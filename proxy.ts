@@ -38,5 +38,9 @@ export async function proxy(request: NextRequest) {
 }
 
 export const config = {
-  matcher: ["/((?!api|_next/static|_next/image|favicon.ico|.*\\..*).*)"],
+  // Inkludér "/" eksplicit — nogle miljøer matcher ikke roden med kun ét regex.
+  matcher: [
+    "/",
+    "/((?!api|_next/static|_next/image|favicon.ico|.*\\..*).*)",
+  ],
 };
