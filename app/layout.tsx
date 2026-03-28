@@ -16,6 +16,7 @@ const geistMono = Geist_Mono({
 export const metadata: Metadata = {
   title: "Allio Leads",
   description: "Leadbase til jeres salgsteam",
+  icons: { icon: "/next.svg" },
 };
 
 export default function RootLayout({
