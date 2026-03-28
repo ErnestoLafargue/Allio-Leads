@@ -1,0 +1,128 @@
+// https://pris.ly/d/prisma-schema
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model User {
+  id           String @id @default(cuid())
+  username     String @unique
+  name         String
+  passwordHash String
+  /// ADMIN eller SELLER
+  role         String @default("SELLER")
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  bookedMeetings Lead[] @relation("LeadBookedBy")
+  /// Aktivt lead-lås under opkald/kampagne (timeouts ryddes i appen)
+  lockedLeads    Lead[] @relation("LeadLockedBy")
+  outcomeLogs    LeadOutcomeLog[]
+  loginDays      UserLoginDay[]
+}
+
+/// Én række pr. bruger pr. kalenderdag (København) ved vellykket login.
+model UserLoginDay {
+  id         String   @id @default(cuid())
+  userId     String
+  /// YYYY-MM-DD (Europe/Copenhagen)
+  dayKey     String
+  loggedInAt DateTime @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, dayKey])
+  @@index([dayKey])
+}
+
+model Campaign {
+  id          String   @id @default(cuid())
+  name        String
+  /// JSON: { extensions: { companyName?: [{ key, label }], ... } }
+  fieldConfig String   @default("{}")
+  /// true = alle leads i kampagne; false = skjul hvor customFields.reklamebeskyttet (case-ins.) er «ja»
+  includeProtectedBusinesses Boolean @default(false)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  leads Lead[]
+}
+
+model Lead {
+  id         String    @id @default(cuid())
+  campaignId String
+  campaign   Campaign  @relation(fields: [campaignId], references: [id], onDelete: Restrict)
+
+  companyName String
+  phone       String
+  email       String @default("")
+  cvr         String @default("")
+  address     String @default("")
+  postalCode  String @default("")
+  city        String @default("")
+  industry    String @default("")
+  notes       String @default("")
+  /// JSON object string -> Record<string, string> for kampagnespecifikke felter
+  customFields String @default("{}")
+
+  /// NEW | VOICEMAIL | MEETING_BOOKED | NOT_INTERESTED | NOT_HOME
+  status String @default("NEW")
+
+  /// Sættes når status bliver VOICEMAIL — bruges til auto-tilbage til NEW efter 2 timer
+  voicemailMarkedAt DateTime?
+  /// Sættes når status bliver NOT_HOME — bruges til auto-tilbage til NEW efter 6 timer
+  notHomeMarkedAt DateTime?
+
+  meetingBookedAt     DateTime?
+  meetingScheduledFor DateTime?
+  bookedByUserId      String?
+  bookedByUser        User?     @relation("LeadBookedBy", fields: [bookedByUserId], references: [id])
+
+  /// Kontaktperson til booket møde (sælgeren udfylder ved møde-booking)
+  meetingContactName            String @default("")
+  meetingContactEmail           String @default("")
+  meetingContactPhonePrivate    String @default("")
+
+  /// PENDING | HELD | CANCELLED — kun relevant når status = MEETING_BOOKED (admin sætter udfald)
+  meetingOutcomeStatus     String @default("PENDING")
+  /// YYYY-MM-DD (Europe/Copenhagen) for den dag mødet blev booket — gruppering til provisions-bonus
+  meetingCommissionDayKey String @default("")
+
+  /// Import eller manuel oprettelse — bruges til sortering «senest tilføjet»
+  importedAt DateTime @default(now())
+
+  /// Lås: én sælger ad gangen — udløber efter inaktivitet (se LEAD_LOCK_TTL_SECONDS)
+  lockedByUserId String?
+  lockedAt       DateTime?
+  lockExpiresAt  DateTime?
+  lockedByUser   User? @relation("LeadLockedBy", fields: [lockedByUserId], references: [id], onDelete: SetNull)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  outcomeLogs LeadOutcomeLog[]
+
+  @@index([lockExpiresAt])
+  @@index([lockedByUserId])
+}
+
+/// Ét log for hver tællende sælgerhandling (udfald) til daglig leaderboard.
+model LeadOutcomeLog {
+  id        String   @id @default(cuid())
+  leadId    String
+  userId    String
+  /// VOICEMAIL | NOT_HOME | NOT_INTERESTED | MEETING_BOOKED
+  status    String
+  createdAt DateTime @default(now())
+
+  lead Lead @relation(fields: [leadId], references: [id], onDelete: Cascade)
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, createdAt])
+  @@index([createdAt])
+}
