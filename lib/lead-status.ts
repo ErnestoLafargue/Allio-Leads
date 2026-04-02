@@ -4,6 +4,7 @@ export const LEAD_STATUSES = [
   "MEETING_BOOKED",
   "NOT_INTERESTED",
   "NOT_HOME",
+  "CALLBACK_SCHEDULED",
 ] as const;
 
 export type LeadStatus = (typeof LEAD_STATUSES)[number];
@@ -14,6 +15,7 @@ export const LEAD_STATUS_LABELS: Record<LeadStatus, string> = {
   MEETING_BOOKED: "Møde booket",
   NOT_INTERESTED: "Ikke interesseret",
   NOT_HOME: "Ikke hjemme",
+  CALLBACK_SCHEDULED: "Callback planlagt",
 };
 
 export function isLeadStatus(v: string): v is LeadStatus {
@@ -24,6 +26,7 @@ export function isLeadStatus(v: string): v is LeadStatus {
 export const LEAD_STATUS_STATS_ORDER: LeadStatus[] = [
   "NEW",
   "VOICEMAIL",
+  "CALLBACK_SCHEDULED",
   "MEETING_BOOKED",
   "NOT_HOME",
   "NOT_INTERESTED",
@@ -36,4 +39,5 @@ export const LEAD_STATUS_COUNT_BADGE_CLASS: Record<LeadStatus, string> = {
   MEETING_BOOKED: "border border-emerald-600 bg-emerald-200 text-emerald-950",
   NOT_INTERESTED: "border border-red-600 bg-red-200 text-red-950",
   NOT_HOME: "border border-blue-600 bg-blue-200 text-blue-950",
+  CALLBACK_SCHEDULED: "border border-violet-600 bg-violet-200 text-violet-950",
 };

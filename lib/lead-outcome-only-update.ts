@@ -76,6 +76,13 @@ export function buildLeadOutcomeOnlyUpdate(
     notHomeMarkedAt = null;
   }
 
+  let callbackScheduledFor: Date | null = existing.callbackScheduledFor;
+  let callbackReservedByUserId: string | null = existing.callbackReservedByUserId;
+  if (existing.status === "CALLBACK_SCHEDULED" && status !== "CALLBACK_SCHEDULED") {
+    callbackScheduledFor = null;
+    callbackReservedByUserId = null;
+  }
+
   return {
     ok: true,
     data: pickLeadUpdateData({
@@ -100,6 +107,8 @@ export function buildLeadOutcomeOnlyUpdate(
       meetingCommissionDayKey,
       voicemailMarkedAt,
       notHomeMarkedAt,
+      callbackScheduledFor,
+      callbackReservedByUserId,
     }),
   };
 }

@@ -7,6 +7,7 @@ import { pickLeadUpdateData } from "@/lib/prisma-lead-write";
 import { applyLeadCooldownResets } from "@/lib/lead-cooldown";
 import { shouldLogOutcomeForLeaderboard } from "@/lib/lead-outcome-log";
 import { canAccessBookedMeetingNotes } from "@/lib/lead-meeting-access";
+import { canAccessCallbackLead } from "@/lib/lead-callback-access";
 import { copenhagenDayKey } from "@/lib/copenhagen-day";
 import {
   MEETING_OUTCOME_CANCELLED,
@@ -32,9 +33,19 @@ export async function GET(_req: Request, { params }: Params) {
         bookedByUser: { select: { id: true, name: true, username: true } },
         campaign: { select: { id: true, name: true, fieldConfig: true } },
         lockedByUser: { select: { id: true, name: true, username: true } },
+        callbackReservedByUser: { select: { id: true, name: true, username: true } },
       },
     });
     if (!lead) return NextResponse.json({ error: "Ikke fundet" }, { status: 404 });
+    if (!canAccessCallbackLead(session.user.role, session.user.id, lead)) {
+      return NextResponse.json(
+        {
+          error:
+            "Dette lead er reserveret til et planlagt callback for en anden sælger. Du kan ikke åbne det.",
+        },
+        { status: 403 },
+      );
+    }
     if (!canAccessBookedMeetingNotes(session.user.role, session.user.id, lead)) {
       return NextResponse.json(
         {
@@ -52,6 +63,8 @@ export async function GET(_req: Request, { params }: Params) {
       msg.includes("notHomeMarkedAt") ||
       msg.includes("lockedByUserId") ||
       msg.includes("lockExpiresAt") ||
+      msg.includes("callbackScheduledFor") ||
+      msg.includes("callbackReservedByUserId") ||
       msg.includes("no such column") ||
       msg.toLowerCase().includes("does not exist");
     return NextResponse.json(
@@ -82,6 +95,16 @@ export async function PATCH(req: Request, { params }: Params) {
       {
         error:
           "Kun den sælger der har booket mødet (eller en administrator) kan redigere dette bookede møde.",
+      },
+      { status: 403 },
+    );
+  }
+
+  if (!canAccessCallbackLead(session.user.role, userId, existing)) {
+    return NextResponse.json(
+      {
+        error:
+          "Dette lead er reserveret til et planlagt callback for en anden sælger. Du kan ikke redigere det.",
       },
       { status: 403 },
     );
@@ -131,6 +154,15 @@ export async function PATCH(req: Request, { params }: Params) {
 
   let status = existing.status;
   if (typeof body?.status === "string" && isLeadStatus(body.status)) {
+    if (body.status === "CALLBACK_SCHEDULED") {
+      return NextResponse.json(
+        {
+          error:
+            "Status «Callback planlagt» kan kun sættes via callback-planlægning i kampagne-arbejdet (ikke ved almindelig gem).",
+        },
+        { status: 400 },
+      );
+    }
     status = body.status;
   }
 
@@ -247,6 +279,13 @@ export async function PATCH(req: Request, { params }: Params) {
     notHomeMarkedAt = null;
   }
 
+  let callbackScheduledFor: Date | null = existing.callbackScheduledFor;
+  let callbackReservedByUserId: string | null = existing.callbackReservedByUserId;
+  if (existing.status === "CALLBACK_SCHEDULED" && status !== "CALLBACK_SCHEDULED") {
+    callbackScheduledFor = null;
+    callbackReservedByUserId = null;
+  }
+
   const logOutcome = shouldLogOutcomeForLeaderboard(
     { status: existing.status, meetingBookedAt: existing.meetingBookedAt },
     status,
@@ -280,6 +319,8 @@ export async function PATCH(req: Request, { params }: Params) {
           meetingCommissionDayKey,
           voicemailMarkedAt,
           notHomeMarkedAt,
+          callbackScheduledFor,
+          callbackReservedByUserId,
         }),
         ...(clearLeadLock
           ? { lockedByUserId: null, lockedAt: null, lockExpiresAt: null }
@@ -289,6 +330,7 @@ export async function PATCH(req: Request, { params }: Params) {
         bookedByUser: { select: { id: true, name: true, username: true } },
         campaign: { select: { id: true, name: true, fieldConfig: true } },
         lockedByUser: { select: { id: true, name: true, username: true } },
+        callbackReservedByUser: { select: { id: true, name: true, username: true } },
       },
     });
     if (logOutcome) {

@@ -29,11 +29,18 @@ export async function GET(req: Request) {
           { status: 400 },
         );
       }
-      const rows = await prisma.lead.findMany({
+      const rowsRaw = await prisma.lead.findMany({
         where: { campaignId },
-        select: { status: true, customFields: true },
+        select: { status: true, customFields: true, callbackReservedByUserId: true },
         orderBy: { importedAt: "desc" },
       });
+      const rows =
+        session.user.role === "ADMIN"
+          ? rowsRaw
+          : rowsRaw.filter(
+              (r) =>
+                r.status !== "CALLBACK_SCHEDULED" || r.callbackReservedByUserId === session.user.id,
+            );
       return NextResponse.json(rows);
     }
 
@@ -78,6 +85,13 @@ export async function GET(req: Request) {
     let out = campaignId
       ? filterLeadsByCampaignProtectedSetting(leads, includeProtectedBusinesses)
       : leads;
+
+    if (session.user.role !== "ADMIN") {
+      const uid = session.user.id;
+      out = out.filter(
+        (l) => l.status !== "CALLBACK_SCHEDULED" || l.callbackReservedByUserId === uid,
+      );
+    }
 
     if (campaignId && out.length > 0) {
       const outcomeToday = await getLeadIdsWithOutcomeLogToday(out.map((l) => l.id));

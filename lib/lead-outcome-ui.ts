@@ -26,6 +26,8 @@ export function outcomeButtonClass(status: LeadStatus, active: boolean): string 
       return `${base} border-emerald-600 bg-emerald-300 text-emerald-950 ring-2 ring-emerald-500`;
     case "NOT_HOME":
       return `${base} border-blue-600 bg-blue-300 text-blue-950 ring-2 ring-blue-500`;
+    case "CALLBACK_SCHEDULED":
+      return `${base} border-violet-600 bg-violet-300 text-violet-950 ring-2 ring-violet-500`;
     default:
       return `${base} border-stone-500 bg-stone-200`;
   }

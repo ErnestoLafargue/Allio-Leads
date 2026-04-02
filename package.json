@@ -10,7 +10,8 @@
     "lint": "eslint",
     "test": "vitest run",
     "db:seed": "tsx prisma/seed.ts",
-    "db:set-password": "tsx prisma/set-password.ts"
+    "db:set-password": "tsx prisma/set-password.ts",
+    "db:migrate": "node scripts/run-prisma-migrate.cjs"
   },
   "prisma": {
     "seed": "tsx prisma/seed.ts"

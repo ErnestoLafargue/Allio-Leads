@@ -13,12 +13,13 @@ const leadInclude = {
   bookedByUser: { select: { id: true, name: true, username: true } as const },
   campaign: { select: { id: true, name: true, fieldConfig: true } as const },
   lockedByUser: { select: { id: true, name: true, username: true } as const },
+  callbackReservedByUser: { select: { id: true, name: true, username: true } as const },
 } as const;
 
 /**
- * Atomisk reservation af næste «Ny»-lead i kampagnen til opkald/arbejdsflow.
- * Post body (valgfri): { "preferLeadId": "…" } for at genåbne samme lead efter refresh, hvis det stadig er ledigt.
- * { "excludeLeadId": "…" } springer dette lead over i den almindelige kø (fx efter «Gem og næste» med udfald Ny).
+ * Atomisk reservation: først forfaldne planlagte callbacks for denne bruger, derefter «Ny»-køen.
+ * Post body (valgfri): { "preferLeadId": "…" } for at genåbne samme Ny-lead efter refresh (gælder ikke for callback-prioritet).
+ * { "excludeLeadId": "…" } springer dette lead over i Ny-køen (fx efter «Gem og næste» med udfald Ny).
  */
 export async function POST(req: Request, { params }: Params) {
   const { session, response } = await requireSession();
@@ -40,6 +41,34 @@ export async function POST(req: Request, { params }: Params) {
     });
     if (!campaign) {
       return NextResponse.json({ error: "Kampagne findes ikke" }, { status: 404 });
+    }
+
+    const now = new Date();
+
+    async function tryReserve(id: string) {
+      const ok = await tryAcquireLeadLock(prisma, id, userId, now);
+      if (!ok) return null;
+      const lead = await prisma.lead.findUnique({
+        where: { id },
+        include: leadInclude,
+      });
+      return lead;
+    }
+
+    const dueCallbacks = await prisma.lead.findMany({
+      where: {
+        campaignId,
+        status: "CALLBACK_SCHEDULED",
+        callbackReservedByUserId: userId,
+        callbackScheduledFor: { lte: now },
+      },
+      orderBy: { callbackScheduledFor: "asc" },
+      select: { id: true },
+    });
+
+    for (const row of dueCallbacks) {
+      const got = await tryReserve(row.id);
+      if (got) return NextResponse.json({ lead: got });
     }
 
     const rawNew = await prisma.lead.findMany({
@@ -67,16 +96,6 @@ export async function POST(req: Request, { params }: Params) {
       })),
     );
 
-    async function tryReserve(id: string) {
-      const ok = await tryAcquireLeadLock(prisma, id, userId);
-      if (!ok) return null;
-      const lead = await prisma.lead.findUnique({
-        where: { id },
-        include: leadInclude,
-      });
-      return lead;
-    }
-
     if (preferLeadId) {
       const allowed = new Set(sorted.map((r) => r.id));
       if (allowed.has(preferLeadId)) {
@@ -97,12 +116,14 @@ export async function POST(req: Request, { params }: Params) {
     const migrationHint =
       msg.includes("lockedByUserId") ||
       msg.includes("lockExpiresAt") ||
+      msg.includes("callbackScheduledFor") ||
+      msg.includes("callbackReservedByUserId") ||
       msg.includes("no such column") ||
       msg.toLowerCase().includes("does not exist");
     return NextResponse.json(
       {
         error: migrationHint
-          ? "Databasen mangler lead-lås-kolonner. Kør «npx prisma migrate deploy» og genstart serveren."
+          ? "Databasen matcher ikke den aktuelle kode (manglende kolonner). Kør «npm run db:migrate» i projektmappen (indlæser .env.local), eller «npx prisma migrate deploy» med DATABASE_URL sat — genstart derefter dev-serveren."
           : "Kunne ikke reservere lead.",
         details: process.env.NODE_ENV === "development" ? msg : undefined,
       },

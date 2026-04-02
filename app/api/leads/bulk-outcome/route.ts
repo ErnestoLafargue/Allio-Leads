@@ -38,6 +38,13 @@ export async function POST(req: Request) {
   }
   const status = statusRaw as LeadStatus;
 
+  if (status === "CALLBACK_SCHEDULED") {
+    return NextResponse.json(
+      { error: "Bulk-udfald understøtter ikke «Callback planlagt» — brug callback i kampagne-arbejdet." },
+      { status: 400 },
+    );
+  }
+
   try {
     await applyLeadCooldownResets();
     await releaseExpiredLocksEverywhere(prisma);

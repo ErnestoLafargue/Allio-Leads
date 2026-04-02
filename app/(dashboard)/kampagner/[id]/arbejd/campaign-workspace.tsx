@@ -35,6 +35,8 @@ type Lead = {
   lockedAt?: string | null;
   lockExpiresAt?: string | null;
   lockedByUser?: { id: string; name: string; username: string } | null;
+  callbackScheduledFor?: string | null;
+  callbackReservedByUserId?: string | null;
 };
 
 type Props = { campaignId: string };
@@ -82,6 +84,8 @@ export function CampaignWorkspace({ campaignId }: Props) {
     email?: string;
     phone?: string;
   }>({});
+  const [callbackDialogOpen, setCallbackDialogOpen] = useState(false);
+  const [callbackLocalDatetime, setCallbackLocalDatetime] = useState("");
 
   useEffect(() => {
     activeLeadRef.current = activeLead;
@@ -105,7 +109,13 @@ export function CampaignWorkspace({ campaignId }: Props) {
     setIndustry(l.industry);
     setNotes(l.notes);
     setCustom(parseCustomFields(l.customFields));
-    setStatus((LEAD_STATUSES as readonly string[]).includes(l.status) ? (l.status as LeadStatus) : "NEW");
+    setStatus(
+      l.status === "CALLBACK_SCHEDULED"
+        ? "NEW"
+        : (LEAD_STATUSES as readonly string[]).includes(l.status)
+          ? (l.status as LeadStatus)
+          : "NEW",
+    );
     if (l.meetingScheduledFor) {
       const d = new Date(l.meetingScheduledFor);
       const local = new Date(d.getTime() - d.getTimezoneOffset() * 60000);
@@ -354,6 +364,39 @@ export function CampaignWorkspace({ campaignId }: Props) {
     await advanceToNextReservedAfterSave(currentId);
   }
 
+  function openCallbackDialog() {
+    const d = new Date();
+    d.setMinutes(d.getMinutes() + 60, 0, 0);
+    const local = new Date(d.getTime() - d.getTimezoneOffset() * 60000);
+    setCallbackLocalDatetime(local.toISOString().slice(0, 16));
+    setError(null);
+    setCallbackDialogOpen(true);
+  }
+
+  async function handleConfirmCallback() {
+    if (!activeLead || activeLead.status !== "NEW") return;
+    if (!callbackLocalDatetime.trim()) {
+      setError("Vælg dato og tid for callback.");
+      return;
+    }
+    const iso = new Date(callbackLocalDatetime).toISOString();
+    setSaving(true);
+    setError(null);
+    const res = await fetch(`/api/leads/${activeLead.id}/schedule-callback`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ scheduledFor: iso }),
+    });
+    setSaving(false);
+    if (!res.ok) {
+      const j = await res.json().catch(() => ({}));
+      setError(typeof j.error === "string" ? j.error : "Kunne ikke planlægge callback.");
+      return;
+    }
+    setCallbackDialogOpen(false);
+    await advanceToNextReservedAfterSave(activeLead.id);
+  }
+
   async function onConfirmBookingFromPanel(detail: BookingConfirmPayload) {
     if (!activeLead || status !== "MEETING_BOOKED") return;
     await onNext(detail.localDateTimeISO);
@@ -400,7 +443,8 @@ export function CampaignWorkspace({ campaignId }: Props) {
             <strong>optaget</strong> af kolleger der også arbejder i kampagnen. Prøv igen om lidt.
           </p>
           <p className="text-sm text-stone-600">
-            Når voicemail eller «Ikke hjemme» er udløbet, eller et lead frigives, dukker det i køen igen.
+            Når voicemail eller «Ikke hjemme» er udløbet, et lead frigives, eller et planlagt callback når tidspunktet
+            (eller du loader siden igen), dukker det i køen igen.
           </p>
           {error && <p className="text-sm text-red-600">{error}</p>}
           <button
@@ -470,6 +514,8 @@ export function CampaignWorkspace({ campaignId }: Props) {
 
   const current = activeLead!;
 
+  const canScheduleCallback = current.status === "NEW";
+
   const showNextForMeeting = status !== "MEETING_BOOKED";
   const nextLabel = saving ? "Gemmer…" : "Gem og næste";
   const nextButtonClass =
@@ -496,6 +542,16 @@ export function CampaignWorkspace({ campaignId }: Props) {
           eller reservere det samme nummer samtidig. Når du går videre eller lukker fanen, frigives låset. Mens du
           arbejder her, fornyes det automatisk.
         </p>
+        {current.status === "CALLBACK_SCHEDULED" && current.callbackScheduledFor && (
+          <div className="mt-3 rounded-lg border border-violet-200 bg-violet-50/90 px-3 py-2 text-xs text-violet-950">
+            <strong>Planlagt genopkald:</strong>{" "}
+            {new Date(current.callbackScheduledFor).toLocaleString("da-DK", {
+              dateStyle: "short",
+              timeStyle: "short",
+            })}
+            . Vælg udfald og gem — eller «Gem og næste» med «Ny» for at lægge leadet tilbage som nyt i køen.
+          </div>
+        )}
       </div>
 
       <div className="shrink-0 space-y-4 rounded-2xl border border-stone-200 bg-white p-4 shadow-lg sm:p-5">
@@ -535,6 +591,16 @@ export function CampaignWorkspace({ campaignId }: Props) {
             )}
           </div>
           <div className="flex flex-col items-end gap-2 lg:shrink-0 lg:pt-6">
+            {canScheduleCallback ? (
+              <button
+                type="button"
+                disabled={saving}
+                onClick={openCallbackDialog}
+                className="rounded-xl border-2 border-violet-600 bg-violet-100 px-5 py-2.5 text-sm font-semibold text-violet-950 shadow-sm transition hover:bg-violet-200 disabled:opacity-60"
+              >
+                Callback
+              </button>
+            ) : null}
             {status === "NEW" && showNextForMeeting ? (
               <p className="max-w-[14rem] text-right text-xs text-stone-500">
                 Gemmer noter og går til næste lead uden at ændre udfald.
@@ -621,6 +687,50 @@ export function CampaignWorkspace({ campaignId }: Props) {
       <div className="flex shrink-0 flex-wrap items-center justify-end gap-3 border-t border-stone-200 pt-4">
         {renderNextButton()}
       </div>
+
+      {callbackDialogOpen ? (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4"
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="callback-dialog-title"
+        >
+          <div className="w-full max-w-md rounded-2xl border border-stone-200 bg-white p-6 shadow-xl">
+            <h2 id="callback-dialog-title" className="text-lg font-semibold text-stone-900">
+              Planlæg callback
+            </h2>
+            <p className="mt-1 text-sm text-stone-600">
+              Vælg hvornår du vil ringe igen. Leadet reserveres til dig og vises først i køen når tidspunktet er nået.
+            </p>
+            <label className="mt-4 block text-xs font-medium text-stone-600">
+              Dato og tid
+              <input
+                type="datetime-local"
+                value={callbackLocalDatetime}
+                onChange={(e) => setCallbackLocalDatetime(e.target.value)}
+                className="mt-1 w-full rounded-lg border border-stone-200 px-3 py-2 text-sm text-stone-900"
+              />
+            </label>
+            <div className="mt-6 flex flex-wrap justify-end gap-2">
+              <button
+                type="button"
+                className="rounded-lg border border-stone-300 bg-white px-4 py-2 text-sm font-medium text-stone-800 hover:bg-stone-50"
+                onClick={() => setCallbackDialogOpen(false)}
+              >
+                Annuller
+              </button>
+              <button
+                type="button"
+                disabled={saving}
+                onClick={() => void handleConfirmCallback()}
+                className="rounded-lg bg-violet-700 px-4 py-2 text-sm font-semibold text-white hover:bg-violet-800 disabled:opacity-60"
+              >
+                {saving ? "Gemmer…" : "Bekræft"}
+              </button>
+            </div>
+          </div>
+        </div>
+      ) : null}
     </div>
   );
 }

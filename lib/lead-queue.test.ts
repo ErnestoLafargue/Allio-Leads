@@ -1,5 +1,9 @@
 import { describe, expect, it } from "vitest";
-import { compareLeadQueueOrder, sortLeadsForCampaignCallQueue } from "./lead-queue";
+import {
+  compareLeadQueueOrder,
+  isQueueEligibleStatus,
+  sortLeadsForCampaignCallQueue,
+} from "./lead-queue";
 
 describe("compareLeadQueueOrder", () => {
   it("placerer leads uden udfaldslog i dag før dem med", () => {
@@ -60,6 +64,13 @@ describe("compareLeadQueueOrder", () => {
       hasOutcomeLogToday: true,
     };
     expect(compareLeadQueueOrder(a, b)).toBeLessThan(0);
+  });
+});
+
+describe("isQueueEligibleStatus", () => {
+  it("ekluderer CALLBACK_SCHEDULED fra kø-navigation", () => {
+    expect(isQueueEligibleStatus("CALLBACK_SCHEDULED")).toBe(false);
+    expect(isQueueEligibleStatus("NEW")).toBe(true);
   });
 });
 

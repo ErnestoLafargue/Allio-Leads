@@ -6,6 +6,7 @@ import { isLeadStatus } from "./lead-status";
  */
 export const LEAD_QUEUE_ORDER: Record<LeadStatus, number> = {
   NEW: 0,
+  CALLBACK_SCHEDULED: 0,
   VOICEMAIL: 1,
   NOT_HOME: 2,
   NOT_INTERESTED: 3,
@@ -19,14 +20,15 @@ export function queueRank(status: string): number {
 
 /**
  * Leads der ikke hører til opkaldskø/kø-navigation på kampagne:
- * afsluttet (ikke interesseret, møde booket), voicemail/ikke hjemme (venter på genåbning).
+ * afsluttet (ikke interesseret, møde booket), voicemail/ikke hjemme (venter på genåbning), planlagt callback.
  */
 export function isQueueEligibleStatus(status: string): boolean {
   return (
     status !== "NOT_INTERESTED" &&
     status !== "MEETING_BOOKED" &&
     status !== "VOICEMAIL" &&
-    status !== "NOT_HOME"
+    status !== "NOT_HOME" &&
+    status !== "CALLBACK_SCHEDULED"
   );
 }
 

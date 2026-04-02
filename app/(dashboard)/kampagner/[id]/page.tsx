@@ -123,6 +123,7 @@ export default function RedigerKampagnePage() {
         MEETING_BOOKED: 0,
         NOT_INTERESTED: 0,
         NOT_HOME: 0,
+        CALLBACK_SCHEDULED: 0,
       };
       const res = await fetch(
         `/api/leads?campaignId=${encodeURIComponent(id)}&outcomeStats=1`,
