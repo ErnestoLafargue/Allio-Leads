@@ -14,13 +14,13 @@ export function isValidCVR(raw: string | null | undefined): boolean {
   return normalizeCVR(raw) != null;
 }
 
-export type LeadCvrLookup = { id: string; campaignId: string; cvr: string };
+export type LeadCvrLookup = { id: string; campaignId: string | null; cvr: string };
 
 /** Første lead pr. normaliseret CVR (til global opslag). */
 export function indexLeadsByNormalizedCvr(
   leads: LeadCvrLookup[],
-): Map<string, { id: string; campaignId: string }> {
-  const map = new Map<string, { id: string; campaignId: string }>();
+): Map<string, { id: string; campaignId: string | null }> {
+  const map = new Map<string, { id: string; campaignId: string | null }>();
   for (const l of leads) {
     const key = normalizeCVR(l.cvr);
     if (!key || map.has(key)) continue;

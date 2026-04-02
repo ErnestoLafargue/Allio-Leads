@@ -22,8 +22,32 @@ async function main() {
   const direct = await prisma.campaign.findFirst({ where: { name: "Direkte møder" } });
   if (!direct) {
     await prisma.campaign.create({
-      data: { name: "Direkte møder", fieldConfig: defaultCampaignFieldConfigJson() },
+      data: {
+        name: "Direkte møder",
+        fieldConfig: defaultCampaignFieldConfigJson(),
+        isSystemCampaign: true,
+        systemCampaignType: "direct_booking",
+      },
     });
+  }
+
+  const systemDefs = [
+    { name: "Kommende møder" as const, systemCampaignType: "upcoming_meetings" as const },
+    { name: "Genbook møder" as const, systemCampaignType: "rebooking" as const },
+    { name: "Aktive kunder" as const, systemCampaignType: "active_customers" as const },
+  ];
+  for (const def of systemDefs) {
+    const row = await prisma.campaign.findFirst({ where: { name: def.name } });
+    if (!row) {
+      await prisma.campaign.create({
+        data: {
+          name: def.name,
+          fieldConfig: defaultCampaignFieldConfigJson(),
+          isSystemCampaign: true,
+          systemCampaignType: def.systemCampaignType,
+        },
+      });
+    }
   }
 
   await prisma.user.upsert({
@@ -45,7 +69,9 @@ async function main() {
   console.log(
     'Admin: brugernavn "admin", adgangskode = SEED_ADMIN_PASSWORD miljøvariabel hvis sat, ellers "admin123"',
   );
-  console.log('«Standard»- og «Direkte møder»-kampagner oprettes hvis de ikke findes i forvejen.');
+  console.log(
+    '«Standard», «Direkte møder» og møde-systemkampagner (Kommende møder, Genbook møder, Aktive kunder) oprettes hvis de ikke findes.',
+  );
 }
 
 main()

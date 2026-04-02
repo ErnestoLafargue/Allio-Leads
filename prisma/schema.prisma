@@ -24,6 +24,8 @@ model User {
   lockedLeads    Lead[] @relation("LeadLockedBy")
   /// Leads med planlagt genopkald reserveret til denne sælger
   callbackReservedLeads Lead[] @relation("LeadCallbackReservedBy")
+  /// Bruger der oprettede tilbagekaldet (kan være anderledes end tildelt)
+  callbackCreatedLeads Lead[] @relation("LeadCallbackCreatedBy")
   outcomeLogs    LeadOutcomeLog[]
   loginDays      UserLoginDay[]
 }
@@ -49,6 +51,10 @@ model Campaign {
   fieldConfig String   @default("{}")
   /// true = alle leads i kampagne; false = skjul hvor customFields.reklamebeskyttet (case-ins.) er «ja»
   includeProtectedBusinesses Boolean @default(false)
+  /// Systemkampagner (mødeflow m.m.) — visse typer kan ikke slettes.
+  isSystemCampaign   Boolean @default(false)
+  /// upcoming_meetings | rebooking | active_customers | direct_booking | null
+  systemCampaignType String?
   createdAt   DateTime @default(now())
   updatedAt   DateTime @updatedAt
 
@@ -57,8 +63,8 @@ model Campaign {
 
 model Lead {
   id         String    @id @default(cuid())
-  campaignId String
-  campaign   Campaign  @relation(fields: [campaignId], references: [id], onDelete: Restrict)
+  campaignId String?
+  campaign   Campaign? @relation(fields: [campaignId], references: [id], onDelete: SetNull)
 
   companyName String
   phone       String
@@ -108,6 +114,11 @@ model Lead {
   callbackScheduledFor     DateTime?
   callbackReservedByUserId String?
   callbackReservedByUser   User? @relation("LeadCallbackReservedBy", fields: [callbackReservedByUserId], references: [id], onDelete: SetNull)
+  /// PENDING | COMPLETED | CANCELLED — kun aktiv plan vises når PENDING
+  callbackStatus           String @default("PENDING")
+  callbackNote             String @default("")
+  callbackCreatedByUserId  String?
+  callbackCreatedByUser    User? @relation("LeadCallbackCreatedBy", fields: [callbackCreatedByUserId], references: [id], onDelete: SetNull)
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt

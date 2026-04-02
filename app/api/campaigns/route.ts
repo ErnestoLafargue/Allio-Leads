@@ -15,6 +15,8 @@ export async function GET() {
         name: true,
         fieldConfig: true,
         includeProtectedBusinesses: true,
+        isSystemCampaign: true,
+        systemCampaignType: true,
         createdAt: true,
         updatedAt: true,
         _count: { select: { leads: true } },
@@ -26,6 +28,8 @@ export async function GET() {
     const msg = e instanceof Error ? e.message : String(e);
     const migrationHint =
       msg.includes("includeProtectedBusinesses") ||
+      msg.includes("isSystemCampaign") ||
+      msg.includes("systemCampaignType") ||
       msg.includes("no such column") ||
       msg.toLowerCase().includes("does not exist");
     return NextResponse.json(

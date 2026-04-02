@@ -24,6 +24,11 @@ import {
 } from "@/lib/lead-status";
 import { LeadsBulkPanel } from "@/app/components/leads-bulk-panel";
 import { CampaignProtectedSwitch } from "@/app/components/campaign-protected-switch";
+import { CampaignDeleteFlow } from "@/app/components/campaign-delete-flow";
+import {
+  canDeleteCampaign,
+  PROTECTED_CAMPAIGN_DELETE_MESSAGE,
+} from "@/lib/campaign-delete";
 import {
   getReklamebeskyttetNormalized,
   leadIncludedForCampaignProtectedSetting,
@@ -59,6 +64,12 @@ export default function RedigerKampagnePage() {
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [campaignMeta, setCampaignMeta] = useState<{
+    name: string;
+    isSystemCampaign: boolean;
+    systemCampaignType: string | null;
+  } | null>(null);
+
   const [outcomeStats, setOutcomeStats] = useState<{
     byStatus: Record<LeadStatus, number>;
     protectedCount: number;
@@ -88,6 +99,14 @@ export default function RedigerKampagnePage() {
       const c = await res.json();
       if (cancelled) return;
       setName(c.name);
+      setCampaignMeta({
+        name: c.name,
+        isSystemCampaign: Boolean(c.isSystemCampaign),
+        systemCampaignType:
+          typeof c.systemCampaignType === "string" && c.systemCampaignType.trim()
+            ? c.systemCampaignType.trim()
+            : null,
+      });
       setIncludeProtectedBusinesses(Boolean(c.includeProtectedBusinesses));
       const cfg = parseFieldConfig(c.fieldConfig);
       const next: Record<FieldGroupKey, Row[]> = {
@@ -264,6 +283,27 @@ export default function RedigerKampagnePage() {
           telefon&quot; under telefon.
         </p>
       </div>
+
+      {campaignMeta && (
+        <section className="rounded-lg border border-stone-200 bg-white p-6 shadow-sm">
+          <h2 className="text-sm font-semibold text-stone-900">Slet kampagne</h2>
+          <p className="mt-1 text-xs text-stone-500">
+            Fjerner kun selve kampagnen. Leads bevares uden tilknytning til denne kampagne.
+          </p>
+          <div className="mt-4 flex flex-col gap-2 sm:flex-row sm:items-start sm:gap-4">
+            <CampaignDeleteFlow
+              campaignId={id}
+              campaignName={name.trim() || campaignMeta.name}
+              deletable={canDeleteCampaign(campaignMeta)}
+              protectedExplanation={PROTECTED_CAMPAIGN_DELETE_MESSAGE}
+              onDeleted={() => {
+                router.push("/kampagner");
+                router.refresh();
+              }}
+            />
+          </div>
+        </section>
+      )}
 
       {outcomeStats && (
         <section className="rounded-lg border border-stone-200 bg-stone-50/80 p-6 shadow-sm">

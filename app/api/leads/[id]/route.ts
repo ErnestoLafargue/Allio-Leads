@@ -281,9 +281,15 @@ export async function PATCH(req: Request, { params }: Params) {
 
   let callbackScheduledFor: Date | null = existing.callbackScheduledFor;
   let callbackReservedByUserId: string | null = existing.callbackReservedByUserId;
+  let callbackNote = existing.callbackNote ?? "";
+  let callbackCreatedByUserId: string | null = existing.callbackCreatedByUserId;
+  let callbackStatus = existing.callbackStatus ?? "PENDING";
   if (existing.status === "CALLBACK_SCHEDULED" && status !== "CALLBACK_SCHEDULED") {
     callbackScheduledFor = null;
     callbackReservedByUserId = null;
+    callbackNote = "";
+    callbackCreatedByUserId = null;
+    callbackStatus = "PENDING";
   }
 
   const logOutcome = shouldLogOutcomeForLeaderboard(
@@ -321,6 +327,9 @@ export async function PATCH(req: Request, { params }: Params) {
           notHomeMarkedAt,
           callbackScheduledFor,
           callbackReservedByUserId,
+          callbackNote,
+          callbackCreatedByUserId,
+          callbackStatus,
         }),
         ...(clearLeadLock
           ? { lockedByUserId: null, lockedAt: null, lockExpiresAt: null }

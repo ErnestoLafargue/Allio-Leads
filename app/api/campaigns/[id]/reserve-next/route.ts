@@ -59,6 +59,7 @@ export async function POST(req: Request, { params }: Params) {
       where: {
         campaignId,
         status: "CALLBACK_SCHEDULED",
+        callbackStatus: "PENDING",
         callbackReservedByUserId: userId,
         callbackScheduledFor: { lte: now },
       },

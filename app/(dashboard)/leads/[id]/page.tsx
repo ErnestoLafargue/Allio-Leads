@@ -4,20 +4,23 @@ import Link from "next/link";
 import { useParams, useRouter, useSearchParams } from "next/navigation";
 import { Suspense, useEffect, useRef, useState } from "react";
 import { useSession } from "next-auth/react";
-import { LEAD_STATUSES, LEAD_STATUS_LABELS, type LeadStatus } from "@/lib/lead-status";
+import { LEAD_STATUSES, type LeadStatus } from "@/lib/lead-status";
 import { isQueueEligibleStatus, sortLeadsForQueue } from "@/lib/lead-queue";
-import { LeadDataLeftPanel } from "@/app/components/lead-data-left-panel";
-import { LeadOutcomeModal } from "@/app/components/lead-outcome-modal";
-import { MeetingContactFields } from "@/app/components/booking/meeting-contact-fields";
+import { LeadOutcomeStrip } from "@/app/components/lead-workspace/lead-outcome-strip";
+import { LeadKundeNoterBooking } from "@/app/components/lead-workspace/lead-kunde-noter-booking";
+import { CallbackScheduleDialog } from "@/app/components/callback-schedule-dialog";
+import type { BookingConfirmPayload } from "@/app/components/booking/booking-panel";
 import { parseCustomFields } from "@/lib/custom-fields";
+import { validateMeetingContactFields } from "@/lib/meeting-contact-validation";
 import {
   MEETING_OUTCOME_LABELS,
   MEETING_OUTCOME_PENDING,
 } from "@/lib/meeting-outcome";
+import { defaultCampaignFieldConfigJson } from "@/lib/campaign-fields";
 
 type Lead = {
   id: string;
-  campaignId: string;
+  campaignId: string | null;
   companyName: string;
   phone: string;
   email: string;
@@ -36,10 +39,11 @@ type Lead = {
   meetingContactEmail?: string;
   meetingContactPhonePrivate?: string;
   meetingOutcomeStatus?: string;
-  campaign: { id: string; name: string; fieldConfig: string };
+  campaign: { id: string; name: string; fieldConfig: string } | null;
   lockedByUserId?: string | null;
   lockExpiresAt?: string | null;
   lockedByUser?: { name: string; username: string } | null;
+  callbackScheduledFor?: string | null;
 };
 
 type QueueInfo = { ids: string[]; position: number };
@@ -76,6 +80,11 @@ function LeadDetailInner() {
   const [meetingContactName, setMeetingContactName] = useState("");
   const [meetingContactEmail, setMeetingContactEmail] = useState("");
   const [meetingContactPhonePrivate, setMeetingContactPhonePrivate] = useState("");
+  const [meetingContactErrors, setMeetingContactErrors] = useState<{
+    name?: string;
+    email?: string;
+    phone?: string;
+  }>({});
   const [meetingOutcomeStatus, setMeetingOutcomeStatus] = useState(MEETING_OUTCOME_PENDING);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
@@ -83,8 +92,9 @@ function LeadDetailInner() {
   const [queue, setQueue] = useState<QueueInfo | null>(null);
 
   const leadWorkspaceRef = useRef<HTMLDivElement>(null);
-  const [outcomeModalOpen, setOutcomeModalOpen] = useState(false);
   const [deletingLead, setDeletingLead] = useState(false);
+  const [callbackDialogOpen, setCallbackDialogOpen] = useState(false);
+  const [callbackSubmitError, setCallbackSubmitError] = useState<string | null>(null);
 
   function setCustomKey(key: string, value: string) {
     setCustom((prev) => ({ ...prev, [key]: value }));
@@ -117,7 +127,13 @@ function LeadDetailInner() {
       setIndustry(data.industry);
       setNotes(data.notes);
       setCustom(parseCustomFields(data.customFields));
-      setStatus((LEAD_STATUSES as readonly string[]).includes(data.status) ? (data.status as LeadStatus) : "NEW");
+      setStatus(
+        data.status === "CALLBACK_SCHEDULED"
+          ? "NEW"
+          : (LEAD_STATUSES as readonly string[]).includes(data.status)
+            ? (data.status as LeadStatus)
+            : "NEW",
+      );
       if (data.meetingScheduledFor) {
         const d = new Date(data.meetingScheduledFor);
         const local = new Date(d.getTime() - d.getTimezoneOffset() * 60000);
@@ -253,9 +269,89 @@ function LeadDetailInner() {
     };
   }, [fromCampaign, lead, id]);
 
+  useEffect(() => {
+    if (status !== "MEETING_BOOKED") setMeetingContactErrors({});
+  }, [status]);
+
+  async function onConfirmBookingFromPanel(detail: BookingConfirmPayload) {
+    if (!lead || status !== "MEETING_BOOKED") return;
+    const contactErr = validateMeetingContactFields(
+      meetingContactName,
+      meetingContactEmail,
+      meetingContactPhonePrivate,
+    );
+    if (contactErr) {
+      setMeetingContactErrors(contactErr);
+      setError("Du skal udfylde mødekontakt-oplysningerne, før mødet kan bookes.");
+      return;
+    }
+    setMeetingContactErrors({});
+    setError(null);
+    setSaving(true);
+    const body: Record<string, unknown> = {
+      companyName,
+      phone,
+      email,
+      cvr,
+      address,
+      postalCode,
+      city,
+      industry,
+      notes,
+      customFields: custom,
+      status,
+      meetingScheduledFor: detail.localDateTimeISO,
+      meetingContactName: meetingContactName.trim(),
+      meetingContactEmail: meetingContactEmail.trim(),
+      meetingContactPhonePrivate: meetingContactPhonePrivate.trim(),
+    };
+    const res = await fetch(`/api/leads/${id}`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+    });
+    setSaving(false);
+    if (!res.ok) {
+      const j = await res.json().catch(() => ({}));
+      setError(j.error ?? "Kunne ikke gemme booking");
+      return;
+    }
+    const data: Lead = await res.json();
+    setLead(data);
+    setCustom(parseCustomFields(data.customFields));
+    if (data.meetingScheduledFor) {
+      const dt = new Date(data.meetingScheduledFor);
+      const local = new Date(dt.getTime() - dt.getTimezoneOffset() * 60000);
+      setMeetingScheduledFor(local.toISOString().slice(0, 16));
+    }
+    if (String(data.status).trim().toUpperCase() !== "NEW") {
+      setHoldsEditLock(false);
+      setEditLockBlocked(false);
+      setLockBusyMessage(null);
+    }
+    router.refresh();
+  }
+
   async function onSave(e: React.FormEvent) {
     e.preventDefault();
     setError(null);
+    if (status === "MEETING_BOOKED") {
+      const contactErr = validateMeetingContactFields(
+        meetingContactName,
+        meetingContactEmail,
+        meetingContactPhonePrivate,
+      );
+      if (contactErr) {
+        setMeetingContactErrors(contactErr);
+        setError("Du skal udfylde de tre mødekontakt-felter, før du kan gemme med udfaldet «Møde booket».");
+        return;
+      }
+      setMeetingContactErrors({});
+      if (!meetingScheduledFor?.trim()) {
+        setError("Vælg dato og ledig tid i kalenderen nedenfor og tryk «Bekræft booking» (eller udfyld tidspunktet via booking-flowet først).");
+        return;
+      }
+    }
     setSaving(true);
     const body: Record<string, unknown> = {
       companyName,
@@ -298,38 +394,40 @@ function LeadDetailInner() {
     router.refresh();
   }
 
-  function openOutcomeModal() {
+  function openCallbackDialog() {
+    setCallbackSubmitError(null);
     setError(null);
-    setOutcomeModalOpen(true);
+    setCallbackDialogOpen(true);
   }
 
-  function scrollToLeadWorkspace() {
-    leadWorkspaceRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
-  }
-
-  function onOutcomeSaved(data?: Record<string, unknown>) {
-    if (!data) return;
-    const d = data as Lead;
-    setLead(d);
-    if (String(d.status).trim().toUpperCase() !== "NEW") {
-      setHoldsEditLock(false);
-      setEditLockBlocked(false);
-      setLockBusyMessage(null);
+  async function handleConfirmCallback(payload: {
+    assignedUserId: string;
+    scheduledForISO: string;
+    note: string;
+  }) {
+    if (!lead || lead.status !== "NEW") return;
+    setSaving(true);
+    setCallbackSubmitError(null);
+    setError(null);
+    const res = await fetch(`/api/leads/${lead.id}/schedule-callback`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        scheduledFor: payload.scheduledForISO,
+        assignedUserId: payload.assignedUserId,
+        note: payload.note,
+      }),
+    });
+    setSaving(false);
+    if (!res.ok) {
+      const j = await res.json().catch(() => ({}));
+      setCallbackSubmitError(typeof j.error === "string" ? j.error : "Kunne ikke planlægge tilbagekald.");
+      return;
     }
-    setStatus((LEAD_STATUSES as readonly string[]).includes(d.status) ? (d.status as LeadStatus) : "NEW");
-    if (d.meetingScheduledFor) {
-      const dt = new Date(d.meetingScheduledFor);
-      const local = new Date(dt.getTime() - dt.getTimezoneOffset() * 60000);
-      setMeetingScheduledFor(local.toISOString().slice(0, 16));
-    } else {
-      setMeetingScheduledFor("");
-    }
-    setMeetingContactName(d.meetingContactName ?? "");
-    setMeetingContactEmail(d.meetingContactEmail ?? "");
-    setMeetingContactPhonePrivate(d.meetingContactPhonePrivate ?? "");
-    setMeetingOutcomeStatus(
-      String(d.meetingOutcomeStatus ?? "").trim().toUpperCase() || MEETING_OUTCOME_PENDING,
-    );
+    const data: Lead = await res.json();
+    setLead(data);
+    setCallbackDialogOpen(false);
+    setStatus("NEW");
     router.refresh();
   }
 
@@ -399,9 +497,12 @@ function LeadDetailInner() {
     );
   }
 
+  const canScheduleCallback = lead.status === "NEW";
+  const showNextForMeeting = status !== "MEETING_BOOKED";
+
   return (
-    <div className="mx-auto max-w-6xl space-y-6">
-      <div>
+    <div className="mx-auto max-w-6xl flex min-h-[calc(100dvh-5.5rem)] flex-col gap-4 pb-4">
+      <div className="shrink-0">
         <Link
           href={fromCampaign ? "/kampagner" : "/leads"}
           className="text-sm text-stone-500 hover:text-stone-800"
@@ -468,210 +569,195 @@ function LeadDetailInner() {
         )}
 
         <h1 className="mt-2 text-xl font-semibold text-stone-900">{lead.companyName}</h1>
-        <p className="text-sm text-stone-500">Kampagne: {lead.campaign.name}</p>
-
-        <div className="mt-3 flex flex-wrap items-center gap-2">
-          <button
-            type="button"
-            onClick={scrollToLeadWorkspace}
-            className="rounded-md border border-stone-200 bg-white px-3 py-1.5 text-sm font-medium text-stone-800 shadow-sm hover:bg-stone-50"
-          >
-            Åbn lead
-          </button>
-          <button
-            type="button"
-            disabled={editLockBlocked && !isAdmin}
-            onClick={openOutcomeModal}
-            className="rounded-md border border-stone-200 bg-white px-3 py-1.5 text-sm font-medium text-stone-800 shadow-sm hover:bg-stone-50 disabled:cursor-not-allowed disabled:opacity-50"
-          >
-            Ændre udfald
-          </button>
-          <button
-            type="button"
-            disabled={deletingLead || (editLockBlocked && !isAdmin)}
-            onClick={() => void onDeleteLead()}
-            className="rounded-md border border-red-200 bg-red-50 px-3 py-1.5 text-sm font-medium text-red-800 hover:bg-red-100 disabled:opacity-60"
-          >
-            {deletingLead ? "Sletter…" : "Slet lead"}
-          </button>
-          <span className="text-xs text-stone-500 sm:ml-auto">
-            Udfald:{" "}
-            <span
-              className={`inline-flex items-center rounded-full px-2 py-0.5 text-xs font-semibold ${
-                status === "NOT_INTERESTED"
-                  ? "bg-red-100 text-red-900"
-                  : status === "MEETING_BOOKED"
-                    ? "bg-emerald-100 text-emerald-900"
-                    : status === "VOICEMAIL"
-                      ? "bg-amber-100 text-amber-950"
-                      : status === "NOT_HOME"
-                        ? "bg-blue-100 text-blue-950"
-                        : "bg-stone-100 text-stone-800"
-              }`}
-            >
-              {LEAD_STATUS_LABELS[status]}
-            </span>
-          </span>
-        </div>
-      </div>
-
-      <form onSubmit={onSave} className="space-y-6">
-        <fieldset
-          disabled={editLockBlocked && !isAdmin}
-          className="min-w-0 space-y-6 border-0 p-0 disabled:opacity-90"
-        >
-        <div className="flex flex-col gap-1 rounded-xl border border-stone-200 bg-white px-4 py-3 shadow-sm sm:flex-row sm:items-center sm:justify-between sm:px-6">
-          <p className="text-xs text-stone-500">
-            Gem ændringer opdaterer kundedata og noter. Udfald skifter du med <strong>Ændre udfald</strong>.
+        <p className="text-sm text-stone-500">
+          Kampagne:{" "}
+          {lead.campaign ? lead.campaign.name : "Ingen kampagne (kampagne slettet)"}
+        </p>
+        {holdsEditLock && !editLockBlocked && (
+          <p className="mt-1 max-w-2xl text-xs text-stone-600">
+            Dette lead er <strong>låst til dig</strong>, så længe du har denne side åben — kolleger kan ikke overtage det
+            samtidig. Låset fornyes automatisk mens du arbejder.
           </p>
-          <button
-            type="submit"
-            disabled={saving || (editLockBlocked && !isAdmin)}
-            className="shrink-0 rounded-md bg-stone-800 px-5 py-2.5 text-sm font-medium text-white hover:bg-stone-900 disabled:opacity-60"
-          >
-            {saving ? "Gemmer…" : "Gem ændringer"}
-          </button>
-        </div>
-
-        <div
-          id="lead-arbejdsvisning"
-          ref={leadWorkspaceRef}
-          className="rounded-xl border border-stone-200 bg-white p-4 shadow-sm sm:p-6"
-        >
-          <div className="grid min-h-[min(70vh,36rem)] gap-8 lg:grid-cols-2 lg:gap-0">
-            <div className="lg:border-r lg:border-stone-100 lg:pr-8">
-              <LeadDataLeftPanel
-                fieldConfigJson={lead.campaign.fieldConfig}
-                companyName={companyName}
-                onCompanyName={setCompanyName}
-                phone={phone}
-                onPhone={setPhone}
-                email={email}
-                onEmail={setEmail}
-                cvr={cvr}
-                onCvr={setCvr}
-                address={address}
-                onAddress={setAddress}
-                postalCode={postalCode}
-                onPostalCode={setPostalCode}
-                city={city}
-                onCity={setCity}
-                industry={industry}
-                onIndustry={setIndustry}
-                custom={custom}
-                onCustom={setCustomKey}
-              />
-            </div>
-            <div className="flex min-h-[14rem] flex-col lg:min-h-0 lg:pl-8">
-              <label htmlFor="notes-detail" className="text-xs font-semibold uppercase tracking-wide text-stone-500">
-                Noter
-              </label>
-              <textarea
-                id="notes-detail"
-                value={notes}
-                onChange={(e) => setNotes(e.target.value)}
-                className="mt-2 min-h-[14rem] flex-1 resize-y rounded-lg border border-stone-200 bg-stone-50/50 px-3 py-3 text-sm text-stone-900 shadow-inner outline-none ring-stone-400 focus:ring-2 lg:min-h-[clamp(18rem,62vh,40rem)]"
-                placeholder="Skriv noter, aftaler, opfølgning…"
-              />
-            </div>
-          </div>
-        </div>
-
-        {status === "MEETING_BOOKED" && (
-          <div className="rounded-xl border border-stone-200 bg-stone-50 p-6 shadow-sm">
-            <div className="flex flex-wrap items-center gap-2">
-              <h2 className="text-sm font-medium text-stone-800">Møde</h2>
-              <span
-                className={`inline-flex rounded-full px-2 py-0.5 text-xs font-semibold ${
-                  meetingOutcomeStatus === "HELD"
-                    ? "bg-emerald-100 text-emerald-900"
-                    : meetingOutcomeStatus === "CANCELLED"
-                      ? "bg-red-100 text-red-900"
-                      : "bg-amber-100 text-amber-950"
-                }`}
-              >
-                {MEETING_OUTCOME_LABELS[meetingOutcomeStatus] ??
-                  MEETING_OUTCOME_LABELS[MEETING_OUTCOME_PENDING]}
-              </span>
-            </div>
-            <div className="mt-3 grid gap-3 sm:grid-cols-2">
-              <div>
-                <label className="block text-xs text-stone-600">Møde tid (dato og klokkeslæt)</label>
-                <input
-                  type="datetime-local"
-                  required
-                  value={meetingScheduledFor}
-                  onChange={(e) => setMeetingScheduledFor(e.target.value)}
-                  className="mt-1 w-full rounded-md border border-stone-200 bg-white px-3 py-2 text-sm text-stone-900 shadow-sm outline-none ring-stone-400 focus:ring-2"
-                />
-              </div>
-              {lead.meetingBookedAt && (
-                <div>
-                  <p className="text-xs text-stone-600">Booket den</p>
-                  <p className="mt-1 text-sm text-stone-800">
-                    {new Date(lead.meetingBookedAt).toLocaleString("da-DK")}
-                  </p>
-                </div>
-              )}
-              {lead.bookedByUser && (
-                <div className="sm:col-span-2">
-                  <p className="text-xs text-stone-600">Booket af</p>
-                  <p className="mt-1 text-sm text-stone-800">
-                    {lead.bookedByUser.name} ({lead.bookedByUser.username})
-                  </p>
-                </div>
-              )}
-              <MeetingContactFields
-                contactRequired
-                className="sm:col-span-2 mt-2 border-stone-200 bg-white/80"
-                meetingContactName={meetingContactName}
-                meetingContactEmail={meetingContactEmail}
-                meetingContactPhonePrivate={meetingContactPhonePrivate}
-                onMeetingContactName={setMeetingContactName}
-                onMeetingContactEmail={setMeetingContactEmail}
-                onMeetingContactPhonePrivate={setMeetingContactPhonePrivate}
-              />
-            </div>
-            {isAdmin && (
-              <div className="mt-4 flex flex-wrap items-center gap-2 border-t border-stone-200 pt-4">
-                <span className="text-xs font-medium text-stone-600">Admin — mødeudfald:</span>
-                <button
-                  type="button"
-                  disabled={meetingOutcomeStatus === "HELD"}
-                  onClick={() => void patchMeetingOutcome("HELD")}
-                  className="rounded-md bg-emerald-700 px-3 py-1.5 text-xs font-semibold text-white hover:bg-emerald-800 disabled:cursor-not-allowed disabled:opacity-50"
-                >
-                  Afholdt
-                </button>
-                <button
-                  type="button"
-                  disabled={meetingOutcomeStatus === "CANCELLED"}
-                  onClick={() => void patchMeetingOutcome("CANCELLED")}
-                  className="rounded-md border border-stone-300 bg-white px-3 py-1.5 text-xs font-semibold text-stone-800 hover:bg-stone-50 disabled:cursor-not-allowed disabled:opacity-50"
-                >
-                  Annulleret
-                </button>
-              </div>
-            )}
+        )}
+        {lead.status === "CALLBACK_SCHEDULED" && lead.callbackScheduledFor && (
+          <div className="mt-3 rounded-lg border border-violet-200 bg-violet-50/90 px-3 py-2 text-xs text-violet-950">
+            <strong>Planlagt genopkald:</strong>{" "}
+            {new Date(lead.callbackScheduledFor).toLocaleString("da-DK", {
+              dateStyle: "short",
+              timeStyle: "short",
+            })}
+            . Vælg udfald og gem — eller skift tilbage til «Ny» og gem for at lægge leadet i køen igen.
           </div>
         )}
+      </div>
 
-        {error && !outcomeModalOpen && <p className="text-sm text-red-600">{error}</p>}
+      <form onSubmit={onSave} className="flex min-h-0 flex-1 flex-col gap-4">
+        <fieldset
+          disabled={editLockBlocked && !isAdmin}
+          className="flex min-h-0 flex-1 flex-col gap-4 border-0 p-0 disabled:opacity-90"
+        >
+          <LeadOutcomeStrip
+            status={status}
+            onStatusChange={setStatus}
+            meetingBookedAt={lead.meetingBookedAt}
+            bookedByUser={lead.bookedByUser}
+            inlineAfterOutcomes={
+              canScheduleCallback ? (
+                <button
+                  type="button"
+                  disabled={saving || (editLockBlocked && !isAdmin) || !myUserId}
+                  onClick={openCallbackDialog}
+                  className="rounded-xl border-2 border-violet-600 bg-violet-100 px-4 py-3 text-sm font-semibold text-violet-950 shadow-sm transition hover:bg-violet-200 disabled:opacity-60 min-w-[8rem]"
+                >
+                  Tilbagekald
+                </button>
+              ) : null
+            }
+            rightColumn={
+              <>
+                {status === "NEW" && showNextForMeeting ? (
+                  <p className="max-w-[14rem] text-right text-xs text-stone-500">
+                    Gem ændringer gemmer kundedata og noter. Vælg udfald-knapperne ovenfor.
+                  </p>
+                ) : null}
+                <button
+                  type="submit"
+                  disabled={saving || (editLockBlocked && !isAdmin)}
+                  className="rounded-xl bg-stone-900 px-6 py-3 text-sm font-semibold text-white shadow-md transition hover:bg-stone-800 disabled:opacity-60"
+                >
+                  {saving ? "Gemmer…" : "Gem ændringer"}
+                </button>
+                <button
+                  type="button"
+                  disabled={deletingLead || (editLockBlocked && !isAdmin)}
+                  onClick={() => void onDeleteLead()}
+                  className="rounded-xl border-2 border-red-200 bg-red-50 px-5 py-2.5 text-sm font-semibold text-red-900 shadow-sm transition hover:bg-red-100 disabled:opacity-60"
+                >
+                  {deletingLead ? "Sletter…" : "Slet lead"}
+                </button>
+              </>
+            }
+          />
+
+          {error && <p className="shrink-0 text-sm text-red-600">{error}</p>}
+
+          <div ref={leadWorkspaceRef} id="lead-arbejdsvisning" className="flex min-h-0 flex-1 flex-col gap-4">
+            <LeadKundeNoterBooking
+              gridKey={`${lead.id}-kunde-noter`}
+              gridClassName="flex-1"
+              fieldConfigJson={lead.campaign?.fieldConfig ?? defaultCampaignFieldConfigJson()}
+              companyName={companyName}
+              onCompanyName={setCompanyName}
+              phone={phone}
+              onPhone={setPhone}
+              email={email}
+              onEmail={setEmail}
+              cvr={cvr}
+              onCvr={setCvr}
+              address={address}
+              onAddress={setAddress}
+              postalCode={postalCode}
+              onPostalCode={setPostalCode}
+              city={city}
+              onCity={setCity}
+              industry={industry}
+              onIndustry={setIndustry}
+              custom={custom}
+              onCustom={setCustomKey}
+              notes={notes}
+              onNotesChange={setNotes}
+              meetingContact={{
+                meetingContactName,
+                meetingContactEmail,
+                meetingContactPhonePrivate,
+                onMeetingContactName: (v) => {
+                  setMeetingContactName(v);
+                  setMeetingContactErrors((prev) => ({ ...prev, name: undefined }));
+                },
+                onMeetingContactEmail: (v) => {
+                  setMeetingContactEmail(v);
+                  setMeetingContactErrors((prev) => ({ ...prev, email: undefined }));
+                },
+                onMeetingContactPhonePrivate: (v) => {
+                  setMeetingContactPhonePrivate(v);
+                  setMeetingContactErrors((prev) => ({ ...prev, phone: undefined }));
+                },
+                contactRequired: status === "MEETING_BOOKED",
+                meetingContactErrors: status === "MEETING_BOOKED" ? meetingContactErrors : undefined,
+              }}
+              booking={{
+                campaignId: lead.campaignId ?? undefined,
+                leadId: lead.id,
+                initialMeetingLocal: status === "MEETING_BOOKED" ? meetingScheduledFor || undefined : undefined,
+                isSubmitting: saving,
+                allowMeetingConfirm: status === "MEETING_BOOKED",
+                onConfirmBooking: (d) => void onConfirmBookingFromPanel(d),
+              }}
+            />
+          </div>
+
+          {status === "MEETING_BOOKED" && (
+            <div className="rounded-xl border border-stone-200 bg-stone-50 p-6 shadow-sm">
+              <div className="flex flex-wrap items-center gap-2">
+                <h2 className="text-sm font-medium text-stone-800">Mødeudfald</h2>
+                <span
+                  className={`inline-flex rounded-full px-2 py-0.5 text-xs font-semibold ${
+                    meetingOutcomeStatus === "HELD"
+                      ? "bg-emerald-100 text-emerald-900"
+                      : meetingOutcomeStatus === "CANCELLED"
+                        ? "bg-red-100 text-red-900"
+                        : "bg-amber-100 text-amber-950"
+                  }`}
+                >
+                  {MEETING_OUTCOME_LABELS[meetingOutcomeStatus] ??
+                    MEETING_OUTCOME_LABELS[MEETING_OUTCOME_PENDING]}
+                </span>
+              </div>
+              {meetingScheduledFor ? (
+                <p className="mt-2 text-sm text-stone-800">
+                  Planlagt tidspunkt:{" "}
+                  {new Date(meetingScheduledFor).toLocaleString("da-DK", {
+                    dateStyle: "short",
+                    timeStyle: "short",
+                  })}
+                </p>
+              ) : null}
+              {isAdmin && (
+                <div className="mt-4 flex flex-wrap items-center gap-2 border-t border-stone-200 pt-4">
+                  <span className="text-xs font-medium text-stone-600">Admin — mødeudfald:</span>
+                  <button
+                    type="button"
+                    disabled={meetingOutcomeStatus === "HELD"}
+                    onClick={() => void patchMeetingOutcome("HELD")}
+                    className="rounded-md bg-emerald-700 px-3 py-1.5 text-xs font-semibold text-white hover:bg-emerald-800 disabled:cursor-not-allowed disabled:opacity-50"
+                  >
+                    Afholdt
+                  </button>
+                  <button
+                    type="button"
+                    disabled={meetingOutcomeStatus === "CANCELLED"}
+                    onClick={() => void patchMeetingOutcome("CANCELLED")}
+                    className="rounded-md border border-stone-300 bg-white px-3 py-1.5 text-xs font-semibold text-stone-800 hover:bg-stone-50 disabled:cursor-not-allowed disabled:opacity-50"
+                  >
+                    Annulleret
+                  </button>
+                </div>
+              )}
+            </div>
+          )}
         </fieldset>
       </form>
 
-      <LeadOutcomeModal
-        open={outcomeModalOpen}
-        onClose={() => setOutcomeModalOpen(false)}
-        leadIds={[lead.id]}
-        initialStatus={status}
-        initialMeetingLocal={meetingScheduledFor}
-        meetingContactSnapshot={{
-          name: meetingContactName,
-          email: meetingContactEmail,
-          phone: meetingContactPhonePrivate,
+      <CallbackScheduleDialog
+        open={callbackDialogOpen}
+        currentUserId={myUserId}
+        saving={saving}
+        errorText={callbackSubmitError}
+        onClose={() => {
+          setCallbackDialogOpen(false);
+          setCallbackSubmitError(null);
         }}
-        onSaved={onOutcomeSaved}
+        onConfirm={(p) => void handleConfirmCallback(p)}
       />
     </div>
   );

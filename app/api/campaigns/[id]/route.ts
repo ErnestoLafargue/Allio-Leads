@@ -2,6 +2,10 @@ import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { requireSession, requireAdmin } from "@/lib/api-auth";
 import { parseFieldConfig, serializeFieldConfig } from "@/lib/campaign-fields";
+import {
+  canDeleteCampaign,
+  PROTECTED_CAMPAIGN_DELETE_MESSAGE,
+} from "@/lib/campaign-delete";
 
 type Params = { params: Promise<{ id: string }> };
 
@@ -17,6 +21,8 @@ export async function GET(_req: Request, { params }: Params) {
       name: true,
       fieldConfig: true,
       includeProtectedBusinesses: true,
+      isSystemCampaign: true,
+      systemCampaignType: true,
       createdAt: true,
       updatedAt: true,
       _count: { select: { leads: true } },
@@ -24,6 +30,42 @@ export async function GET(_req: Request, { params }: Params) {
   });
   if (!campaign) return NextResponse.json({ error: "Ikke fundet" }, { status: 404 });
   return NextResponse.json(campaign);
+}
+
+export async function DELETE(_req: Request, { params }: Params) {
+  const { response } = await requireAdmin();
+  if (response) return response;
+
+  const { id } = await params;
+  const existing = await prisma.campaign.findUnique({
+    where: { id },
+    select: {
+      id: true,
+      name: true,
+      isSystemCampaign: true,
+      systemCampaignType: true,
+    },
+  });
+  if (!existing) return NextResponse.json({ error: "Ikke fundet" }, { status: 404 });
+
+  if (!canDeleteCampaign(existing)) {
+    return NextResponse.json({ error: PROTECTED_CAMPAIGN_DELETE_MESSAGE }, { status: 403 });
+  }
+
+  try {
+    await prisma.campaign.delete({ where: { id } });
+  } catch (e) {
+    const msg = e instanceof Error ? e.message : String(e);
+    return NextResponse.json(
+      {
+        error: "Kunne ikke slette kampagne.",
+        details: process.env.NODE_ENV === "development" ? msg : undefined,
+      },
+      { status: 500 },
+    );
+  }
+
+  return NextResponse.json({ ok: true });
 }
 
 export async function PATCH(req: Request, { params }: Params) {

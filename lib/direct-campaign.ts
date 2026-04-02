@@ -12,6 +12,8 @@ export async function ensureDirectBookingCampaign() {
     data: {
       name: DIRECT_BOOKING_CAMPAIGN_NAME,
       fieldConfig: defaultCampaignFieldConfigJson(),
+      isSystemCampaign: true,
+      systemCampaignType: "direct_booking",
     },
   });
 }

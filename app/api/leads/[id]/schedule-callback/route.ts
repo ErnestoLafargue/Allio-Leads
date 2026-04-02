@@ -10,6 +10,7 @@ const leadInclude = {
   campaign: { select: { id: true, name: true, fieldConfig: true } as const },
   lockedByUser: { select: { id: true, name: true, username: true } as const },
   callbackReservedByUser: { select: { id: true, name: true, username: true } as const },
+  callbackCreatedByUser: { select: { id: true, name: true, username: true } as const },
 } as const;
 
 /**
@@ -29,6 +30,14 @@ export async function POST(req: Request, { params }: Params) {
   const scheduledFor = new Date(scheduledRaw.trim());
   if (Number.isNaN(scheduledFor.getTime())) {
     return NextResponse.json({ error: "Ugyldig dato." }, { status: 400 });
+  }
+
+  let assignedUserId = typeof body?.assignedUserId === "string" ? body.assignedUserId.trim() : userId;
+  const noteRaw = typeof body?.note === "string" ? body.note.trim().slice(0, 2000) : "";
+
+  const assignee = await prisma.user.findUnique({ where: { id: assignedUserId }, select: { id: true } });
+  if (!assignee) {
+    return NextResponse.json({ error: "Ukendt bruger til tildeling." }, { status: 400 });
   }
 
   const now = new Date();
@@ -76,7 +85,10 @@ export async function POST(req: Request, { params }: Params) {
       data: {
         status: "CALLBACK_SCHEDULED",
         callbackScheduledFor: scheduledFor,
-        callbackReservedByUserId: userId,
+        callbackReservedByUserId: assignedUserId,
+        callbackCreatedByUserId: userId,
+        callbackStatus: "PENDING",
+        callbackNote: noteRaw,
         ...LEAD_LOCK_CLEAR,
       },
       include: leadInclude,
@@ -88,6 +100,8 @@ export async function POST(req: Request, { params }: Params) {
     const migrationHint =
       msg.includes("callbackScheduledFor") ||
       msg.includes("callbackReservedByUserId") ||
+      msg.includes("callbackStatus") ||
+      msg.includes("callbackCreatedByUserId") ||
       msg.includes("no such column") ||
       msg.toLowerCase().includes("does not exist");
     return NextResponse.json(

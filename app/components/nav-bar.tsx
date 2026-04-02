@@ -7,6 +7,7 @@ import { signOut } from "next-auth/react";
 const links: { href: string; label: string; adminOnly?: boolean }[] = [
   { href: "/kampagner", label: "Kampagner" },
   { href: "/leads", label: "Leads" },
+  { href: "/tilbagekald-kalender", label: "Tilbagekald & Kalender" },
   { href: "/meetings", label: "Møder" },
   { href: "/mine-salg", label: "Mine Salg" },
   { href: "/scoreboard", label: "Scoreboard" },

@@ -2,13 +2,14 @@
 
 import Link from "next/link";
 import { useCallback, useEffect, useRef, useState } from "react";
-import { LEAD_STATUSES, LEAD_STATUS_LABELS, type LeadStatus } from "@/lib/lead-status";
-import { OUTCOME_ORDER, outcomeButtonClass } from "@/lib/lead-outcome-ui";
-import { LeadDataLeftPanel } from "@/app/components/lead-data-left-panel";
+import { useSession } from "next-auth/react";
+import { LEAD_STATUSES, type LeadStatus } from "@/lib/lead-status";
 import { parseCustomFields } from "@/lib/custom-fields";
-import { BookingPanel, type BookingConfirmPayload } from "@/app/components/booking/booking-panel";
-import { MeetingContactFields } from "@/app/components/booking/meeting-contact-fields";
+import type { BookingConfirmPayload } from "@/app/components/booking/booking-panel";
+import { LeadOutcomeStrip } from "@/app/components/lead-workspace/lead-outcome-strip";
+import { LeadKundeNoterBooking } from "@/app/components/lead-workspace/lead-kunde-noter-booking";
 import { validateMeetingContactFields } from "@/lib/meeting-contact-validation";
+import { CallbackScheduleDialog } from "@/app/components/callback-schedule-dialog";
 
 type Lead = {
   id: string;
@@ -52,6 +53,8 @@ async function releaseLockHttp(leadId: string) {
 }
 
 export function CampaignWorkspace({ campaignId }: Props) {
+  const { data: session } = useSession();
+  const sessionUserId = session?.user?.id ?? "";
   const [campaignName, setCampaignName] = useState("");
   const [fieldConfigJson, setFieldConfigJson] = useState("{}");
   const [campaignLeadCount, setCampaignLeadCount] = useState<number | null>(null);
@@ -85,7 +88,7 @@ export function CampaignWorkspace({ campaignId }: Props) {
     phone?: string;
   }>({});
   const [callbackDialogOpen, setCallbackDialogOpen] = useState(false);
-  const [callbackLocalDatetime, setCallbackLocalDatetime] = useState("");
+  const [callbackSubmitError, setCallbackSubmitError] = useState<string | null>(null);
 
   useEffect(() => {
     activeLeadRef.current = activeLead;
@@ -365,32 +368,33 @@ export function CampaignWorkspace({ campaignId }: Props) {
   }
 
   function openCallbackDialog() {
-    const d = new Date();
-    d.setMinutes(d.getMinutes() + 60, 0, 0);
-    const local = new Date(d.getTime() - d.getTimezoneOffset() * 60000);
-    setCallbackLocalDatetime(local.toISOString().slice(0, 16));
+    setCallbackSubmitError(null);
     setError(null);
     setCallbackDialogOpen(true);
   }
 
-  async function handleConfirmCallback() {
+  async function handleConfirmCallback(payload: {
+    assignedUserId: string;
+    scheduledForISO: string;
+    note: string;
+  }) {
     if (!activeLead || activeLead.status !== "NEW") return;
-    if (!callbackLocalDatetime.trim()) {
-      setError("Vælg dato og tid for callback.");
-      return;
-    }
-    const iso = new Date(callbackLocalDatetime).toISOString();
     setSaving(true);
+    setCallbackSubmitError(null);
     setError(null);
     const res = await fetch(`/api/leads/${activeLead.id}/schedule-callback`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ scheduledFor: iso }),
+      body: JSON.stringify({
+        scheduledFor: payload.scheduledForISO,
+        assignedUserId: payload.assignedUserId,
+        note: payload.note,
+      }),
     });
     setSaving(false);
     if (!res.ok) {
       const j = await res.json().catch(() => ({}));
-      setError(typeof j.error === "string" ? j.error : "Kunne ikke planlægge callback.");
+      setCallbackSubmitError(typeof j.error === "string" ? j.error : "Kunne ikke planlægge tilbagekald.");
       return;
     }
     setCallbackDialogOpen(false);
@@ -554,183 +558,102 @@ export function CampaignWorkspace({ campaignId }: Props) {
         )}
       </div>
 
-      <div className="shrink-0 space-y-4 rounded-2xl border border-stone-200 bg-white p-4 shadow-lg sm:p-5">
-        <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between lg:gap-6">
-          <div className="min-w-0 flex-1 space-y-3">
-            <p className="text-xs font-semibold uppercase tracking-wide text-stone-500">Udfald</p>
-            <div className="flex flex-wrap gap-2 sm:gap-3">
-              {OUTCOME_ORDER.map((s) => (
-                <button
-                  key={s}
-                  type="button"
-                  onClick={() => setStatus(s)}
-                  className={outcomeButtonClass(s, status === s)}
-                >
-                  {LEAD_STATUS_LABELS[s]}
-                </button>
-              ))}
-            </div>
-            {status === "MEETING_BOOKED" && (
-              <div className="rounded-lg border border-emerald-200 bg-emerald-50/50 p-4">
-                <p className="text-xs font-medium text-emerald-900">Møde tid (påkrævet)</p>
-                <p className="mt-1 text-xs text-emerald-800/90">
-                  Vælg dato og tidspunkt i kalenderen nedenfor. Tryk «Bekræft booking» for at gemme og gå videre
-                  (samme som «Næste»).
-                </p>
-                {meetingBookedAt && (
-                  <p className="mt-2 text-xs text-emerald-800">
-                    Booket den {new Date(meetingBookedAt).toLocaleString("da-DK")}
-                  </p>
-                )}
-                {bookedByUser && (
-                  <p className="text-xs text-emerald-800">
-                    Af {bookedByUser.name} ({bookedByUser.username})
-                  </p>
-                )}
-              </div>
-            )}
-          </div>
-          <div className="flex flex-col items-end gap-2 lg:shrink-0 lg:pt-6">
-            {canScheduleCallback ? (
-              <button
-                type="button"
-                disabled={saving}
-                onClick={openCallbackDialog}
-                className="rounded-xl border-2 border-violet-600 bg-violet-100 px-5 py-2.5 text-sm font-semibold text-violet-950 shadow-sm transition hover:bg-violet-200 disabled:opacity-60"
-              >
-                Callback
-              </button>
-            ) : null}
+      <LeadOutcomeStrip
+        status={status}
+        onStatusChange={setStatus}
+        meetingBookedAt={meetingBookedAt}
+        bookedByUser={bookedByUser}
+        inlineAfterOutcomes={
+          canScheduleCallback ? (
+            <button
+              type="button"
+              disabled={saving || !sessionUserId}
+              onClick={openCallbackDialog}
+              className="rounded-xl border-2 border-violet-600 bg-violet-100 px-4 py-3 text-sm font-semibold text-violet-950 shadow-sm transition hover:bg-violet-200 disabled:opacity-60 min-w-[8rem]"
+            >
+              Tilbagekald
+            </button>
+          ) : null
+        }
+        rightColumn={
+          <>
             {status === "NEW" && showNextForMeeting ? (
               <p className="max-w-[14rem] text-right text-xs text-stone-500">
                 Gemmer noter og går til næste lead uden at ændre udfald.
               </p>
             ) : null}
             {renderNextButton()}
-          </div>
-        </div>
-      </div>
+          </>
+        }
+      />
 
       {error && <p className="shrink-0 text-sm text-red-600">{error}</p>}
 
-      <div
-        key={`${current.id}-kunde-noter`}
-        className="grid min-h-0 flex-1 grid-cols-1 gap-0 overflow-hidden rounded-2xl border border-stone-200 bg-white shadow-lg lg:grid-cols-2 lg:min-h-[calc(100dvh-15rem)]"
-      >
-        <div className="flex min-h-[42dvh] min-w-0 flex-col border-b border-stone-100 p-4 sm:p-6 lg:min-h-full lg:border-b-0 lg:border-r lg:border-stone-100">
-          <h2 className="mb-3 shrink-0 text-xs font-semibold uppercase tracking-wide text-stone-500">Kunde</h2>
-          <div className="min-h-0 flex-1 overflow-y-auto pr-1">
-            <LeadDataLeftPanel
-              fieldConfigJson={fieldConfigJson}
-              companyName={companyName}
-              onCompanyName={setCompanyName}
-              phone={phone}
-              onPhone={setPhone}
-              email={email}
-              onEmail={setEmail}
-              cvr={cvr}
-              onCvr={setCvr}
-              address={address}
-              onAddress={setAddress}
-              postalCode={postalCode}
-              onPostalCode={setPostalCode}
-              city={city}
-              onCity={setCity}
-              industry={industry}
-              onIndustry={setIndustry}
-              custom={custom}
-              onCustom={setCustomKey}
-            />
-          </div>
-        </div>
-        <div className="flex min-w-0 flex-col items-stretch p-4 sm:p-6 lg:h-full lg:items-start">
-          <h2 className="mb-3 shrink-0 text-xs font-semibold uppercase tracking-wide text-stone-500">Noter</h2>
-          <textarea
-            value={notes}
-            onChange={(e) => setNotes(e.target.value)}
-            className="min-h-[4.5rem] h-48 w-full max-w-full resize-y rounded-xl border border-stone-200 bg-stone-50/80 px-4 py-3 text-sm text-stone-900 shadow-inner outline-none ring-stone-400 focus:ring-2"
-            placeholder="Skriv noter… Træk i nederste kant for kortere eller længere."
-            rows={6}
-          />
-          <MeetingContactFields
-            className="mt-4 shrink-0"
-            contactRequired={status === "MEETING_BOOKED"}
-            fieldErrors={status === "MEETING_BOOKED" ? meetingContactErrors : undefined}
-            meetingContactName={meetingContactName}
-            meetingContactEmail={meetingContactEmail}
-            meetingContactPhonePrivate={meetingContactPhonePrivate}
-            onMeetingContactName={(v) => {
-              setMeetingContactName(v);
-              setMeetingContactErrors((prev) => ({ ...prev, name: undefined }));
-            }}
-            onMeetingContactEmail={(v) => {
-              setMeetingContactEmail(v);
-              setMeetingContactErrors((prev) => ({ ...prev, email: undefined }));
-            }}
-            onMeetingContactPhonePrivate={(v) => {
-              setMeetingContactPhonePrivate(v);
-              setMeetingContactErrors((prev) => ({ ...prev, phone: undefined }));
-            }}
-          />
-        </div>
-      </div>
-
-      <BookingPanel
-        campaignId={campaignId}
-        leadId={current.id}
-        initialMeetingLocal={status === "MEETING_BOOKED" ? meetingScheduledFor || undefined : undefined}
-        isSubmitting={saving}
-        allowMeetingConfirm={status === "MEETING_BOOKED"}
-        onConfirmBooking={onConfirmBookingFromPanel}
+      <LeadKundeNoterBooking
+        gridKey={`${current.id}-kunde-noter`}
+        gridClassName="flex-1"
+        fieldConfigJson={fieldConfigJson}
+        companyName={companyName}
+        onCompanyName={setCompanyName}
+        phone={phone}
+        onPhone={setPhone}
+        email={email}
+        onEmail={setEmail}
+        cvr={cvr}
+        onCvr={setCvr}
+        address={address}
+        onAddress={setAddress}
+        postalCode={postalCode}
+        onPostalCode={setPostalCode}
+        city={city}
+        onCity={setCity}
+        industry={industry}
+        onIndustry={setIndustry}
+        custom={custom}
+        onCustom={setCustomKey}
+        notes={notes}
+        onNotesChange={setNotes}
+        meetingContact={{
+          meetingContactName,
+          meetingContactEmail,
+          meetingContactPhonePrivate,
+          onMeetingContactName: (v) => {
+            setMeetingContactName(v);
+            setMeetingContactErrors((prev) => ({ ...prev, name: undefined }));
+          },
+          onMeetingContactEmail: (v) => {
+            setMeetingContactEmail(v);
+            setMeetingContactErrors((prev) => ({ ...prev, email: undefined }));
+          },
+          onMeetingContactPhonePrivate: (v) => {
+            setMeetingContactPhonePrivate(v);
+            setMeetingContactErrors((prev) => ({ ...prev, phone: undefined }));
+          },
+          contactRequired: status === "MEETING_BOOKED",
+          meetingContactErrors: status === "MEETING_BOOKED" ? meetingContactErrors : undefined,
+        }}
+        booking={{
+          campaignId,
+          leadId: current.id,
+          initialMeetingLocal: status === "MEETING_BOOKED" ? meetingScheduledFor || undefined : undefined,
+          isSubmitting: saving,
+          allowMeetingConfirm: status === "MEETING_BOOKED",
+          onConfirmBooking: onConfirmBookingFromPanel,
+        }}
+        bottomBar={renderNextButton()}
       />
 
-      <div className="flex shrink-0 flex-wrap items-center justify-end gap-3 border-t border-stone-200 pt-4">
-        {renderNextButton()}
-      </div>
-
-      {callbackDialogOpen ? (
-        <div
-          className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4"
-          role="dialog"
-          aria-modal="true"
-          aria-labelledby="callback-dialog-title"
-        >
-          <div className="w-full max-w-md rounded-2xl border border-stone-200 bg-white p-6 shadow-xl">
-            <h2 id="callback-dialog-title" className="text-lg font-semibold text-stone-900">
-              Planlæg callback
-            </h2>
-            <p className="mt-1 text-sm text-stone-600">
-              Vælg hvornår du vil ringe igen. Leadet reserveres til dig og vises først i køen når tidspunktet er nået.
-            </p>
-            <label className="mt-4 block text-xs font-medium text-stone-600">
-              Dato og tid
-              <input
-                type="datetime-local"
-                value={callbackLocalDatetime}
-                onChange={(e) => setCallbackLocalDatetime(e.target.value)}
-                className="mt-1 w-full rounded-lg border border-stone-200 px-3 py-2 text-sm text-stone-900"
-              />
-            </label>
-            <div className="mt-6 flex flex-wrap justify-end gap-2">
-              <button
-                type="button"
-                className="rounded-lg border border-stone-300 bg-white px-4 py-2 text-sm font-medium text-stone-800 hover:bg-stone-50"
-                onClick={() => setCallbackDialogOpen(false)}
-              >
-                Annuller
-              </button>
-              <button
-                type="button"
-                disabled={saving}
-                onClick={() => void handleConfirmCallback()}
-                className="rounded-lg bg-violet-700 px-4 py-2 text-sm font-semibold text-white hover:bg-violet-800 disabled:opacity-60"
-              >
-                {saving ? "Gemmer…" : "Bekræft"}
-              </button>
-            </div>
-          </div>
-        </div>
-      ) : null}
+      <CallbackScheduleDialog
+        open={callbackDialogOpen}
+        currentUserId={sessionUserId}
+        saving={saving}
+        errorText={callbackSubmitError}
+        onClose={() => {
+          setCallbackDialogOpen(false);
+          setCallbackSubmitError(null);
+        }}
+        onConfirm={(p) => void handleConfirmCallback(p)}
+      />
     </div>
   );
 }

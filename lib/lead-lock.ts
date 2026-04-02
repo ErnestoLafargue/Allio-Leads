@@ -73,12 +73,12 @@ export async function tryAcquireLeadLock(
   const staleCutoff = new Date(now.getTime() - idleMs);
   const expires = new Date(now.getTime() + idleMs);
   /** Kan overtage fra anden bruger kun når lås ikke længere er aktivt (matcher isLockActive). */
-  const inactiveLease = {
+  const inactiveLease: Prisma.LeadWhereInput = {
     AND: [
       { OR: [{ lockedAt: null }, { lockedAt: { lt: staleCutoff } }] },
       { OR: [{ lockExpiresAt: null }, { lockExpiresAt: { lte: now } }] },
     ],
-  } as const;
+  };
   const res = await db.lead.updateMany({
     where: {
       id: leadId,
@@ -159,12 +159,12 @@ export async function releaseLeadLock(
 export async function releaseExpiredLocksEverywhere(db: PrismaClient, now: Date = new Date()): Promise<number> {
   const idleMs = getLeadLockMaxIdleMs();
   const staleCutoff = new Date(now.getTime() - idleMs);
-  const inactiveLease = {
+  const inactiveLease: Prisma.LeadWhereInput = {
     AND: [
       { OR: [{ lockedAt: null }, { lockedAt: { lt: staleCutoff } }] },
       { OR: [{ lockExpiresAt: null }, { lockExpiresAt: { lte: now } }] },
     ],
-  } as const;
+  };
   const res = await db.lead.updateMany({
     where: {
       lockedByUserId: { not: null },
