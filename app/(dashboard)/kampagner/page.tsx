@@ -10,8 +10,12 @@ type Campaign = {
   fieldConfig: string;
   createdAt: string;
   updatedAt: string;
+  systemCampaignType?: string | null;
   _count: { leads: number };
 };
+
+/** Fast rækkefølge øverst — matcher API (Aktive kunder → Kommende møder → Genbook møde). */
+const PINNED_TOP_TYPES = new Set(["active_customers", "upcoming_meetings", "rebooking"]);
 
 export default function KampagnerPage() {
   const { data: session } = useSession();
@@ -113,7 +117,14 @@ export default function KampagnerPage() {
               </tr>
             ) : (
               campaigns.map((c) => (
-                <tr key={c.id} className="hover:bg-stone-50/80">
+                <tr
+                  key={c.id}
+                  className={
+                    PINNED_TOP_TYPES.has(String(c.systemCampaignType ?? "").trim())
+                      ? "border-b border-stone-100 bg-stone-50/90 hover:bg-stone-100/90"
+                      : "hover:bg-stone-50/80"
+                  }
+                >
                   <td className="px-4 py-3 font-medium text-stone-900">
                     <Link
                       href={`/kampagner/${c.id}/arbejd`}

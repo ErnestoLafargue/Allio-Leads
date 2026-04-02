@@ -3,7 +3,7 @@ import { defaultCampaignFieldConfigJson } from "@/lib/campaign-fields";
 
 const DEFS = [
   { systemCampaignType: "upcoming_meetings" as const, name: "Kommende møder" },
-  { systemCampaignType: "rebooking" as const, name: "Genbook møder" },
+  { systemCampaignType: "rebooking" as const, name: "Genbook møde" },
   { systemCampaignType: "active_customers" as const, name: "Aktive kunder" },
 ] as const;
 

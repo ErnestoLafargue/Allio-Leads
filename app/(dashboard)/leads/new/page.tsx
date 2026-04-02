@@ -4,6 +4,7 @@ import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
 import { useEffect, useState } from "react";
 import { MeetingContactFields } from "@/app/components/booking/meeting-contact-fields";
+import { AdLibraryCard } from "@/app/components/ad-library-card";
 import { LeadDataLeftPanel } from "@/app/components/lead-data-left-panel";
 
 type CampaignOption = { id: string; name: string };
@@ -225,6 +226,7 @@ export default function NewLeadPage() {
                 onMeetingContactEmail={setMeetingContactEmail}
                 onMeetingContactPhonePrivate={setMeetingContactPhonePrivate}
               />
+              <AdLibraryCard companyName={companyName} className="mt-4 shrink-0" />
             </div>
           </div>
 

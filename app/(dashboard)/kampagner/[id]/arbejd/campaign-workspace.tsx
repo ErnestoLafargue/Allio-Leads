@@ -10,6 +10,10 @@ import { LeadOutcomeStrip } from "@/app/components/lead-workspace/lead-outcome-s
 import { LeadKundeNoterBooking } from "@/app/components/lead-workspace/lead-kunde-noter-booking";
 import { validateMeetingContactFields } from "@/lib/meeting-contact-validation";
 import { CallbackScheduleDialog } from "@/app/components/callback-schedule-dialog";
+import {
+  buildCampaignLeadPatchBody,
+  type CampaignLeadFormSnapshot,
+} from "@/lib/campaign-workspace-patch";
 
 type Lead = {
   id: string;
@@ -52,6 +56,12 @@ async function releaseLockHttp(leadId: string) {
   await fetch(`/api/leads/${leadId}/lock`, { method: "DELETE", keepalive: true }).catch(() => {});
 }
 
+const BG_SAVE_RETRIES = 3;
+
+function delayMs(ms: number) {
+  return new Promise<void>((r) => setTimeout(r, ms));
+}
+
 export function CampaignWorkspace({ campaignId }: Props) {
   const { data: session } = useSession();
   const sessionUserId = session?.user?.id ?? "";
@@ -62,8 +72,14 @@ export function CampaignWorkspace({ campaignId }: Props) {
   const activeLeadRef = useRef<Lead | null>(null);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
+  /** Fejl ved baggrundsgem af forrige lead (blokér ikke næste lead). */
+  const [backgroundSyncError, setBackgroundSyncError] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [done, setDone] = useState(false);
+  /** Lås på leads der stadig gemmes i baggrunden — heartbeat som aktivt lead. */
+  const [backgroundLockLeadIds, setBackgroundLockLeadIds] = useState<string[]>([]);
+  const backgroundLockLeadIdsRef = useRef<string[]>([]);
+  const pendingPatchBodiesRef = useRef<Map<string, Record<string, unknown>>>(new Map());
 
   const [companyName, setCompanyName] = useState("");
   const [phone, setPhone] = useState("");
@@ -94,10 +110,22 @@ export function CampaignWorkspace({ campaignId }: Props) {
     activeLeadRef.current = activeLead;
   }, [activeLead]);
 
+  backgroundLockLeadIdsRef.current = backgroundLockLeadIds;
+
   useEffect(() => {
     return () => {
       const id = activeLeadRef.current?.id;
       if (id) void releaseLockHttp(id);
+      for (const [leadId, body] of pendingPatchBodiesRef.current.entries()) {
+        void fetch(`/api/leads/${leadId}`, {
+          method: "PATCH",
+          keepalive: true,
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(body),
+        }).catch(() => {});
+        void releaseLockHttp(leadId);
+      }
+      pendingPatchBodiesRef.current.clear();
     };
   }, [campaignId]);
 
@@ -197,21 +225,25 @@ export function CampaignWorkspace({ campaignId }: Props) {
     };
   }, [campaignId]);
 
-  useEffect(() => {
-    if (!activeLead?.id) return;
-    const id = activeLead.id;
-    void fetch(`/api/leads/${id}/lock`, { method: "PATCH" }).catch(() => {});
-    const t = window.setInterval(() => {
+  const pulseAllLeadLocks = useCallback(() => {
+    const ids = new Set<string>();
+    if (activeLeadRef.current?.id) ids.add(activeLeadRef.current.id);
+    for (const id of backgroundLockLeadIdsRef.current) ids.add(id);
+    for (const id of ids) {
       void fetch(`/api/leads/${id}/lock`, { method: "PATCH" }).catch(() => {});
-    }, LOCK_HEARTBEAT_MS);
-    return () => clearInterval(t);
-  }, [activeLead?.id]);
+    }
+  }, []);
 
   useEffect(() => {
-    if (!activeLead?.id) return;
-    const id = activeLead.id;
+    if (!activeLead?.id && backgroundLockLeadIds.length === 0) return;
+    pulseAllLeadLocks();
+    const t = window.setInterval(pulseAllLeadLocks, LOCK_HEARTBEAT_MS);
+    return () => clearInterval(t);
+  }, [activeLead?.id, backgroundLockLeadIds, pulseAllLeadLocks]);
+
+  useEffect(() => {
     function refreshLockFromFocus() {
-      void fetch(`/api/leads/${id}/lock`, { method: "PATCH" }).catch(() => {});
+      pulseAllLeadLocks();
     }
     function onVisibility() {
       if (document.visibilityState === "visible") refreshLockFromFocus();
@@ -224,7 +256,7 @@ export function CampaignWorkspace({ campaignId }: Props) {
       window.removeEventListener("focus", refreshLockFromFocus);
       window.removeEventListener("pageshow", refreshLockFromFocus);
     };
-  }, [activeLead?.id]);
+  }, [pulseAllLeadLocks]);
 
   useEffect(() => {
     if (!activeLead) return;
@@ -239,11 +271,8 @@ export function CampaignWorkspace({ campaignId }: Props) {
     setCustom((prev) => ({ ...prev, [key]: value }));
   }
 
-  async function saveLead(
-    l: Lead,
-    meetingScheduledForISO?: string,
-  ): Promise<{ next: Lead[]; updated: Lead } | null> {
-    const body: Record<string, unknown> = {
+  function getFormSnapshot(): CampaignLeadFormSnapshot {
+    return {
       companyName,
       phone,
       email,
@@ -255,16 +284,18 @@ export function CampaignWorkspace({ campaignId }: Props) {
       notes,
       customFields: custom,
       status,
+      meetingScheduledFor,
+      meetingContactName,
+      meetingContactEmail,
+      meetingContactPhonePrivate,
     };
-    if (status === "MEETING_BOOKED") {
-      const iso =
-        meetingScheduledForISO ??
-        (meetingScheduledFor ? new Date(meetingScheduledFor).toISOString() : undefined);
-      body.meetingScheduledFor = iso;
-      body.meetingContactName = meetingContactName.trim();
-      body.meetingContactEmail = meetingContactEmail.trim();
-      body.meetingContactPhonePrivate = meetingContactPhonePrivate.trim();
-    }
+  }
+
+  async function saveLead(
+    l: Lead,
+    meetingScheduledForISO?: string,
+  ): Promise<{ next: Lead[]; updated: Lead } | null> {
+    const body = buildCampaignLeadPatchBody(getFormSnapshot(), { meetingScheduledForISO });
     const res = await fetch(`/api/leads/${l.id}`, {
       method: "PATCH",
       headers: { "Content-Type": "application/json" },
@@ -325,6 +356,8 @@ export function CampaignWorkspace({ campaignId }: Props) {
 
   async function onNext(meetingScheduledForISO?: string) {
     if (!activeLead) return;
+
+    /** Mødebooking: vent på bekræftet gem — ingen optimistisk navigation (data integritet). */
     if (status === "MEETING_BOOKED") {
       const iso =
         meetingScheduledForISO ??
@@ -348,23 +381,100 @@ export function CampaignWorkspace({ campaignId }: Props) {
         setError(parts.join(" "));
         return;
       }
+
+      const currentId = activeLead.id;
+      setSaving(true);
+      setError(null);
+      const saved = await saveLead(activeLead, meetingScheduledForISO);
+      setSaving(false);
+      if (!saved) return;
+
+      if (meetingScheduledForISO) {
+        const d = new Date(meetingScheduledForISO);
+        const local = new Date(d.getTime() - d.getTimezoneOffset() * 60000);
+        setMeetingScheduledFor(local.toISOString().slice(0, 16));
+      }
+
+      await advanceToNextReservedAfterSave(currentId);
+      return;
     }
 
     const currentId = activeLead.id;
+    const patchBody = buildCampaignLeadPatchBody(getFormSnapshot());
 
-    setSaving(true);
     setError(null);
-    const saved = await saveLead(activeLead, meetingScheduledForISO);
-    setSaving(false);
-    if (!saved) return;
+    setBackgroundSyncError(null);
 
-    if (meetingScheduledForISO) {
-      const d = new Date(meetingScheduledForISO);
-      const local = new Date(d.getTime() - d.getTimezoneOffset() * 60000);
-      setMeetingScheduledFor(local.toISOString().slice(0, 16));
+    const rRes = await fetch(`/api/campaigns/${campaignId}/reserve-next`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ excludeLeadId: currentId }),
+    });
+    if (!rRes.ok) {
+      const j = await rRes.json().catch(() => ({}));
+      setError(typeof j.error === "string" ? j.error : "Kunne ikke hente næste lead.");
+      return;
+    }
+    const rj = (await rRes.json()) as { lead: Lead | null };
+
+    if (!rj.lead) {
+      setSaving(true);
+      const res = await fetch(`/api/leads/${currentId}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(patchBody),
+      });
+      setSaving(false);
+      if (!res.ok) {
+        const j = await res.json().catch(() => ({}));
+        setError(typeof j.error === "string" ? j.error : "Kunne ikke gemme");
+        return;
+      }
+      await releaseLockHttp(currentId);
+      setActiveLead(null);
+      setDone(true);
+      try {
+        sessionStorage.removeItem(preferStorageKey(campaignId));
+      } catch {
+        /* ignore */
+      }
+      return;
     }
 
-    await advanceToNextReservedAfterSave(currentId);
+    setBackgroundLockLeadIds((prev) => [...prev, currentId]);
+    pendingPatchBodiesRef.current.set(currentId, patchBody);
+    setActiveLead(rj.lead);
+    try {
+      sessionStorage.setItem(preferStorageKey(campaignId), rj.lead.id);
+    } catch {
+      /* ignore */
+    }
+
+    void (async () => {
+      let ok = false;
+      for (let attempt = 0; attempt < BG_SAVE_RETRIES; attempt++) {
+        const res = await fetch(`/api/leads/${currentId}`, {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(patchBody),
+        });
+        if (res.ok) {
+          ok = true;
+          break;
+        }
+        await delayMs(350 * (attempt + 1));
+      }
+      pendingPatchBodiesRef.current.delete(currentId);
+      if (ok) {
+        setBackgroundLockLeadIds((prev) => prev.filter((id) => id !== currentId));
+        await releaseLockHttp(currentId);
+        setBackgroundSyncError(null);
+      } else {
+        setBackgroundSyncError(
+          "Kunne ikke gemme forrige lead efter flere forsøg. Det er stadig låst for andre — genindlæs siden og prøv igen.",
+        );
+      }
+    })();
   }
 
   function openCallbackDialog() {
@@ -520,6 +630,7 @@ export function CampaignWorkspace({ campaignId }: Props) {
 
   const showNextForMeeting = status !== "MEETING_BOOKED";
   const nextLabel = saving ? "Gemmer…" : "Gem og næste";
+  const showBackgroundSaveHint = backgroundLockLeadIds.length > 0;
   const nextButtonClass =
     "rounded-xl bg-stone-900 px-6 py-3 text-sm font-semibold text-white shadow-md transition hover:bg-stone-800 disabled:opacity-60 shrink-0";
 
@@ -585,6 +696,16 @@ export function CampaignWorkspace({ campaignId }: Props) {
         }
       />
 
+      {showBackgroundSaveHint && (
+        <p className="shrink-0 text-xs text-stone-500" aria-live="polite">
+          Gemmer forrige lead i baggrunden…
+        </p>
+      )}
+      {backgroundSyncError && (
+        <p className="shrink-0 text-sm text-amber-800" role="alert">
+          {backgroundSyncError}
+        </p>
+      )}
       {error && <p className="shrink-0 text-sm text-red-600">{error}</p>}
 
       <LeadKundeNoterBooking

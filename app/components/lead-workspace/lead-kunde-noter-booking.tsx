@@ -3,6 +3,7 @@
 import { LeadDataLeftPanel } from "@/app/components/lead-data-left-panel";
 import { BookingPanel, type BookingPanelProps } from "@/app/components/booking/booking-panel";
 import { MeetingContactFields } from "@/app/components/booking/meeting-contact-fields";
+import { AdLibraryCard } from "@/app/components/ad-library-card";
 import type { MeetingContactFieldErrors } from "@/lib/meeting-contact-validation";
 
 type MeetingContactProps = {
@@ -147,6 +148,7 @@ export function LeadKundeNoterBooking({
             onMeetingContactEmail={onMeetingContactEmail}
             onMeetingContactPhonePrivate={onMeetingContactPhonePrivate}
           />
+          <AdLibraryCard companyName={companyName} className="mt-4 shrink-0" />
         </div>
       </div>
 

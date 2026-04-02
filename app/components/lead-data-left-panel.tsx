@@ -2,7 +2,6 @@
 
 import { FIELD_GROUP_LABELS, parseFieldConfig, type FieldGroupKey } from "@/lib/campaign-fields";
 import { ExternalSearchButton } from "@/app/components/external-search-button";
-import { isKrakPersonFieldLabel } from "@/lib/external-search-urls";
 
 type Props = {
   fieldConfigJson: string;
@@ -97,21 +96,39 @@ export function LeadDataLeftPanel({
           <div className="mt-3 space-y-3">
             <div>
               <label className="sr-only">{FIELD_GROUP_LABELS[g]}</label>
-              <input
-                type={g === "email" ? "email" : "text"}
-                autoComplete={g === "email" ? "email" : undefined}
-                className={inputCls}
-                value={baseValues[g]}
-                onChange={(e) => baseSetters[g](e.target.value)}
-                placeholder={g === "phone" ? "Telefonnummer (valgfrit)" : FIELD_GROUP_LABELS[g]}
-                required={g === "companyName"}
-              />
+              <div className={g === "companyName" ? "flex items-center gap-2" : undefined}>
+                <input
+                  type={g === "email" ? "email" : "text"}
+                  autoComplete={g === "email" ? "email" : undefined}
+                  className={g === "companyName" ? `${inputCls} min-w-0 flex-1` : inputCls}
+                  value={baseValues[g]}
+                  onChange={(e) => baseSetters[g](e.target.value)}
+                  placeholder={g === "phone" ? "Telefonnummer (valgfrit)" : FIELD_GROUP_LABELS[g]}
+                  required={g === "companyName"}
+                />
+                {g === "companyName" ? (
+                  <>
+                    <ExternalSearchButton
+                      type="google"
+                      value={baseValues.companyName}
+                      visible={baseValues.companyName.trim().length > 0}
+                      tooltip="Søg på Google"
+                    />
+                    <ExternalSearchButton
+                      type="krak"
+                      value={baseValues.companyName}
+                      visible={baseValues.companyName.trim().length > 0}
+                      tooltip="Søg på Krak"
+                    />
+                  </>
+                ) : null}
+              </div>
             </div>
             {(cfg.extensions[g] ?? []).map((f) => {
               if (usedCustomKeys.has(f.key)) return null;
               usedCustomKeys.add(f.key);
               const extVal = custom[f.key] ?? "";
-              const showKrak = isKrakPersonFieldLabel(f.label) && extVal.trim().length > 0;
+              const showKrak = extVal.trim().length > 0;
               return (
                 <div key={f.key}>
                   <label className="mb-1 block text-xs font-medium text-stone-600">{f.label}</label>
@@ -182,7 +199,7 @@ export function LeadDataLeftPanel({
             if (usedCustomKeys.has(f.key)) return null;
             usedCustomKeys.add(f.key);
             const extVal = custom[f.key] ?? "";
-            const showKrak = isKrakPersonFieldLabel(f.label) && extVal.trim().length > 0;
+            const showKrak = extVal.trim().length > 0;
             return (
               <div key={f.key}>
                 <label className="mb-1 block text-xs font-medium text-stone-600">{f.label}</label>
@@ -233,7 +250,7 @@ export function LeadDataLeftPanel({
             if (usedCustomKeys.has(f.key)) return null;
             usedCustomKeys.add(f.key);
             const extVal = custom[f.key] ?? "";
-            const showKrak = isKrakPersonFieldLabel(f.label) && extVal.trim().length > 0;
+            const showKrak = extVal.trim().length > 0;
             return (
               <div key={f.key}>
                 <label className="mb-1 block text-xs font-medium text-stone-600">{f.label}</label>
@@ -271,7 +288,7 @@ export function LeadDataLeftPanel({
             if (usedCustomKeys.has(f.key)) return null;
             usedCustomKeys.add(f.key);
             const extVal = custom[f.key] ?? "";
-            const showKrak = isKrakPersonFieldLabel(f.label) && extVal.trim().length > 0;
+            const showKrak = extVal.trim().length > 0;
             return (
               <div key={f.key}>
                 <label className="mb-1 block text-xs font-medium text-stone-600">{f.label}</label>

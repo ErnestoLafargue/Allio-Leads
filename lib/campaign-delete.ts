@@ -12,6 +12,7 @@ const PROTECTED_TYPE_SET = new Set<string>(PROTECTED_SYSTEM_CAMPAIGN_TYPES);
 /** Eksakt navn (som i UI/seed) — fallback hvis flag ikke er sat endnu. */
 export const PROTECTED_CAMPAIGN_NAMES = [
   "Kommende møder",
+  "Genbook møde",
   "Genbook møder",
   "Aktive kunder",
 ] as const;

@@ -2,13 +2,14 @@ import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { requireSession, requireAdmin } from "@/lib/api-auth";
 import { defaultCampaignFieldConfigJson } from "@/lib/campaign-fields";
+import { sortCampaignsForDisplay } from "@/lib/campaign-list-sort";
 
 export async function GET() {
   const { session, response } = await requireSession();
   if (response) return response;
 
   try {
-    const campaigns = await prisma.campaign.findMany({
+    const rows = await prisma.campaign.findMany({
       where:
         session!.user.role === "ADMIN"
           ? {}
@@ -26,6 +27,8 @@ export async function GET() {
         _count: { select: { leads: true } },
       },
     });
+
+    const campaigns = sortCampaignsForDisplay(rows);
 
     return NextResponse.json(campaigns);
   } catch (e) {
