@@ -77,6 +77,10 @@ export default function RedigerKampagnePage() {
     newCountWhenExcludingProtected: number;
   } | null>(null);
 
+  const [exportFormat, setExportFormat] = useState<"csv" | "xlsx">("xlsx");
+  const [exporting, setExporting] = useState(false);
+  const [exportMessage, setExportMessage] = useState<string | null>(null);
+
   const isAdmin = session?.user.role === "ADMIN";
 
   useEffect(() => {
@@ -203,6 +207,40 @@ export default function RedigerKampagnePage() {
       ...prev,
       [g]: prev[g].filter((r) => r.draftId !== draftId),
     }));
+  }
+
+  async function onExportCampaign() {
+    if (exporting || !id) return;
+    setExporting(true);
+    setExportMessage(null);
+    try {
+      const res = await fetch(`/api/campaigns/${id}/export?format=${exportFormat}`);
+      if (!res.ok) {
+        const j = await res.json().catch(() => ({}));
+        setExportMessage(typeof j.error === "string" ? j.error : "Eksport fejlede");
+        return;
+      }
+      const blob = await res.blob();
+      const disp = res.headers.get("Content-Disposition") ?? "";
+      let filename = `export.${exportFormat}`;
+      const star = /filename\*=UTF-8''([^;]+)/i.exec(disp);
+      const quoted = /filename="([^"]+)"/i.exec(disp);
+      if (star?.[1]) filename = decodeURIComponent(star[1]);
+      else if (quoted?.[1]) filename = quoted[1];
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = filename;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      URL.revokeObjectURL(url);
+      setExportMessage("Filen er hentet.");
+    } catch {
+      setExportMessage("Eksport fejlede");
+    } finally {
+      setExporting(false);
+    }
   }
 
   async function onSave(e: React.FormEvent) {
@@ -342,10 +380,47 @@ export default function RedigerKampagnePage() {
       )}
 
       <section className="rounded-lg border border-stone-200 bg-white p-6 shadow-sm">
-        <h2 className="text-sm font-semibold text-stone-900">Leads i denne kampagne</h2>
-        <p className="mt-1 text-xs text-stone-500">
-          Vælg leads og slet dem efter behov. Listen er sorteret med senest tilføjet først.
-        </p>
+        <div className="flex flex-col gap-3 sm:flex-row sm:flex-wrap sm:items-start sm:justify-between">
+          <div>
+            <h2 className="text-sm font-semibold text-stone-900">Leads i denne kampagne</h2>
+            <p className="mt-1 text-xs text-stone-500">
+              Vælg leads og slet dem efter behov. Listen er sorteret med senest tilføjet først.
+            </p>
+          </div>
+          <div className="flex flex-wrap items-center gap-2">
+            <Link
+              href={`/import?campaignId=${encodeURIComponent(id)}`}
+              className="rounded-md border border-stone-200 bg-stone-50 px-3 py-2 text-xs font-medium text-stone-800 hover:bg-stone-100"
+            >
+              Importer leads
+            </Link>
+            <label className="flex items-center gap-1.5 text-xs text-stone-600">
+              <span className="sr-only">Filformat</span>
+              <select
+                value={exportFormat}
+                onChange={(e) => setExportFormat(e.target.value as "csv" | "xlsx")}
+                disabled={exporting}
+                className="rounded-md border border-stone-200 bg-white px-2 py-1.5 text-xs text-stone-900 shadow-sm outline-none ring-stone-400 focus:ring-2 disabled:opacity-60"
+              >
+                <option value="xlsx">Excel (.xlsx)</option>
+                <option value="csv">CSV (.csv)</option>
+              </select>
+            </label>
+            <button
+              type="button"
+              onClick={() => void onExportCampaign()}
+              disabled={exporting}
+              className="rounded-md bg-stone-800 px-3 py-2 text-xs font-medium text-white hover:bg-stone-900 disabled:cursor-not-allowed disabled:opacity-60"
+            >
+              {exporting ? "Eksporterer…" : "Eksporter kampagne"}
+            </button>
+          </div>
+        </div>
+        {exportMessage && (
+          <p className="mt-2 text-xs text-stone-600" role="status">
+            {exportMessage}
+          </p>
+        )}
         <div className="mt-4">
           <LeadsBulkPanel
             campaignId={id}

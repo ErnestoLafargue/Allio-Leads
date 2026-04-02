@@ -1,5 +1,6 @@
 import { prisma } from "@/lib/prisma";
 import { BOOKING_MEETING_BLOCK_MIN, findBookingTimeConflict } from "@/lib/booking/availability";
+import { MEETING_OUTCOME_PENDING } from "@/lib/meeting-outcome";
 
 /** DB-runde for overlappende 75-min mødeblokke (undtagen annullerede). */
 export async function findLeadBookingOverlapInDb(
@@ -23,7 +24,7 @@ export async function findLeadBookingOverlapInDb(
         gte: new Date(startMs - pad),
         lte: new Date(startMs + pad),
       },
-      NOT: { meetingOutcomeStatus: "CANCELLED" },
+      meetingOutcomeStatus: MEETING_OUTCOME_PENDING,
       ...(exclude.length ? { id: { notIn: exclude } } : {}),
     },
     select: { id: true, meetingScheduledFor: true, meetingOutcomeStatus: true },

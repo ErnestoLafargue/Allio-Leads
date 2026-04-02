@@ -8,6 +8,8 @@ import { applyLeadCooldownResets } from "@/lib/lead-cooldown";
 import { shouldLogOutcomeForLeaderboard } from "@/lib/lead-outcome-log";
 import { isLockedByOtherUser, releaseExpiredLocksEverywhere } from "@/lib/lead-lock";
 import { findLeadBookingOverlapInDb } from "@/lib/booking/overlap-db";
+import { campaignIdForBookedMeetingOutcome } from "@/lib/meeting-campaign-routing";
+import { ensureStandardCampaignId } from "@/lib/ensure-system-campaigns";
 import { getMeetingBlockEndMs, intervalsOverlapExclusiveEnd } from "@/lib/booking/availability";
 
 const MAX_BULK = 500;
@@ -89,6 +91,14 @@ export async function POST(req: Request) {
         data.lockedByUserId = null;
         data.lockedAt = null;
         data.lockExpiresAt = null;
+      }
+      if (status === "MEETING_BOOKED") {
+        const o = String(data.meetingOutcomeStatus ?? "PENDING");
+        const cid = await campaignIdForBookedMeetingOutcome(o);
+        if (cid) data.campaignId = cid;
+      } else if (existing.status === "MEETING_BOOKED") {
+        const sid = await ensureStandardCampaignId();
+        if (sid) data.campaignId = sid;
       }
       updates.push({ id: existing.id, data });
       if (shouldLogOutcomeForLeaderboard(existing, status)) {

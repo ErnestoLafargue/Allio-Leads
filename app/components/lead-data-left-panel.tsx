@@ -1,6 +1,8 @@
 "use client";
 
 import { FIELD_GROUP_LABELS, parseFieldConfig, type FieldGroupKey } from "@/lib/campaign-fields";
+import { ExternalSearchButton } from "@/app/components/external-search-button";
+import { isKrakPersonFieldLabel } from "@/lib/external-search-urls";
 
 type Props = {
   fieldConfigJson: string;
@@ -108,15 +110,25 @@ export function LeadDataLeftPanel({
             {(cfg.extensions[g] ?? []).map((f) => {
               if (usedCustomKeys.has(f.key)) return null;
               usedCustomKeys.add(f.key);
+              const extVal = custom[f.key] ?? "";
+              const showKrak = isKrakPersonFieldLabel(f.label) && extVal.trim().length > 0;
               return (
                 <div key={f.key}>
                   <label className="mb-1 block text-xs font-medium text-stone-600">{f.label}</label>
-                  <input
-                    className={inputCls}
-                    value={custom[f.key] ?? ""}
-                    onChange={(e) => onCustom(f.key, e.target.value)}
-                    placeholder={f.label}
-                  />
+                  <div className="flex items-center gap-2">
+                    <input
+                      className={`${inputCls} min-w-0 flex-1`}
+                      value={extVal}
+                      onChange={(e) => onCustom(f.key, e.target.value)}
+                      placeholder={f.label}
+                    />
+                    <ExternalSearchButton
+                      type="krak"
+                      value={extVal}
+                      visible={showKrak}
+                      tooltip="Søg på Krak"
+                    />
+                  </div>
                 </div>
               );
             })}
@@ -169,15 +181,25 @@ export function LeadDataLeftPanel({
           {addressExtraFields.map((f) => {
             if (usedCustomKeys.has(f.key)) return null;
             usedCustomKeys.add(f.key);
+            const extVal = custom[f.key] ?? "";
+            const showKrak = isKrakPersonFieldLabel(f.label) && extVal.trim().length > 0;
             return (
               <div key={f.key}>
                 <label className="mb-1 block text-xs font-medium text-stone-600">{f.label}</label>
-                <input
-                  className={inputCls}
-                  value={custom[f.key] ?? ""}
-                  onChange={(e) => onCustom(f.key, e.target.value)}
-                  placeholder={f.label}
-                />
+                <div className="flex items-center gap-2">
+                  <input
+                    className={`${inputCls} min-w-0 flex-1`}
+                    value={extVal}
+                    onChange={(e) => onCustom(f.key, e.target.value)}
+                    placeholder={f.label}
+                  />
+                  <ExternalSearchButton
+                    type="krak"
+                    value={extVal}
+                    visible={showKrak}
+                    tooltip="Søg på Krak"
+                  />
+                </div>
               </div>
             );
           })}
@@ -191,26 +213,44 @@ export function LeadDataLeftPanel({
         <div className="mt-3 space-y-3">
           <div>
             <label className="sr-only">{FIELD_GROUP_LABELS.cvr}</label>
-            <input
-              type="text"
-              className={inputCls}
-              value={baseValues.cvr}
-              onChange={(e) => onCvr(e.target.value)}
-              placeholder={FIELD_GROUP_LABELS.cvr}
-            />
+            <div className="flex items-center gap-2">
+              <input
+                type="text"
+                className={`${inputCls} min-w-0 flex-1`}
+                value={baseValues.cvr}
+                onChange={(e) => onCvr(e.target.value)}
+                placeholder={FIELD_GROUP_LABELS.cvr}
+              />
+              <ExternalSearchButton
+                type="virk"
+                value={baseValues.cvr}
+                visible={baseValues.cvr.trim().length > 0}
+                tooltip="Se virksomhed på VIRK"
+              />
+            </div>
           </div>
           {(cfg.extensions.cvr ?? []).map((f) => {
             if (usedCustomKeys.has(f.key)) return null;
             usedCustomKeys.add(f.key);
+            const extVal = custom[f.key] ?? "";
+            const showKrak = isKrakPersonFieldLabel(f.label) && extVal.trim().length > 0;
             return (
               <div key={f.key}>
                 <label className="mb-1 block text-xs font-medium text-stone-600">{f.label}</label>
-                <input
-                  className={inputCls}
-                  value={custom[f.key] ?? ""}
-                  onChange={(e) => onCustom(f.key, e.target.value)}
-                  placeholder={f.label}
-                />
+                <div className="flex items-center gap-2">
+                  <input
+                    className={`${inputCls} min-w-0 flex-1`}
+                    value={extVal}
+                    onChange={(e) => onCustom(f.key, e.target.value)}
+                    placeholder={f.label}
+                  />
+                  <ExternalSearchButton
+                    type="krak"
+                    value={extVal}
+                    visible={showKrak}
+                    tooltip="Søg på Krak"
+                  />
+                </div>
               </div>
             );
           })}
@@ -230,15 +270,25 @@ export function LeadDataLeftPanel({
           {(cfg.extensions.industry ?? []).map((f) => {
             if (usedCustomKeys.has(f.key)) return null;
             usedCustomKeys.add(f.key);
+            const extVal = custom[f.key] ?? "";
+            const showKrak = isKrakPersonFieldLabel(f.label) && extVal.trim().length > 0;
             return (
               <div key={f.key}>
                 <label className="mb-1 block text-xs font-medium text-stone-600">{f.label}</label>
-                <input
-                  className={inputCls}
-                  value={custom[f.key] ?? ""}
-                  onChange={(e) => onCustom(f.key, e.target.value)}
-                  placeholder={f.label}
-                />
+                <div className="flex items-center gap-2">
+                  <input
+                    className={`${inputCls} min-w-0 flex-1`}
+                    value={extVal}
+                    onChange={(e) => onCustom(f.key, e.target.value)}
+                    placeholder={f.label}
+                  />
+                  <ExternalSearchButton
+                    type="krak"
+                    value={extVal}
+                    visible={showKrak}
+                    tooltip="Søg på Krak"
+                  />
+                </div>
               </div>
             );
           })}

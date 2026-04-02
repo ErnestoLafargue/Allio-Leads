@@ -20,7 +20,15 @@ type CallbackLead = {
 const HOUR_START = 8;
 const HOUR_END = 20;
 const HOURS = HOUR_END - HOUR_START;
-const WEEKDAYS = ["Man", "Tir", "Ons", "Tor", "Fre"] as const;
+/** Skal matche den faktiske højde af uge-kolonne-header (to linjer + padding). */
+const WEEK_GRID_HEADER_HEIGHT_PX = 56;
+
+/** Ugevisning: fuld ugedag (STORE BOGSTAVER) + «30. marts» på dansk — ingen forkortelser eller 30.3. */
+function formatWeekColumnHeaderDa(d: Date): { weekday: string; dayMonth: string } {
+  const weekday = d.toLocaleDateString("da-DK", { weekday: "long" }).toUpperCase();
+  const dayMonth = d.toLocaleDateString("da-DK", { day: "numeric", month: "long" });
+  return { weekday, dayMonth };
+}
 
 function startOfWeekMon(d: Date): Date {
   const x = new Date(d);
@@ -294,19 +302,25 @@ export default function TilbagekaldKalenderPage() {
           <div className="overflow-x-auto rounded-2xl border border-slate-200 bg-white shadow-sm">
             <div className="relative min-w-[720px]">
               <div className="grid" style={{ gridTemplateColumns: `4.5rem repeat(5, 1fr)` }}>
-                <div className="border-b border-r border-slate-100 bg-slate-50/80" />
-                {weekDays.map((d, i) => (
-                  <div
-                    key={i}
-                    className="border-b border-slate-100 bg-slate-50/80 px-2 py-2 text-center text-xs font-semibold text-slate-700"
-                  >
-                    {WEEKDAYS[i]} {d.getDate()}.{d.getMonth() + 1}
-                  </div>
-                ))}
+                <div className="border-b border-r border-slate-200 bg-slate-50/80" />
+                {weekDays.map((d, i) => {
+                  const { weekday, dayMonth } = formatWeekColumnHeaderDa(d);
+                  return (
+                    <div
+                      key={i}
+                      className="flex min-h-[3.5rem] flex-col items-center justify-center gap-1 border-b border-r border-slate-200 bg-slate-50/80 px-2 py-2.5 text-center"
+                    >
+                      <span className="text-[11px] font-medium uppercase leading-tight tracking-wide text-slate-500">
+                        {weekday}
+                      </span>
+                      <span className="text-sm font-semibold leading-snug text-slate-900">{dayMonth}</span>
+                    </div>
+                  );
+                })}
 
                 {Array.from({ length: HOURS }, (_, hi) => HOUR_START + hi).map((hour) => (
                   <Fragment key={hour}>
-                    <div className="border-b border-r border-slate-100 bg-white py-2 pr-2 text-right text-xs text-slate-500">
+                    <div className="border-b border-r border-slate-200 bg-white py-2 pr-2 text-right text-xs text-slate-500">
                       {String(hour).padStart(2, "0")}:00
                     </div>
                     {weekDays.map((day, di) => {
@@ -317,7 +331,7 @@ export default function TilbagekaldKalenderPage() {
                       return (
                         <div
                           key={`${hour}-${di}`}
-                          className="relative min-h-[52px] border-b border-slate-100 bg-white"
+                          className="relative min-h-[52px] border-b border-r border-slate-200 bg-white"
                         >
                           {slotItems.map((it) => (
                             <Link
@@ -422,7 +436,7 @@ function WeekNowLine({
 }) {
   const col = weekDays.findIndex((d) => sameDay(d, now));
   if (col < 0) return null;
-  const headerH = 40;
+  const headerH = WEEK_GRID_HEADER_HEIGHT_PX;
   const rowH = 52;
   const bodyH = HOURS * rowH;
   const top = headerH + (nowLinePct / 100) * bodyH;

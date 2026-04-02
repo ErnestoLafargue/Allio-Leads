@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { requireSession } from "@/lib/api-auth";
 import { LEAD_LOCK_CLEAR, isLockActive } from "@/lib/lead-lock";
+import { isCallbackTimeInCopenhagenBusinessWindow } from "@/lib/callback-datetime";
 
 type Params = { params: Promise<{ id: string }> };
 
@@ -33,7 +34,6 @@ export async function POST(req: Request, { params }: Params) {
   }
 
   let assignedUserId = typeof body?.assignedUserId === "string" ? body.assignedUserId.trim() : userId;
-  const noteRaw = typeof body?.note === "string" ? body.note.trim().slice(0, 2000) : "";
 
   const assignee = await prisma.user.findUnique({ where: { id: assignedUserId }, select: { id: true } });
   if (!assignee) {
@@ -45,6 +45,12 @@ export async function POST(req: Request, { params }: Params) {
   if (scheduledFor.getTime() <= minFuture.getTime()) {
     return NextResponse.json(
       { error: "Vælg et tidspunkt i fremtiden (mindst ét minut fra nu)." },
+      { status: 400 },
+    );
+  }
+  if (!isCallbackTimeInCopenhagenBusinessWindow(scheduledFor)) {
+    return NextResponse.json(
+      { error: "Tilbagekald skal ligge mellem kl. 08:00 og 20:00 (København)." },
       { status: 400 },
     );
   }
@@ -88,7 +94,7 @@ export async function POST(req: Request, { params }: Params) {
         callbackReservedByUserId: assignedUserId,
         callbackCreatedByUserId: userId,
         callbackStatus: "PENDING",
-        callbackNote: noteRaw,
+        callbackNote: "",
         ...LEAD_LOCK_CLEAR,
       },
       include: leadInclude,

@@ -4,7 +4,11 @@ import Link from "next/link";
 import { useSession } from "next-auth/react";
 import { useCallback, useEffect, useState } from "react";
 import { StandaloneMeetingBooker } from "@/app/components/booking/standalone-meeting-booker";
-import { MEETING_OUTCOME_LABELS, MEETING_OUTCOME_PENDING } from "@/lib/meeting-outcome";
+import {
+  MEETING_OUTCOME_LABELS,
+  MEETING_OUTCOME_PENDING,
+  MEETING_OUTCOME_SALE,
+} from "@/lib/meeting-outcome";
 
 type Meeting = {
   id: string;
@@ -50,7 +54,10 @@ export default function MeetingsPage() {
     void load();
   }, [load]);
 
-  async function patchOutcome(id: string, meetingOutcomeStatus: "HELD" | "CANCELLED") {
+  async function patchOutcome(
+    id: string,
+    meetingOutcomeStatus: "PENDING" | "HELD" | "CANCELLED" | typeof MEETING_OUTCOME_SALE,
+  ) {
     const res = await fetch(`/api/leads/${id}`, {
       method: "PATCH",
       headers: { "Content-Type": "application/json" },
@@ -75,8 +82,8 @@ export default function MeetingsPage() {
         <p className="mt-1 text-sm text-stone-600">
           Alle kan se oversigt over bookede møder (tid, booket af og status). Kun{" "}
           <strong>administratorer</strong> og <strong>sælgeren der har booket</strong> kan åbne leadet og læse eller
-          redigere noter. Administratorer registrerer om mødet er afholdt eller annulleret — det styrer provision pr.
-          dag.
+          redigere noter.           Administratorer registrerer mødeudfald (afventende, afholdt, annulleret, salg) — det styrer bl.a. kø og
+          provision pr. dag.
         </p>
       </div>
 
@@ -157,7 +164,9 @@ export default function MeetingsPage() {
                           ? "bg-emerald-100 text-emerald-900"
                           : String(m.meetingOutcomeStatus).toUpperCase() === "CANCELLED"
                             ? "bg-red-100 text-red-900"
-                            : "bg-amber-100 text-amber-950"
+                            : String(m.meetingOutcomeStatus).toUpperCase() === MEETING_OUTCOME_SALE
+                              ? "bg-violet-100 text-violet-950"
+                              : "bg-amber-100 text-amber-950"
                       }`}
                     >
                       {outcomeLabel(m.meetingOutcomeStatus)}
@@ -165,22 +174,34 @@ export default function MeetingsPage() {
                   </td>
                   {isAdmin && (
                     <td className="px-4 py-3">
-                      <div className="flex flex-wrap gap-1">
+                      <div className="flex max-w-[14rem] flex-wrap gap-1">
                         <button
                           type="button"
-                          disabled={String(m.meetingOutcomeStatus).toUpperCase() === "HELD"}
+                          onClick={() => void patchOutcome(m.id, "PENDING")}
+                          className="rounded-md bg-amber-600 px-2 py-1 text-xs font-medium text-white hover:bg-amber-700"
+                        >
+                          Afventende
+                        </button>
+                        <button
+                          type="button"
                           onClick={() => void patchOutcome(m.id, "HELD")}
-                          className="rounded-md bg-emerald-700 px-2 py-1 text-xs font-medium text-white hover:bg-emerald-800 disabled:cursor-not-allowed disabled:opacity-50"
+                          className="rounded-md bg-emerald-700 px-2 py-1 text-xs font-medium text-white hover:bg-emerald-800"
                         >
                           Afholdt
                         </button>
                         <button
                           type="button"
-                          disabled={String(m.meetingOutcomeStatus).toUpperCase() === "CANCELLED"}
                           onClick={() => void patchOutcome(m.id, "CANCELLED")}
-                          className="rounded-md border border-stone-300 bg-white px-2 py-1 text-xs font-medium text-stone-800 hover:bg-stone-50 disabled:cursor-not-allowed disabled:opacity-50"
+                          className="rounded-md border border-stone-300 bg-white px-2 py-1 text-xs font-medium text-stone-800 hover:bg-stone-50"
                         >
                           Annulleret
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => void patchOutcome(m.id, MEETING_OUTCOME_SALE)}
+                          className="rounded-md bg-violet-700 px-2 py-1 text-xs font-medium text-white hover:bg-violet-800"
+                        >
+                          Salg
                         </button>
                       </div>
                     </td>

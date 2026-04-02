@@ -2,7 +2,11 @@
 
 import Link from "next/link";
 import { useEffect, useState } from "react";
-import { MEETING_OUTCOME_LABELS, MEETING_OUTCOME_PENDING } from "@/lib/meeting-outcome";
+import {
+  MEETING_OUTCOME_LABELS,
+  MEETING_OUTCOME_PENDING,
+  MEETING_OUTCOME_SALE,
+} from "@/lib/meeting-outcome";
 import { rateKrPerHeldMeeting } from "@/lib/commission";
 
 type LeadRow = {
@@ -37,6 +41,7 @@ type SalesPayload = {
     totalBooked: number;
     pending: number;
     held: number;
+    sale: number;
     cancelled: number;
   };
 };
@@ -103,7 +108,7 @@ export default function MineSalgPage() {
         </p>
       </div>
 
-      <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+      <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-5">
         <div className="rounded-xl border border-stone-200 bg-white p-4 shadow-sm">
           <p className="text-xs font-medium uppercase tracking-wide text-stone-500">Bookede møder i alt</p>
           <p className="mt-1 text-2xl font-semibold text-stone-900">{stats.totalBooked}</p>
@@ -115,6 +120,10 @@ export default function MineSalgPage() {
         <div className="rounded-xl border border-emerald-200/80 bg-emerald-50/50 p-4 shadow-sm">
           <p className="text-xs font-medium uppercase tracking-wide text-emerald-900/80">Afholdt</p>
           <p className="mt-1 text-2xl font-semibold text-emerald-950">{stats.held}</p>
+        </div>
+        <div className="rounded-xl border border-violet-200/80 bg-violet-50/50 p-4 shadow-sm">
+          <p className="text-xs font-medium uppercase tracking-wide text-violet-900/80">Salg</p>
+          <p className="mt-1 text-2xl font-semibold text-violet-950">{stats.sale ?? 0}</p>
         </div>
         <div className="rounded-xl border border-red-200/80 bg-red-50/40 p-4 shadow-sm">
           <p className="text-xs font-medium uppercase tracking-wide text-red-900/80">Annulleret</p>
@@ -270,7 +279,9 @@ export default function MineSalgPage() {
                             ? "bg-emerald-100 text-emerald-900"
                             : String(l.meetingOutcomeStatus).toUpperCase() === "CANCELLED"
                               ? "bg-red-100 text-red-900"
-                              : "bg-amber-100 text-amber-950"
+                              : String(l.meetingOutcomeStatus).toUpperCase() === MEETING_OUTCOME_SALE
+                                ? "bg-violet-100 text-violet-950"
+                                : "bg-amber-100 text-amber-950"
                         }`}
                       >
                         {outcomeLabel(l.meetingOutcomeStatus)}

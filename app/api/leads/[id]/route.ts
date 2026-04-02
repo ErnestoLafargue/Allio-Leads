@@ -12,8 +12,11 @@ import { copenhagenDayKey } from "@/lib/copenhagen-day";
 import {
   MEETING_OUTCOME_CANCELLED,
   MEETING_OUTCOME_PENDING,
+  MEETING_OUTCOME_SALE,
   normalizeMeetingOutcomeStatus,
 } from "@/lib/meeting-outcome";
+import { campaignIdForBookedMeetingOutcome } from "@/lib/meeting-campaign-routing";
+import { ensureStandardCampaignId } from "@/lib/ensure-system-campaigns";
 import { releaseExpiredLocksEverywhere, sellerMayEditLead } from "@/lib/lead-lock";
 import { findLeadBookingOverlapInDb } from "@/lib/booking/overlap-db";
 
@@ -129,7 +132,7 @@ export async function PATCH(req: Request, { params }: Params) {
       return NextResponse.json({ error: "Ugyldigt mødeudfald." }, { status: 400 });
     }
     const o = body.meetingOutcomeStatus.trim().toUpperCase();
-    if (o !== "PENDING" && o !== "HELD" && o !== "CANCELLED") {
+    if (o !== "PENDING" && o !== "HELD" && o !== "CANCELLED" && o !== MEETING_OUTCOME_SALE) {
       return NextResponse.json({ error: "Ugyldigt mødeudfald." }, { status: 400 });
     }
     adminMeetingOutcome = o;
@@ -299,6 +302,13 @@ export async function PATCH(req: Request, { params }: Params) {
 
   const clearLeadLock = status !== "NEW";
 
+  let campaignIdToSet: string | null | undefined;
+  if (status === "MEETING_BOOKED" && meetingScheduledFor) {
+    campaignIdToSet = await campaignIdForBookedMeetingOutcome(meetingOutcomeStatus);
+  } else if (existing.status === "MEETING_BOOKED" && status !== "MEETING_BOOKED") {
+    campaignIdToSet = (await ensureStandardCampaignId()) ?? undefined;
+  }
+
   const lead = await prisma.$transaction(async (tx) => {
     const updated = await tx.lead.update({
       where: { id },
@@ -331,6 +341,7 @@ export async function PATCH(req: Request, { params }: Params) {
           callbackCreatedByUserId,
           callbackStatus,
         }),
+        ...(campaignIdToSet !== undefined && campaignIdToSet !== null ? { campaignId: campaignIdToSet } : {}),
         ...(clearLeadLock
           ? { lockedByUserId: null, lockedAt: null, lockExpiresAt: null }
           : {}),

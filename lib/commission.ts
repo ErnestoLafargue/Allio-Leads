@@ -2,6 +2,7 @@ import {
   MEETING_OUTCOME_CANCELLED,
   MEETING_OUTCOME_HELD,
   MEETING_OUTCOME_PENDING,
+  MEETING_OUTCOME_SALE,
 } from "@/lib/meeting-outcome";
 
 /** Provisions-sats pr. afholdt møde ud fra antal afholdte møder samme bookings-dag (efter alle udfald). */
@@ -29,7 +30,10 @@ export function commissionKrForBookedDay(meetings: MeetingForCommission[]): {
   ratePerHeld: number;
 } {
   const pending = meetings.filter((m) => normalizeOutcome(m.meetingOutcomeStatus) === MEETING_OUTCOME_PENDING);
-  const held = meetings.filter((m) => normalizeOutcome(m.meetingOutcomeStatus) === MEETING_OUTCOME_HELD);
+  const held = meetings.filter((m) => {
+    const o = normalizeOutcome(m.meetingOutcomeStatus);
+    return o === MEETING_OUTCOME_HELD || o === MEETING_OUTCOME_SALE;
+  });
   const cancelled = meetings.filter(
     (m) => normalizeOutcome(m.meetingOutcomeStatus) === MEETING_OUTCOME_CANCELLED,
   );

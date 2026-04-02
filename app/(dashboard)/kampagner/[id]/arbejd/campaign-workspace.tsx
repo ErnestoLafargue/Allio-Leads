@@ -376,7 +376,6 @@ export function CampaignWorkspace({ campaignId }: Props) {
   async function handleConfirmCallback(payload: {
     assignedUserId: string;
     scheduledForISO: string;
-    note: string;
   }) {
     if (!activeLead || activeLead.status !== "NEW") return;
     setSaving(true);
@@ -388,7 +387,6 @@ export function CampaignWorkspace({ campaignId }: Props) {
       body: JSON.stringify({
         scheduledFor: payload.scheduledForISO,
         assignedUserId: payload.assignedUserId,
-        note: payload.note,
       }),
     });
     setSaving(false);
@@ -569,7 +567,7 @@ export function CampaignWorkspace({ campaignId }: Props) {
               type="button"
               disabled={saving || !sessionUserId}
               onClick={openCallbackDialog}
-              className="rounded-xl border-2 border-violet-600 bg-violet-100 px-4 py-3 text-sm font-semibold text-violet-950 shadow-sm transition hover:bg-violet-200 disabled:opacity-60 min-w-[8rem]"
+              className="min-w-[8rem] appearance-none rounded-xl border-2 border-solid border-violet-600 bg-violet-100 px-4 py-3 text-sm font-semibold text-violet-950 shadow-sm transition hover:bg-violet-200 disabled:opacity-60"
             >
               Tilbagekald
             </button>

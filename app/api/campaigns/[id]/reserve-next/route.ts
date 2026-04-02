@@ -37,10 +37,19 @@ export async function POST(req: Request, { params }: Params) {
 
     const campaign = await prisma.campaign.findUnique({
       where: { id: campaignId },
-      select: { id: true, includeProtectedBusinesses: true },
+      select: { id: true, includeProtectedBusinesses: true, systemCampaignType: true },
     });
     if (!campaign) {
       return NextResponse.json({ error: "Kampagne findes ikke" }, { status: 404 });
+    }
+    if (
+      campaign.systemCampaignType === "active_customers" &&
+      session!.user.role !== "ADMIN"
+    ) {
+      return NextResponse.json(
+        { error: "Kun administratorer kan arbejde i «Aktive kunder»." },
+        { status: 403 },
+      );
     }
 
     const now = new Date();

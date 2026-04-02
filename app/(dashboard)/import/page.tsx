@@ -1,7 +1,7 @@
 "use client";
 
 import { useSession } from "next-auth/react";
-import { useRouter } from "next/navigation";
+import { useRouter, useSearchParams } from "next/navigation";
 import { useCallback, useEffect, useState } from "react";
 import {
   FIELD_GROUPS,
@@ -66,6 +66,8 @@ function buildMappingSelectOptions(fieldConfigJson: string) {
 export default function ImportPage() {
   const { data: session, status } = useSession();
   const router = useRouter();
+  const searchParams = useSearchParams();
+  const campaignIdFromQuery = searchParams.get("campaignId");
   const [campaigns, setCampaigns] = useState<Campaign[]>([]);
   const [campaignId, setCampaignId] = useState("");
   const [fieldConfigJson, setFieldConfigJson] = useState("{}");
@@ -109,6 +111,13 @@ export default function ImportPage() {
     if (status !== "authenticated" || session?.user.role !== "ADMIN") return;
     void loadCampaigns();
   }, [status, session?.user.role, loadCampaigns]);
+
+  useEffect(() => {
+    if (!campaignIdFromQuery || campaigns.length === 0) return;
+    if (campaigns.some((c) => c.id === campaignIdFromQuery)) {
+      setCampaignId(campaignIdFromQuery);
+    }
+  }, [campaignIdFromQuery, campaigns]);
 
   useEffect(() => {
     if (!campaignId) {

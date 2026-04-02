@@ -68,7 +68,7 @@ export function StandaloneMeetingBooker({ className = "", onBooked }: Props) {
       <div>
         <h2 className="text-lg font-semibold text-stone-900">Book nyt møde</h2>
         <p className="mt-1 text-sm text-stone-500">
-          Opretter et lead under «Direkte møder» med status møde booket. Udfyld mødekontakt, evt. noter og vælg tid.
+          Opretter et lead under «Kommende møder» med status møde booket. Udfyld mødekontakt, evt. noter og vælg tid.
         </p>
       </div>
 

@@ -3,7 +3,7 @@ import { prisma } from "@/lib/prisma";
 import { requireSession } from "@/lib/api-auth";
 import { pickLeadCreateData } from "@/lib/prisma-lead-write";
 import { stringifyCustomFields } from "@/lib/custom-fields";
-import { ensureDirectBookingCampaign } from "@/lib/direct-campaign";
+import { ensureSystemCampaignId } from "@/lib/ensure-system-campaigns";
 import { copenhagenDayKey } from "@/lib/copenhagen-day";
 import { MEETING_OUTCOME_PENDING } from "@/lib/meeting-outcome";
 import { shouldLogOutcomeForLeaderboard } from "@/lib/lead-outcome-log";
@@ -65,14 +65,14 @@ export async function POST(req: Request) {
     );
   }
 
-  const campaign = await ensureDirectBookingCampaign();
+  const campaignId = await ensureSystemCampaignId("upcoming_meetings");
   const meetingBookedAt = new Date();
 
   try {
     const lead = await prisma.$transaction(async (tx) => {
       const created = await tx.lead.create({
         data: pickLeadCreateData({
-          campaignId: campaign.id,
+          campaignId,
           companyName,
           phone,
           email,

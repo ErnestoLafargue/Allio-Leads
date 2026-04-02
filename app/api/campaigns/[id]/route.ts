@@ -10,7 +10,7 @@ import {
 type Params = { params: Promise<{ id: string }> };
 
 export async function GET(_req: Request, { params }: Params) {
-  const { response } = await requireSession();
+  const { session, response } = await requireSession();
   if (response) return response;
 
   const { id } = await params;
@@ -29,6 +29,15 @@ export async function GET(_req: Request, { params }: Params) {
     },
   });
   if (!campaign) return NextResponse.json({ error: "Ikke fundet" }, { status: 404 });
+  if (
+    campaign.systemCampaignType === "active_customers" &&
+    session!.user.role !== "ADMIN"
+  ) {
+    return NextResponse.json(
+      { error: "Kun administratorer har adgang til «Aktive kunder»." },
+      { status: 403 },
+    );
+  }
   return NextResponse.json(campaign);
 }
 

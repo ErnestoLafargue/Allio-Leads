@@ -7,10 +7,11 @@ import {
   getMeetingBlockEndMs,
   occupiedBlocksFromScheduledMeetings,
 } from "@/lib/booking/availability";
+import { MEETING_OUTCOME_PENDING } from "@/lib/meeting-outcome";
 
 /**
  * GET ?date=YYYY-MM-DD&excludeLeadId=
- * Returnerer alle aktive 75-min blokke (ikke-annullerede møder) der kan påvirke ledige tider den dag.
+ * Returnerer 75-min blokke for afventende møder der kan påvirke ledige tider den dag.
  */
 export async function GET(req: Request) {
   const { response } = await requireSession();
@@ -34,7 +35,7 @@ export async function GET(req: Request) {
       where: {
         status: "MEETING_BOOKED",
         meetingScheduledFor: { not: null, gte: queryStart, lt: queryEnd },
-        NOT: { meetingOutcomeStatus: "CANCELLED" },
+        meetingOutcomeStatus: MEETING_OUTCOME_PENDING,
         ...(excludeLeadId ? { id: { not: excludeLeadId } } : {}),
       },
       select: {

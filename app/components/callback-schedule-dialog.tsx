@@ -1,11 +1,11 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import { isCallbackTimeInCopenhagenBusinessWindow } from "@/lib/callback-datetime";
 
 export type CallbackSchedulePayload = {
   assignedUserId: string;
   scheduledForISO: string;
-  note: string;
 };
 
 type UserOpt = { id: string; name: string; username: string; role: string };
@@ -21,18 +21,48 @@ type Props = {
   onConfirm: (p: CallbackSchedulePayload) => void;
 };
 
-function defaultDateParts() {
+/** 08:00–20:00 inkl., 15-minutters trin (København vises som lokal dato+tids-valg). */
+const TIME_OPTIONS: string[] = (() => {
+  const out: string[] = [];
+  for (let h = 8; h <= 20; h++) {
+    const maxM = h === 20 ? 0 : 45;
+    for (let m = 0; m <= maxM; m += 15) {
+      out.push(`${String(h).padStart(2, "0")}:${String(m).padStart(2, "0")}`);
+    }
+  }
+  return out;
+})();
+
+function defaultDateParts(): { date: string; time: string } {
   const d = new Date();
   d.setMinutes(d.getMinutes() + 60, 0, 0);
-  const local = new Date(d.getTime() - d.getTimezoneOffset() * 60000);
-  const iso = local.toISOString();
-  return { date: iso.slice(0, 10), time: iso.slice(11, 16) };
+  const pad = (n: number) => String(n).padStart(2, "0");
+  const y = d.getFullYear();
+  const mo = pad(d.getMonth() + 1);
+  const day = pad(d.getDate());
+  let H = d.getHours();
+  let M = d.getMinutes();
+  M = Math.ceil(M / 15) * 15;
+  if (M >= 60) {
+    H += 1;
+    M = 0;
+  }
+  if (H < 8) {
+    H = 8;
+    M = 0;
+  }
+  if (H > 20 || (H === 20 && M > 0)) {
+    H = 20;
+    M = 0;
+  }
+  const time = `${pad(H)}:${pad(M)}`;
+  return { date: `${y}-${mo}-${day}`, time: TIME_OPTIONS.includes(time) ? time : "09:00" };
 }
 
 export function CallbackScheduleDialog({
   open,
   title = "Planlæg tilbagekald",
-  description = "Vælg hvem der skal ringe tilbage, og hvornår. Leadet reserveres til den valgte bruger.",
+  description = "Vælg hvem der skal ringe tilbage, og hvornår (08:00–20:00). Noter på leadet bruges som udgangspunkt — der tilføjes ikke separat callback-note.",
   currentUserId,
   saving,
   errorText,
@@ -43,7 +73,6 @@ export function CallbackScheduleDialog({
   const [assignedUserId, setAssignedUserId] = useState(currentUserId);
   const [dateStr, setDateStr] = useState("");
   const [timeStr, setTimeStr] = useState("");
-  const [note, setNote] = useState("");
   const [loadErr, setLoadErr] = useState<string | null>(null);
 
   useEffect(() => {
@@ -52,7 +81,6 @@ export function CallbackScheduleDialog({
     setDateStr(date);
     setTimeStr(time);
     setAssignedUserId(currentUserId);
-    setNote("");
     setLoadErr(null);
     void (async () => {
       const res = await fetch("/api/users/for-assignment");
@@ -71,10 +99,10 @@ export function CallbackScheduleDialog({
     if (!dateStr || !timeStr) return;
     const local = new Date(`${dateStr}T${timeStr}:00`);
     if (Number.isNaN(local.getTime())) return;
+    if (!isCallbackTimeInCopenhagenBusinessWindow(local)) return;
     onConfirm({
       assignedUserId,
       scheduledForISO: local.toISOString(),
-      note: note.trim(),
     });
   }
 
@@ -100,12 +128,14 @@ export function CallbackScheduleDialog({
           <select
             value={assignedUserId}
             onChange={(e) => setAssignedUserId(e.target.value)}
-            className="mt-1 w-full rounded-lg border border-stone-200 bg-white px-3 py-2 text-sm text-stone-900"
+            className="mt-1 w-full appearance-none rounded-lg border border-stone-200 bg-white bg-[length:1rem] bg-[right_0.5rem_center] bg-no-repeat px-3 py-2.5 pr-9 text-sm text-stone-900 shadow-sm outline-none ring-stone-400 focus:ring-2"
+            style={{
+              backgroundImage: `url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' fill='none' viewBox='0 0 24 24' stroke='%2357534e'%3E%3Cpath stroke-linecap='round' stroke-linejoin='round' stroke-width='2' d='M19 9l-7 7-7-7'%3E%3C/path%3E%3C/svg%3E")`,
+            }}
           >
             {users.map((u) => (
               <option key={u.id} value={u.id}>
-                {u.name} ({u.username})
-                {u.role === "ADMIN" ? " · Admin" : ""}
+                {u.name}
               </option>
             ))}
           </select>
@@ -118,30 +148,24 @@ export function CallbackScheduleDialog({
               type="date"
               value={dateStr}
               onChange={(e) => setDateStr(e.target.value)}
-              className="mt-1 w-full rounded-lg border border-stone-200 px-3 py-2 text-sm text-stone-900"
+              className="mt-1 w-full rounded-lg border border-stone-200 bg-white px-3 py-2 text-sm text-stone-900 shadow-sm outline-none ring-stone-400 focus:ring-2"
             />
           </label>
           <label className="block text-xs font-medium text-stone-600">
-            Tid (tt:mm)
-            <input
-              type="time"
+            Tid (08:00–20:00)
+            <select
               value={timeStr}
               onChange={(e) => setTimeStr(e.target.value)}
-              className="mt-1 w-full rounded-lg border border-stone-200 px-3 py-2 text-sm text-stone-900"
-            />
+              className="mt-1 w-full appearance-none rounded-lg border border-stone-200 bg-white px-3 py-2.5 text-sm text-stone-900 shadow-sm outline-none ring-stone-400 focus:ring-2"
+            >
+              {TIME_OPTIONS.map((t) => (
+                <option key={t} value={t}>
+                  {t}
+                </option>
+              ))}
+            </select>
           </label>
         </div>
-
-        <label className="mt-4 block text-xs font-medium text-stone-600">
-          Note (valgfri)
-          <textarea
-            value={note}
-            onChange={(e) => setNote(e.target.value)}
-            rows={2}
-            className="mt-1 w-full resize-y rounded-lg border border-stone-200 px-3 py-2 text-sm text-stone-900"
-            placeholder="Kort note til tilbagekaldet…"
-          />
-        </label>
 
         <div className="mt-6 flex flex-wrap justify-end gap-2">
           <button
@@ -155,7 +179,7 @@ export function CallbackScheduleDialog({
             type="button"
             disabled={saving || !dateStr || !timeStr || users.length === 0}
             onClick={submit}
-            className="rounded-lg bg-violet-700 px-4 py-2 text-sm font-semibold text-white hover:bg-violet-800 disabled:opacity-60"
+            className="rounded-lg bg-violet-700 px-4 py-2 text-sm font-semibold text-white shadow-sm hover:bg-violet-800 disabled:opacity-60"
           >
             {saving ? "Gemmer…" : "Bekræft tilbagekald"}
           </button>

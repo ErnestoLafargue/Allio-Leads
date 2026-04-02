@@ -1,5 +1,8 @@
 import { copenhagenDayBoundsUtcFromDayKey, copenhagenDayKey } from "@/lib/copenhagen-day";
-import { MEETING_OUTCOME_CANCELLED, normalizeMeetingOutcomeStatus } from "@/lib/meeting-outcome";
+import {
+  MEETING_OUTCOME_PENDING,
+  normalizeMeetingOutcomeStatus,
+} from "@/lib/meeting-outcome";
 
 /** 15-minutters gitter som i kalenderen */
 export const BOOKING_SLOT_STEP_MIN = 15;
@@ -50,7 +53,8 @@ export function occupiedBlocksFromScheduledMeetings(
   const out: TimeBlockMs[] = [];
   for (const row of rows) {
     if (!row.meetingScheduledFor) continue;
-    if (normalizeMeetingOutcomeStatus(row.meetingOutcomeStatus) === MEETING_OUTCOME_CANCELLED) {
+    /** Kun afventende møder reserverer kalenderslots. */
+    if (normalizeMeetingOutcomeStatus(row.meetingOutcomeStatus) !== MEETING_OUTCOME_PENDING) {
       continue;
     }
     const startMs = row.meetingScheduledFor.getTime();
@@ -139,7 +143,7 @@ export function findBookingTimeConflict(
 
   for (const row of existingRows) {
     if (!row.meetingScheduledFor) continue;
-    if (normalizeMeetingOutcomeStatus(row.meetingOutcomeStatus) === MEETING_OUTCOME_CANCELLED) {
+    if (normalizeMeetingOutcomeStatus(row.meetingOutcomeStatus) !== MEETING_OUTCOME_PENDING) {
       continue;
     }
     const os = row.meetingScheduledFor.getTime();

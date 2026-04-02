@@ -7,6 +7,7 @@ import {
   MEETING_OUTCOME_CANCELLED,
   MEETING_OUTCOME_HELD,
   MEETING_OUTCOME_PENDING,
+  MEETING_OUTCOME_SALE,
 } from "@/lib/meeting-outcome";
 
 function normOutcome(s: string | null | undefined) {
@@ -67,6 +68,7 @@ export async function GET() {
       totalBooked: rows.length,
       pending: rows.filter((r) => normOutcome(r.meetingOutcomeStatus) === MEETING_OUTCOME_PENDING).length,
       held: rows.filter((r) => normOutcome(r.meetingOutcomeStatus) === MEETING_OUTCOME_HELD).length,
+      sale: rows.filter((r) => normOutcome(r.meetingOutcomeStatus) === MEETING_OUTCOME_SALE).length,
       cancelled: rows.filter((r) => normOutcome(r.meetingOutcomeStatus) === MEETING_OUTCOME_CANCELLED).length,
     };
 

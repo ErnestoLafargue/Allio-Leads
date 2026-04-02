@@ -4,11 +4,15 @@ import { requireSession, requireAdmin } from "@/lib/api-auth";
 import { defaultCampaignFieldConfigJson } from "@/lib/campaign-fields";
 
 export async function GET() {
-  const { response } = await requireSession();
+  const { session, response } = await requireSession();
   if (response) return response;
 
   try {
     const campaigns = await prisma.campaign.findMany({
+      where:
+        session!.user.role === "ADMIN"
+          ? {}
+          : { NOT: { systemCampaignType: "active_customers" } },
       orderBy: { name: "asc" },
       select: {
         id: true,

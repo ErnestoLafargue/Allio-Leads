@@ -15,6 +15,7 @@ import { validateMeetingContactFields } from "@/lib/meeting-contact-validation";
 import {
   MEETING_OUTCOME_LABELS,
   MEETING_OUTCOME_PENDING,
+  MEETING_OUTCOME_SALE,
 } from "@/lib/meeting-outcome";
 import { defaultCampaignFieldConfigJson } from "@/lib/campaign-fields";
 
@@ -403,7 +404,6 @@ function LeadDetailInner() {
   async function handleConfirmCallback(payload: {
     assignedUserId: string;
     scheduledForISO: string;
-    note: string;
   }) {
     if (!lead || lead.status !== "NEW") return;
     setSaving(true);
@@ -415,7 +415,6 @@ function LeadDetailInner() {
       body: JSON.stringify({
         scheduledFor: payload.scheduledForISO,
         assignedUserId: payload.assignedUserId,
-        note: payload.note,
       }),
     });
     setSaving(false);
@@ -431,7 +430,7 @@ function LeadDetailInner() {
     router.refresh();
   }
 
-  async function patchMeetingOutcome(o: "HELD" | "CANCELLED") {
+  async function patchMeetingOutcome(o: "PENDING" | "HELD" | "CANCELLED" | typeof MEETING_OUTCOME_SALE) {
     if (!lead) return;
     setError(null);
     const res = await fetch(`/api/leads/${id}`, {
@@ -607,7 +606,7 @@ function LeadDetailInner() {
                   type="button"
                   disabled={saving || (editLockBlocked && !isAdmin) || !myUserId}
                   onClick={openCallbackDialog}
-                  className="rounded-xl border-2 border-violet-600 bg-violet-100 px-4 py-3 text-sm font-semibold text-violet-950 shadow-sm transition hover:bg-violet-200 disabled:opacity-60 min-w-[8rem]"
+                  className="min-w-[8rem] appearance-none rounded-xl border-2 border-solid border-violet-600 bg-violet-100 px-4 py-3 text-sm font-semibold text-violet-950 shadow-sm transition hover:bg-violet-200 disabled:opacity-60"
                 >
                   Tilbagekald
                 </button>
@@ -706,7 +705,9 @@ function LeadDetailInner() {
                       ? "bg-emerald-100 text-emerald-900"
                       : meetingOutcomeStatus === "CANCELLED"
                         ? "bg-red-100 text-red-900"
-                        : "bg-amber-100 text-amber-950"
+                        : meetingOutcomeStatus === MEETING_OUTCOME_SALE
+                          ? "bg-violet-100 text-violet-950"
+                          : "bg-amber-100 text-amber-950"
                   }`}
                 >
                   {MEETING_OUTCOME_LABELS[meetingOutcomeStatus] ??
@@ -727,19 +728,31 @@ function LeadDetailInner() {
                   <span className="text-xs font-medium text-stone-600">Admin — mødeudfald:</span>
                   <button
                     type="button"
-                    disabled={meetingOutcomeStatus === "HELD"}
+                    onClick={() => void patchMeetingOutcome("PENDING")}
+                    className="rounded-md bg-amber-600 px-3 py-1.5 text-xs font-semibold text-white hover:bg-amber-700"
+                  >
+                    Afventende
+                  </button>
+                  <button
+                    type="button"
                     onClick={() => void patchMeetingOutcome("HELD")}
-                    className="rounded-md bg-emerald-700 px-3 py-1.5 text-xs font-semibold text-white hover:bg-emerald-800 disabled:cursor-not-allowed disabled:opacity-50"
+                    className="rounded-md bg-emerald-700 px-3 py-1.5 text-xs font-semibold text-white hover:bg-emerald-800"
                   >
                     Afholdt
                   </button>
                   <button
                     type="button"
-                    disabled={meetingOutcomeStatus === "CANCELLED"}
                     onClick={() => void patchMeetingOutcome("CANCELLED")}
-                    className="rounded-md border border-stone-300 bg-white px-3 py-1.5 text-xs font-semibold text-stone-800 hover:bg-stone-50 disabled:cursor-not-allowed disabled:opacity-50"
+                    className="rounded-md border border-stone-300 bg-white px-3 py-1.5 text-xs font-semibold text-stone-800 hover:bg-stone-50"
                   >
                     Annulleret
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => void patchMeetingOutcome(MEETING_OUTCOME_SALE)}
+                    className="rounded-md bg-violet-700 px-3 py-1.5 text-xs font-semibold text-white hover:bg-violet-800"
+                  >
+                    Salg
                   </button>
                 </div>
               )}
