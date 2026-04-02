@@ -37,6 +37,41 @@ async function loadPresentUsers(dayKey: string): Promise<PresentUser[]> {
   return sellers.map((u) => ({ userId: u.id, user: u }));
 }
 
+async function distinctUserIdsWithOutcomesInRange(start: Date, end: Date): Promise<string[]> {
+  try {
+    const rows = await prisma.leadOutcomeLog.groupBy({
+      by: ["userId"],
+      where: { createdAt: { gte: start, lt: end } },
+    });
+    return rows.map((r) => r.userId);
+  } catch (e) {
+    console.warn("[leaderboard] LeadOutcomeLog groupBy failed:", e);
+    return [];
+  }
+}
+
+async function mergePresentWithOutcomeUsers(
+  present: PresentUser[],
+  outcomeUserIds: string[],
+): Promise<PresentUser[]> {
+  const map = new Map<string, PresentUser>();
+  for (const p of present) {
+    map.set(p.userId, p);
+  }
+  const missingIds = outcomeUserIds.filter((id) => !map.has(id));
+  if (missingIds.length === 0) {
+    return Array.from(map.values());
+  }
+  const users = await prisma.user.findMany({
+    where: { id: { in: missingIds } },
+    select: { id: true, name: true, username: true, role: true },
+  });
+  for (const u of users) {
+    map.set(u.id, { userId: u.id, user: u });
+  }
+  return Array.from(map.values());
+}
+
 export async function GET() {
   const { response } = await requireSession();
   if (response) return response;
@@ -58,6 +93,8 @@ export async function GET() {
     const dayKey = copenhagenDayKey();
 
     let present = await loadPresentUsers(dayKey);
+    const outcomeUserIds = await distinctUserIdsWithOutcomesInRange(start, end);
+    present = await mergePresentWithOutcomeUsers(present, outcomeUserIds);
 
     if (present.length === 0) {
       const sellers = await prisma.user.findMany({

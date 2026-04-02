@@ -187,10 +187,30 @@ export function CampaignWorkspace({ campaignId }: Props) {
   useEffect(() => {
     if (!activeLead?.id) return;
     const id = activeLead.id;
+    void fetch(`/api/leads/${id}/lock`, { method: "PATCH" }).catch(() => {});
     const t = window.setInterval(() => {
       void fetch(`/api/leads/${id}/lock`, { method: "PATCH" }).catch(() => {});
     }, LOCK_HEARTBEAT_MS);
     return () => clearInterval(t);
+  }, [activeLead?.id]);
+
+  useEffect(() => {
+    if (!activeLead?.id) return;
+    const id = activeLead.id;
+    function refreshLockFromFocus() {
+      void fetch(`/api/leads/${id}/lock`, { method: "PATCH" }).catch(() => {});
+    }
+    function onVisibility() {
+      if (document.visibilityState === "visible") refreshLockFromFocus();
+    }
+    document.addEventListener("visibilitychange", onVisibility);
+    window.addEventListener("focus", refreshLockFromFocus);
+    window.addEventListener("pageshow", refreshLockFromFocus);
+    return () => {
+      document.removeEventListener("visibilitychange", onVisibility);
+      window.removeEventListener("focus", refreshLockFromFocus);
+      window.removeEventListener("pageshow", refreshLockFromFocus);
+    };
   }, [activeLead?.id]);
 
   useEffect(() => {
@@ -258,7 +278,7 @@ export function CampaignWorkspace({ campaignId }: Props) {
     const rRes = await fetch(`/api/campaigns/${campaignId}/reserve-next`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({}),
+      body: JSON.stringify({ excludeLeadId: savedLeadId }),
     });
     if (!rRes.ok) {
       const j = await rRes.json().catch(() => ({}));
@@ -464,10 +484,6 @@ export function CampaignWorkspace({ campaignId }: Props) {
     );
   }
 
-  const lockExpiryLabel = current.lockExpiresAt
-    ? new Date(current.lockExpiresAt).toLocaleTimeString("da-DK", { hour: "2-digit", minute: "2-digit" })
-    : null;
-
   return (
     <div className="flex min-h-[calc(100dvh-5.5rem)] flex-col gap-4 pb-4">
       <div className="shrink-0">
@@ -476,9 +492,9 @@ export function CampaignWorkspace({ campaignId }: Props) {
         </Link>
         <h1 className="mt-2 text-xl font-semibold text-stone-900">{campaignName}</h1>
         <p className="mt-1 text-xs text-stone-600">
-          Dette lead er <strong>reserveret til dig</strong>, så kolleger ikke kan ringe på samme nummer
-          samtidig. Låset udløber kl. {lockExpiryLabel ?? "—"} hvis siden står uden aktivitet — vi forlænger
-          automatisk mens du arbejder her.
+          Dette lead er <strong>låst til dig</strong>, så længe du har denne side åben — kolleger kan ikke åbne
+          eller reservere det samme nummer samtidig. Når du går videre eller lukker fanen, frigives låset. Mens du
+          arbejder her, fornyes det automatisk.
         </p>
       </div>
 
@@ -518,7 +534,14 @@ export function CampaignWorkspace({ campaignId }: Props) {
               </div>
             )}
           </div>
-          <div className="flex justify-end lg:shrink-0 lg:pt-6">{renderNextButton()}</div>
+          <div className="flex flex-col items-end gap-2 lg:shrink-0 lg:pt-6">
+            {status === "NEW" && showNextForMeeting ? (
+              <p className="max-w-[14rem] text-right text-xs text-stone-500">
+                Gemmer noter og går til næste lead uden at ændre udfald.
+              </p>
+            ) : null}
+            {renderNextButton()}
+          </div>
         </div>
       </div>
 

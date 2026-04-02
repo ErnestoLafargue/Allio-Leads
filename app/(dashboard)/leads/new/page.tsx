@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
 import { useEffect, useState } from "react";
+import { MeetingContactFields } from "@/app/components/booking/meeting-contact-fields";
 import { LeadDataLeftPanel } from "@/app/components/lead-data-left-panel";
 
 type CampaignOption = { id: string; name: string };
@@ -26,6 +27,9 @@ export default function NewLeadPage() {
   const [city, setCity] = useState("");
   const [industry, setIndustry] = useState("");
   const [notes, setNotes] = useState("");
+  const [meetingContactName, setMeetingContactName] = useState("");
+  const [meetingContactEmail, setMeetingContactEmail] = useState("");
+  const [meetingContactPhonePrivate, setMeetingContactPhonePrivate] = useState("");
   const [custom, setCustom] = useState<Record<string, string>>({});
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
@@ -98,6 +102,9 @@ export default function NewLeadPage() {
         city,
         industry,
         notes,
+        meetingContactName: meetingContactName.trim(),
+        meetingContactEmail: meetingContactEmail.trim(),
+        meetingContactPhonePrivate: meetingContactPhonePrivate.trim(),
         customFields: custom,
       }),
     });
@@ -207,6 +214,16 @@ export default function NewLeadPage() {
                 onChange={(e) => setNotes(e.target.value)}
                 className="mt-2 min-h-[14rem] flex-1 resize-y rounded-lg border border-stone-200 bg-stone-50/50 px-3 py-3 text-sm text-stone-900 shadow-inner outline-none ring-stone-400 focus:ring-2 lg:min-h-[clamp(18rem,62vh,40rem)]"
                 placeholder="Skriv noter, aftaler, opfølgning…"
+              />
+              <MeetingContactFields
+                className="mt-4 shrink-0"
+                contactRequired={false}
+                meetingContactName={meetingContactName}
+                meetingContactEmail={meetingContactEmail}
+                meetingContactPhonePrivate={meetingContactPhonePrivate}
+                onMeetingContactName={setMeetingContactName}
+                onMeetingContactEmail={setMeetingContactEmail}
+                onMeetingContactPhonePrivate={setMeetingContactPhonePrivate}
               />
             </div>
           </div>

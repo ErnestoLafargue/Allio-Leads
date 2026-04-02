@@ -96,7 +96,7 @@ model Lead {
   /// Import eller manuel oprettelse — bruges til sortering «senest tilføjet»
   importedAt DateTime @default(now())
 
-  /// Lås: én sælger ad gangen — udløber efter inaktivitet (se LEAD_LOCK_TTL_SECONDS)
+  /// Lås: én sælger ad gangen — frigives ved navigering eller efter max. inaktivitet (LEAD_LOCK_MAX_IDLE_SECONDS)
   lockedByUserId String?
   lockedAt       DateTime?
   lockExpiresAt  DateTime?

@@ -3,6 +3,7 @@ import { prisma } from "@/lib/prisma";
 import { requireSession } from "@/lib/api-auth";
 import { applyLeadCooldownResets } from "@/lib/lead-cooldown";
 import { filterLeadsByCampaignProtectedSetting } from "@/lib/reklamebeskyttet-filter";
+import { getLeadIdsWithOutcomeLogToday } from "@/lib/lead-outcome-today";
 import { sortLeadsForCampaignCallQueue } from "@/lib/lead-queue";
 import { releaseExpiredLocksEverywhere, tryAcquireLeadLock } from "@/lib/lead-lock";
 
@@ -17,6 +18,7 @@ const leadInclude = {
 /**
  * Atomisk reservation af næste «Ny»-lead i kampagnen til opkald/arbejdsflow.
  * Post body (valgfri): { "preferLeadId": "…" } for at genåbne samme lead efter refresh, hvis det stadig er ledigt.
+ * { "excludeLeadId": "…" } springer dette lead over i den almindelige kø (fx efter «Gem og næste» med udfald Ny).
  */
 export async function POST(req: Request, { params }: Params) {
   const { session, response } = await requireSession();
@@ -26,6 +28,7 @@ export async function POST(req: Request, { params }: Params) {
 
   const body = await req.json().catch(() => null);
   const preferLeadId = typeof body?.preferLeadId === "string" ? body.preferLeadId.trim() : "";
+  const excludeLeadId = typeof body?.excludeLeadId === "string" ? body.excludeLeadId.trim() : "";
 
   try {
     await applyLeadCooldownResets();
@@ -53,10 +56,12 @@ export async function POST(req: Request, { params }: Params) {
       rawNew.map((r) => ({ ...r, customFields: r.customFields })),
       campaign.includeProtectedBusinesses,
     );
+    const outcomeToday = await getLeadIdsWithOutcomeLogToday(filtered.map((r) => r.id));
     const sorted = sortLeadsForCampaignCallQueue(
       filtered.map((r) => ({
         id: r.id,
         status: r.status,
+        hasOutcomeLogToday: outcomeToday.has(r.id),
         importedAt:
           r.importedAt instanceof Date ? r.importedAt.toISOString() : String(r.importedAt),
       })),
@@ -81,6 +86,7 @@ export async function POST(req: Request, { params }: Params) {
     }
 
     for (const row of sorted) {
+      if (excludeLeadId && row.id === excludeLeadId) continue;
       const got = await tryReserve(row.id);
       if (got) return NextResponse.json({ lead: got });
     }

@@ -30,29 +30,38 @@ export function isQueueEligibleStatus(status: string): boolean {
   );
 }
 
-export function sortLeadsForQueue<T extends { status: string; updatedAt: string }>(leads: T[]): T[] {
-  return [...leads].sort((a, b) => {
-    const ra = queueRank(a.status);
-    const rb = queueRank(b.status);
-    if (ra !== rb) return ra - rb;
-    return new Date(a.updatedAt).getTime() - new Date(b.updatedAt).getTime();
-  });
+type QueueOrderFields = {
+  status: string;
+  importedAt: string;
+  id: string;
+  hasOutcomeLogToday?: boolean;
+};
+
+/** Fælles sortering: status-rang → uden udfaldslog i dag først → senest importeret → id */
+export function compareLeadQueueOrder(a: QueueOrderFields, b: QueueOrderFields): number {
+  const ra = queueRank(a.status);
+  const rb = queueRank(b.status);
+  if (ra !== rb) return ra - rb;
+  const ha = a.hasOutcomeLogToday === true ? 1 : 0;
+  const hb = b.hasOutcomeLogToday === true ? 1 : 0;
+  if (ha !== hb) return ha - hb;
+  const ta = new Date(a.importedAt).getTime();
+  const tb = new Date(b.importedAt).getTime();
+  if (ta !== tb) return tb - ta;
+  return a.id.localeCompare(b.id);
+}
+
+export function sortLeadsForQueue<T extends QueueOrderFields>(leads: T[]): T[] {
+  return [...leads].sort(compareLeadQueueOrder);
 }
 
 /**
  * Opkaldskø på kampagne-arbejde: samme status-rækkefølge, men stabilt bindeled (senest tilføjet først + id)
  * så et gem ikke flytter leadet foran de andre — undgår at «Næste» afslutter for tidligt eller springer leads over.
+ * Leads med udfaldslog i dag (København) kommer efter dem uden.
  */
-export function sortLeadsForCampaignCallQueue<
-  T extends { status: string; importedAt: string; id: string },
->(leads: T[]): T[] {
-  return [...leads].sort((a, b) => {
-    const ra = queueRank(a.status);
-    const rb = queueRank(b.status);
-    if (ra !== rb) return ra - rb;
-    const ta = new Date(a.importedAt).getTime();
-    const tb = new Date(b.importedAt).getTime();
-    if (ta !== tb) return tb - ta;
-    return a.id.localeCompare(b.id);
-  });
+export function sortLeadsForCampaignCallQueue<T extends QueueOrderFields & { hasOutcomeLogToday: boolean }>(
+  leads: T[],
+): T[] {
+  return [...leads].sort(compareLeadQueueOrder);
 }

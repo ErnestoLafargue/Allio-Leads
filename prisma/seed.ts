@@ -1,7 +1,10 @@
-import "dotenv/config";
+import { config as loadEnv } from "dotenv";
 import bcrypt from "bcryptjs";
 import { PrismaClient } from "@prisma/client";
 import { defaultCampaignFieldConfigJson } from "../lib/campaign-fields";
+
+loadEnv({ path: ".env" });
+loadEnv({ path: ".env.local" });
 
 const prisma = new PrismaClient();
 

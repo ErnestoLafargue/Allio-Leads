@@ -2,10 +2,12 @@ import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { requireSession } from "@/lib/api-auth";
 import { stringifyCustomFields } from "@/lib/custom-fields";
+import { meetingContactEmailValid } from "@/lib/meeting-contact-validation";
 import { pickLeadCreateData } from "@/lib/prisma-lead-write";
 import { applyLeadCooldownResets } from "@/lib/lead-cooldown";
 import { filterLeadsByCampaignProtectedSetting } from "@/lib/reklamebeskyttet-filter";
 import { releaseExpiredLocksEverywhere } from "@/lib/lead-lock";
+import { getLeadIdsWithOutcomeLogToday } from "@/lib/lead-outcome-today";
 
 export async function GET(req: Request) {
   const { session, response } = await requireSession();
@@ -73,9 +75,17 @@ export async function GET(req: Request) {
       },
     });
 
-    const out = campaignId
+    let out = campaignId
       ? filterLeadsByCampaignProtectedSetting(leads, includeProtectedBusinesses)
       : leads;
+
+    if (campaignId && out.length > 0) {
+      const outcomeToday = await getLeadIdsWithOutcomeLogToday(out.map((l) => l.id));
+      out = out.map((l) => ({
+        ...l,
+        hasOutcomeLogToday: outcomeToday.has(l.id),
+      }));
+    }
 
     return NextResponse.json(out);
   } catch (e) {
@@ -128,6 +138,19 @@ export async function POST(req: Request) {
   const city = typeof body?.city === "string" ? body.city : "";
   const industry = typeof body?.industry === "string" ? body.industry : "";
   const notes = typeof body?.notes === "string" ? body.notes : "";
+  const meetingContactName =
+    typeof body?.meetingContactName === "string" ? body.meetingContactName.trim() : "";
+  const meetingContactEmail =
+    typeof body?.meetingContactEmail === "string" ? body.meetingContactEmail.trim() : "";
+  const meetingContactPhonePrivate =
+    typeof body?.meetingContactPhonePrivate === "string"
+      ? body.meetingContactPhonePrivate.trim()
+      : "";
+
+  if (meetingContactEmail.length > 0 && !meetingContactEmailValid(meetingContactEmail)) {
+    return NextResponse.json({ error: "Ugyldig e-mail til mødekontakten." }, { status: 400 });
+  }
+
   const custom: Record<string, string> = {};
   if (body?.customFields && typeof body.customFields === "object" && body.customFields !== null) {
     for (const [k, v] of Object.entries(body.customFields as Record<string, unknown>)) {
@@ -147,6 +170,9 @@ export async function POST(req: Request) {
       city,
       industry,
       notes,
+      meetingContactName,
+      meetingContactEmail,
+      meetingContactPhonePrivate,
       customFields: stringifyCustomFields(custom),
       status: "NEW",
     }),

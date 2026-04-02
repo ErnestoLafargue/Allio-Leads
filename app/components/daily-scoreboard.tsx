@@ -61,7 +61,7 @@ export function DailyScoreboard() {
   return (
     <div className="space-y-3 rounded-xl border border-amber-200/80 bg-gradient-to-b from-amber-50/90 to-white p-6 shadow-sm">
       <div className="flex flex-wrap items-baseline justify-between gap-2">
-        <h2 className="text-sm font-semibold text-amber-950">Dagens scoreboard · logget ind i dag</h2>
+        <h2 className="text-sm font-semibold text-amber-950">Dagens scoreboard · login eller udfald i dag</h2>
         <p className="text-xs font-medium text-amber-800/90">{data.dayLabel}</p>
       </div>
       <div className="overflow-x-auto rounded-lg border border-amber-100 bg-white/90">
@@ -111,7 +111,7 @@ export function DailyScoreboard() {
         </table>
       </div>
       {data.rows.length === 0 && (
-        <p className="text-sm text-stone-600">Ingen har logget ind i dag endnu.</p>
+        <p className="text-sm text-stone-600">Ingen aktivitet endnu i dag (login eller udfald).</p>
       )}
     </div>
   );

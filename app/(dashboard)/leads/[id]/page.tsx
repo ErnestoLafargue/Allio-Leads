@@ -196,10 +196,31 @@ function LeadDetailInner() {
 
   useEffect(() => {
     if (!holdsEditLock || !lead?.id) return;
+    const lid = lead.id;
+    void fetch(`/api/leads/${lid}/lock`, { method: "PATCH" }).catch(() => {});
     const t = window.setInterval(() => {
-      void fetch(`/api/leads/${lead.id}/lock`, { method: "PATCH" }).catch(() => {});
+      void fetch(`/api/leads/${lid}/lock`, { method: "PATCH" }).catch(() => {});
     }, 25_000);
     return () => clearInterval(t);
+  }, [holdsEditLock, lead?.id]);
+
+  useEffect(() => {
+    if (!holdsEditLock || !lead?.id) return;
+    const lid = lead.id;
+    function refreshLockFromFocus() {
+      void fetch(`/api/leads/${lid}/lock`, { method: "PATCH" }).catch(() => {});
+    }
+    function onVisibility() {
+      if (document.visibilityState === "visible") refreshLockFromFocus();
+    }
+    document.addEventListener("visibilitychange", onVisibility);
+    window.addEventListener("focus", refreshLockFromFocus);
+    window.addEventListener("pageshow", refreshLockFromFocus);
+    return () => {
+      document.removeEventListener("visibilitychange", onVisibility);
+      window.removeEventListener("focus", refreshLockFromFocus);
+      window.removeEventListener("pageshow", refreshLockFromFocus);
+    };
   }, [holdsEditLock, lead?.id]);
 
   useEffect(() => {
@@ -211,7 +232,12 @@ function LeadDetailInner() {
     async function loadQueue() {
       const res = await fetch(`/api/leads?campaignId=${encodeURIComponent(fromCampaign)}`);
       if (!res.ok || cancelled) return;
-      const rows: { id: string; status: string; updatedAt: string }[] = await res.json();
+      const rows: {
+        id: string;
+        status: string;
+        importedAt: string;
+        hasOutcomeLogToday?: boolean;
+      }[] = await res.json();
       const sorted = sortLeadsForQueue(rows.filter((r) => isQueueEligibleStatus(r.status)));
       const ids = sorted.map((r) => r.id);
       const position = ids.indexOf(id);

@@ -3,9 +3,12 @@
  * Brug: npm run db:set-password -- <brugernavn> <ny-adgangskode>
  * Kræver min. 6 tegn (samme som ved oprettelse af bruger i appen).
  */
-import "dotenv/config";
+import { config as loadEnv } from "dotenv";
 import bcrypt from "bcryptjs";
 import { PrismaClient } from "@prisma/client";
+
+loadEnv({ path: ".env" });
+loadEnv({ path: ".env.local" });
 
 const prisma = new PrismaClient();
 

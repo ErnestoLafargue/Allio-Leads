@@ -5,6 +5,7 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { useSession } from "next-auth/react";
 import { LEAD_STATUSES, LEAD_STATUS_LABELS, type LeadStatus } from "@/lib/lead-status";
 import { LeadOutcomeModal } from "@/app/components/lead-outcome-modal";
+import { isLockActive } from "@/lib/lead-lock";
 
 type LeadRow = {
   id: string;
@@ -19,13 +20,17 @@ type LeadRow = {
   meetingScheduledFor?: string | null;
   campaign?: { id: string; name: string };
   lockedByUserId?: string | null;
+  lockedAt?: string | null;
   lockExpiresAt?: string | null;
   lockedByUser?: { id: string; name: string; username: string } | null;
 };
 
-function lockActive(l: Pick<LeadRow, "lockExpiresAt">): boolean {
-  if (!l.lockExpiresAt) return false;
-  return new Date(l.lockExpiresAt).getTime() > Date.now();
+function lockActive(l: Pick<LeadRow, "lockedByUserId" | "lockedAt" | "lockExpiresAt">): boolean {
+  return isLockActive({
+    lockedByUserId: l.lockedByUserId ?? null,
+    lockedAt: l.lockedAt ? new Date(l.lockedAt) : null,
+    lockExpiresAt: l.lockExpiresAt ? new Date(l.lockExpiresAt) : null,
+  });
 }
 
 function isLockedByAnotherUser(l: LeadRow, myUserId: string | undefined): boolean {
