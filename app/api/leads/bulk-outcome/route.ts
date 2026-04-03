@@ -121,7 +121,7 @@ export async function POST(req: Request) {
           return NextResponse.json(
             {
               error:
-                "Mindst ét tidspunkt overlapper et eksisterende møde (60 min før + 75 min efter start). Vælg andre tider.",
+                "Mindst ét tidspunkt overlapper et eksisterende møde (55 min før + 70 min efter start). Vælg andre tider.",
             },
             { status: 409 },
           );
@@ -137,7 +137,7 @@ export async function POST(req: Request) {
           const be = getMeetingBlockEndMs(bs);
           if (intervalsOverlapExclusiveEnd(as, ae, bs, be)) {
             return NextResponse.json(
-              { error: "Flere valgte møder overlapper hinanden i tid (75 min pr. booking)." },
+              { error: "Flere valgte møder overlapper hinanden i tid (55 min før + 70 min efter pr. booking)." },
               { status: 409 },
             );
           }

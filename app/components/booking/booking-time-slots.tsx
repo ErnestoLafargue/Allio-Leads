@@ -31,7 +31,7 @@ export function BookingTimeSlots({
           <p className="text-sm text-slate-500">Henter ledige tider…</p>
         ) : slots.length === 0 ? (
           <p className="text-sm text-slate-500">
-            Ingen ledige tider denne dag — alt kan være optaget af andre møder (75 min pr. booking) eller uden for
+            Ingen ledige tider denne dag — alt kan være optaget af andre møder (55 min før + 70 min efter pr. booking) eller uden for
             09–17.
           </p>
         ) : (

@@ -247,9 +247,13 @@ export async function PATCH(req: Request, { params }: Params) {
     meetingOutcomeStatus = adminMeetingOutcome;
   }
 
+  const meetingTimeChangedForOverlap =
+    !existing.meetingScheduledFor ||
+    existing.meetingScheduledFor.getTime() !== meetingScheduledFor?.getTime();
   if (
     status === "MEETING_BOOKED" &&
     meetingScheduledFor &&
+    meetingTimeChangedForOverlap &&
     normalizeMeetingOutcomeStatus(meetingOutcomeStatus) !== MEETING_OUTCOME_CANCELLED
   ) {
     const overlap = await findLeadBookingOverlapInDb(meetingScheduledFor, { excludeLeadId: id });
@@ -257,7 +261,7 @@ export async function PATCH(req: Request, { params }: Params) {
       return NextResponse.json(
         {
           error:
-            "Det valgte tidspunkt overlapper et andet møde. Hvert møde reserverer 60 min før og 75 min efter start — vælg et andet tidspunkt.",
+            "Det valgte tidspunkt overlapper et andet møde. Hvert møde reserverer 55 min før og 70 min efter start — vælg et andet tidspunkt.",
         },
         { status: 409 },
       );

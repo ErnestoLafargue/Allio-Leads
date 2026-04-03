@@ -6,10 +6,10 @@ import {
 
 /** 15-minutters gitter som i kalenderen */
 export const BOOKING_SLOT_STEP_MIN = 15;
-/** Hvert møde blokerer 60 min før start */
-export const BOOKING_MEETING_BLOCK_BEFORE_MIN = 60;
-/** Hvert møde blokerer 75 min efter start */
-export const BOOKING_MEETING_BLOCK_AFTER_MIN = 75;
+/** Hvert møde blokerer 55 min før start */
+export const BOOKING_MEETING_BLOCK_BEFORE_MIN = 55;
+/** Hvert møde blokerer 70 min efter start */
+export const BOOKING_MEETING_BLOCK_AFTER_MIN = 70;
 /** Bevares for kompatibilitet i ældre kaldesteder (efter-blok) */
 export const BOOKING_MEETING_BLOCK_MIN = BOOKING_MEETING_BLOCK_AFTER_MIN;
 

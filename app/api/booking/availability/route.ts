@@ -12,7 +12,7 @@ import { MEETING_OUTCOME_PENDING } from "@/lib/meeting-outcome";
 
 /**
  * GET ?date=YYYY-MM-DD&excludeLeadId=
- * Returnerer mødeblokke (-60/+75) for afventende møder der kan påvirke ledige tider den dag.
+ * Returnerer mødeblokke (-55/+70) for afventende møder der kan påvirke ledige tider den dag.
  */
 export async function GET(req: Request) {
   const { response } = await requireSession();
