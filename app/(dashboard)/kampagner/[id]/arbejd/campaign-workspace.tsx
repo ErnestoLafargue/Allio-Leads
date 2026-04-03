@@ -14,6 +14,7 @@ import {
   buildCampaignLeadPatchBody,
   type CampaignLeadFormSnapshot,
 } from "@/lib/campaign-workspace-patch";
+import { isValidCVR } from "@/lib/cvr-import";
 
 type Lead = {
   id: string;
@@ -520,10 +521,19 @@ export function CampaignWorkspace({ campaignId }: Props) {
 
   async function onVirkEnrich() {
     if (!activeLead) return;
+    if (!isValidCVR(cvr)) {
+      setVirkEnrichFeedback("Gyldigt CVR-nummer mangler");
+      setVirkNoDataFieldKeys([]);
+      return;
+    }
     setVirkEnrichFeedback(null);
     setError(null);
     setVirkEnrichLoading(true);
-    const res = await fetch(`/api/leads/${activeLead.id}/enrich-virk`, { method: "POST" });
+    const res = await fetch(`/api/leads/${activeLead.id}/enrich-virk`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ cvr }),
+    });
     setVirkEnrichLoading(false);
     const payload = (await res.json().catch(() => ({}))) as {
       error?: string;

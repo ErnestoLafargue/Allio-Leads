@@ -18,6 +18,7 @@ import {
   MEETING_OUTCOME_SALE,
 } from "@/lib/meeting-outcome";
 import { defaultCampaignFieldConfigJson } from "@/lib/campaign-fields";
+import { isValidCVR } from "@/lib/cvr-import";
 
 type Lead = {
   id: string;
@@ -473,10 +474,19 @@ function LeadDetailInner() {
 
   async function onVirkEnrich() {
     if (!lead) return;
+    if (!isValidCVR(cvr)) {
+      setVirkEnrichFeedback("Gyldigt CVR-nummer mangler");
+      setVirkNoDataFieldKeys([]);
+      return;
+    }
     setVirkEnrichFeedback(null);
     setError(null);
     setVirkEnrichLoading(true);
-    const res = await fetch(`/api/leads/${lead.id}/enrich-virk`, { method: "POST" });
+    const res = await fetch(`/api/leads/${lead.id}/enrich-virk`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ cvr }),
+    });
     setVirkEnrichLoading(false);
     const payload = (await res.json().catch(() => ({}))) as {
       error?: string;

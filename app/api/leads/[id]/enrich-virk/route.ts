@@ -2,15 +2,21 @@ import { NextResponse } from "next/server";
 import { requireSession } from "@/lib/api-auth";
 import { prisma } from "@/lib/prisma";
 import { parseCustomFields, stringifyCustomFields } from "@/lib/custom-fields";
-import { parseFieldConfig, resolveFixedPersonFieldKeys } from "@/lib/campaign-fields";
 import { fetchVirkCompanyByCvr, mapVirkParticipantsToLeadFields } from "@/lib/virk-enrichment";
 import { canAccessBookedMeetingNotes } from "@/lib/lead-meeting-access";
 import { canAccessCallbackLead } from "@/lib/lead-callback-access";
 import { sellerMayEditLead } from "@/lib/lead-lock";
+import { normalizeCVR } from "@/lib/cvr-import";
 
 type Params = { params: Promise<{ id: string }> };
 
-export async function POST(_req: Request, { params }: Params) {
+const FIXED_KEYS = {
+  stifter: "stifter",
+  direktor: "direktor",
+  fuldtAnsvarligPerson: "fuldt_ansvarlig_person",
+} as const;
+
+export async function POST(req: Request, { params }: Params) {
   const { session, response } = await requireSession();
   if (response) return response;
 
@@ -31,39 +37,39 @@ export async function POST(_req: Request, { params }: Params) {
     return NextResponse.json({ error: "Leadet er låst af en anden bruger." }, { status: 409 });
   }
 
-  if (!lead.cvr?.trim()) {
-    return NextResponse.json({ error: "CVR-nummer mangler eller er ugyldigt" }, { status: 400 });
-  }
+  const body = await req.json().catch(() => null);
+  const cvrFromField = typeof body?.cvr === "string" ? body.cvr : "";
+  const cvr = normalizeCVR(cvrFromField);
+  if (!cvr) return NextResponse.json({ error: "Gyldigt CVR-nummer mangler" }, { status: 400 });
 
   let virkPayload: unknown;
   try {
-    virkPayload = await fetchVirkCompanyByCvr(lead.cvr);
-  } catch (e) {
-    const msg = e instanceof Error ? e.message : String(e);
-    const status = msg.includes("ugyldigt") ? 400 : 502;
-    return NextResponse.json({ error: status === 400 ? msg : "Kunne ikke hente oplysninger fra VIRK" }, { status });
+    virkPayload = await fetchVirkCompanyByCvr(cvr);
+  } catch {
+    return NextResponse.json({ error: "Kunne ikke hente oplysninger fra VIRK" }, { status: 502 });
   }
 
   const mapped = mapVirkParticipantsToLeadFields(virkPayload);
-  const fieldCfg = parseFieldConfig(lead.campaign?.fieldConfig ?? "{}");
-  const keys = resolveFixedPersonFieldKeys(fieldCfg);
 
   const custom = parseCustomFields(lead.customFields);
   const updates: Record<string, string> = {};
   const missingFieldKeys: string[] = [];
 
-  const stifterEmpty = !(custom[keys.stifter] ?? "").trim();
-  const direktorEmpty = !(custom[keys.direktor] ?? "").trim();
-  const fadEmpty = !(custom[keys.fuldtAnsvarligPerson] ?? "").trim();
+  const stifterEmpty = !(custom[FIXED_KEYS.stifter] ?? "").trim();
+  const direktorEmpty = !(custom[FIXED_KEYS.direktor] ?? "").trim();
+  const fadEmpty = !(custom[FIXED_KEYS.fuldtAnsvarligPerson] ?? "").trim();
 
-  if (mapped.stifter && stifterEmpty) updates[keys.stifter] = mapped.stifter;
-  else if (stifterEmpty) missingFieldKeys.push(keys.stifter);
+  if (mapped.stifter && stifterEmpty) updates[FIXED_KEYS.stifter] = mapped.stifter;
+  else if (stifterEmpty) missingFieldKeys.push(FIXED_KEYS.stifter);
 
-  if (mapped.direktor && direktorEmpty) updates[keys.direktor] = mapped.direktor;
-  else if (direktorEmpty) missingFieldKeys.push(keys.direktor);
+  if (mapped.direktor && direktorEmpty) updates[FIXED_KEYS.direktor] = mapped.direktor;
+  else if (direktorEmpty) missingFieldKeys.push(FIXED_KEYS.direktor);
 
-  if (mapped.fuldtAnsvarligPerson && fadEmpty) updates[keys.fuldtAnsvarligPerson] = mapped.fuldtAnsvarligPerson;
-  else if (fadEmpty) missingFieldKeys.push(keys.fuldtAnsvarligPerson);
+  if (mapped.fuldtAnsvarligPerson && fadEmpty) {
+    updates[FIXED_KEYS.fuldtAnsvarligPerson] = mapped.fuldtAnsvarligPerson;
+  } else if (fadEmpty) {
+    missingFieldKeys.push(FIXED_KEYS.fuldtAnsvarligPerson);
+  }
 
   if (Object.keys(updates).length === 0) {
     return NextResponse.json({
