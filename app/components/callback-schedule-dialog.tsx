@@ -21,11 +21,11 @@ type Props = {
   onConfirm: (p: CallbackSchedulePayload) => void;
 };
 
-/** 08:00–20:00 inkl., 15-minutters trin (København vises som lokal dato+tids-valg). */
+/** 08:00–22:00 inkl., 15-minutters trin (København vises som lokal dato+tids-valg). */
 const TIME_OPTIONS: string[] = (() => {
   const out: string[] = [];
-  for (let h = 8; h <= 20; h++) {
-    const maxM = h === 20 ? 0 : 45;
+  for (let h = 8; h <= 22; h++) {
+    const maxM = h === 22 ? 0 : 45;
     for (let m = 0; m <= maxM; m += 15) {
       out.push(`${String(h).padStart(2, "0")}:${String(m).padStart(2, "0")}`);
     }
@@ -51,8 +51,8 @@ function defaultDateParts(): { date: string; time: string } {
     H = 8;
     M = 0;
   }
-  if (H > 20 || (H === 20 && M > 0)) {
-    H = 20;
+  if (H > 22 || (H === 22 && M > 0)) {
+    H = 22;
     M = 0;
   }
   const time = `${pad(H)}:${pad(M)}`;
@@ -62,7 +62,7 @@ function defaultDateParts(): { date: string; time: string } {
 export function CallbackScheduleDialog({
   open,
   title = "Planlæg tilbagekald",
-  description = "Vælg hvem der skal ringe tilbage, og hvornår (08:00–20:00). Noter på leadet bruges som udgangspunkt — der tilføjes ikke separat callback-note.",
+  description = "Vælg hvem der skal ringe tilbage, og hvornår (08:00–22:00). Noter på leadet bruges som udgangspunkt — der tilføjes ikke separat callback-note.",
   currentUserId,
   saving,
   errorText,
@@ -152,7 +152,7 @@ export function CallbackScheduleDialog({
             />
           </label>
           <label className="block text-xs font-medium text-stone-600">
-            Tid (08:00–20:00)
+            Tid (08:00–22:00)
             <select
               value={timeStr}
               onChange={(e) => setTimeStr(e.target.value)}

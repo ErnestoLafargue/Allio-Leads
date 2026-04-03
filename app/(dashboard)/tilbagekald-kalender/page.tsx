@@ -18,8 +18,8 @@ type CallbackLead = {
 };
 
 const HOUR_START = 8;
-const HOUR_END = 20;
-const HOURS = HOUR_END - HOUR_START;
+const HOUR_END = 22;
+const HOURS = HOUR_END - HOUR_START + 1;
 /** Skal matche den faktiske højde af uge-kolonne-header (to linjer + padding). */
 const WEEK_GRID_HEADER_HEIGHT_PX = 56;
 
@@ -142,7 +142,8 @@ export default function TilbagekaldKalenderPage() {
 
   const now = new Date();
   const nowMinutesFromStart = now.getHours() * 60 + now.getMinutes() - HOUR_START * 60;
-  const nowLinePct = (nowMinutesFromStart / (HOURS * 60)) * 100;
+  const nowWindowMinutes = (HOUR_END - HOUR_START) * 60;
+  const nowLinePct = (nowMinutesFromStart / nowWindowMinutes) * 100;
   const showNowLine = nowLinePct >= 0 && nowLinePct <= 100;
 
   const weekDays = useMemo(() => {

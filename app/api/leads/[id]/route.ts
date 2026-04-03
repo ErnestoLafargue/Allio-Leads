@@ -257,7 +257,7 @@ export async function PATCH(req: Request, { params }: Params) {
       return NextResponse.json(
         {
           error:
-            "Det valgte tidspunkt overlapper et andet møde. Hvert møde reserverer 75 minutter — vælg et andet tidspunkt.",
+            "Det valgte tidspunkt overlapper et andet møde. Hvert møde reserverer 60 min før og 75 min efter start — vælg et andet tidspunkt.",
         },
         { status: 409 },
       );

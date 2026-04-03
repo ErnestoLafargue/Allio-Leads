@@ -10,7 +10,7 @@ export function formatCallbackDa(iso: string | Date): string {
   return `${day}.${month}.${year} kl. ${h}:${m}`;
 }
 
-/** København: gyldigt tidspunkt for planlagt tilbagekald 08:00–20:00 (inkl.). */
+/** København: gyldigt tidspunkt for planlagt tilbagekald 08:00–22:00 (inkl.). */
 export function isCallbackTimeInCopenhagenBusinessWindow(d: Date): boolean {
   const parts = new Intl.DateTimeFormat("en-GB", {
     timeZone: "Europe/Copenhagen",
@@ -21,7 +21,7 @@ export function isCallbackTimeInCopenhagenBusinessWindow(d: Date): boolean {
   const hour = parseInt(parts.find((p) => p.type === "hour")?.value ?? "0", 10);
   const minute = parseInt(parts.find((p) => p.type === "minute")?.value ?? "0", 10);
   const t = hour * 60 + minute;
-  return t >= 8 * 60 && t <= 20 * 60;
+  return t >= 8 * 60 && t <= 22 * 60;
 }
 
 /** Er tilbagekald aktivt og tidspunktet passeret? */

@@ -1,15 +1,19 @@
 import { prisma } from "@/lib/prisma";
-import { BOOKING_MEETING_BLOCK_MIN, findBookingTimeConflict } from "@/lib/booking/availability";
+import {
+  BOOKING_MEETING_BLOCK_AFTER_MIN,
+  BOOKING_MEETING_BLOCK_BEFORE_MIN,
+  findBookingTimeConflict,
+} from "@/lib/booking/availability";
 import { MEETING_OUTCOME_PENDING } from "@/lib/meeting-outcome";
 
-/** DB-runde for overlappende 75-min mødeblokke (undtagen annullerede). */
+/** DB-runde for overlappende mødeblokke (-60/+75) (undtagen annullerede). */
 export async function findLeadBookingOverlapInDb(
   proposedStart: Date,
   opts: { excludeLeadId?: string; excludeLeadIds?: string[] } = {},
 ): Promise<{ id: string } | null> {
   const startMs = proposedStart.getTime();
   if (Number.isNaN(startMs)) return null;
-  const pad = BOOKING_MEETING_BLOCK_MIN * 60 * 1000 * 2;
+  const pad = (BOOKING_MEETING_BLOCK_BEFORE_MIN + BOOKING_MEETING_BLOCK_AFTER_MIN) * 60 * 1000;
   const exclude = opts.excludeLeadIds?.length
     ? opts.excludeLeadIds
     : opts.excludeLeadId

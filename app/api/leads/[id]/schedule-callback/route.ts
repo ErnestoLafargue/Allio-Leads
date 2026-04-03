@@ -50,7 +50,7 @@ export async function POST(req: Request, { params }: Params) {
   }
   if (!isCallbackTimeInCopenhagenBusinessWindow(scheduledFor)) {
     return NextResponse.json(
-      { error: "Tilbagekald skal ligge mellem kl. 08:00 og 20:00 (København)." },
+      { error: "Tilbagekald skal ligge mellem kl. 08:00 og 22:00 (København)." },
       { status: 400 },
     );
   }

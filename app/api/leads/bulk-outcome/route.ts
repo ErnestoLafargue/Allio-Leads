@@ -121,7 +121,7 @@ export async function POST(req: Request) {
           return NextResponse.json(
             {
               error:
-                "Mindst ét tidspunkt overlapper et eksisterende møde (75 minutters reservation). Vælg andre tider.",
+                "Mindst ét tidspunkt overlapper et eksisterende møde (60 min før + 75 min efter start). Vælg andre tider.",
             },
             { status: 409 },
           );

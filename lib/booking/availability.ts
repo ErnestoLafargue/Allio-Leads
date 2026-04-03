@@ -6,18 +6,26 @@ import {
 
 /** 15-minutters gitter som i kalenderen */
 export const BOOKING_SLOT_STEP_MIN = 15;
-/** Hvert booket møde reserverer et vindue på denne længde */
-export const BOOKING_MEETING_BLOCK_MIN = 75;
+/** Hvert møde blokerer 60 min før start */
+export const BOOKING_MEETING_BLOCK_BEFORE_MIN = 60;
+/** Hvert møde blokerer 75 min efter start */
+export const BOOKING_MEETING_BLOCK_AFTER_MIN = 75;
+/** Bevares for kompatibilitet i ældre kaldesteder (efter-blok) */
+export const BOOKING_MEETING_BLOCK_MIN = BOOKING_MEETING_BLOCK_AFTER_MIN;
 
-/** Samme arbejdsvindue: 09:00–17:00 (17 ekskl.) */
-export const BOOKING_DAY_WINDOW = { startH: 9, endH: 17 } as const;
+/** Arbejdsvindue: 09:00–22:00 (22 ekskl.) */
+export const BOOKING_DAY_WINDOW = { startH: 9, endH: 22 } as const;
 
 export type TimeBlockMs = { startMs: number; endMs: number };
 
 export type CopenhagenBookingSlot = { time: string; utcMs: number };
 
+export function getMeetingBlockStartMs(startMs: number): number {
+  return startMs - BOOKING_MEETING_BLOCK_BEFORE_MIN * 60 * 1000;
+}
+
 export function getMeetingBlockEndMs(startMs: number): number {
-  return startMs + BOOKING_MEETING_BLOCK_MIN * 60 * 1000;
+  return startMs + BOOKING_MEETING_BLOCK_AFTER_MIN * 60 * 1000;
 }
 
 /** Åbne intervaller [aStart,aEnd) og [bStart,bEnd) */
@@ -59,7 +67,7 @@ export function occupiedBlocksFromScheduledMeetings(
     }
     const startMs = row.meetingScheduledFor.getTime();
     if (Number.isNaN(startMs)) continue;
-    out.push({ startMs, endMs: getMeetingBlockEndMs(startMs) });
+    out.push({ startMs: getMeetingBlockStartMs(startMs), endMs: getMeetingBlockEndMs(startMs) });
   }
   return out;
 }
@@ -70,7 +78,7 @@ export function isPastCopenhagenDayKey(dayKey: string): boolean {
 }
 
 /**
- * Ledige 15-min starttider på en kalenderdag i Europe/Copenhagen, efter 75-min blokke.
+ * Ledige 15-min starttider på en kalenderdag i Europe/Copenhagen, efter +/- mødeblok.
  */
 export function getAvailableCopenhagenBookingSlots(
   dayKey: string,
@@ -134,11 +142,13 @@ export function parseOccupiedBlocksFromApi(
 export function findBookingTimeConflict(
   proposedStart: Date,
   existingRows: { id: string; meetingScheduledFor: Date | null; meetingOutcomeStatus: string | null }[],
-  opts?: { blockMinutes?: number },
+  opts?: { blockBeforeMinutes?: number; blockAfterMinutes?: number },
 ): { id: string } | null {
-  const blockMin = opts?.blockMinutes ?? BOOKING_MEETING_BLOCK_MIN;
+  const blockBeforeMin = opts?.blockBeforeMinutes ?? BOOKING_MEETING_BLOCK_BEFORE_MIN;
+  const blockAfterMin = opts?.blockAfterMinutes ?? BOOKING_MEETING_BLOCK_AFTER_MIN;
   const startMs = proposedStart.getTime();
-  const endMs = startMs + blockMin * 60 * 1000;
+  const proposedBlockStart = startMs - blockBeforeMin * 60 * 1000;
+  const proposedBlockEnd = startMs + blockAfterMin * 60 * 1000;
   if (Number.isNaN(startMs)) return null;
 
   for (const row of existingRows) {
@@ -146,9 +156,10 @@ export function findBookingTimeConflict(
     if (normalizeMeetingOutcomeStatus(row.meetingOutcomeStatus) !== MEETING_OUTCOME_PENDING) {
       continue;
     }
-    const os = row.meetingScheduledFor.getTime();
-    const oe = os + blockMin * 60 * 1000;
-    if (intervalsOverlapExclusiveEnd(startMs, endMs, os, oe)) {
+    const otherStart = row.meetingScheduledFor.getTime();
+    const otherBlockStart = otherStart - blockBeforeMin * 60 * 1000;
+    const otherBlockEnd = otherStart + blockAfterMin * 60 * 1000;
+    if (intervalsOverlapExclusiveEnd(proposedBlockStart, proposedBlockEnd, otherBlockStart, otherBlockEnd)) {
       return { id: row.id };
     }
   }

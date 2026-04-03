@@ -3,7 +3,8 @@ import { prisma } from "@/lib/prisma";
 import { requireSession } from "@/lib/api-auth";
 import { copenhagenDayBoundsUtcFromDayKey } from "@/lib/copenhagen-day";
 import {
-  BOOKING_MEETING_BLOCK_MIN,
+  BOOKING_MEETING_BLOCK_AFTER_MIN,
+  BOOKING_MEETING_BLOCK_BEFORE_MIN,
   getMeetingBlockEndMs,
   occupiedBlocksFromScheduledMeetings,
 } from "@/lib/booking/availability";
@@ -11,7 +12,7 @@ import { MEETING_OUTCOME_PENDING } from "@/lib/meeting-outcome";
 
 /**
  * GET ?date=YYYY-MM-DD&excludeLeadId=
- * Returnerer 75-min blokke for afventende møder der kan påvirke ledige tider den dag.
+ * Returnerer mødeblokke (-60/+75) for afventende møder der kan påvirke ledige tider den dag.
  */
 export async function GET(req: Request) {
   const { response } = await requireSession();
@@ -27,9 +28,10 @@ export async function GET(req: Request) {
 
   try {
     const { start, end } = copenhagenDayBoundsUtcFromDayKey(date);
-    const bufferMs = BOOKING_MEETING_BLOCK_MIN * 60 * 1000;
-    const queryStart = new Date(start.getTime() - bufferMs);
-    const queryEnd = end;
+    const beforeMs = BOOKING_MEETING_BLOCK_BEFORE_MIN * 60 * 1000;
+    const afterMs = BOOKING_MEETING_BLOCK_AFTER_MIN * 60 * 1000;
+    const queryStart = new Date(start.getTime() - afterMs);
+    const queryEnd = new Date(end.getTime() + beforeMs);
 
     const leads = await prisma.lead.findMany({
       where: {
