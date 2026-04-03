@@ -11,6 +11,7 @@ import {
   type FieldGroupKey,
   type CampaignExtraField,
   isFixedCvrExtensionKey,
+  isFixedPersonExtensionKey,
   parseFieldConfig,
   serializeFieldConfig,
   slugifyKey,
@@ -562,6 +563,8 @@ export default function RedigerKampagnePage() {
                   <ul className="mt-4 space-y-3">
                     {ext[g].map((row) => {
                       const fixedCvr = g === "cvr" && isFixedCvrExtensionKey(row.key);
+                      const fixedPerson = g === "companyName" && isFixedPersonExtensionKey(row.key);
+                      const fixedField = fixedCvr || fixedPerson;
                       return (
                         <li key={row.draftId} className="flex flex-wrap items-end gap-3 rounded-md bg-stone-50 p-3">
                           <div className="min-w-[180px] flex-1">
@@ -579,12 +582,12 @@ export default function RedigerKampagnePage() {
                               value={row.key}
                               onChange={(e) => updateRow(g, row.draftId, { key: e.target.value })}
                               placeholder="Auto"
-                              readOnly={fixedCvr}
-                              title={fixedCvr ? "Standardfelt — nøgle er låst" : undefined}
-                              className={`mt-1 w-full rounded-md border border-stone-200 bg-white px-3 py-2 font-mono text-xs text-stone-800 shadow-sm outline-none ring-stone-400 focus:ring-2 ${fixedCvr ? "cursor-not-allowed bg-stone-100 text-stone-600" : ""}`}
+                              readOnly={fixedField}
+                              title={fixedField ? "Standardfelt — nøgle er låst" : undefined}
+                              className={`mt-1 w-full rounded-md border border-stone-200 bg-white px-3 py-2 font-mono text-xs text-stone-800 shadow-sm outline-none ring-stone-400 focus:ring-2 ${fixedField ? "cursor-not-allowed bg-stone-100 text-stone-600" : ""}`}
                             />
                           </div>
-                          {fixedCvr ? (
+                          {fixedField ? (
                             <span className="self-end px-2 py-2 text-xs text-stone-500">Standardfelt</span>
                           ) : (
                             <button

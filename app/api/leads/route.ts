@@ -8,6 +8,8 @@ import { applyLeadCooldownResets } from "@/lib/lead-cooldown";
 import { filterLeadsByCampaignProtectedSetting } from "@/lib/reklamebeskyttet-filter";
 import { releaseExpiredLocksEverywhere } from "@/lib/lead-lock";
 import { getLeadIdsWithOutcomeLogToday } from "@/lib/lead-outcome-today";
+import { copenhagenDayBoundsUtc, copenhagenDayBoundsUtcFromDayKey } from "@/lib/copenhagen-day";
+import { isLeadStatus } from "@/lib/lead-status";
 
 export async function GET(req: Request) {
   const { session, response } = await requireSession();
@@ -17,6 +19,10 @@ export async function GET(req: Request) {
   const q = searchParams.get("q")?.trim() ?? "";
   const campaignId = searchParams.get("campaignId")?.trim() ?? "";
   const outcomeStats = searchParams.get("outcomeStats") === "1";
+  const addedToday = searchParams.get("addedToday") === "1";
+  const fromDate = searchParams.get("fromDate")?.trim() ?? "";
+  const toDate = searchParams.get("toDate")?.trim() ?? "";
+  const statusFilter = searchParams.get("status")?.trim().toUpperCase() ?? "";
 
   try {
     await applyLeadCooldownResets();
@@ -55,9 +61,38 @@ export async function GET(req: Request) {
       }
     }
 
+    const importedAtFilter: { gte?: Date; lt?: Date } = {};
+    try {
+      if (addedToday) {
+        const { start, end } = copenhagenDayBoundsUtc();
+        importedAtFilter.gte = start;
+        importedAtFilter.lt = end;
+      } else {
+        if (fromDate) {
+          const { start } = copenhagenDayBoundsUtcFromDayKey(fromDate);
+          importedAtFilter.gte = start;
+        }
+        if (toDate) {
+          const { end } = copenhagenDayBoundsUtcFromDayKey(toDate);
+          importedAtFilter.lt = end;
+        }
+      }
+    } catch {
+      return NextResponse.json({ error: "Ugyldigt datofilter" }, { status: 400 });
+    }
+
+    const statusWhere =
+      statusFilter === "NO_OUTCOME"
+        ? { status: "NEW" }
+        : statusFilter && statusFilter !== "ANY" && isLeadStatus(statusFilter)
+          ? { status: statusFilter }
+          : {};
+
     const leads = await prisma.lead.findMany({
       where: {
         ...(campaignId ? { campaignId } : {}),
+        ...(Object.keys(importedAtFilter).length > 0 ? { importedAt: importedAtFilter } : {}),
+        ...statusWhere,
         ...(q
           ? {
               OR: [

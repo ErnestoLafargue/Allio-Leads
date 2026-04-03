@@ -135,6 +135,8 @@ type LeadsBulkPanelProps = {
   showCampaignColumn?: boolean;
   /** Tilføjes til link til lead-detalje, fx ?fromCampaign=... */
   leadDetailSearchSuffix?: string;
+  /** Vis udvidede filtre (dato + status). */
+  showFilters?: boolean;
 };
 
 export function LeadsBulkPanel({
@@ -144,6 +146,7 @@ export function LeadsBulkPanel({
   showSearchField = false,
   showCampaignColumn = false,
   leadDetailSearchSuffix = "",
+  showFilters = true,
 }: LeadsBulkPanelProps) {
   const { data: session } = useSession();
   const myUserId = session?.user?.id;
@@ -161,6 +164,10 @@ export function LeadsBulkPanel({
   const [sortDir, setSortDir] = useState<"asc" | "desc">("desc");
   const [refreshNonce, setRefreshNonce] = useState(0);
   const [outcomeForIds, setOutcomeForIds] = useState<string[] | null>(null);
+  const [addedToday, setAddedToday] = useState(false);
+  const [fromDate, setFromDate] = useState("");
+  const [toDate, setToDate] = useState("");
+  const [statusFilter, setStatusFilter] = useState<"ANY" | "NO_OUTCOME" | LeadStatus>("ANY");
 
   useEffect(() => {
     setSelected(new Set());
@@ -177,6 +184,10 @@ export function LeadsBulkPanel({
       const qs = new URLSearchParams();
       if (campaignId) qs.set("campaignId", campaignId);
       if (q.trim()) qs.set("q", q.trim());
+      if (addedToday) qs.set("addedToday", "1");
+      if (!addedToday && fromDate) qs.set("fromDate", fromDate);
+      if (!addedToday && toDate) qs.set("toDate", toDate);
+      if (statusFilter !== "ANY") qs.set("status", statusFilter);
       const res = await fetch(`/api/leads?${qs.toString()}`);
       if (cancelled) return;
       if (!res.ok) {
@@ -204,7 +215,7 @@ export function LeadsBulkPanel({
       cancelled = true;
       clearTimeout(t);
     };
-  }, [q, campaignId, refreshNonce]);
+  }, [q, campaignId, refreshNonce, addedToday, fromDate, toDate, statusFilter]);
 
   useEffect(() => {
     if (!campaignId) return;
@@ -315,6 +326,69 @@ export function LeadsBulkPanel({
           </button>
         </div>
       </div>
+      {showFilters && (
+        <div className="flex flex-col gap-2 rounded-md border border-stone-200 bg-stone-50/70 p-3 sm:flex-row sm:flex-wrap sm:items-end">
+          <label className="inline-flex items-center gap-2 text-xs text-stone-700">
+            <input
+              type="checkbox"
+              checked={addedToday}
+              onChange={(e) => setAddedToday(e.target.checked)}
+              className="rounded border-stone-300"
+            />
+            Tilføjet i dag
+          </label>
+          <label className="text-xs text-stone-700">
+            Fra dato
+            <input
+              type="date"
+              value={fromDate}
+              onChange={(e) => setFromDate(e.target.value)}
+              disabled={addedToday}
+              className="mt-1 block rounded-md border border-stone-200 bg-white px-2 py-1.5 text-xs text-stone-900 disabled:opacity-60"
+            />
+          </label>
+          <label className="text-xs text-stone-700">
+            Til dato
+            <input
+              type="date"
+              value={toDate}
+              onChange={(e) => setToDate(e.target.value)}
+              disabled={addedToday}
+              className="mt-1 block rounded-md border border-stone-200 bg-white px-2 py-1.5 text-xs text-stone-900 disabled:opacity-60"
+            />
+          </label>
+          <label className="text-xs text-stone-700">
+            Udfald/status
+            <select
+              value={statusFilter}
+              onChange={(e) =>
+                setStatusFilter((e.target.value as LeadStatus | "ANY" | "NO_OUTCOME") ?? "ANY")
+              }
+              className="mt-1 block rounded-md border border-stone-200 bg-white px-2 py-1.5 text-xs text-stone-900"
+            >
+              <option value="ANY">Alle</option>
+              <option value="NO_OUTCOME">Uden udfald</option>
+              {LEAD_STATUSES.map((s) => (
+                <option key={s} value={s}>
+                  {LEAD_STATUS_LABELS[s]}
+                </option>
+              ))}
+            </select>
+          </label>
+          <button
+            type="button"
+            onClick={() => {
+              setAddedToday(false);
+              setFromDate("");
+              setToDate("");
+              setStatusFilter("ANY");
+            }}
+            className="rounded-md border border-stone-200 bg-white px-3 py-1.5 text-xs font-medium text-stone-700 hover:bg-stone-50"
+          >
+            Nulstil filtre
+          </button>
+        </div>
+      )}
 
       {error && <p className="text-sm text-red-600">{error}</p>}
 

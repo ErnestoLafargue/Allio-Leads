@@ -34,7 +34,7 @@ export type CampaignFieldConfig = {
 export const FIXED_PERSON_EXTENSION_FIELDS: CampaignExtraField[] = [
   { key: "stifter", label: "Stifter" },
   { key: "direktor", label: "Direktør" },
-  { key: "fuldt_ansvarlig_person", label: "Fuldt ansvarlig person" },
+  { key: "fuldt_ansvarlig_person", label: "Fuldt ansvarlig deltager" },
 ];
 
 /** Altid under CVR i alle kampagner (nøgler bruges i import + reklame-filter). */
@@ -47,6 +47,12 @@ const DEFAULT_CVR_KEYS = new Set(DEFAULT_CVR_EXTENSION_FIELDS.map((f) => f.key))
 
 export function isFixedCvrExtensionKey(key: string): boolean {
   return DEFAULT_CVR_KEYS.has(key.trim());
+}
+
+const FIXED_PERSON_KEYS = new Set(FIXED_PERSON_EXTENSION_FIELDS.map((f) => f.key));
+
+export function isFixedPersonExtensionKey(key: string): boolean {
+  return FIXED_PERSON_KEYS.has(key.trim());
 }
 
 export function mergeDefaultExtensions(cfg: CampaignFieldConfig): CampaignFieldConfig {

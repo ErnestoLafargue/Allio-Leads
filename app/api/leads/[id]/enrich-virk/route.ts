@@ -40,16 +40,33 @@ export async function POST(req: Request, { params }: Params) {
   const body = await req.json().catch(() => null);
   const cvrFromField = typeof body?.cvr === "string" ? body.cvr : "";
   const cvr = normalizeCVR(cvrFromField);
-  if (!cvr) return NextResponse.json({ error: "Gyldigt CVR-nummer mangler" }, { status: 400 });
+  if (!cvr) {
+    if (process.env.NODE_ENV !== "production") {
+      console.warn(`[VIRK] enrich ${id}: missing_or_invalid_cvr`, { cvrFromField });
+    }
+    return NextResponse.json({ error: "Gyldigt CVR-nummer mangler" }, { status: 400 });
+  }
 
   let virkPayload: unknown;
   try {
     virkPayload = await fetchVirkCompanyByCvr(cvr);
-  } catch {
+  } catch (e) {
+    if (process.env.NODE_ENV !== "production") {
+      const msg = e instanceof Error ? e.message : String(e);
+      console.error(`[VIRK] enrich ${id}: request_failed`, { cvr, msg });
+    }
     return NextResponse.json({ error: "Kunne ikke hente oplysninger fra VIRK" }, { status: 502 });
   }
 
   const mapped = mapVirkParticipantsToLeadFields(virkPayload);
+  if (process.env.NODE_ENV !== "production") {
+    console.info(`[VIRK] enrich ${id}: mapped`, {
+      cvr,
+      hasStifter: Boolean(mapped.stifter),
+      hasDirektor: Boolean(mapped.direktor),
+      hasFuldtAnsvarligPerson: Boolean(mapped.fuldtAnsvarligPerson),
+    });
+  }
 
   const custom = parseCustomFields(lead.customFields);
   const updates: Record<string, string> = {};
@@ -72,6 +89,9 @@ export async function POST(req: Request, { params }: Params) {
   }
 
   if (Object.keys(updates).length === 0) {
+    if (process.env.NODE_ENV !== "production") {
+      console.info(`[VIRK] enrich ${id}: no_updates`, { cvr, missingFieldKeys });
+    }
     return NextResponse.json({
       ok: true,
       updatedFields: {},

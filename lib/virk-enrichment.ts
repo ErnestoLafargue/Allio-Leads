@@ -160,7 +160,9 @@ export async function fetchVirkCompanyByCvr(rawCvr: string): Promise<unknown> {
   const cvr = normalizeCVR(rawCvr);
   if (!cvr) throw new Error("CVR-nummer mangler eller er ugyldigt");
 
-  const auth = process.env.VIRK_API_BASIC_AUTH?.trim() || process.env.VIRK_BASIC_AUTH?.trim();
+  let auth = process.env.VIRK_API_BASIC_AUTH?.trim() || process.env.VIRK_BASIC_AUTH?.trim();
+  if (!auth) throw new Error("VIRK API credentials mangler i server-miljø");
+  auth = auth.replace(/^Basic\s+/i, "").trim();
   if (!auth) throw new Error("VIRK API credentials mangler i server-miljø");
 
   const controller = new AbortController();
@@ -186,7 +188,17 @@ export async function fetchVirkCompanyByCvr(rawCvr: string): Promise<unknown> {
     if (!res.ok) {
       throw new Error(`VIRK request fejlede (${res.status})`);
     }
-    return await res.json();
+    const json = await res.json();
+    if (process.env.NODE_ENV !== "production") {
+      const hits = Number(
+        (json as { hits?: { total?: { value?: number } | number } })?.hits?.total &&
+          typeof (json as { hits?: { total?: { value?: number } | number } }).hits?.total === "object"
+          ? ((json as { hits?: { total?: { value?: number } } }).hits?.total?.value ?? 0)
+          : ((json as { hits?: { total?: number } }).hits?.total ?? 0),
+      );
+      console.info(`[VIRK] lookup ok for CVR ${cvr}. hits=${hits}`);
+    }
+    return json;
   } finally {
     clearTimeout(timer);
   }
