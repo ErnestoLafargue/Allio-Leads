@@ -39,6 +39,11 @@ export type LeadKundeNoterBookingProps = {
   onIndustry: (v: string) => void;
   custom: Record<string, string>;
   onCustom: (key: string, value: string) => void;
+  onVirkEnrich?: () => void;
+  virkEnrichLoading?: boolean;
+  virkEnrichFeedback?: string | null;
+  virkNoDataFieldKeys?: string[];
+  virkNoDataToken?: number;
   notes: string;
   onNotesChange: (v: string) => void;
   meetingContact: MeetingContactProps;
@@ -73,6 +78,11 @@ export function LeadKundeNoterBooking({
   onIndustry,
   custom,
   onCustom,
+  onVirkEnrich,
+  virkEnrichLoading,
+  virkEnrichFeedback,
+  virkNoDataFieldKeys,
+  virkNoDataToken,
   notes,
   onNotesChange,
   meetingContact,
@@ -125,6 +135,11 @@ export function LeadKundeNoterBooking({
               onIndustry={onIndustry}
               custom={custom}
               onCustom={onCustom}
+              onVirkEnrich={onVirkEnrich}
+              virkEnrichLoading={virkEnrichLoading}
+              virkEnrichFeedback={virkEnrichFeedback}
+              virkNoDataFieldKeys={virkNoDataFieldKeys}
+              virkNoDataToken={virkNoDataToken}
             />
           </div>
         </div>

@@ -31,6 +31,12 @@ export type CampaignFieldConfig = {
   extensions: Partial<Record<FieldGroupKey, CampaignExtraField[]>>;
 };
 
+export const FIXED_PERSON_EXTENSION_FIELDS: CampaignExtraField[] = [
+  { key: "stifter", label: "Stifter" },
+  { key: "direktor", label: "Direktør" },
+  { key: "fuldt_ansvarlig_person", label: "Fuldt ansvarlig person" },
+];
+
 /** Altid under CVR i alle kampagner (nøgler bruges i import + reklame-filter). */
 export const DEFAULT_CVR_EXTENSION_FIELDS: CampaignExtraField[] = [
   { key: "reklamebeskyttet", label: "Reklamebeskyttet" },
@@ -46,6 +52,16 @@ export function isFixedCvrExtensionKey(key: string): boolean {
 export function mergeDefaultExtensions(cfg: CampaignFieldConfig): CampaignFieldConfig {
   const extensions: CampaignFieldConfig["extensions"] = {};
   for (const g of FIELD_GROUPS) {
+    if (g === "companyName") {
+      const existing = cfg.extensions.companyName ?? [];
+      const fixedKeys = new Set(FIXED_PERSON_EXTENSION_FIELDS.map((f) => f.key));
+      const merged: CampaignExtraField[] = [...FIXED_PERSON_EXTENSION_FIELDS];
+      for (const f of existing) {
+        if (!fixedKeys.has(f.key)) merged.push(f);
+      }
+      extensions.companyName = merged;
+      continue;
+    }
     if (g === "cvr") {
       const existing = cfg.extensions.cvr ?? [];
       const merged: CampaignExtraField[] = [...DEFAULT_CVR_EXTENSION_FIELDS];
@@ -92,6 +108,43 @@ export function parseFieldConfig(raw: string | null | undefined): CampaignFieldC
     }
   })();
   return mergeDefaultExtensions(base);
+}
+
+function normalizeLabel(label: string): string {
+  return label
+    .trim()
+    .toLowerCase()
+    .normalize("NFD")
+    .replace(/\p{M}/gu, "")
+    .replace(/[øØ]/g, "o")
+    .replace(/[æÆ]/g, "ae")
+    .replace(/[åÅ]/g, "aa");
+}
+
+export function resolveFixedPersonFieldKeys(cfg: CampaignFieldConfig): Record<"stifter" | "direktor" | "fuldtAnsvarligPerson", string> {
+  const out = {
+    stifter: "stifter",
+    direktor: "direktor",
+    fuldtAnsvarligPerson: "fuldt_ansvarlig_person",
+  };
+
+  for (const g of FIELD_GROUPS) {
+    for (const f of cfg.extensions[g] ?? []) {
+      const keyNorm = normalizeLabel(f.key);
+      const labelNorm = normalizeLabel(f.label);
+      if (keyNorm === "stifter" || labelNorm.includes("stifter")) out.stifter = f.key;
+      if (keyNorm === "direktor" || labelNorm.includes("direktor")) out.direktor = f.key;
+      if (
+        keyNorm.includes("fuldt_ansvarlig") ||
+        labelNorm.includes("fuldt ansvarlig") ||
+        /\bfad\b/.test(labelNorm)
+      ) {
+        out.fuldtAnsvarligPerson = f.key;
+      }
+    }
+  }
+
+  return out;
 }
 
 export function serializeFieldConfig(cfg: CampaignFieldConfig): string {

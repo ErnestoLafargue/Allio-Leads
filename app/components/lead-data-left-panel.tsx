@@ -1,7 +1,9 @@
 "use client";
 
+import { useEffect, useRef, useState } from "react";
 import { FIELD_GROUP_LABELS, parseFieldConfig, type FieldGroupKey } from "@/lib/campaign-fields";
 import { ExternalSearchButton } from "@/app/components/external-search-button";
+import { isKrakPersonFieldLabel } from "@/lib/external-search-urls";
 
 type Props = {
   fieldConfigJson: string;
@@ -23,6 +25,11 @@ type Props = {
   onIndustry: (v: string) => void;
   custom: Record<string, string>;
   onCustom: (key: string, value: string) => void;
+  onVirkEnrich?: () => void;
+  virkEnrichLoading?: boolean;
+  virkEnrichFeedback?: string | null;
+  virkNoDataFieldKeys?: string[];
+  virkNoDataToken?: number;
 };
 
 const inputCls =
@@ -50,8 +57,43 @@ export function LeadDataLeftPanel({
   onIndustry,
   custom,
   onCustom,
+  onVirkEnrich,
+  virkEnrichLoading = false,
+  virkEnrichFeedback = null,
+  virkNoDataFieldKeys = [],
+  virkNoDataToken = 0,
 }: Props) {
   const cfg = parseFieldConfig(fieldConfigJson);
+  const [noDataPhase, setNoDataPhase] = useState<Record<string, "show" | "fade">>({});
+  const timersRef = useRef<number[]>([]);
+
+  useEffect(() => {
+    for (const t of timersRef.current) window.clearTimeout(t);
+    timersRef.current = [];
+    if (!virkNoDataFieldKeys.length) {
+      setNoDataPhase({});
+      return;
+    }
+
+    const phase: Record<string, "show" | "fade"> = {};
+    for (const key of virkNoDataFieldKeys) phase[key] = "show";
+    setNoDataPhase(phase);
+
+    const fadeTimer = window.setTimeout(() => {
+      setNoDataPhase((prev) => {
+        const next: Record<string, "show" | "fade"> = {};
+        for (const key of Object.keys(prev)) next[key] = "fade";
+        return next;
+      });
+    }, 4000);
+    const clearTimer = window.setTimeout(() => setNoDataPhase({}), 4600);
+    timersRef.current.push(fadeTimer, clearTimer);
+
+    return () => {
+      for (const t of timersRef.current) window.clearTimeout(t);
+      timersRef.current = [];
+    };
+  }, [virkNoDataToken, virkNoDataFieldKeys]);
 
   const baseSetters: Record<FieldGroupKey, (v: string) => void> = {
     companyName: onCompanyName,
@@ -107,38 +149,59 @@ export function LeadDataLeftPanel({
                   required={g === "companyName"}
                 />
                 {g === "companyName" ? (
-                  <>
+                  <div className="flex shrink-0 flex-col items-end gap-1">
                     <ExternalSearchButton
                       type="google"
                       value={baseValues.companyName}
                       visible={baseValues.companyName.trim().length > 0}
                       tooltip="Søg på Google"
                     />
-                    <ExternalSearchButton
-                      type="krak"
-                      value={baseValues.companyName}
-                      visible={baseValues.companyName.trim().length > 0}
-                      tooltip="Søg på Krak"
-                    />
-                  </>
+                    {onVirkEnrich ? (
+                      <button
+                        type="button"
+                        onClick={onVirkEnrich}
+                        disabled={virkEnrichLoading}
+                        className="rounded-md border border-stone-300 bg-white px-2 py-1 text-[11px] font-medium text-stone-700 hover:bg-stone-50 disabled:cursor-not-allowed disabled:opacity-60"
+                      >
+                        {virkEnrichLoading ? "Beriger…" : "Berig"}
+                      </button>
+                    ) : null}
+                  </div>
                 ) : null}
               </div>
+              {g === "companyName" && virkEnrichFeedback ? (
+                <p className="mt-1 text-xs text-stone-600" role="status">
+                  {virkEnrichFeedback}
+                </p>
+              ) : null}
             </div>
             {(cfg.extensions[g] ?? []).map((f) => {
               if (usedCustomKeys.has(f.key)) return null;
               usedCustomKeys.add(f.key);
               const extVal = custom[f.key] ?? "";
-              const showKrak = extVal.trim().length > 0;
+              const showKrak = isKrakPersonFieldLabel(f.label) && extVal.trim().length > 0;
+              const noData = !extVal.trim() && noDataPhase[f.key];
               return (
                 <div key={f.key}>
                   <label className="mb-1 block text-xs font-medium text-stone-600">{f.label}</label>
-                  <div className="flex items-center gap-2">
-                    <input
-                      className={`${inputCls} min-w-0 flex-1`}
-                      value={extVal}
-                      onChange={(e) => onCustom(f.key, e.target.value)}
-                      placeholder={f.label}
-                    />
+                  <div className="relative flex items-center gap-2">
+                    <div className="relative min-w-0 flex-1">
+                      <input
+                        className={`${inputCls} min-w-0 flex-1`}
+                        value={extVal}
+                        onChange={(e) => onCustom(f.key, e.target.value)}
+                        placeholder={f.label}
+                      />
+                      {noData ? (
+                        <span
+                          className={`pointer-events-none absolute inset-y-0 left-3 flex items-center text-sm text-stone-400 transition-opacity duration-500 ${
+                            noData === "fade" ? "opacity-0" : "opacity-100"
+                          }`}
+                        >
+                          - INTET AT HENTE -
+                        </span>
+                      ) : null}
+                    </div>
                     <ExternalSearchButton
                       type="krak"
                       value={extVal}
@@ -199,17 +262,29 @@ export function LeadDataLeftPanel({
             if (usedCustomKeys.has(f.key)) return null;
             usedCustomKeys.add(f.key);
             const extVal = custom[f.key] ?? "";
-            const showKrak = extVal.trim().length > 0;
+            const showKrak = isKrakPersonFieldLabel(f.label) && extVal.trim().length > 0;
+            const noData = !extVal.trim() && noDataPhase[f.key];
             return (
               <div key={f.key}>
                 <label className="mb-1 block text-xs font-medium text-stone-600">{f.label}</label>
-                <div className="flex items-center gap-2">
-                  <input
-                    className={`${inputCls} min-w-0 flex-1`}
-                    value={extVal}
-                    onChange={(e) => onCustom(f.key, e.target.value)}
-                    placeholder={f.label}
-                  />
+                <div className="relative flex items-center gap-2">
+                  <div className="relative min-w-0 flex-1">
+                    <input
+                      className={`${inputCls} min-w-0 flex-1`}
+                      value={extVal}
+                      onChange={(e) => onCustom(f.key, e.target.value)}
+                      placeholder={f.label}
+                    />
+                    {noData ? (
+                      <span
+                        className={`pointer-events-none absolute inset-y-0 left-3 flex items-center text-sm text-stone-400 transition-opacity duration-500 ${
+                          noData === "fade" ? "opacity-0" : "opacity-100"
+                        }`}
+                      >
+                        - INTET AT HENTE -
+                      </span>
+                    ) : null}
+                  </div>
                   <ExternalSearchButton
                     type="krak"
                     value={extVal}
@@ -250,17 +325,29 @@ export function LeadDataLeftPanel({
             if (usedCustomKeys.has(f.key)) return null;
             usedCustomKeys.add(f.key);
             const extVal = custom[f.key] ?? "";
-            const showKrak = extVal.trim().length > 0;
+            const showKrak = isKrakPersonFieldLabel(f.label) && extVal.trim().length > 0;
+            const noData = !extVal.trim() && noDataPhase[f.key];
             return (
               <div key={f.key}>
                 <label className="mb-1 block text-xs font-medium text-stone-600">{f.label}</label>
-                <div className="flex items-center gap-2">
-                  <input
-                    className={`${inputCls} min-w-0 flex-1`}
-                    value={extVal}
-                    onChange={(e) => onCustom(f.key, e.target.value)}
-                    placeholder={f.label}
-                  />
+                <div className="relative flex items-center gap-2">
+                  <div className="relative min-w-0 flex-1">
+                    <input
+                      className={`${inputCls} min-w-0 flex-1`}
+                      value={extVal}
+                      onChange={(e) => onCustom(f.key, e.target.value)}
+                      placeholder={f.label}
+                    />
+                    {noData ? (
+                      <span
+                        className={`pointer-events-none absolute inset-y-0 left-3 flex items-center text-sm text-stone-400 transition-opacity duration-500 ${
+                          noData === "fade" ? "opacity-0" : "opacity-100"
+                        }`}
+                      >
+                        - INTET AT HENTE -
+                      </span>
+                    ) : null}
+                  </div>
                   <ExternalSearchButton
                     type="krak"
                     value={extVal}
@@ -288,17 +375,29 @@ export function LeadDataLeftPanel({
             if (usedCustomKeys.has(f.key)) return null;
             usedCustomKeys.add(f.key);
             const extVal = custom[f.key] ?? "";
-            const showKrak = extVal.trim().length > 0;
+            const showKrak = isKrakPersonFieldLabel(f.label) && extVal.trim().length > 0;
+            const noData = !extVal.trim() && noDataPhase[f.key];
             return (
               <div key={f.key}>
                 <label className="mb-1 block text-xs font-medium text-stone-600">{f.label}</label>
-                <div className="flex items-center gap-2">
-                  <input
-                    className={`${inputCls} min-w-0 flex-1`}
-                    value={extVal}
-                    onChange={(e) => onCustom(f.key, e.target.value)}
-                    placeholder={f.label}
-                  />
+                <div className="relative flex items-center gap-2">
+                  <div className="relative min-w-0 flex-1">
+                    <input
+                      className={`${inputCls} min-w-0 flex-1`}
+                      value={extVal}
+                      onChange={(e) => onCustom(f.key, e.target.value)}
+                      placeholder={f.label}
+                    />
+                    {noData ? (
+                      <span
+                        className={`pointer-events-none absolute inset-y-0 left-3 flex items-center text-sm text-stone-400 transition-opacity duration-500 ${
+                          noData === "fade" ? "opacity-0" : "opacity-100"
+                        }`}
+                      >
+                        - INTET AT HENTE -
+                      </span>
+                    ) : null}
+                  </div>
                   <ExternalSearchButton
                     type="krak"
                     value={extVal}

@@ -26,6 +26,7 @@ Vercel kører **serverless** — der findes ingen vedvarende disk til `dev.db` (
 | `DATABASE_URL` | Din Neon connection string |
 | `AUTH_SECRET` | Lang tilfældig streng (`openssl rand -base64 32`) |
 | `AUTH_URL` | Din offentlige URL, fx `https://dit-projekt.vercel.app` |
+| `VIRK_API_BASIC_AUTH` | Base64 Basic Auth værdi til VIRK API (uden `Basic ` prefix) |
 | `SEED_ADMIN_PASSWORD` | Kun til **første** seed lokalt eller via engangs-script (valgfri på Vercel) |
 
 4. Deploy. Build kører `prisma migrate deploy` og opretter tabeller i Neon.

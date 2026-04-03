@@ -91,6 +91,10 @@ function LeadDetailInner() {
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [queue, setQueue] = useState<QueueInfo | null>(null);
+  const [virkEnrichLoading, setVirkEnrichLoading] = useState(false);
+  const [virkEnrichFeedback, setVirkEnrichFeedback] = useState<string | null>(null);
+  const [virkNoDataFieldKeys, setVirkNoDataFieldKeys] = useState<string[]>([]);
+  const [virkNoDataToken, setVirkNoDataToken] = useState(0);
 
   const leadWorkspaceRef = useRef<HTMLDivElement>(null);
   const [deletingLead, setDeletingLead] = useState(false);
@@ -467,6 +471,40 @@ function LeadDetailInner() {
     router.refresh();
   }
 
+  async function onVirkEnrich() {
+    if (!lead) return;
+    setVirkEnrichFeedback(null);
+    setError(null);
+    setVirkEnrichLoading(true);
+    const res = await fetch(`/api/leads/${lead.id}/enrich-virk`, { method: "POST" });
+    setVirkEnrichLoading(false);
+    const payload = (await res.json().catch(() => ({}))) as {
+      error?: string;
+      message?: string;
+      lead?: Lead;
+      missingFieldKeys?: string[];
+    };
+    if (!res.ok) {
+      const msg =
+        typeof payload.error === "string" && payload.error.trim()
+          ? payload.error
+          : "Kunne ikke hente oplysninger fra VIRK";
+      setVirkEnrichFeedback(msg);
+      setVirkNoDataFieldKeys([]);
+      return;
+    }
+    if (payload.lead) {
+      setLead(payload.lead);
+      setCustom(parseCustomFields(payload.lead.customFields));
+    }
+    const missing = Array.isArray(payload.missingFieldKeys)
+      ? payload.missingFieldKeys.filter((v): v is string => typeof v === "string" && v.trim().length > 0)
+      : [];
+    setVirkNoDataFieldKeys(missing);
+    setVirkNoDataToken((n) => n + 1);
+    setVirkEnrichFeedback(payload.message ?? "Berigelse gennemført");
+  }
+
   const nextLeadId =
     queue && queue.position < queue.ids.length ? queue.ids[queue.position] : null;
   const prevLeadId = queue && queue.position > 1 ? queue.ids[queue.position - 2] : null;
@@ -606,7 +644,7 @@ function LeadDetailInner() {
                   type="button"
                   disabled={saving || (editLockBlocked && !isAdmin) || !myUserId}
                   onClick={openCallbackDialog}
-                  className="min-w-[8rem] appearance-none rounded-xl border-2 border-solid border-violet-600 bg-violet-100 px-4 py-3 text-sm font-semibold text-violet-950 shadow-sm transition hover:bg-violet-200 disabled:opacity-60"
+                  className="min-w-[8rem] appearance-none rounded-xl border-2 border-stone-200 bg-white px-4 py-3 text-sm font-semibold text-stone-600 shadow-sm transition hover:border-stone-300 hover:bg-stone-50 disabled:opacity-60"
                 >
                   Tilbagekald
                 </button>
@@ -692,6 +730,11 @@ function LeadDetailInner() {
                 allowMeetingConfirm: status === "MEETING_BOOKED",
                 onConfirmBooking: (d) => void onConfirmBookingFromPanel(d),
               }}
+              onVirkEnrich={() => void onVirkEnrich()}
+              virkEnrichLoading={virkEnrichLoading}
+              virkEnrichFeedback={virkEnrichFeedback}
+              virkNoDataFieldKeys={virkNoDataFieldKeys}
+              virkNoDataToken={virkNoDataToken}
             />
           </div>
 

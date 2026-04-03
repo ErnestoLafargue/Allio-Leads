@@ -105,6 +105,10 @@ export function CampaignWorkspace({ campaignId }: Props) {
   }>({});
   const [callbackDialogOpen, setCallbackDialogOpen] = useState(false);
   const [callbackSubmitError, setCallbackSubmitError] = useState<string | null>(null);
+  const [virkEnrichLoading, setVirkEnrichLoading] = useState(false);
+  const [virkEnrichFeedback, setVirkEnrichFeedback] = useState<string | null>(null);
+  const [virkNoDataFieldKeys, setVirkNoDataFieldKeys] = useState<string[]>([]);
+  const [virkNoDataToken, setVirkNoDataToken] = useState(0);
 
   useEffect(() => {
     activeLeadRef.current = activeLead;
@@ -514,6 +518,40 @@ export function CampaignWorkspace({ campaignId }: Props) {
     await onNext(detail.localDateTimeISO);
   }
 
+  async function onVirkEnrich() {
+    if (!activeLead) return;
+    setVirkEnrichFeedback(null);
+    setError(null);
+    setVirkEnrichLoading(true);
+    const res = await fetch(`/api/leads/${activeLead.id}/enrich-virk`, { method: "POST" });
+    setVirkEnrichLoading(false);
+    const payload = (await res.json().catch(() => ({}))) as {
+      error?: string;
+      message?: string;
+      lead?: Lead;
+      missingFieldKeys?: string[];
+    };
+    if (!res.ok) {
+      const msg =
+        typeof payload.error === "string" && payload.error.trim()
+          ? payload.error
+          : "Kunne ikke hente oplysninger fra VIRK";
+      setVirkEnrichFeedback(msg);
+      setVirkNoDataFieldKeys([]);
+      return;
+    }
+    if (payload.lead) {
+      setActiveLead(payload.lead);
+      setCustom(parseCustomFields(payload.lead.customFields));
+    }
+    const missing = Array.isArray(payload.missingFieldKeys)
+      ? payload.missingFieldKeys.filter((v): v is string => typeof v === "string" && v.trim().length > 0)
+      : [];
+    setVirkNoDataFieldKeys(missing);
+    setVirkNoDataToken((n) => n + 1);
+    setVirkEnrichFeedback(payload.message ?? "Berigelse gennemført");
+  }
+
   if (loading) {
     return <div className="py-12 text-center text-stone-500">Henter kampagne og reserverer lead…</div>;
   }
@@ -678,7 +716,7 @@ export function CampaignWorkspace({ campaignId }: Props) {
               type="button"
               disabled={saving || !sessionUserId}
               onClick={openCallbackDialog}
-              className="min-w-[8rem] appearance-none rounded-xl border-2 border-solid border-violet-600 bg-violet-100 px-4 py-3 text-sm font-semibold text-violet-950 shadow-sm transition hover:bg-violet-200 disabled:opacity-60"
+              className="min-w-[8rem] appearance-none rounded-xl border-2 border-stone-200 bg-white px-4 py-3 text-sm font-semibold text-stone-600 shadow-sm transition hover:border-stone-300 hover:bg-stone-50 disabled:opacity-60"
             >
               Tilbagekald
             </button>
@@ -759,6 +797,11 @@ export function CampaignWorkspace({ campaignId }: Props) {
           allowMeetingConfirm: status === "MEETING_BOOKED",
           onConfirmBooking: onConfirmBookingFromPanel,
         }}
+        onVirkEnrich={() => void onVirkEnrich()}
+        virkEnrichLoading={virkEnrichLoading}
+        virkEnrichFeedback={virkEnrichFeedback}
+        virkNoDataFieldKeys={virkNoDataFieldKeys}
+        virkNoDataToken={virkNoDataToken}
         bottomBar={renderNextButton()}
       />
 
