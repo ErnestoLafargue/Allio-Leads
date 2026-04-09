@@ -69,6 +69,12 @@ function formatAddressLine(l: Pick<LeadRow, "address" | "postalCode" | "city">) 
   return parts.join(", ");
 }
 
+function formatDateCell(isoLike: string): string {
+  const t = new Date(isoLike).getTime();
+  if (!Number.isFinite(t)) return isoLike;
+  return new Date(t).toLocaleString("da-DK");
+}
+
 type SortColumn = "company" | "phone" | "address" | "status" | "imported";
 
 function compareLeads(a: LeadRow, b: LeadRow, key: SortColumn, dir: "asc" | "desc"): number {
@@ -385,7 +391,24 @@ export function LeadsBulkPanel({
 
     if (!sortKey) return out;
     return [...out].sort((a, b) => compareLeads(a, b, sortKey, sortDir));
-  }, [leads, sortKey, sortDir, selectedDynamicField, dynamicSortDir, dynamicFromDate, dynamicToDate]);
+  }, [leads, sortKey, sortDir, selectedDynamicField, dynamicSortDir, dynamicFromDate, dynamicToDate, dynamicDateInvert]);
+
+  const middleColumnLabel = selectedDynamicField?.label ?? "Adresse";
+  const middleColumnValue = (l: LeadRow): string => {
+    if (!selectedDynamicField) return formatAddressLine(l);
+    const getDynamicValue = (row: LeadRow, fieldId: string): string => {
+      if (fieldId.startsWith("custom:")) {
+        const key = fieldId.slice("custom:".length);
+        return parseCustomFields(row.customFields ?? "")[key] ?? "";
+      }
+      const v = (row as Record<string, unknown>)[fieldId];
+      return typeof v === "string" ? v : v == null ? "" : String(v);
+    };
+    const raw = getDynamicValue(l, selectedDynamicField.id);
+    if (!raw) return "—";
+    if (selectedDynamicField.kind === "date") return formatDateCell(raw);
+    return raw;
+  };
 
   function onSortColumnClick(column: SortColumn) {
     if (sortKey === column) {
@@ -664,11 +687,16 @@ export function LeadsBulkPanel({
               <th className="hidden px-2 py-3 font-medium md:table-cell">
                 <button
                   type="button"
-                  onClick={() => onSortColumnClick("address")}
+                  onClick={() => {
+                    if (selectedDynamicField) return;
+                    onSortColumnClick("address");
+                  }}
                   className="-mx-1 flex w-full items-center gap-0.5 rounded px-1 text-left font-medium text-stone-700 hover:bg-stone-200/80 hover:text-stone-900"
                 >
-                  Adresse
-                  {sortKey === "address" && <span aria-hidden>{sortDir === "asc" ? "↑" : "↓"}</span>}
+                  {middleColumnLabel}
+                  {!selectedDynamicField && sortKey === "address" && (
+                    <span aria-hidden>{sortDir === "asc" ? "↑" : "↓"}</span>
+                  )}
                 </button>
               </th>
               <th className="px-2 py-3 font-medium">
@@ -756,7 +784,7 @@ export function LeadsBulkPanel({
                     {l.phone?.trim() ? l.phone : <span className="text-stone-400">—</span>}
                   </td>
                   <td className="hidden max-w-xs truncate px-2 py-3 text-stone-600 md:table-cell">
-                    {formatAddressLine(l)}
+                    {middleColumnValue(l)}
                   </td>
                   <td
                     className={
