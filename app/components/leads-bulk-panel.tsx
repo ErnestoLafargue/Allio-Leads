@@ -6,25 +6,35 @@ import { useSession } from "next-auth/react";
 import { LEAD_STATUSES, LEAD_STATUS_LABELS, type LeadStatus } from "@/lib/lead-status";
 import { LeadOutcomeModal } from "@/app/components/lead-outcome-modal";
 import { isLockActive } from "@/lib/lead-lock";
+import { parseCustomFields } from "@/lib/custom-fields";
+import { parseFieldConfig, FIELD_GROUPS, FIELD_GROUP_LABELS } from "@/lib/campaign-fields";
 
 type LeadRow = {
   id: string;
   companyName: string;
   phone: string;
+  email?: string;
+  cvr?: string;
   address: string;
   postalCode: string;
   city: string;
+  industry?: string;
+  notes?: string;
   status: string;
   importedAt: string;
   lastOutcomeAt?: string | null;
   /** Fra API (til udfalds-modal) */
   meetingScheduledFor?: string | null;
-  campaign?: { id: string; name: string };
+  customFields?: string;
+  campaign?: { id: string; name: string; fieldConfig?: string };
   lockedByUserId?: string | null;
   lockedAt?: string | null;
   lockExpiresAt?: string | null;
   lockedByUser?: { id: string; name: string; username: string } | null;
 };
+
+type DynamicFieldKind = "text" | "number" | "date";
+type DynamicSortField = { id: string; label: string; kind: DynamicFieldKind };
 
 function lockActive(l: Pick<LeadRow, "lockedByUserId" | "lockedAt" | "lockExpiresAt">): boolean {
   return isLockActive({
@@ -107,6 +117,31 @@ function defaultDirForColumn(key: SortColumn): "asc" | "desc" {
   return key === "imported" ? "desc" : "asc";
 }
 
+function dynamicDefaultDir(kind: DynamicFieldKind): "asc" | "desc" {
+  return kind === "date" ? "desc" : "asc";
+}
+
+function isNumericLike(v: string): boolean {
+  const digits = v.replace(/\D/g, "");
+  return digits.length > 0;
+}
+
+function toNumberLike(v: string): number {
+  const digits = v.replace(/\D/g, "");
+  if (!digits) return Number.NaN;
+  const n = Number(digits);
+  return Number.isFinite(n) ? n : Number.NaN;
+}
+
+function toDateLike(v: string): number {
+  const n = new Date(v).getTime();
+  return Number.isFinite(n) ? n : Number.NaN;
+}
+
+function normalizeText(v: string): string {
+  return v.trim().toLocaleLowerCase("da");
+}
+
 function sortSummary(key: SortColumn | null, dir: "asc" | "desc"): string {
   if (!key) {
     return "Standard: uden udfald først, derefter ældste udfald først (fra server). Klik på en titel for at sortere.";
@@ -172,6 +207,12 @@ export function LeadsBulkPanel({
   const [fromDate, setFromDate] = useState("");
   const [toDate, setToDate] = useState("");
   const [statusFilter, setStatusFilter] = useState<"ANY" | "NO_OUTCOME" | LeadStatus>("ANY");
+  const [dynamicSortFieldId, setDynamicSortFieldId] = useState("");
+  const [dynamicSortDir, setDynamicSortDir] = useState<"asc" | "desc">("asc");
+  const [dynamicFromDate, setDynamicFromDate] = useState("");
+  const [dynamicToDate, setDynamicToDate] = useState("");
+  const [dynamicDateInvert, setDynamicDateInvert] = useState(false);
+  const [campaignFieldConfigRaw, setCampaignFieldConfigRaw] = useState<string>("");
 
   useEffect(() => {
     setSelected(new Set());
@@ -222,15 +263,129 @@ export function LeadsBulkPanel({
   }, [q, campaignId, refreshNonce, addedToday, fromDate, toDate, statusFilter]);
 
   useEffect(() => {
+    if (!campaignId) {
+      setCampaignFieldConfigRaw("");
+      return;
+    }
+    let cancelled = false;
+    void (async () => {
+      const res = await fetch(`/api/campaigns/${campaignId}`);
+      if (!res.ok || cancelled) return;
+      const j = (await res.json().catch(() => ({}))) as { fieldConfig?: string };
+      if (!cancelled) {
+        setCampaignFieldConfigRaw(typeof j.fieldConfig === "string" ? j.fieldConfig : "");
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [campaignId]);
+
+  useEffect(() => {
     if (!campaignId) return;
     const t = window.setInterval(() => setRefreshNonce((n) => n + 1), 20_000);
     return () => clearInterval(t);
   }, [campaignId]);
 
+  const dynamicSortFields = useMemo((): DynamicSortField[] => {
+    const base: DynamicSortField[] = [
+      { id: "companyName", label: "Virksomhedsnavn", kind: "text" },
+      { id: "phone", label: "Telefonnummer", kind: "number" },
+      { id: "email", label: "E-mail", kind: "text" },
+      { id: "cvr", label: "CVR-nummer", kind: "number" },
+      { id: "address", label: "Adresse", kind: "text" },
+      { id: "postalCode", label: "Postnr.", kind: "number" },
+      { id: "city", label: "By", kind: "text" },
+      { id: "industry", label: "Branche", kind: "text" },
+      { id: "notes", label: "Noter", kind: "text" },
+      { id: "status", label: "Status", kind: "text" },
+      { id: "importedAt", label: "Tilføjet", kind: "date" },
+      { id: "lastOutcomeAt", label: "Sidst udfald ændret", kind: "date" },
+      { id: "meetingScheduledFor", label: "Mødetid", kind: "date" },
+    ];
+    if (!campaignId) return base;
+    const cfg = parseFieldConfig(campaignFieldConfigRaw);
+    const custom: DynamicSortField[] = [];
+    for (const g of FIELD_GROUPS) {
+      for (const f of cfg.extensions[g] ?? []) {
+        const raw = `${f.label} ${f.key}`.toLowerCase();
+        const kind: DynamicFieldKind =
+          raw.includes("dato") || raw.includes("date")
+            ? "date"
+            : raw.includes("telefon") || raw.includes("tlf") || raw.includes("cvr") || raw.includes("nummer")
+              ? "number"
+              : "text";
+        custom.push({ id: `custom:${f.key}`, label: `${FIELD_GROUP_LABELS[g]} → ${f.label}`, kind });
+      }
+    }
+    return [...base, ...custom];
+  }, [campaignId, campaignFieldConfigRaw]);
+
+  const selectedDynamicField = useMemo(
+    () => dynamicSortFields.find((f) => f.id === dynamicSortFieldId) ?? null,
+    [dynamicSortFields, dynamicSortFieldId],
+  );
+
   const sortedLeads = useMemo(() => {
-    if (!sortKey) return leads;
-    return [...leads].sort((a, b) => compareLeads(a, b, sortKey, sortDir));
-  }, [leads, sortKey, sortDir]);
+    const getDynamicValue = (l: LeadRow, fieldId: string): string => {
+      if (fieldId.startsWith("custom:")) {
+        const key = fieldId.slice("custom:".length);
+        return parseCustomFields(l.customFields ?? "")[key] ?? "";
+      }
+      const v = (l as Record<string, unknown>)[fieldId];
+      return typeof v === "string" ? v : v == null ? "" : String(v);
+    };
+
+    let out = leads;
+    if (selectedDynamicField && selectedDynamicField.kind === "date" && (dynamicFromDate || dynamicToDate)) {
+      out = out.filter((l) => {
+        const t = toDateLike(getDynamicValue(l, selectedDynamicField.id));
+        if (!Number.isFinite(t)) return dynamicDateInvert;
+        let inRange = true;
+        if (dynamicFromDate) {
+          const from = toDateLike(`${dynamicFromDate}T00:00:00`);
+          if (Number.isFinite(from) && t < from) inRange = false;
+        }
+        if (dynamicToDate) {
+          const to = toDateLike(`${dynamicToDate}T23:59:59.999`);
+          if (Number.isFinite(to) && t > to) inRange = false;
+        }
+        return dynamicDateInvert ? !inRange : inRange;
+      });
+    }
+
+    if (selectedDynamicField) {
+      const dirMul = dynamicSortDir === "asc" ? 1 : -1;
+      return [...out].sort((a, b) => {
+        const av = getDynamicValue(a, selectedDynamicField.id);
+        const bv = getDynamicValue(b, selectedDynamicField.id);
+        if (selectedDynamicField.kind === "date") {
+          const at = toDateLike(av);
+          const bt = toDateLike(bv);
+          const aHas = Number.isFinite(at);
+          const bHas = Number.isFinite(bt);
+          if (aHas !== bHas) return aHas ? -1 : 1;
+          if (aHas && bHas && at !== bt) return (at - bt) * dirMul;
+          return a.id.localeCompare(b.id);
+        }
+        if (selectedDynamicField.kind === "number" || (isNumericLike(av) && isNumericLike(bv))) {
+          const an = toNumberLike(av);
+          const bn = toNumberLike(bv);
+          const aHas = Number.isFinite(an);
+          const bHas = Number.isFinite(bn);
+          if (aHas !== bHas) return aHas ? -1 : 1;
+          if (aHas && bHas && an !== bn) return (an - bn) * dirMul;
+          return a.id.localeCompare(b.id);
+        }
+        const cmp = normalizeText(av).localeCompare(normalizeText(bv), "da", { sensitivity: "base" });
+        if (cmp !== 0) return cmp * dirMul;
+        return a.id.localeCompare(b.id);
+      });
+    }
+
+    if (!sortKey) return out;
+    return [...out].sort((a, b) => compareLeads(a, b, sortKey, sortDir));
+  }, [leads, sortKey, sortDir, selectedDynamicField, dynamicSortDir, dynamicFromDate, dynamicToDate]);
 
   function onSortColumnClick(column: SortColumn) {
     if (sortKey === column) {
@@ -385,6 +540,72 @@ export function LeadsBulkPanel({
               ))}
             </select>
           </label>
+          <label className="text-xs text-stone-700">
+            Sorter i filter
+            <select
+              value={dynamicSortFieldId}
+              onChange={(e) => {
+                const id = e.target.value;
+                setDynamicSortFieldId(id);
+                const field = dynamicSortFields.find((f) => f.id === id);
+                if (field) setDynamicSortDir(dynamicDefaultDir(field.kind));
+                setDynamicFromDate("");
+                setDynamicToDate("");
+                setDynamicDateInvert(false);
+              }}
+              className="mt-1 block min-w-[15rem] rounded-md border border-stone-200 bg-white px-2 py-1.5 text-xs text-stone-900"
+            >
+              <option value="">Ingen</option>
+              {dynamicSortFields.map((f) => (
+                <option key={f.id} value={f.id}>
+                  {f.label}
+                </option>
+              ))}
+            </select>
+          </label>
+          <label className="text-xs text-stone-700">
+            Retning
+            <select
+              value={dynamicSortDir}
+              onChange={(e) => setDynamicSortDir(e.target.value === "asc" ? "asc" : "desc")}
+              disabled={!selectedDynamicField}
+              className="mt-1 block rounded-md border border-stone-200 bg-white px-2 py-1.5 text-xs text-stone-900 disabled:opacity-60"
+            >
+              <option value="asc">Stigende</option>
+              <option value="desc">Faldende</option>
+            </select>
+          </label>
+          {selectedDynamicField?.kind === "date" && (
+            <>
+              <label className="text-xs text-stone-700">
+                Startdato fra
+                <input
+                  type="date"
+                  value={dynamicFromDate}
+                  onChange={(e) => setDynamicFromDate(e.target.value)}
+                  className="mt-1 block rounded-md border border-stone-200 bg-white px-2 py-1.5 text-xs text-stone-900"
+                />
+              </label>
+              <label className="text-xs text-stone-700">
+                Startdato til
+                <input
+                  type="date"
+                  value={dynamicToDate}
+                  onChange={(e) => setDynamicToDate(e.target.value)}
+                  className="mt-1 block rounded-md border border-stone-200 bg-white px-2 py-1.5 text-xs text-stone-900"
+                />
+              </label>
+              <label className="inline-flex items-center gap-2 text-xs text-stone-700">
+                <input
+                  type="checkbox"
+                  checked={dynamicDateInvert}
+                  onChange={(e) => setDynamicDateInvert(e.target.checked)}
+                  className="rounded border-stone-300"
+                />
+                Invertér interval (vis alle undtagen i spændet)
+              </label>
+            </>
+          )}
           <button
             type="button"
             onClick={() => {
@@ -392,6 +613,10 @@ export function LeadsBulkPanel({
               setFromDate("");
               setToDate("");
               setStatusFilter("ANY");
+              setDynamicSortFieldId("");
+              setDynamicFromDate("");
+              setDynamicToDate("");
+              setDynamicDateInvert(false);
             }}
             className="rounded-md border border-stone-200 bg-white px-3 py-1.5 text-xs font-medium text-stone-700 hover:bg-stone-50"
           >
