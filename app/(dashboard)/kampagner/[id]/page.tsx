@@ -385,7 +385,7 @@ export default function RedigerKampagnePage() {
           <div>
             <h2 className="text-sm font-semibold text-stone-900">Leads i denne kampagne</h2>
             <p className="mt-1 text-xs text-stone-500">
-              Vælg leads og slet dem efter behov. Listen er sorteret med senest tilføjet først.
+              Vælg leads og slet dem efter behov. Standard-sortering er uden udfald først, derefter ældste udfald først.
             </p>
           </div>
           <div className="flex flex-wrap items-center gap-2">

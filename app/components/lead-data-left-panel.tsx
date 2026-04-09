@@ -179,7 +179,8 @@ export function LeadDataLeftPanel({
               if (usedCustomKeys.has(f.key)) return null;
               usedCustomKeys.add(f.key);
               const extVal = custom[f.key] ?? "";
-              const showKrak = isKrakPersonFieldLabel(f.label) && extVal.trim().length > 0;
+              const showKrak =
+                g === "companyName" && isKrakPersonFieldLabel(f.label) && extVal.trim().length > 0;
               const noData = !extVal.trim() && noDataPhase[f.key];
               return (
                 <div key={f.key}>
@@ -262,7 +263,7 @@ export function LeadDataLeftPanel({
             if (usedCustomKeys.has(f.key)) return null;
             usedCustomKeys.add(f.key);
             const extVal = custom[f.key] ?? "";
-            const showKrak = isKrakPersonFieldLabel(f.label) && extVal.trim().length > 0;
+            const showKrak = false;
             const noData = !extVal.trim() && noDataPhase[f.key];
             return (
               <div key={f.key}>
@@ -325,7 +326,7 @@ export function LeadDataLeftPanel({
             if (usedCustomKeys.has(f.key)) return null;
             usedCustomKeys.add(f.key);
             const extVal = custom[f.key] ?? "";
-            const showKrak = isKrakPersonFieldLabel(f.label) && extVal.trim().length > 0;
+            const showKrak = false;
             const noData = !extVal.trim() && noDataPhase[f.key];
             return (
               <div key={f.key}>
@@ -375,7 +376,7 @@ export function LeadDataLeftPanel({
             if (usedCustomKeys.has(f.key)) return null;
             usedCustomKeys.add(f.key);
             const extVal = custom[f.key] ?? "";
-            const showKrak = isKrakPersonFieldLabel(f.label) && extVal.trim().length > 0;
+            const showKrak = false;
             const noData = !extVal.trim() && noDataPhase[f.key];
             return (
               <div key={f.key}>

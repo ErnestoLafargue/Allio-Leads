@@ -14,6 +14,10 @@ import { getMeetingBlockEndMs, intervalsOverlapExclusiveEnd } from "@/lib/bookin
 
 const MAX_BULK = 500;
 
+function isRealOutcomeStatus(status: string): boolean {
+  return status !== "NEW" && status !== "CALLBACK_SCHEDULED";
+}
+
 export async function POST(req: Request) {
   const { session, response } = await requireSession();
   if (response) return response;
@@ -87,6 +91,9 @@ export async function POST(req: Request) {
         );
       }
       const data: Prisma.LeadUncheckedUpdateInput = { ...built.data };
+      if (existing.status !== status && isRealOutcomeStatus(status)) {
+        data.lastOutcomeAt = new Date();
+      }
       if (status !== "NEW") {
         data.lockedByUserId = null;
         data.lockedAt = null;

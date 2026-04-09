@@ -1,7 +1,11 @@
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { requireSession } from "@/lib/api-auth";
-import { copenhagenDayBoundsUtc, copenhagenDayKey } from "@/lib/copenhagen-day";
+import {
+  copenhagenDayBoundsUtc,
+  copenhagenDayBoundsUtcFromDayKey,
+  copenhagenDayKey,
+} from "@/lib/copenhagen-day";
 import { leaderboardDeltasForOutcome } from "@/lib/lead-outcome-log";
 
 type PresentUser = {
@@ -72,15 +76,22 @@ async function mergePresentWithOutcomeUsers(
   return Array.from(map.values());
 }
 
-export async function GET() {
+export async function GET(req: Request) {
   const { response } = await requireSession();
   if (response) return response;
 
   try {
+    const searchParams = new URL(req.url).searchParams;
+    const requestedDayKey = searchParams.get("dayKey")?.trim() ?? "";
+    const dayKey =
+      /^\d{4}-\d{2}-\d{2}$/.test(requestedDayKey) ? requestedDayKey : copenhagenDayKey();
+
     let start: Date;
     let end: Date;
     try {
-      const b = copenhagenDayBoundsUtc();
+      const b = requestedDayKey
+        ? copenhagenDayBoundsUtcFromDayKey(dayKey)
+        : copenhagenDayBoundsUtc();
       start = b.start;
       end = b.end;
     } catch (e) {
@@ -89,8 +100,7 @@ export async function GET() {
       start = b.start;
       end = b.end;
     }
-
-    const dayKey = copenhagenDayKey();
+    const todayKey = copenhagenDayKey();
 
     let present = await loadPresentUsers(dayKey);
     const outcomeUserIds = await distinctUserIdsWithOutcomesInRange(start, end);
@@ -162,7 +172,13 @@ export async function GET() {
         return b.contacts - a.contacts;
       });
 
-    return NextResponse.json({ dayLabel, start: start.toISOString(), rows: board });
+    return NextResponse.json({
+      dayKey,
+      todayKey,
+      dayLabel,
+      start: start.toISOString(),
+      rows: board,
+    });
   } catch (e) {
     const msg = e instanceof Error ? e.message : String(e);
     console.error("[leaderboard]", e);

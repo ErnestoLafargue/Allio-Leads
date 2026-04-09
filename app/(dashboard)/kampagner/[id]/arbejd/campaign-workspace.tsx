@@ -29,6 +29,7 @@ type Lead = {
   notes: string;
   customFields: string;
   status: string;
+  meetingOutcomeStatus?: string | null;
   importedAt: string;
   updatedAt: string;
   meetingBookedAt: string | null;
@@ -45,7 +46,7 @@ type Lead = {
   callbackReservedByUserId?: string | null;
 };
 
-type Props = { campaignId: string };
+type Props = { campaignId: string; preferredLeadId?: string };
 
 const LOCK_HEARTBEAT_MS = 25_000;
 
@@ -63,10 +64,11 @@ function delayMs(ms: number) {
   return new Promise<void>((r) => setTimeout(r, ms));
 }
 
-export function CampaignWorkspace({ campaignId }: Props) {
+export function CampaignWorkspace({ campaignId, preferredLeadId }: Props) {
   const { data: session } = useSession();
   const sessionUserId = session?.user?.id ?? "";
   const [campaignName, setCampaignName] = useState("");
+  const [campaignSystemType, setCampaignSystemType] = useState<string | null>(null);
   const [fieldConfigJson, setFieldConfigJson] = useState("{}");
   const [campaignLeadCount, setCampaignLeadCount] = useState<number | null>(null);
   const [activeLead, setActiveLead] = useState<Lead | null>(null);
@@ -145,8 +147,12 @@ export function CampaignWorkspace({ campaignId }: Props) {
     setIndustry(l.industry);
     setNotes(l.notes);
     setCustom(parseCustomFields(l.customFields));
+    const cancelledMeetingInRebookingCampaign =
+      campaignSystemType === "rebooking" &&
+      l.status === "MEETING_BOOKED" &&
+      String(l.meetingOutcomeStatus ?? "").trim().toUpperCase() === "CANCELLED";
     setStatus(
-      l.status === "CALLBACK_SCHEDULED"
+      l.status === "CALLBACK_SCHEDULED" || cancelledMeetingInRebookingCampaign
         ? "NEW"
         : (LEAD_STATUSES as readonly string[]).includes(l.status)
           ? (l.status as LeadStatus)
@@ -164,7 +170,7 @@ export function CampaignWorkspace({ campaignId }: Props) {
     setMeetingContactName(l.meetingContactName ?? "");
     setMeetingContactEmail(l.meetingContactEmail ?? "");
     setMeetingContactPhonePrivate(l.meetingContactPhonePrivate ?? "");
-  }, []);
+  }, [campaignSystemType]);
 
   useEffect(() => {
     let cancelled = false;
@@ -184,7 +190,7 @@ export function CampaignWorkspace({ campaignId }: Props) {
       const total = typeof c._count?.leads === "number" ? c._count.leads : 0;
       const preferRaw =
         typeof window !== "undefined" ? sessionStorage.getItem(preferStorageKey(campaignId)) : null;
-      const preferLeadId = preferRaw?.trim() || undefined;
+      const preferLeadId = preferredLeadId?.trim() || preferRaw?.trim() || undefined;
       const rRes = await fetch(`/api/campaigns/${campaignId}/reserve-next`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -205,6 +211,11 @@ export function CampaignWorkspace({ campaignId }: Props) {
       const rj = (await rRes.json()) as { lead: Lead | null };
       if (cancelled) return;
       setCampaignName(c.name ?? "");
+      setCampaignSystemType(
+        typeof c.systemCampaignType === "string" && c.systemCampaignType.trim()
+          ? c.systemCampaignType.trim()
+          : null,
+      );
       setFieldConfigJson(c.fieldConfig ?? "{}");
       setCampaignLeadCount(total);
       if (rj.lead) {
@@ -228,7 +239,7 @@ export function CampaignWorkspace({ campaignId }: Props) {
     return () => {
       cancelled = true;
     };
-  }, [campaignId]);
+  }, [campaignId, preferredLeadId]);
 
   const pulseAllLeadLocks = useCallback(() => {
     const ids = new Set<string>();
@@ -496,6 +507,34 @@ export function CampaignWorkspace({ campaignId }: Props) {
     setSaving(true);
     setCallbackSubmitError(null);
     setError(null);
+    const saveRes = await fetch(`/api/leads/${activeLead.id}`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        companyName,
+        phone,
+        email,
+        cvr,
+        address,
+        postalCode,
+        city,
+        industry,
+        notes,
+        customFields: custom,
+        status: "NEW",
+        meetingContactName: meetingContactName.trim(),
+        meetingContactEmail: meetingContactEmail.trim(),
+        meetingContactPhonePrivate: meetingContactPhonePrivate.trim(),
+      }),
+    });
+    if (!saveRes.ok) {
+      setSaving(false);
+      const j = await saveRes.json().catch(() => ({}));
+      setCallbackSubmitError(
+        typeof j.error === "string" ? j.error : "Kunne ikke gemme noter før tilbagekald.",
+      );
+      return;
+    }
     const res = await fetch(`/api/leads/${activeLead.id}/schedule-callback`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -599,7 +638,7 @@ export function CampaignWorkspace({ campaignId }: Props) {
         </div>
         <div className="space-y-3 rounded-xl border border-stone-200 bg-white p-8 text-center shadow-sm">
           <p className="text-stone-800">
-            Der er ingen <strong>Ny</strong>-leads tilgængelige lige nu — de kan være i et andet udfald, eller{" "}
+            Der er ingen leads tilgængelige lige nu — de kan være i et andet udfald, eller{" "}
             <strong>optaget</strong> af kolleger der også arbejder i kampagnen. Prøv igen om lidt.
           </p>
           <p className="text-sm text-stone-600">
@@ -673,6 +712,11 @@ export function CampaignWorkspace({ campaignId }: Props) {
   }
 
   const current = activeLead!;
+  const showOriginalCancelledMeetingInfo =
+    campaignSystemType === "rebooking" &&
+    current.status === "MEETING_BOOKED" &&
+    String(current.meetingOutcomeStatus ?? "").trim().toUpperCase() === "CANCELLED" &&
+    Boolean(current.meetingScheduledFor);
 
   const canScheduleCallback = current.status === "NEW";
 
@@ -711,6 +755,16 @@ export function CampaignWorkspace({ campaignId }: Props) {
               timeStyle: "short",
             })}
             . Vælg udfald og gem — eller «Gem og næste» med «Ny» for at lægge leadet tilbage som nyt i køen.
+          </div>
+        )}
+        {showOriginalCancelledMeetingInfo && (
+          <div className="mt-3 rounded-lg border border-amber-200 bg-amber-50/90 px-3 py-2 text-xs text-amber-950">
+            <strong>Originalt møde (annulleret):</strong>{" "}
+            {new Date(String(current.meetingScheduledFor)).toLocaleString("da-DK", {
+              dateStyle: "short",
+              timeStyle: "short",
+            })}
+            . Behandl leadet som opkald i rebooking-køen.
           </div>
         )}
       </div>

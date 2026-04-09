@@ -92,6 +92,7 @@ export async function POST(req: Request) {
           meetingContactPhonePrivate,
           meetingOutcomeStatus: MEETING_OUTCOME_PENDING,
           meetingCommissionDayKey: copenhagenDayKey(meetingBookedAt),
+          lastOutcomeAt: meetingBookedAt,
         }),
         include: {
           bookedByUser: { select: { id: true, name: true, username: true } },

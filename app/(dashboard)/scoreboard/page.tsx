@@ -25,7 +25,7 @@ export default function ScoreboardPage() {
     <div className="space-y-4">
       <div>
         <h1 className="text-xl font-semibold text-stone-900">Scoreboard</h1>
-        <p className="text-sm text-stone-500">Dagens tal for alle sælgere</p>
+        <p className="text-sm text-stone-500">Tal pr. dag for alle sælgere (vælg dato)</p>
       </div>
       <DailyScoreboard />
     </div>

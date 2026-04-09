@@ -22,6 +22,10 @@ import { findLeadBookingOverlapInDb } from "@/lib/booking/overlap-db";
 
 type Params = { params: Promise<{ id: string }> };
 
+function isRealOutcomeStatus(status: string): boolean {
+  return status !== "NEW" && status !== "CALLBACK_SCHEDULED";
+}
+
 export async function GET(_req: Request, { params }: Params) {
   const { session, response } = await requireSession();
   if (response) return response;
@@ -68,6 +72,7 @@ export async function GET(_req: Request, { params }: Params) {
       msg.includes("lockExpiresAt") ||
       msg.includes("callbackScheduledFor") ||
       msg.includes("callbackReservedByUserId") ||
+      msg.includes("lastOutcomeAt") ||
       msg.includes("no such column") ||
       msg.toLowerCase().includes("does not exist");
     return NextResponse.json(
@@ -230,9 +235,15 @@ export async function PATCH(req: Request, { params }: Params) {
     meetingBookedAt = null;
     meetingScheduledFor = null;
     bookedByUserId = null;
-    meetingContactName = "";
-    meetingContactEmail = "";
-    meetingContactPhonePrivate = "";
+    if (typeof body?.meetingContactName === "string") {
+      meetingContactName = body.meetingContactName.trim();
+    }
+    if (typeof body?.meetingContactEmail === "string") {
+      meetingContactEmail = body.meetingContactEmail.trim();
+    }
+    if (typeof body?.meetingContactPhonePrivate === "string") {
+      meetingContactPhonePrivate = body.meetingContactPhonePrivate.trim();
+    }
     meetingOutcomeStatus = MEETING_OUTCOME_PENDING;
     meetingCommissionDayKey = "";
   }
@@ -303,6 +314,8 @@ export async function PATCH(req: Request, { params }: Params) {
     { status: existing.status, meetingBookedAt: existing.meetingBookedAt },
     status,
   );
+  const touchedOutcomeAt =
+    existing.status !== status && isRealOutcomeStatus(status) ? new Date() : existing.lastOutcomeAt;
 
   const clearLeadLock = status !== "NEW";
 
@@ -344,6 +357,7 @@ export async function PATCH(req: Request, { params }: Params) {
           callbackNote,
           callbackCreatedByUserId,
           callbackStatus,
+          lastOutcomeAt: touchedOutcomeAt,
         }),
         ...(campaignIdToSet !== undefined && campaignIdToSet !== null ? { campaignId: campaignIdToSet } : {}),
         ...(clearLeadLock

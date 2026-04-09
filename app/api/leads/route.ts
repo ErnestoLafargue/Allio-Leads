@@ -38,7 +38,7 @@ export async function GET(req: Request) {
       const rowsRaw = await prisma.lead.findMany({
         where: { campaignId },
         select: { status: true, customFields: true, callbackReservedByUserId: true },
-        orderBy: { importedAt: "desc" },
+        orderBy: [{ lastOutcomeAt: "asc" }, { importedAt: "desc" }],
       });
       const rows =
         session.user.role === "ADMIN"
@@ -109,7 +109,7 @@ export async function GET(req: Request) {
             }
           : {}),
       },
-      orderBy: { importedAt: "desc" },
+      orderBy: [{ lastOutcomeAt: "asc" }, { importedAt: "desc" }],
       include: {
         bookedByUser: { select: { id: true, name: true, username: true } },
         campaign: { select: { id: true, name: true } },
@@ -126,6 +126,7 @@ export async function GET(req: Request) {
       out = out.filter(
         (l) => l.status !== "CALLBACK_SCHEDULED" || l.callbackReservedByUserId === uid,
       );
+      out = out.map(({ lastOutcomeAt: _lastOutcomeAt, ...rest }) => rest);
     }
 
     if (campaignId && out.length > 0) {
@@ -145,6 +146,7 @@ export async function GET(req: Request) {
       msg.includes("notHomeMarkedAt") ||
       msg.includes("lockedByUserId") ||
       msg.includes("lockExpiresAt") ||
+      msg.includes("lastOutcomeAt") ||
       msg.includes("no such column") ||
       msg.toLowerCase().includes("does not exist");
     return NextResponse.json(

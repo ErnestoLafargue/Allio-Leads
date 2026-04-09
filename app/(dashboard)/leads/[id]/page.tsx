@@ -414,6 +414,32 @@ function LeadDetailInner() {
     setSaving(true);
     setCallbackSubmitError(null);
     setError(null);
+    const saveRes = await fetch(`/api/leads/${lead.id}`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        companyName,
+        phone,
+        email,
+        cvr,
+        address,
+        postalCode,
+        city,
+        industry,
+        notes,
+        customFields: custom,
+        status: "NEW",
+        meetingContactName: meetingContactName.trim(),
+        meetingContactEmail: meetingContactEmail.trim(),
+        meetingContactPhonePrivate: meetingContactPhonePrivate.trim(),
+      }),
+    });
+    if (!saveRes.ok) {
+      setSaving(false);
+      const j = await saveRes.json().catch(() => ({}));
+      setCallbackSubmitError(typeof j.error === "string" ? j.error : "Kunne ikke gemme noter før tilbagekald.");
+      return;
+    }
     const res = await fetch(`/api/leads/${lead.id}/schedule-callback`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },

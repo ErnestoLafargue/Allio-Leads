@@ -16,6 +16,7 @@ type LeadRow = {
   city: string;
   status: string;
   importedAt: string;
+  lastOutcomeAt?: string | null;
   /** Fra API (til udfalds-modal) */
   meetingScheduledFor?: string | null;
   campaign?: { id: string; name: string };
@@ -107,7 +108,9 @@ function defaultDirForColumn(key: SortColumn): "asc" | "desc" {
 }
 
 function sortSummary(key: SortColumn | null, dir: "asc" | "desc"): string {
-  if (!key) return "Standard: senest tilføjet først (fra server). Klik på en titel for at sortere.";
+  if (!key) {
+    return "Standard: uden udfald først, derefter ældste udfald først (fra server). Klik på en titel for at sortere.";
+  }
   const d = dir === "asc" ? "stigende" : "faldende";
   switch (key) {
     case "company":
@@ -150,6 +153,7 @@ export function LeadsBulkPanel({
 }: LeadsBulkPanelProps) {
   const { data: session } = useSession();
   const myUserId = session?.user?.id;
+  const isAdmin = session?.user?.role === "ADMIN";
 
   const [internalQ, setInternalQ] = useState("");
   const q = controlledSearch !== undefined ? controlledSearch : internalQ;
@@ -277,10 +281,16 @@ export function LeadsBulkPanel({
   }
 
   const selectedOne = selected.size === 1 ? leads.find((l) => l.id === [...selected][0]) : undefined;
+  function leadOpenHref(lead: LeadRow): string {
+    if (campaignId) {
+      return `/kampagner/${encodeURIComponent(campaignId)}/arbejd?leadId=${encodeURIComponent(lead.id)}`;
+    }
+    return `/leads/${lead.id}${leadDetailSearchSuffix || ""}`;
+  }
   const actionsBtnClass =
     "rounded-md border border-stone-200 bg-white px-3 py-1.5 text-sm font-medium text-stone-800 shadow-sm hover:bg-stone-50";
 
-  const colCount = showCampaignColumn ? 7 : 6;
+  const colCount = (showCampaignColumn ? 7 : 6) + (isAdmin ? 1 : 0);
 
   return (
     <div className="space-y-3">
@@ -298,7 +308,7 @@ export function LeadsBulkPanel({
           <span className="text-xs text-stone-500">{sortSummary(sortKey, sortDir)}</span>
           {selectedOne && (
             <Link
-              href={`/leads/${selectedOne.id}${leadDetailSearchSuffix || ""}`}
+              href={leadOpenHref(selectedOne)}
               className={actionsBtnClass}
             >
               Åbn lead
@@ -447,6 +457,7 @@ export function LeadsBulkPanel({
                 </button>
               </th>
               {showCampaignColumn && <th className="px-2 py-3 font-medium">Kampagne</th>}
+              {isAdmin && <th className="px-2 py-3 font-medium">Sidst udfald</th>}
               <th className="px-2 py-3 font-medium">
                 <button
                   type="button"
@@ -497,7 +508,7 @@ export function LeadsBulkPanel({
                   <td className="px-2 py-3">
                     <div className="flex flex-col gap-0.5">
                       <Link
-                        href={`/leads/${l.id}${leadDetailSearchSuffix || ""}`}
+                        href={leadOpenHref(l)}
                         className={`font-medium underline-offset-2 hover:underline ${
                           isLockedByAnotherUser(l, myUserId)
                             ? "text-amber-900/90"
@@ -534,6 +545,11 @@ export function LeadsBulkPanel({
                   {showCampaignColumn && (
                     <td className="px-2 py-3 text-stone-600">
                       {l.campaign?.name ?? "—"}
+                    </td>
+                  )}
+                  {isAdmin && (
+                    <td className="whitespace-nowrap px-2 py-3 text-stone-500">
+                      {l.lastOutcomeAt ? new Date(l.lastOutcomeAt).toLocaleString("da-DK") : "Intet endnu"}
                     </td>
                   )}
                   <td className="whitespace-nowrap px-2 py-3 text-stone-500">

@@ -14,20 +14,35 @@ export type LeaderboardRow = {
 };
 
 export type LeaderboardPayload = {
+  dayKey: string;
+  todayKey: string;
   dayLabel: string;
   rows: LeaderboardRow[];
 };
+
+function shiftDayKey(dayKey: string, diffDays: number): string {
+  const [y, m, d] = dayKey.split("-").map((n) => parseInt(n, 10));
+  if (!y || !m || !d) return dayKey;
+  const dt = new Date(Date.UTC(y, m - 1, d + diffDays, 12, 0, 0));
+  const yy = dt.getUTCFullYear();
+  const mm = String(dt.getUTCMonth() + 1).padStart(2, "0");
+  const dd = String(dt.getUTCDate()).padStart(2, "0");
+  return `${yy}-${mm}-${dd}`;
+}
 
 export function DailyScoreboard() {
   const { data: session, status } = useSession();
   const [data, setData] = useState<LeaderboardPayload | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [selectedDayKey, setSelectedDayKey] = useState<string>("");
 
   useEffect(() => {
     if (status !== "authenticated") return;
     let cancelled = false;
     async function load() {
-      const res = await fetch("/api/users/leaderboard");
+      const qs = new URLSearchParams();
+      if (selectedDayKey) qs.set("dayKey", selectedDayKey);
+      const res = await fetch(`/api/users/leaderboard?${qs.toString()}`);
       if (!res.ok) {
         if (!cancelled) setError("Kunne ikke hente scoreboard");
         return;
@@ -42,7 +57,7 @@ export function DailyScoreboard() {
     return () => {
       cancelled = true;
     };
-  }, [status]);
+  }, [status, selectedDayKey]);
 
   if (status === "loading") {
     return <p className="text-sm text-stone-500">Henter scoreboard…</p>;
@@ -61,8 +76,32 @@ export function DailyScoreboard() {
   return (
     <div className="space-y-3 rounded-xl border border-amber-200/80 bg-gradient-to-b from-amber-50/90 to-white p-6 shadow-sm">
       <div className="flex flex-wrap items-baseline justify-between gap-2">
-        <h2 className="text-sm font-semibold text-amber-950">Dagens scoreboard · login eller udfald i dag</h2>
-        <p className="text-xs font-medium text-amber-800/90">{data.dayLabel}</p>
+        <h2 className="text-sm font-semibold text-amber-950">Scoreboard pr. dag · login eller udfald</h2>
+        <div className="flex flex-wrap items-center gap-2">
+          <button
+            type="button"
+            onClick={() => setSelectedDayKey((k) => shiftDayKey(k || data.dayKey, -1))}
+            className="rounded-md border border-amber-200 bg-white px-2 py-1 text-xs font-medium text-amber-900 hover:bg-amber-50"
+          >
+            Forrige dag
+          </button>
+          <input
+            type="date"
+            value={selectedDayKey || data.dayKey}
+            max={data.todayKey}
+            onChange={(e) => setSelectedDayKey(e.target.value)}
+            className="rounded-md border border-amber-200 bg-white px-2 py-1 text-xs text-amber-950"
+          />
+          <button
+            type="button"
+            onClick={() => setSelectedDayKey(data.todayKey)}
+            disabled={(selectedDayKey || data.dayKey) === data.todayKey}
+            className="rounded-md border border-amber-200 bg-white px-2 py-1 text-xs font-medium text-amber-900 hover:bg-amber-50 disabled:opacity-60"
+          >
+            I dag
+          </button>
+          <p className="text-xs font-medium text-amber-800/90">{data.dayLabel}</p>
+        </div>
       </div>
       <div className="overflow-x-auto rounded-lg border border-amber-100 bg-white/90">
         <table className="w-full min-w-[28rem] text-left text-sm">
@@ -111,7 +150,7 @@ export function DailyScoreboard() {
         </table>
       </div>
       {data.rows.length === 0 && (
-        <p className="text-sm text-stone-600">Ingen aktivitet endnu i dag (login eller udfald).</p>
+        <p className="text-sm text-stone-600">Ingen aktivitet denne dag (login eller udfald).</p>
       )}
     </div>
   );

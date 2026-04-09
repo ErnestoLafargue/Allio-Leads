@@ -5,6 +5,7 @@ import { applyLeadCooldownResets } from "@/lib/lead-cooldown";
 import { filterLeadsByCampaignProtectedSetting } from "@/lib/reklamebeskyttet-filter";
 import { getLeadIdsWithOutcomeLogToday } from "@/lib/lead-outcome-today";
 import { sortLeadsForCampaignCallQueue } from "@/lib/lead-queue";
+import { MEETING_OUTCOME_CANCELLED, normalizeMeetingOutcomeStatus } from "@/lib/meeting-outcome";
 import { releaseExpiredLocksEverywhere, tryAcquireLeadLock } from "@/lib/lead-lock";
 
 type Params = { params: Promise<{ id: string }> };
@@ -17,7 +18,7 @@ const leadInclude = {
 } as const;
 
 /**
- * Atomisk reservation: først forfaldne planlagte callbacks for denne bruger, derefter «Ny»-køen.
+ * Atomisk reservation: først alle aktive planlagte callbacks for denne bruger (på tværs af kampagner), derefter «Ny»-køen.
  * Post body (valgfri): { "preferLeadId": "…" } for at genåbne samme Ny-lead efter refresh (gælder ikke for callback-prioritet).
  * { "excludeLeadId": "…" } springer dette lead over i Ny-køen (fx efter «Gem og næste» med udfald Ny).
  */
@@ -64,45 +65,58 @@ export async function POST(req: Request, { params }: Params) {
       return lead;
     }
 
-    const dueCallbacks = await prisma.lead.findMany({
+    const pendingCallbacks = await prisma.lead.findMany({
       where: {
-        campaignId,
         status: "CALLBACK_SCHEDULED",
         callbackStatus: "PENDING",
         callbackReservedByUserId: userId,
-        callbackScheduledFor: { lte: now },
       },
       orderBy: { callbackScheduledFor: "asc" },
       select: { id: true },
     });
 
-    for (const row of dueCallbacks) {
+    for (const row of pendingCallbacks) {
       const got = await tryReserve(row.id);
       if (got) return NextResponse.json({ lead: got });
     }
 
-    const rawNew = await prisma.lead.findMany({
-      where: { campaignId, status: "NEW" },
+    const rawQueue = await prisma.lead.findMany({
+      where:
+        campaign.systemCampaignType === "rebooking"
+          ? {
+              campaignId,
+              status: "MEETING_BOOKED",
+              meetingOutcomeStatus: MEETING_OUTCOME_CANCELLED,
+            }
+          : { campaignId, status: "NEW" },
       select: {
         id: true,
         status: true,
+        meetingOutcomeStatus: true,
         importedAt: true,
+        lastOutcomeAt: true,
         customFields: true,
       },
     });
 
     const filtered = filterLeadsByCampaignProtectedSetting(
-      rawNew.map((r) => ({ ...r, customFields: r.customFields })),
+      rawQueue.map((r) => ({ ...r, customFields: r.customFields })),
       campaign.includeProtectedBusinesses,
     );
     const outcomeToday = await getLeadIdsWithOutcomeLogToday(filtered.map((r) => r.id));
     const sorted = sortLeadsForCampaignCallQueue(
       filtered.map((r) => ({
         id: r.id,
-        status: r.status,
+        status:
+          campaign.systemCampaignType === "rebooking" &&
+          normalizeMeetingOutcomeStatus(r.meetingOutcomeStatus ?? "") === MEETING_OUTCOME_CANCELLED
+            ? "NEW"
+            : r.status,
         hasOutcomeLogToday: outcomeToday.has(r.id),
         importedAt:
           r.importedAt instanceof Date ? r.importedAt.toISOString() : String(r.importedAt),
+        lastOutcomeAt:
+          r.lastOutcomeAt instanceof Date ? r.lastOutcomeAt.toISOString() : undefined,
       })),
     );
 
@@ -128,6 +142,7 @@ export async function POST(req: Request, { params }: Params) {
       msg.includes("lockExpiresAt") ||
       msg.includes("callbackScheduledFor") ||
       msg.includes("callbackReservedByUserId") ||
+      msg.includes("lastOutcomeAt") ||
       msg.includes("no such column") ||
       msg.toLowerCase().includes("does not exist");
     return NextResponse.json(

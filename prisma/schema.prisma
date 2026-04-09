@@ -103,6 +103,8 @@ model Lead {
 
   /// Import eller manuel oprettelse — bruges til sortering «senest tilføjet»
   importedAt DateTime @default(now())
+  /// Seneste tidspunkt et egentligt udfald blev ændret (ikke callback-planlægning)
+  lastOutcomeAt DateTime?
 
   /// Lås: én sælger ad gangen — frigives ved navigering eller efter max. inaktivitet (LEAD_LOCK_MAX_IDLE_SECONDS)
   lockedByUserId String?
@@ -128,6 +130,7 @@ model Lead {
   @@index([lockExpiresAt])
   @@index([lockedByUserId])
   @@index([campaignId, callbackReservedByUserId, callbackScheduledFor])
+  @@index([lastOutcomeAt])
 }
 
 /// Ét log for hver tællende sælgerhandling (udfald) til daglig leaderboard.

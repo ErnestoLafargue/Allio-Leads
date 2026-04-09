@@ -3,6 +3,11 @@
 import { useEffect, useState } from "react";
 import { LEAD_STATUS_LABELS, type LeadStatus } from "@/lib/lead-status";
 import { OUTCOME_ORDER, outcomeButtonClass } from "@/lib/lead-outcome-ui";
+import {
+  getAvailableCopenhagenBookingSlots,
+  parseOccupiedBlocksFromApi,
+} from "@/lib/booking/availability";
+import { toCopenhagenDateKey } from "@/lib/booking/mock-availability";
 
 type Props = {
   open: boolean;
@@ -42,6 +47,24 @@ export function LeadOutcomeModal({
     setError(null);
   }, [open, initialStatus, initialMeetingLocal]);
 
+  async function isMeetingTimeSelectable(meetingIso: string): Promise<boolean> {
+    const dt = new Date(meetingIso);
+    if (Number.isNaN(dt.getTime())) return false;
+    const dayKey = toCopenhagenDateKey(dt);
+    const qs = new URLSearchParams({ date: dayKey });
+    if (single && leadIds[0]) {
+      qs.set("excludeLeadId", leadIds[0]);
+    }
+    const res = await fetch(`/api/booking/availability?${qs.toString()}`);
+    if (!res.ok) return false;
+    const payload = (await res.json().catch(() => ({}))) as {
+      blocks?: { start: string; end: string }[];
+    };
+    const occupied = parseOccupiedBlocksFromApi(Array.isArray(payload.blocks) ? payload.blocks : []);
+    const available = getAvailableCopenhagenBookingSlots(dayKey, occupied);
+    return available.some((s) => Math.abs(s.utcMs - dt.getTime()) < 90_000);
+  }
+
   async function save() {
     if (draftStatus === "MEETING_BOOKED" && !draftMeeting.trim()) {
       setError("Vælg dato og tid for mødet.");
@@ -54,6 +77,16 @@ export function LeadOutcomeModal({
       draftStatus === "MEETING_BOOKED" && draftMeeting.trim()
         ? new Date(draftMeeting).toISOString()
         : undefined;
+    if (draftStatus === "MEETING_BOOKED" && meetingIso) {
+      const selectable = await isMeetingTimeSelectable(meetingIso);
+      if (!selectable) {
+        setSaving(false);
+        setError(
+          "Det valgte mødetidspunkt overlapper buffer-reglen (55 min før / 70 min efter) eller er ikke længere ledigt. Vælg en ledig tid i kalenderen.",
+        );
+        return;
+      }
+    }
 
     if (single) {
       const body: Record<string, unknown> = { status: draftStatus };
