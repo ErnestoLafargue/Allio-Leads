@@ -82,7 +82,7 @@ export function LeadOutcomeModal({
       if (!selectable) {
         setSaving(false);
         setError(
-          "Det valgte mødetidspunkt overlapper buffer-reglen (55 min før / 70 min efter) eller er ikke længere ledigt. Vælg en ledig tid i kalenderen.",
+          "Det valgte mødetidspunkt overlapper buffer-reglen (75 min før / 75 min efter) eller er ikke længere ledigt. Vælg en ledig tid i kalenderen.",
         );
         return;
       }

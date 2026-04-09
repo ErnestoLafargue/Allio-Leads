@@ -28,6 +28,7 @@ type DaySummary = {
   kr: number;
   ratePerHeld: number;
   meetingCount: number;
+  possibleHeldCount?: number;
   forventetKr?: number;
   forventetRatePerMeeting?: number;
 };
@@ -151,7 +152,9 @@ export default function MineSalgPage() {
           <p className="mt-2 text-3xl font-bold tracking-tight text-sky-900">
             {forventetProvisionTotal.toLocaleString("da-DK")} kr
           </p>
-          <p className="mt-2 text-xs text-sky-900/85">Hvis alle møder går igennem, udbetales der.</p>
+          <p className="mt-2 text-xs text-sky-900/85">
+            Hvis alle ikke-annullerede møder går igennem, udbetales der.
+          </p>
         </div>
         <div className="rounded-xl border border-stone-200 bg-white p-5 shadow-sm">
           <h2 className="text-sm font-semibold text-stone-900">Bonus-trappe (pr. afholdt møde)</h2>
@@ -176,11 +179,11 @@ export default function MineSalgPage() {
             annullerede møder tæller ikke med i antallet, men skal stadig have udfald før dagen kan lukkes.
           </li>
           <li>
-            Før alle udfald er sat, vises der ikke beløb i «Til udbetaling» for den dag — det gør der først, når den
-            sidste booking fra dagen har fået status.
+            <strong>Forventet provision</strong> regnes kun på møder, der stadig kan blive afholdt — annullerede møder
+            tæller ikke med i muligt bonus-trin.
           </li>
           <li>
-            <strong>Forventet provision</strong>: hvis alle møder går igennem, udbetales der.
+            <strong>Forventet provision</strong>: hvis alle ikke-annullerede møder går igennem, udbetales der.
           </li>
         </ul>
       </div>
@@ -224,7 +227,7 @@ export default function MineSalgPage() {
                             {(d.forventetKr ?? 0).toLocaleString("da-DK")} kr
                           </span>
                           <span className="mt-0.5 block text-xs text-stone-500">
-                            {(d.forventetRatePerMeeting ?? 0)} kr × {d.meetingCount} (alle afholdt)
+                            {(d.forventetRatePerMeeting ?? 0)} kr × {d.possibleHeldCount ?? 0} (ikke-annullerede)
                           </span>
                         </>
                       ) : (

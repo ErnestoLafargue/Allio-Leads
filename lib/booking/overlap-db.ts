@@ -6,7 +6,7 @@ import {
 } from "@/lib/booking/availability";
 import { MEETING_OUTCOME_PENDING } from "@/lib/meeting-outcome";
 
-/** DB-runde for overlappende mødeblokke (-55/+70) (undtagen annullerede). */
+/** DB-runde for overlappende mødeblokke (-75/+75) (undtagen annullerede). */
 export async function findLeadBookingOverlapInDb(
   proposedStart: Date,
   opts: { excludeLeadId?: string; excludeLeadIds?: string[] } = {},

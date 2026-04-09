@@ -6,10 +6,10 @@ import {
 
 /** 15-minutters gitter som i kalenderen */
 export const BOOKING_SLOT_STEP_MIN = 15;
-/** Hvert møde blokerer 55 min før start */
-export const BOOKING_MEETING_BLOCK_BEFORE_MIN = 55;
-/** Hvert møde blokerer 70 min efter start */
-export const BOOKING_MEETING_BLOCK_AFTER_MIN = 70;
+/** Hvert møde blokerer 75 min før start */
+export const BOOKING_MEETING_BLOCK_BEFORE_MIN = 75;
+/** Hvert møde blokerer 75 min efter start */
+export const BOOKING_MEETING_BLOCK_AFTER_MIN = 75;
 /** Bevares for kompatibilitet i ældre kaldesteder (efter-blok) */
 export const BOOKING_MEETING_BLOCK_MIN = BOOKING_MEETING_BLOCK_AFTER_MIN;
 
@@ -40,12 +40,12 @@ export function intervalsOverlapExclusiveEnd(
 
 export function isSlotStartBlocked(
   slotStartMs: number,
-  slotDurationMin: number,
+  _slotDurationMin: number,
   occupied: TimeBlockMs[],
 ): boolean {
-  const slotEndMs = slotStartMs + slotDurationMin * 60 * 1000;
   for (const o of occupied) {
-    if (intervalsOverlapExclusiveEnd(slotStartMs, slotEndMs, o.startMs, o.endMs)) {
+    // Starttid præcis på grænsen (fx 12:45 / 15:15) er tilladt.
+    if (slotStartMs > o.startMs && slotStartMs < o.endMs) {
       return true;
     }
   }
@@ -157,9 +157,12 @@ export function findBookingTimeConflict(
       continue;
     }
     const otherStart = row.meetingScheduledFor.getTime();
-    const otherBlockStart = otherStart - blockBeforeMin * 60 * 1000;
-    const otherBlockEnd = otherStart + blockAfterMin * 60 * 1000;
-    if (intervalsOverlapExclusiveEnd(proposedBlockStart, proposedBlockEnd, otherBlockStart, otherBlockEnd)) {
+    // Konflikt kun når en starttid ligger inde i den andens buffer (grænser er tilladt).
+    if (
+      (otherStart > proposedBlockStart && otherStart < proposedBlockEnd) ||
+      (startMs > otherStart - blockBeforeMin * 60 * 1000 &&
+        startMs < otherStart + blockAfterMin * 60 * 1000)
+    ) {
       return { id: row.id };
     }
   }

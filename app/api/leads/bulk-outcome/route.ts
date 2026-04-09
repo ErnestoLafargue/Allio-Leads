@@ -10,7 +10,7 @@ import { isLockedByOtherUser, releaseExpiredLocksEverywhere } from "@/lib/lead-l
 import { findLeadBookingOverlapInDb } from "@/lib/booking/overlap-db";
 import { campaignIdForBookedMeetingOutcome } from "@/lib/meeting-campaign-routing";
 import { ensureStandardCampaignId } from "@/lib/ensure-system-campaigns";
-import { getMeetingBlockEndMs, intervalsOverlapExclusiveEnd } from "@/lib/booking/availability";
+import { findBookingTimeConflict } from "@/lib/booking/availability";
 
 const MAX_BULK = 500;
 
@@ -128,7 +128,7 @@ export async function POST(req: Request) {
           return NextResponse.json(
             {
               error:
-                "Mindst ét tidspunkt overlapper et eksisterende møde (55 min før + 70 min efter start). Vælg andre tider.",
+                "Mindst ét tidspunkt overlapper et eksisterende møde (75 min før/efter start). Vælg andre tider.",
             },
             { status: 409 },
           );
@@ -136,15 +136,15 @@ export async function POST(req: Request) {
       }
       for (let i = 0; i < proposals.length; i++) {
         const a = proposals[i]!;
-        const as = a.start.getTime();
-        const ae = getMeetingBlockEndMs(as);
         for (let j = i + 1; j < proposals.length; j++) {
           const b = proposals[j]!;
-          const bs = b.start.getTime();
-          const be = getMeetingBlockEndMs(bs);
-          if (intervalsOverlapExclusiveEnd(as, ae, bs, be)) {
+          if (
+            findBookingTimeConflict(a.start, [
+              { id: b.id, meetingScheduledFor: b.start, meetingOutcomeStatus: "PENDING" },
+            ])
+          ) {
             return NextResponse.json(
-              { error: "Flere valgte møder overlapper hinanden i tid (55 min før + 70 min efter pr. booking)." },
+              { error: "Flere valgte møder overlapper hinanden i tid (75 min før/efter pr. booking)." },
               { status: 409 },
             );
           }

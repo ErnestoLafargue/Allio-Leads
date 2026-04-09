@@ -41,8 +41,11 @@ export async function GET() {
     const daySummaries = [...byDay.entries()]
       .map(([dayKey, meetings]) => {
         const n = meetings.length;
-        const forventetRatePerMeeting = rateKrPerHeldMeeting(n);
-        const forventetKr = n * forventetRatePerMeeting;
+        const possibleHeldCount = meetings.filter(
+          (m) => normOutcome(m.meetingOutcomeStatus) !== MEETING_OUTCOME_CANCELLED,
+        ).length;
+        const forventetRatePerMeeting = rateKrPerHeldMeeting(possibleHeldCount);
+        const forventetKr = possibleHeldCount * forventetRatePerMeeting;
         forventetProvisionKr += forventetKr;
 
         const c = commissionKrForBookedDay(
@@ -60,6 +63,7 @@ export async function GET() {
           kr: currentKr,
           ratePerHeld: currentRatePerHeld,
           meetingCount: n,
+          possibleHeldCount,
           forventetKr,
           forventetRatePerMeeting,
         };

@@ -164,7 +164,7 @@ export function BookingPanel({
       <div className="mb-4 flex flex-col gap-3 border-b border-slate-100 pb-4 sm:flex-row sm:items-center sm:justify-between">
         <h2 className="text-lg font-semibold tracking-tight text-slate-900">Vælg tid til møde</h2>
         <p className="text-xs text-slate-600">
-          Hvert møde reserverer <strong>55 min før</strong> og <strong>70 min efter</strong> start (gitter 15 min) —
+          Hvert møde reserverer <strong>75 min før</strong> og <strong>75 min efter</strong> start (gitter 15 min) —
           ledige tider er allerede filtreret.
         </p>
       </div>

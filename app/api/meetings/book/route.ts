@@ -59,7 +59,7 @@ export async function POST(req: Request) {
     return NextResponse.json(
       {
         error:
-            "Tidspunktet overlapper et eksisterende møde. Hvert møde reserverer 55 min før og 70 min efter start — vælg et andet tidspunkt.",
+            "Tidspunktet overlapper et eksisterende møde. Hvert møde reserverer 75 min før og 75 min efter start — vælg et andet tidspunkt.",
       },
       { status: 409 },
     );
