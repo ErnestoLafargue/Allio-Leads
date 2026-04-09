@@ -126,7 +126,6 @@ export async function GET(req: Request) {
       out = out.filter(
         (l) => l.status !== "CALLBACK_SCHEDULED" || l.callbackReservedByUserId === uid,
       );
-      out = out.map(({ lastOutcomeAt: _lastOutcomeAt, ...rest }) => rest);
     }
 
     if (campaignId && out.length > 0) {
