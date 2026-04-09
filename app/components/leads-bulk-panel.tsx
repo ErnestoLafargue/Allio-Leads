@@ -762,7 +762,7 @@ export function LeadsBulkPanel({
                 <tr
                   key={l.id}
                   className={
-                    l.status === "NOT_INTERESTED"
+                    l.status === "NOT_INTERESTED" || l.status === "UNQUALIFIED"
                       ? "bg-red-50/90 hover:bg-red-50 border-l-4 border-l-red-600"
                       : "hover:bg-stone-50/80"
                   }
@@ -805,7 +805,7 @@ export function LeadsBulkPanel({
                   </td>
                   <td
                     className={
-                      l.status === "NOT_INTERESTED"
+                      l.status === "NOT_INTERESTED" || l.status === "UNQUALIFIED"
                         ? "px-2 py-3 font-medium text-red-900"
                         : "px-2 py-3 text-stone-700"
                     }

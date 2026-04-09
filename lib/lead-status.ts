@@ -3,6 +3,7 @@ export const LEAD_STATUSES = [
   "VOICEMAIL",
   "MEETING_BOOKED",
   "NOT_INTERESTED",
+  "UNQUALIFIED",
   "NOT_HOME",
   "CALLBACK_SCHEDULED",
 ] as const;
@@ -14,6 +15,7 @@ export const LEAD_STATUS_LABELS: Record<LeadStatus, string> = {
   VOICEMAIL: "Voicemail",
   MEETING_BOOKED: "Møde booket",
   NOT_INTERESTED: "Ikke interesseret",
+  UNQUALIFIED: "Ukvalificeret",
   NOT_HOME: "Ikke hjemme",
   CALLBACK_SCHEDULED: "Callback planlagt",
 };
@@ -30,6 +32,7 @@ export const LEAD_STATUS_STATS_ORDER: LeadStatus[] = [
   "MEETING_BOOKED",
   "NOT_HOME",
   "NOT_INTERESTED",
+  "UNQUALIFIED",
 ];
 
 /** Små tæller-badges der matcher udfalds-knappernes farver */
@@ -38,6 +41,7 @@ export const LEAD_STATUS_COUNT_BADGE_CLASS: Record<LeadStatus, string> = {
   VOICEMAIL: "border border-amber-500 bg-amber-200 text-amber-950",
   MEETING_BOOKED: "border border-emerald-600 bg-emerald-200 text-emerald-950",
   NOT_INTERESTED: "border border-red-600 bg-red-200 text-red-950",
+  UNQUALIFIED: "border border-red-600 bg-red-200 text-red-950",
   NOT_HOME: "border border-blue-600 bg-blue-200 text-blue-950",
   CALLBACK_SCHEDULED: "border border-violet-600 bg-violet-200 text-violet-950",
 };

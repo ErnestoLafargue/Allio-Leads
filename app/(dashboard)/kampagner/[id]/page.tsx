@@ -146,6 +146,7 @@ export default function RedigerKampagnePage() {
         VOICEMAIL: 0,
         MEETING_BOOKED: 0,
         NOT_INTERESTED: 0,
+        UNQUALIFIED: 0,
         NOT_HOME: 0,
         CALLBACK_SCHEDULED: 0,
       };

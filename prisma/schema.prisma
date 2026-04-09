@@ -78,7 +78,7 @@ model Lead {
   /// JSON object string -> Record<string, string> for kampagnespecifikke felter
   customFields String @default("{}")
 
-  /// NEW | VOICEMAIL | MEETING_BOOKED | NOT_INTERESTED | NOT_HOME | CALLBACK_SCHEDULED
+  /// NEW | VOICEMAIL | MEETING_BOOKED | NOT_INTERESTED | UNQUALIFIED | NOT_HOME | CALLBACK_SCHEDULED
   status String @default("NEW")
 
   /// Sættes når status bliver VOICEMAIL — bruges til auto-tilbage til NEW efter 2 timer

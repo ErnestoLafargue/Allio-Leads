@@ -25,6 +25,8 @@ export function leaderboardDeltasForOutcome(status: string): LeaderboardOutcomeD
     case "NOT_HOME":
     case "NOT_INTERESTED":
       return { meetings: 0, conversations: 1, contacts: 1 };
+    case "UNQUALIFIED":
+      return { meetings: 0, conversations: 0, contacts: 0 };
     case "MEETING_BOOKED":
       return { meetings: 1, conversations: 1, contacts: 1 };
     default:

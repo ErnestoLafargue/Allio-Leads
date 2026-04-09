@@ -5,6 +5,7 @@ export const OUTCOME_ORDER: LeadStatus[] = [
   "NEW",
   "VOICEMAIL",
   "NOT_INTERESTED",
+  "UNQUALIFIED",
   "MEETING_BOOKED",
   "NOT_HOME",
 ];
@@ -21,6 +22,7 @@ export function outcomeButtonClass(status: LeadStatus, active: boolean): string 
     case "VOICEMAIL":
       return `${base} border-amber-500 bg-amber-300 text-amber-950 ring-2 ring-amber-400`;
     case "NOT_INTERESTED":
+    case "UNQUALIFIED":
       return `${base} border-red-600 bg-red-300 text-red-950 ring-2 ring-red-500`;
     case "MEETING_BOOKED":
       return `${base} border-emerald-600 bg-emerald-300 text-emerald-950 ring-2 ring-emerald-500`;

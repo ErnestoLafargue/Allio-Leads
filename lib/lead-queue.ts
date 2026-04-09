@@ -10,6 +10,7 @@ export const LEAD_QUEUE_ORDER: Record<LeadStatus, number> = {
   VOICEMAIL: 1,
   NOT_HOME: 2,
   NOT_INTERESTED: 3,
+  UNQUALIFIED: 3,
   MEETING_BOOKED: 4,
 };
 
@@ -25,6 +26,7 @@ export function queueRank(status: string): number {
 export function isQueueEligibleStatus(status: string): boolean {
   return (
     status !== "NOT_INTERESTED" &&
+    status !== "UNQUALIFIED" &&
     status !== "MEETING_BOOKED" &&
     status !== "VOICEMAIL" &&
     status !== "NOT_HOME" &&
