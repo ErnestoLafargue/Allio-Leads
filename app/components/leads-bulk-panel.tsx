@@ -72,7 +72,7 @@ function formatAddressLine(l: Pick<LeadRow, "address" | "postalCode" | "city">) 
 function formatDateCell(isoLike: string): string {
   const t = new Date(isoLike).getTime();
   if (!Number.isFinite(t)) return isoLike;
-  return new Date(t).toLocaleString("da-DK");
+  return new Date(t).toLocaleDateString("da-DK");
 }
 
 type SortColumn = "company" | "phone" | "address" | "status" | "imported";
@@ -287,12 +287,6 @@ export function LeadsBulkPanel({
     };
   }, [campaignId]);
 
-  useEffect(() => {
-    if (!campaignId) return;
-    const t = window.setInterval(() => setRefreshNonce((n) => n + 1), 20_000);
-    return () => clearInterval(t);
-  }, [campaignId]);
-
   const dynamicSortFields = useMemo((): DynamicSortField[] => {
     const base: DynamicSortField[] = [
       { id: "companyName", label: "Virksomhedsnavn", kind: "text" },
@@ -419,8 +413,8 @@ export function LeadsBulkPanel({
     }
   }
 
-  const allIds = useMemo(() => leads.map((l) => l.id), [leads]);
-  const allSelected = allIds.length > 0 && allIds.every((id) => selected.has(id));
+  const visibleIds = useMemo(() => sortedLeads.map((l) => l.id), [sortedLeads]);
+  const allSelected = visibleIds.length > 0 && visibleIds.every((id) => selected.has(id));
 
   const toggleOne = useCallback((id: string) => {
     setSelected((prev) => {
@@ -432,9 +426,16 @@ export function LeadsBulkPanel({
   }, []);
 
   const toggleAll = useCallback(() => {
-    if (allSelected) setSelected(new Set());
-    else setSelected(new Set(allIds));
-  }, [allIds, allSelected]);
+    setSelected((prev) => {
+      const next = new Set(prev);
+      if (allSelected) {
+        for (const id of visibleIds) next.delete(id);
+      } else {
+        for (const id of visibleIds) next.add(id);
+      }
+      return next;
+    });
+  }, [visibleIds, allSelected]);
 
   async function onBulkDelete() {
     const ids = [...selected];
@@ -807,7 +808,7 @@ export function LeadsBulkPanel({
                   )}
                   <td className="whitespace-nowrap px-2 py-3 text-stone-500">
                     {l.importedAt
-                      ? new Date(l.importedAt).toLocaleString("da-DK")
+                      ? new Date(l.importedAt).toLocaleDateString("da-DK")
                       : "—"}
                   </td>
                 </tr>
