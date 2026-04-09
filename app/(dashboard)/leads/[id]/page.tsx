@@ -46,6 +46,7 @@ type Lead = {
   lockExpiresAt?: string | null;
   lockedByUser?: { name: string; username: string } | null;
   callbackScheduledFor?: string | null;
+  callbackStatus?: string | null;
 };
 
 type QueueInfo = { ids: string[]; position: number };
@@ -410,7 +411,7 @@ function LeadDetailInner() {
     assignedUserId: string;
     scheduledForISO: string;
   }) {
-    if (!lead || lead.status !== "NEW") return;
+    if (!lead || (lead.status !== "NEW" && lead.status !== "CALLBACK_SCHEDULED")) return;
     setSaving(true);
     setCallbackSubmitError(null);
     setError(null);
@@ -570,7 +571,10 @@ function LeadDetailInner() {
     );
   }
 
-  const canScheduleCallback = lead.status === "NEW";
+  const canScheduleCallback =
+    lead.status === "NEW" ||
+    (lead.status === "CALLBACK_SCHEDULED" &&
+      String(lead.callbackStatus ?? "PENDING").trim().toUpperCase() === "PENDING");
   const showNextForMeeting = status !== "MEETING_BOOKED";
 
   return (

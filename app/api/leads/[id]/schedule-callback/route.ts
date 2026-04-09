@@ -3,6 +3,7 @@ import { prisma } from "@/lib/prisma";
 import { requireSession } from "@/lib/api-auth";
 import { LEAD_LOCK_CLEAR, isLockActive } from "@/lib/lead-lock";
 import { isCallbackTimeInCopenhagenBusinessWindow } from "@/lib/callback-datetime";
+import { parseCustomFields, stringifyCustomFields } from "@/lib/custom-fields";
 
 type Params = { params: Promise<{ id: string }> };
 
@@ -59,14 +60,10 @@ export async function POST(req: Request, { params }: Params) {
     const lead = await prisma.lead.findUnique({ where: { id } });
     if (!lead) return NextResponse.json({ error: "Ikke fundet" }, { status: 404 });
 
-    if (lead.status === "CALLBACK_SCHEDULED") {
-      return NextResponse.json(
-        { error: "Dette lead har allerede et planlagt callback." },
-        { status: 409 },
-      );
-    }
-
-    if (lead.status !== "NEW") {
+    const isReschedule =
+      lead.status === "CALLBACK_SCHEDULED" &&
+      String(lead.callbackStatus ?? "").trim().toUpperCase() === "PENDING";
+    if (!isReschedule && lead.status !== "NEW") {
       return NextResponse.json(
         { error: "Callback kan kun planlægges fra et «Ny»-lead i kampagnekøen." },
         { status: 400 },
@@ -75,26 +72,66 @@ export async function POST(req: Request, { params }: Params) {
 
     const role = session.user.role;
     if (role !== "ADMIN") {
-      if (!isLockActive(lead, now) || lead.lockedByUserId !== userId) {
+      if (
+        isReschedule
+          ? lead.callbackReservedByUserId !== userId
+          : !isLockActive(lead, now) || lead.lockedByUserId !== userId
+      ) {
         return NextResponse.json(
           {
-            error:
-              "Du skal have leadet aktivt i kampagne-arbejdet (låst til dig) for at planlægge callback.",
+            error: isReschedule
+              ? "Kun den tildelte bruger eller admin kan flytte dette tilbagekald."
+              : "Du skal have leadet aktivt i kampagne-arbejdet (låst til dig) for at planlægge callback.",
           },
           { status: 403 },
         );
       }
     }
 
+    const customFromBody =
+      body?.customFields && typeof body.customFields === "object" && body.customFields !== null
+        ? (body.customFields as Record<string, unknown>)
+        : null;
+    const mergedCustom = customFromBody
+      ? stringifyCustomFields({
+          ...parseCustomFields(lead.customFields),
+          ...Object.fromEntries(
+            Object.entries(customFromBody).map(([k, v]) => [k, typeof v === "string" ? v : String(v ?? "")]),
+          ),
+        })
+      : lead.customFields;
+
     const updated = await prisma.lead.update({
       where: { id },
       data: {
+        companyName: typeof body?.companyName === "string" ? body.companyName.trim() : lead.companyName,
+        phone: typeof body?.phone === "string" ? body.phone.trim() : lead.phone,
+        email: typeof body?.email === "string" ? body.email : lead.email,
+        cvr: typeof body?.cvr === "string" ? body.cvr : lead.cvr,
+        address: typeof body?.address === "string" ? body.address : lead.address,
+        postalCode: typeof body?.postalCode === "string" ? body.postalCode : lead.postalCode,
+        city: typeof body?.city === "string" ? body.city : lead.city,
+        industry: typeof body?.industry === "string" ? body.industry : lead.industry,
+        notes: typeof body?.notes === "string" ? body.notes : lead.notes,
+        customFields: mergedCustom,
+        meetingContactName:
+          typeof body?.meetingContactName === "string"
+            ? body.meetingContactName.trim()
+            : lead.meetingContactName,
+        meetingContactEmail:
+          typeof body?.meetingContactEmail === "string"
+            ? body.meetingContactEmail.trim()
+            : lead.meetingContactEmail,
+        meetingContactPhonePrivate:
+          typeof body?.meetingContactPhonePrivate === "string"
+            ? body.meetingContactPhonePrivate.trim()
+            : lead.meetingContactPhonePrivate,
         status: "CALLBACK_SCHEDULED",
         callbackScheduledFor: scheduledFor,
         callbackReservedByUserId: assignedUserId,
-        callbackCreatedByUserId: userId,
+        callbackCreatedByUserId: lead.callbackCreatedByUserId ?? userId,
         callbackStatus: "PENDING",
-        callbackNote: "",
+        callbackNote: lead.callbackNote ?? "",
         ...LEAD_LOCK_CLEAR,
       },
       include: leadInclude,

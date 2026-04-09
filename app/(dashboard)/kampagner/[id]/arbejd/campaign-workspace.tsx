@@ -44,6 +44,7 @@ type Lead = {
   lockedByUser?: { id: string; name: string; username: string } | null;
   callbackScheduledFor?: string | null;
   callbackReservedByUserId?: string | null;
+  callbackStatus?: string | null;
 };
 
 type Props = { campaignId: string; preferredLeadId?: string };
@@ -503,7 +504,7 @@ export function CampaignWorkspace({ campaignId, preferredLeadId }: Props) {
     assignedUserId: string;
     scheduledForISO: string;
   }) {
-    if (!activeLead || activeLead.status !== "NEW") return;
+    if (!activeLead || (activeLead.status !== "NEW" && activeLead.status !== "CALLBACK_SCHEDULED")) return;
     setSaving(true);
     setCallbackSubmitError(null);
     setError(null);
@@ -718,7 +719,10 @@ export function CampaignWorkspace({ campaignId, preferredLeadId }: Props) {
     String(current.meetingOutcomeStatus ?? "").trim().toUpperCase() === "CANCELLED" &&
     Boolean(current.meetingScheduledFor);
 
-  const canScheduleCallback = current.status === "NEW";
+  const canScheduleCallback =
+    current.status === "NEW" ||
+    (current.status === "CALLBACK_SCHEDULED" &&
+      String(current.callbackStatus ?? "PENDING").trim().toUpperCase() === "PENDING");
 
   const showNextForMeeting = status !== "MEETING_BOOKED";
   const nextLabel = saving ? "Gemmer…" : "Gem og næste";

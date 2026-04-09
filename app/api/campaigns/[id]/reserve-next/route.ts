@@ -99,10 +99,13 @@ export async function POST(req: Request, { params }: Params) {
       },
     });
 
-    const filtered = filterLeadsByCampaignProtectedSetting(
-      rawQueue.map((r) => ({ ...r, customFields: r.customFields })),
-      campaign.includeProtectedBusinesses,
-    );
+    const filtered =
+      campaign.systemCampaignType === "rebooking"
+        ? rawQueue.map((r) => ({ ...r, customFields: r.customFields }))
+        : filterLeadsByCampaignProtectedSetting(
+            rawQueue.map((r) => ({ ...r, customFields: r.customFields })),
+            campaign.includeProtectedBusinesses,
+          );
     const outcomeToday = await getLeadIdsWithOutcomeLogToday(filtered.map((r) => r.id));
     const sorted = sortLeadsForCampaignCallQueue(
       filtered.map((r) => ({
