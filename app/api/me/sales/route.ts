@@ -48,15 +48,17 @@ export async function GET() {
         const c = commissionKrForBookedDay(
           meetings.map((m) => ({ meetingOutcomeStatus: m.meetingOutcomeStatus })),
         );
-        if (c.finalized) tilUdbetalingKr += c.kr;
+        const currentRatePerHeld = rateKrPerHeldMeeting(c.heldCount);
+        const currentKr = c.heldCount * currentRatePerHeld;
+        tilUdbetalingKr += currentKr;
         return {
           dayKey,
           finalized: c.finalized,
           heldCount: c.heldCount,
           cancelledCount: c.cancelledCount,
           pendingCount: c.pendingCount,
-          kr: c.kr,
-          ratePerHeld: c.ratePerHeld,
+          kr: currentKr,
+          ratePerHeld: currentRatePerHeld,
           meetingCount: n,
           forventetKr,
           forventetRatePerMeeting,

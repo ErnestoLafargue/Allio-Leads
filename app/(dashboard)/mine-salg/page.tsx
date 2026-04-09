@@ -46,6 +46,13 @@ type SalesPayload = {
   };
 };
 
+function formatDayKeyDa(dayKey: string): string {
+  const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(dayKey.trim());
+  if (!m) return dayKey;
+  const [, y, mo, d] = m;
+  return `${d}-${mo}-${y}`;
+}
+
 function outcomeLabel(raw?: string) {
   const k = String(raw ?? "").trim().toUpperCase() || MEETING_OUTCOME_PENDING;
   return MEETING_OUTCOME_LABELS[k] ?? MEETING_OUTCOME_LABELS[MEETING_OUTCOME_PENDING];
@@ -103,8 +110,8 @@ export default function MineSalgPage() {
       <div>
         <h1 className="text-xl font-semibold text-stone-900">Mine Salg</h1>
         <p className="mt-1 text-sm text-stone-600">
-          Oversigt over de møder du har booket, deres status og provision der kan udbetales, når alle møder fra en
-          bookingsdag har fået udfald.
+          Oversigt over de møder du har booket, deres status og provision der løbende kan udbetales for afholdte
+          møder.
         </p>
       </div>
 
@@ -202,13 +209,13 @@ export default function MineSalgPage() {
               ) : (
                 daySummaries.map((d) => (
                   <tr key={d.dayKey}>
-                    <td className="px-3 py-2 text-stone-800">{d.dayKey}</td>
+                    <td className="px-3 py-2 text-stone-800">{formatDayKeyDa(d.dayKey)}</td>
                     <td className="px-3 py-2 text-stone-700">{d.meetingCount}</td>
                     <td className="px-3 py-2 text-stone-700">
                       {d.heldCount} / {d.cancelledCount} / {d.pendingCount}
                     </td>
                     <td className="px-3 py-2 text-stone-700">
-                      {d.finalized ? `${d.ratePerHeld} kr` : "—"}
+                      {d.heldCount > 0 ? `${d.ratePerHeld} kr` : "—"}
                     </td>
                     <td className="px-3 py-2 text-sky-900">
                       {d.meetingCount > 0 ? (
@@ -225,7 +232,7 @@ export default function MineSalgPage() {
                       )}
                     </td>
                     <td className="px-3 py-2 font-medium text-stone-900">
-                      {d.finalized ? `${d.kr.toLocaleString("da-DK")} kr` : "Afventer udfald"}
+                      {d.kr > 0 ? `${d.kr.toLocaleString("da-DK")} kr` : "0 kr"}
                     </td>
                   </tr>
                 ))

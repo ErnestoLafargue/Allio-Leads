@@ -23,6 +23,7 @@ export async function GET(req: Request) {
   const fromDate = searchParams.get("fromDate")?.trim() ?? "";
   const toDate = searchParams.get("toDate")?.trim() ?? "";
   const statusFilter = searchParams.get("status")?.trim().toUpperCase() ?? "";
+  const excludeNotInterested = searchParams.get("excludeNotInterested") === "1";
 
   try {
     await applyLeadCooldownResets();
@@ -87,12 +88,18 @@ export async function GET(req: Request) {
         : statusFilter && statusFilter !== "ANY" && isLeadStatus(statusFilter)
           ? { status: statusFilter }
           : {};
+    if (excludeNotInterested && statusWhere.status === "NOT_INTERESTED") {
+      return NextResponse.json([]);
+    }
+    const statusClause = excludeNotInterested
+      ? { AND: [statusWhere, { status: { not: "NOT_INTERESTED" as const } }] }
+      : statusWhere;
 
     const leads = await prisma.lead.findMany({
       where: {
         ...(campaignId ? { campaignId } : {}),
         ...(Object.keys(importedAtFilter).length > 0 ? { importedAt: importedAtFilter } : {}),
-        ...statusWhere,
+        ...statusClause,
         ...(q
           ? {
               OR: [

@@ -422,7 +422,7 @@ export default function RedigerKampagnePage() {
             {exportMessage}
           </p>
         )}
-        <div className="mt-4 min-h-[24rem] max-h-[62vh] overflow-y-auto pr-1">
+        <div className="mt-4">
           <LeadsBulkPanel
             campaignId={id}
             showSearchField

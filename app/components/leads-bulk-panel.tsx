@@ -213,6 +213,7 @@ export function LeadsBulkPanel({
   const [fromDate, setFromDate] = useState("");
   const [toDate, setToDate] = useState("");
   const [statusFilter, setStatusFilter] = useState<"ANY" | "NO_OUTCOME" | LeadStatus>("ANY");
+  const [excludeNotInterested, setExcludeNotInterested] = useState(false);
   const [dynamicSortFieldId, setDynamicSortFieldId] = useState("");
   const [dynamicSortDir, setDynamicSortDir] = useState<"asc" | "desc">("asc");
   const [dynamicFromDate, setDynamicFromDate] = useState("");
@@ -239,6 +240,7 @@ export function LeadsBulkPanel({
       if (!addedToday && fromDate) qs.set("fromDate", fromDate);
       if (!addedToday && toDate) qs.set("toDate", toDate);
       if (statusFilter !== "ANY") qs.set("status", statusFilter);
+      if (excludeNotInterested) qs.set("excludeNotInterested", "1");
       const res = await fetch(`/api/leads?${qs.toString()}`);
       if (cancelled) return;
       if (!res.ok) {
@@ -266,7 +268,7 @@ export function LeadsBulkPanel({
       cancelled = true;
       clearTimeout(t);
     };
-  }, [q, campaignId, refreshNonce, addedToday, fromDate, toDate, statusFilter]);
+  }, [q, campaignId, refreshNonce, addedToday, fromDate, toDate, statusFilter, excludeNotInterested]);
 
   useEffect(() => {
     if (!campaignId) {
@@ -471,6 +473,10 @@ export function LeadsBulkPanel({
 
   const colCount = (showCampaignColumn ? 7 : 6) + (isAdmin ? 1 : 0);
 
+  const tableContainerClass = campaignId
+    ? "max-h-[58vh] overflow-x-auto overflow-y-auto rounded-lg border border-stone-200 bg-white shadow-sm"
+    : "overflow-x-auto rounded-lg border border-stone-200 bg-white shadow-sm";
+
   return (
     <div className="space-y-3">
       <div className="flex flex-col gap-3 sm:flex-row sm:flex-wrap sm:items-center sm:justify-between">
@@ -564,6 +570,15 @@ export function LeadsBulkPanel({
               ))}
             </select>
           </label>
+          <label className="inline-flex items-center gap-2 text-xs text-stone-700">
+            <input
+              type="checkbox"
+              checked={excludeNotInterested}
+              onChange={(e) => setExcludeNotInterested(e.target.checked)}
+              className="rounded border-stone-300"
+            />
+            Ekskluder ikke interesseret
+          </label>
           <label className="text-xs text-stone-700">
             Sorter i filter
             <select
@@ -637,6 +652,7 @@ export function LeadsBulkPanel({
               setFromDate("");
               setToDate("");
               setStatusFilter("ANY");
+              setExcludeNotInterested(false);
               setDynamicSortFieldId("");
               setDynamicFromDate("");
               setDynamicToDate("");
@@ -651,7 +667,7 @@ export function LeadsBulkPanel({
 
       {error && <p className="text-sm text-red-600">{error}</p>}
 
-      <div className="overflow-x-auto rounded-lg border border-stone-200 bg-white shadow-sm">
+      <div className={tableContainerClass}>
         <table className="w-full min-w-[640px] text-left text-sm">
           <thead className="border-b border-stone-200 bg-stone-50 text-stone-600">
             <tr>
