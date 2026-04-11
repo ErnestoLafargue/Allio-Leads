@@ -100,6 +100,8 @@ model Lead {
   meetingOutcomeStatus     String @default("PENDING")
   /// YYYY-MM-DD (Europe/Copenhagen) for den dag mødet blev booket — gruppering til provisions-bonus
   meetingCommissionDayKey String @default("")
+  /// true hvis mødet første gang blev booket fra genbooking-kampagnen — fast 100 kr, ikke bonustrappe
+  bookedFromRebookingCampaign Boolean @default(false)
 
   /// Import eller manuel oprettelse — bruges til sortering «senest tilføjet»
   importedAt DateTime @default(now())

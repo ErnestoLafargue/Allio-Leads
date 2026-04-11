@@ -415,10 +415,12 @@ function LeadDetailInner() {
     setSaving(true);
     setCallbackSubmitError(null);
     setError(null);
-    const saveRes = await fetch(`/api/leads/${lead.id}`, {
-      method: "PATCH",
+    const res = await fetch(`/api/leads/${lead.id}/schedule-callback`, {
+      method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
+        scheduledFor: payload.scheduledForISO,
+        assignedUserId: payload.assignedUserId,
         companyName,
         phone,
         email,
@@ -429,24 +431,9 @@ function LeadDetailInner() {
         industry,
         notes,
         customFields: custom,
-        status: "NEW",
         meetingContactName: meetingContactName.trim(),
         meetingContactEmail: meetingContactEmail.trim(),
         meetingContactPhonePrivate: meetingContactPhonePrivate.trim(),
-      }),
-    });
-    if (!saveRes.ok) {
-      setSaving(false);
-      const j = await saveRes.json().catch(() => ({}));
-      setCallbackSubmitError(typeof j.error === "string" ? j.error : "Kunne ikke gemme noter før tilbagekald.");
-      return;
-    }
-    const res = await fetch(`/api/leads/${lead.id}/schedule-callback`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        scheduledFor: payload.scheduledForISO,
-        assignedUserId: payload.assignedUserId,
       }),
     });
     setSaving(false);
@@ -457,8 +444,11 @@ function LeadDetailInner() {
     }
     const data: Lead = await res.json();
     setLead(data);
+    setCustom(parseCustomFields(data.customFields));
     setCallbackDialogOpen(false);
-    setStatus("NEW");
+    if ((LEAD_STATUSES as readonly string[]).includes(data.status)) {
+      setStatus(data.status as LeadStatus);
+    }
     router.refresh();
   }
 

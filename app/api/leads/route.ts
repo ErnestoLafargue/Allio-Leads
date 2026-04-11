@@ -22,6 +22,10 @@ export async function GET(req: Request) {
   const addedToday = searchParams.get("addedToday") === "1";
   const fromDate = searchParams.get("fromDate")?.trim() ?? "";
   const toDate = searchParams.get("toDate")?.trim() ?? "";
+  /** Filtrér på planlagt møde-start (`meetingScheduledFor`), kun kalenderdato (Europe/Copenhagen). */
+  const filterByMeetingStart = searchParams.get("filterByMeetingStart") === "1";
+  const meetingStartFrom = searchParams.get("meetingStartFrom")?.trim() ?? "";
+  const meetingStartTo = searchParams.get("meetingStartTo")?.trim() ?? "";
   const statusFilter = searchParams.get("status")?.trim().toUpperCase() ?? "";
   const excludeNotInterested = searchParams.get("excludeNotInterested") === "1";
 
@@ -63,6 +67,7 @@ export async function GET(req: Request) {
     }
 
     const importedAtFilter: { gte?: Date; lt?: Date } = {};
+    let meetingScheduledForFilter: { not: null; gte?: Date; lt?: Date } | undefined;
     try {
       if (addedToday) {
         const { start, end } = copenhagenDayBoundsUtc();
@@ -76,6 +81,21 @@ export async function GET(req: Request) {
         if (toDate) {
           const { end } = copenhagenDayBoundsUtcFromDayKey(toDate);
           importedAtFilter.lt = end;
+        }
+      }
+      if (filterByMeetingStart && (meetingStartFrom || meetingStartTo)) {
+        if (meetingStartFrom && meetingStartTo && meetingStartFrom > meetingStartTo) {
+          return NextResponse.json(
+            { error: "«Fra» skal være før eller samme dag som «til» (møde-start)." },
+            { status: 400 },
+          );
+        }
+        meetingScheduledForFilter = { not: null };
+        if (meetingStartFrom) {
+          meetingScheduledForFilter.gte = copenhagenDayBoundsUtcFromDayKey(meetingStartFrom).start;
+        }
+        if (meetingStartTo) {
+          meetingScheduledForFilter.lt = copenhagenDayBoundsUtcFromDayKey(meetingStartTo).end;
         }
       }
     } catch {
@@ -99,6 +119,7 @@ export async function GET(req: Request) {
       where: {
         ...(campaignId ? { campaignId } : {}),
         ...(Object.keys(importedAtFilter).length > 0 ? { importedAt: importedAtFilter } : {}),
+        ...(meetingScheduledForFilter ? { meetingScheduledFor: meetingScheduledForFilter } : {}),
         ...statusClause,
         ...(q
           ? {

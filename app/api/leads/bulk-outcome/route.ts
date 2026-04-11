@@ -57,6 +57,7 @@ export async function POST(req: Request) {
 
     const existingRows = await prisma.lead.findMany({
       where: { id: { in: idList } },
+      include: { campaign: { select: { systemCampaignType: true } } },
     });
 
     if (existingRows.length !== idList.length) {
@@ -104,8 +105,10 @@ export async function POST(req: Request) {
         const cid = await campaignIdForBookedMeetingOutcome(o);
         if (cid) data.campaignId = cid;
       } else if (existing.status === "MEETING_BOOKED") {
-        const sid = await ensureStandardCampaignId();
-        if (sid) data.campaignId = sid;
+        if (existing.campaign?.systemCampaignType !== "rebooking") {
+          const sid = await ensureStandardCampaignId();
+          if (sid) data.campaignId = sid;
+        }
       }
       updates.push({ id: existing.id, data });
       if (shouldLogOutcomeForLeaderboard(existing, status)) {

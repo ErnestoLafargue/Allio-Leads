@@ -202,6 +202,11 @@ export function CampaignWorkspace({ campaignId, preferredLeadId }: Props) {
         if (!cancelled) {
           setError(typeof j.error === "string" ? j.error : "Kunne ikke reservere lead.");
           setCampaignName(c.name ?? "");
+          setCampaignSystemType(
+            typeof c.systemCampaignType === "string" && c.systemCampaignType.trim()
+              ? c.systemCampaignType.trim()
+              : null,
+          );
           setFieldConfigJson(c.fieldConfig ?? "{}");
           setCampaignLeadCount(total);
           setActiveLead(null);
@@ -508,10 +513,13 @@ export function CampaignWorkspace({ campaignId, preferredLeadId }: Props) {
     setSaving(true);
     setCallbackSubmitError(null);
     setError(null);
-    const saveRes = await fetch(`/api/leads/${activeLead.id}`, {
-      method: "PATCH",
+    /** Ét kald: gemmer noter/felter og sætter CALLBACK_SCHEDULED — ikke et separat «gem udfald». */
+    const res = await fetch(`/api/leads/${activeLead.id}/schedule-callback`, {
+      method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
+        scheduledFor: payload.scheduledForISO,
+        assignedUserId: payload.assignedUserId,
         companyName,
         phone,
         email,
@@ -522,26 +530,9 @@ export function CampaignWorkspace({ campaignId, preferredLeadId }: Props) {
         industry,
         notes,
         customFields: custom,
-        status: "NEW",
         meetingContactName: meetingContactName.trim(),
         meetingContactEmail: meetingContactEmail.trim(),
         meetingContactPhonePrivate: meetingContactPhonePrivate.trim(),
-      }),
-    });
-    if (!saveRes.ok) {
-      setSaving(false);
-      const j = await saveRes.json().catch(() => ({}));
-      setCallbackSubmitError(
-        typeof j.error === "string" ? j.error : "Kunne ikke gemme noter før tilbagekald.",
-      );
-      return;
-    }
-    const res = await fetch(`/api/leads/${activeLead.id}/schedule-callback`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        scheduledFor: payload.scheduledForISO,
-        assignedUserId: payload.assignedUserId,
       }),
     });
     setSaving(false);
@@ -643,8 +634,17 @@ export function CampaignWorkspace({ campaignId, preferredLeadId }: Props) {
             <strong>optaget</strong> af kolleger der også arbejder i kampagnen. Prøv igen om lidt.
           </p>
           <p className="text-sm text-stone-600">
-            Når voicemail eller «Ikke hjemme» er udløbet, et lead frigives, eller et planlagt callback når tidspunktet
-            (eller du loader siden igen), dukker det i køen igen.
+            {campaignSystemType === "rebooking" ? (
+              <>
+                Under «Genbook møde» ligger både annullerede bookinger og leads sat til «Ny» i denne kampagne. Hvis du
+                lige har gemt et lead som «Ny» eller voicemail, kan du prøve igen — eller genindlæs siden.
+              </>
+            ) : (
+              <>
+                Når voicemail eller «Ikke hjemme» er udløbet, et lead frigives, eller et planlagt callback når
+                tidspunktet (eller du loader siden igen), dukker det i køen igen.
+              </>
+            )}
           </p>
           {error && <p className="text-sm text-red-600">{error}</p>}
           <button

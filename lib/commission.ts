@@ -5,7 +5,10 @@ import {
   MEETING_OUTCOME_SALE,
 } from "@/lib/meeting-outcome";
 
-/** Provisions-sats pr. afholdt møde ud fra antal afholdte møder samme bookings-dag (efter alle udfald). */
+/** Genbooking-kampagne: fast provision pr. afholdt møde (uden bonustrappe). */
+export const COMMISSION_REBOOKING_FLAT_KR = 100;
+
+/** Provisions-sats pr. afholdt møde ud fra antal afholdte møder samme bookings-dag (efter alle udfald). Kun ikke-genbooking møder tæller i antallet. */
 export function rateKrPerHeldMeeting(heldCount: number): number {
   if (heldCount <= 0) return 0;
   if (heldCount === 1) return 200;
@@ -15,52 +18,75 @@ export function rateKrPerHeldMeeting(heldCount: number): number {
 
 export type MeetingForCommission = {
   meetingOutcomeStatus: string;
+  bookedFromRebookingCampaign?: boolean | null;
 };
 
+function normalizeOutcome(s: string): string {
+  return String(s ?? "").trim().toUpperCase() || MEETING_OUTCOME_PENDING;
+}
+
+function isHeldOutcome(o: string): boolean {
+  const n = normalizeOutcome(o);
+  return n === MEETING_OUTCOME_HELD || n === MEETING_OUTCOME_SALE;
+}
+
+function isRebookingSource(m: MeetingForCommission): boolean {
+  return m.bookedFromRebookingCampaign === true;
+}
+
 /**
- * Provision for én bookings-dag: alle møder skal have udfald (HELD/CANCELLED).
- * Trappesatsen afhænger kun af antal AFHOLDTE møder den dag.
+ * Provision for én bookings-dag.
+ * Genbooking-bookede møder: fast {@link COMMISSION_REBOOKING_FLAT_KR} kr pr. afholdt — tæller ikke med i bonustrappens antal.
+ * Øvrige møder: trappesats ud fra antal afholdte ikke-genbooking møder samme dag.
  */
 export function commissionKrForBookedDay(meetings: MeetingForCommission[]): {
   finalized: boolean;
   heldCount: number;
+  heldRebookingCount: number;
+  heldStandardCount: number;
   cancelledCount: number;
   pendingCount: number;
   kr: number;
-  ratePerHeld: number;
+  /** Bonustrappens sats for standard-afholdte (0 hvis ingen). */
+  ratePerHeldStandard: number;
 } {
-  const pending = meetings.filter((m) => normalizeOutcome(m.meetingOutcomeStatus) === MEETING_OUTCOME_PENDING);
-  const held = meetings.filter((m) => {
-    const o = normalizeOutcome(m.meetingOutcomeStatus);
-    return o === MEETING_OUTCOME_HELD || o === MEETING_OUTCOME_SALE;
-  });
+  const pending = meetings.filter(
+    (m) => normalizeOutcome(m.meetingOutcomeStatus) === MEETING_OUTCOME_PENDING,
+  );
+  const held = meetings.filter((m) => isHeldOutcome(m.meetingOutcomeStatus));
   const cancelled = meetings.filter(
     (m) => normalizeOutcome(m.meetingOutcomeStatus) === MEETING_OUTCOME_CANCELLED,
   );
 
-  if (pending.length > 0) {
-    return {
-      finalized: false,
-      heldCount: held.length,
-      cancelledCount: cancelled.length,
-      pendingCount: pending.length,
-      kr: 0,
-      ratePerHeld: 0,
-    };
-  }
+  const heldRebooking = held.filter(isRebookingSource);
+  const heldStandard = held.filter((m) => !isRebookingSource(m));
+  const hStd = heldStandard.length;
+  const ratePerHeldStandard = rateKrPerHeldMeeting(hStd);
+  const kr =
+    heldRebooking.length * COMMISSION_REBOOKING_FLAT_KR + heldStandard.length * ratePerHeldStandard;
 
-  const h = held.length;
-  const ratePerHeld = rateKrPerHeldMeeting(h);
   return {
-    finalized: true,
-    heldCount: h,
+    finalized: pending.length === 0,
+    heldCount: held.length,
+    heldRebookingCount: heldRebooking.length,
+    heldStandardCount: heldStandard.length,
     cancelledCount: cancelled.length,
-    pendingCount: 0,
-    kr: h * ratePerHeld,
-    ratePerHeld,
+    pendingCount: pending.length,
+    kr,
+    ratePerHeldStandard,
   };
 }
 
-function normalizeOutcome(s: string): string {
-  return String(s ?? "").trim().toUpperCase() || MEETING_OUTCOME_PENDING;
+/** Ikke-annullerede møder (kan stadig blive afholdt). */
+export function forventetProvisionKrForBookedDay(meetings: MeetingForCommission[]): number {
+  const possible = meetings.filter(
+    (m) => normalizeOutcome(m.meetingOutcomeStatus) !== MEETING_OUTCOME_CANCELLED,
+  );
+  const possibleRebooking = possible.filter(isRebookingSource);
+  const possibleStandard = possible.filter((m) => !isRebookingSource(m));
+  const nStd = possibleStandard.length;
+  return (
+    possibleRebooking.length * COMMISSION_REBOOKING_FLAT_KR +
+    possibleStandard.length * rateKrPerHeldMeeting(nStd)
+  );
 }

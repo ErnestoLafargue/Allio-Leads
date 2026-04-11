@@ -4,7 +4,7 @@ import { requireSession } from "@/lib/api-auth";
 import { applyLeadCooldownResets } from "@/lib/lead-cooldown";
 import { filterLeadsByCampaignProtectedSetting } from "@/lib/reklamebeskyttet-filter";
 import { getLeadIdsWithOutcomeLogToday } from "@/lib/lead-outcome-today";
-import { sortLeadsForCampaignCallQueue } from "@/lib/lead-queue";
+import { isLeadInRebookingDialerPool, sortLeadsForCampaignCallQueue } from "@/lib/lead-queue";
 import { MEETING_OUTCOME_CANCELLED, normalizeMeetingOutcomeStatus } from "@/lib/meeting-outcome";
 import { releaseExpiredLocksEverywhere, tryAcquireLeadLock } from "@/lib/lead-lock";
 
@@ -20,7 +20,7 @@ const leadInclude = {
 /**
  * Atomisk reservation: først alle aktive planlagte callbacks for denne bruger (på tværs af kampagner), derefter «Ny»-køen.
  * Post body (valgfri): { "preferLeadId": "…" } for at genåbne samme Ny-lead efter refresh (gælder ikke for callback-prioritet).
- * { "excludeLeadId": "…" } springer dette lead over i Ny-køen (fx efter «Gem og næste» med udfald Ny).
+ * { "excludeLeadId": "…" } springer dette lead over i både tilbagekald-prioritet og Ny-køen (fx efter planlagt callback).
  */
 export async function POST(req: Request, { params }: Params) {
   const { session, response } = await requireSession();
@@ -76,6 +76,7 @@ export async function POST(req: Request, { params }: Params) {
     });
 
     for (const row of pendingCallbacks) {
+      if (excludeLeadId && row.id === excludeLeadId) continue;
       const got = await tryReserve(row.id);
       if (got) return NextResponse.json({ lead: got });
     }
@@ -85,8 +86,13 @@ export async function POST(req: Request, { params }: Params) {
         campaign.systemCampaignType === "rebooking"
           ? {
               campaignId,
-              status: "MEETING_BOOKED",
-              meetingOutcomeStatus: MEETING_OUTCOME_CANCELLED,
+              /** Afsluttede udfald skal aldrig trækkes som næste lead (ses stadig i kampagne-layout). */
+              NOT: { status: { in: ["NOT_INTERESTED", "UNQUALIFIED"] } },
+              OR: [
+                { status: "MEETING_BOOKED", meetingOutcomeStatus: MEETING_OUTCOME_CANCELLED },
+                /** Efter opkald/gem som «Ny» (eller auto fra voicemail) — stadig under genbook-kampagnen */
+                { status: "NEW" },
+              ],
             }
           : { campaignId, status: "NEW" },
       select: {
@@ -101,7 +107,9 @@ export async function POST(req: Request, { params }: Params) {
 
     const filtered =
       campaign.systemCampaignType === "rebooking"
-        ? rawQueue.map((r) => ({ ...r, customFields: r.customFields }))
+        ? rawQueue
+            .filter((r) => isLeadInRebookingDialerPool(r))
+            .map((r) => ({ ...r, customFields: r.customFields }))
         : filterLeadsByCampaignProtectedSetting(
             rawQueue.map((r) => ({ ...r, customFields: r.customFields })),
             campaign.includeProtectedBusinesses,

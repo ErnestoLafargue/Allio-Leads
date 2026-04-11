@@ -1,7 +1,12 @@
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { requireSession } from "@/lib/api-auth";
-import { commissionKrForBookedDay, rateKrPerHeldMeeting } from "@/lib/commission";
+import {
+  commissionKrForBookedDay,
+  COMMISSION_REBOOKING_FLAT_KR,
+  forventetProvisionKrForBookedDay,
+  rateKrPerHeldMeeting,
+} from "@/lib/commission";
 import { resolveLeadCommissionDayKey } from "@/lib/lead-commission-day";
 import {
   MEETING_OUTCOME_CANCELLED,
@@ -41,29 +46,59 @@ export async function GET() {
     const daySummaries = [...byDay.entries()]
       .map(([dayKey, meetings]) => {
         const n = meetings.length;
+        const commissionRows = meetings.map((m) => ({
+          meetingOutcomeStatus: m.meetingOutcomeStatus,
+          bookedFromRebookingCampaign: m.bookedFromRebookingCampaign,
+        }));
         const possibleHeldCount = meetings.filter(
           (m) => normOutcome(m.meetingOutcomeStatus) !== MEETING_OUTCOME_CANCELLED,
         ).length;
-        const forventetRatePerMeeting = rateKrPerHeldMeeting(possibleHeldCount);
-        const forventetKr = possibleHeldCount * forventetRatePerMeeting;
+        const possibleRebookingCount = meetings.filter(
+          (m) =>
+            normOutcome(m.meetingOutcomeStatus) !== MEETING_OUTCOME_CANCELLED &&
+            m.bookedFromRebookingCampaign === true,
+        ).length;
+        const possibleStandardCount = possibleHeldCount - possibleRebookingCount;
+        const forventetKr = forventetProvisionKrForBookedDay(commissionRows);
         forventetProvisionKr += forventetKr;
 
-        const c = commissionKrForBookedDay(
-          meetings.map((m) => ({ meetingOutcomeStatus: m.meetingOutcomeStatus })),
-        );
-        const currentRatePerHeld = rateKrPerHeldMeeting(c.heldCount);
-        const currentKr = c.heldCount * currentRatePerHeld;
+        const c = commissionKrForBookedDay(commissionRows);
+        const currentKr = c.kr;
         tilUdbetalingKr += currentKr;
+
+        let ratePerHeld = 0;
+        let rateLabel: string | null = null;
+        if (c.heldCount > 0) {
+          if (c.heldRebookingCount > 0 && c.heldStandardCount > 0) {
+            rateLabel = `Blandet (${COMMISSION_REBOOKING_FLAT_KR} kr + trappe)`;
+            ratePerHeld = 0;
+          } else if (c.heldRebookingCount > 0) {
+            ratePerHeld = COMMISSION_REBOOKING_FLAT_KR;
+            rateLabel = `${COMMISSION_REBOOKING_FLAT_KR} kr (genbooking)`;
+          } else {
+            ratePerHeld = c.ratePerHeldStandard;
+            rateLabel = `${c.ratePerHeldStandard} kr`;
+          }
+        }
+
+        const forventetRatePerMeeting =
+          possibleStandardCount > 0 ? rateKrPerHeldMeeting(possibleStandardCount) : 0;
+
         return {
           dayKey,
           finalized: c.finalized,
           heldCount: c.heldCount,
+          heldRebookingCount: c.heldRebookingCount,
+          heldStandardCount: c.heldStandardCount,
           cancelledCount: c.cancelledCount,
           pendingCount: c.pendingCount,
           kr: currentKr,
-          ratePerHeld: currentRatePerHeld,
+          ratePerHeld,
+          rateLabel,
           meetingCount: n,
           possibleHeldCount,
+          possibleRebookingCount,
+          possibleStandardCount,
           forventetKr,
           forventetRatePerMeeting,
         };

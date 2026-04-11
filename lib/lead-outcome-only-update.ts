@@ -12,7 +12,7 @@ export type OutcomeOnlyResult =
  * Kun udfald (status + møde + voicemail/ikke hjemme-felter), øvrige lead-felter uændrede.
  */
 export function buildLeadOutcomeOnlyUpdate(
-  existing: Lead,
+  existing: Lead & { campaign?: { systemCampaignType: string | null } | null },
   status: LeadStatus,
   meetingScheduledForBody: string | undefined,
   userId: string,
@@ -89,6 +89,13 @@ export function buildLeadOutcomeOnlyUpdate(
     callbackStatus = "PENDING";
   }
 
+  let bookedFromRebookingCampaign = existing.bookedFromRebookingCampaign ?? false;
+  if (status !== "MEETING_BOOKED") {
+    bookedFromRebookingCampaign = false;
+  } else if (existing.status !== "MEETING_BOOKED" || !existing.meetingBookedAt) {
+    bookedFromRebookingCampaign = existing.campaign?.systemCampaignType === "rebooking";
+  }
+
   return {
     ok: true,
     data: pickLeadUpdateData({
@@ -111,6 +118,7 @@ export function buildLeadOutcomeOnlyUpdate(
       meetingContactPhonePrivate,
       meetingOutcomeStatus,
       meetingCommissionDayKey,
+      bookedFromRebookingCampaign,
       voicemailMarkedAt,
       notHomeMarkedAt,
       callbackScheduledFor,

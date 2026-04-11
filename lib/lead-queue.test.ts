@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   compareLeadQueueOrder,
+  isLeadInRebookingDialerPool,
   isQueueEligibleStatus,
   sortLeadsForCampaignCallQueue,
 } from "./lead-queue";
@@ -71,6 +72,29 @@ describe("isQueueEligibleStatus", () => {
   it("ekluderer CALLBACK_SCHEDULED fra kø-navigation", () => {
     expect(isQueueEligibleStatus("CALLBACK_SCHEDULED")).toBe(false);
     expect(isQueueEligibleStatus("NEW")).toBe(true);
+  });
+});
+
+describe("isLeadInRebookingDialerPool", () => {
+  it("tillader Ny og annulleret booket møde", () => {
+    expect(isLeadInRebookingDialerPool({ status: "NEW", meetingOutcomeStatus: "PENDING" })).toBe(true);
+    expect(
+      isLeadInRebookingDialerPool({ status: "MEETING_BOOKED", meetingOutcomeStatus: "CANCELLED" }),
+    ).toBe(true);
+  });
+  it("afviser ikke interesseret og ukvalificeret", () => {
+    expect(
+      isLeadInRebookingDialerPool({ status: "NOT_INTERESTED", meetingOutcomeStatus: "PENDING" }),
+    ).toBe(false);
+    expect(
+      isLeadInRebookingDialerPool({ status: "UNQUALIFIED", meetingOutcomeStatus: "PENDING" }),
+    ).toBe(false);
+  });
+  it("afviser øvrige statusser i genbook-køen", () => {
+    expect(
+      isLeadInRebookingDialerPool({ status: "MEETING_BOOKED", meetingOutcomeStatus: "PENDING" }),
+    ).toBe(false);
+    expect(isLeadInRebookingDialerPool({ status: "VOICEMAIL", meetingOutcomeStatus: "PENDING" })).toBe(false);
   });
 });
 

@@ -212,6 +212,10 @@ export function LeadsBulkPanel({
   const [addedToday, setAddedToday] = useState(false);
   const [fromDate, setFromDate] = useState("");
   const [toDate, setToDate] = useState("");
+  /** Planlagt møde (`meetingScheduledFor`) — serverfilter, kalenderdato (København). */
+  const [filterMeetingStart, setFilterMeetingStart] = useState(false);
+  const [meetingStartFrom, setMeetingStartFrom] = useState("");
+  const [meetingStartTo, setMeetingStartTo] = useState("");
   const [statusFilter, setStatusFilter] = useState<"ANY" | "NO_OUTCOME" | LeadStatus>("ANY");
   const [excludeNotInterested, setExcludeNotInterested] = useState(false);
   const [dynamicSortFieldId, setDynamicSortFieldId] = useState("");
@@ -239,6 +243,11 @@ export function LeadsBulkPanel({
       if (addedToday) qs.set("addedToday", "1");
       if (!addedToday && fromDate) qs.set("fromDate", fromDate);
       if (!addedToday && toDate) qs.set("toDate", toDate);
+      if (filterMeetingStart) {
+        qs.set("filterByMeetingStart", "1");
+        if (meetingStartFrom) qs.set("meetingStartFrom", meetingStartFrom);
+        if (meetingStartTo) qs.set("meetingStartTo", meetingStartTo);
+      }
       if (statusFilter !== "ANY") qs.set("status", statusFilter);
       if (excludeNotInterested) qs.set("excludeNotInterested", "1");
       const res = await fetch(`/api/leads?${qs.toString()}`);
@@ -268,7 +277,19 @@ export function LeadsBulkPanel({
       cancelled = true;
       clearTimeout(t);
     };
-  }, [q, campaignId, refreshNonce, addedToday, fromDate, toDate, statusFilter, excludeNotInterested]);
+  }, [
+    q,
+    campaignId,
+    refreshNonce,
+    addedToday,
+    fromDate,
+    toDate,
+    filterMeetingStart,
+    meetingStartFrom,
+    meetingStartTo,
+    statusFilter,
+    excludeNotInterested,
+  ]);
 
   useEffect(() => {
     if (!campaignId) {
@@ -533,7 +554,7 @@ export function LeadsBulkPanel({
             Tilføjet i dag
           </label>
           <label className="text-xs text-stone-700">
-            Fra dato
+            Tilføjet fra
             <input
               type="date"
               value={fromDate}
@@ -543,7 +564,7 @@ export function LeadsBulkPanel({
             />
           </label>
           <label className="text-xs text-stone-700">
-            Til dato
+            Tilføjet til
             <input
               type="date"
               value={toDate}
@@ -552,6 +573,42 @@ export function LeadsBulkPanel({
               className="mt-1 block rounded-md border border-stone-200 bg-white px-2 py-1.5 text-xs text-stone-900 disabled:opacity-60"
             />
           </label>
+          <div className="flex flex-col gap-1 rounded-md border border-dashed border-stone-300 bg-white/80 px-2 py-2 sm:min-w-[14rem]">
+            <label className="inline-flex items-center gap-2 text-xs font-medium text-stone-800">
+              <input
+                type="checkbox"
+                checked={filterMeetingStart}
+                onChange={(e) => setFilterMeetingStart(e.target.checked)}
+                className="rounded border-stone-300"
+              />
+              Filtrér på møde-startdato
+            </label>
+            <p className="text-[11px] leading-snug text-stone-500">
+              Kun leads med planlagt møde; dato (ikke klokkeslæt) i forhold til kalenderdag i Danmark.
+            </p>
+            <div className="flex flex-wrap gap-2">
+              <label className="text-xs text-stone-700">
+                Fra
+                <input
+                  type="date"
+                  value={meetingStartFrom}
+                  onChange={(e) => setMeetingStartFrom(e.target.value)}
+                  disabled={!filterMeetingStart}
+                  className="mt-1 block rounded-md border border-stone-200 bg-white px-2 py-1.5 text-xs text-stone-900 disabled:opacity-60"
+                />
+              </label>
+              <label className="text-xs text-stone-700">
+                Til
+                <input
+                  type="date"
+                  value={meetingStartTo}
+                  onChange={(e) => setMeetingStartTo(e.target.value)}
+                  disabled={!filterMeetingStart}
+                  className="mt-1 block rounded-md border border-stone-200 bg-white px-2 py-1.5 text-xs text-stone-900 disabled:opacity-60"
+                />
+              </label>
+            </div>
+          </div>
           <label className="text-xs text-stone-700">
             Udfald/status
             <select
@@ -617,7 +674,7 @@ export function LeadsBulkPanel({
           {selectedDynamicField?.kind === "date" && (
             <>
               <label className="text-xs text-stone-700">
-                Startdato fra
+                Fra (valgt felt)
                 <input
                   type="date"
                   value={dynamicFromDate}
@@ -626,7 +683,7 @@ export function LeadsBulkPanel({
                 />
               </label>
               <label className="text-xs text-stone-700">
-                Startdato til
+                Til (valgt felt)
                 <input
                   type="date"
                   value={dynamicToDate}
@@ -651,6 +708,9 @@ export function LeadsBulkPanel({
               setAddedToday(false);
               setFromDate("");
               setToDate("");
+              setFilterMeetingStart(false);
+              setMeetingStartFrom("");
+              setMeetingStartTo("");
               setStatusFilter("ANY");
               setExcludeNotInterested(false);
               setDynamicSortFieldId("");

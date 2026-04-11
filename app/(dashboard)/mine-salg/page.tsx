@@ -7,7 +7,7 @@ import {
   MEETING_OUTCOME_PENDING,
   MEETING_OUTCOME_SALE,
 } from "@/lib/meeting-outcome";
-import { rateKrPerHeldMeeting } from "@/lib/commission";
+import { COMMISSION_REBOOKING_FLAT_KR, rateKrPerHeldMeeting } from "@/lib/commission";
 
 type LeadRow = {
   id: string;
@@ -23,12 +23,17 @@ type DaySummary = {
   dayKey: string;
   finalized: boolean;
   heldCount: number;
+  heldRebookingCount?: number;
+  heldStandardCount?: number;
   cancelledCount: number;
   pendingCount: number;
   kr: number;
   ratePerHeld: number;
+  rateLabel?: string | null;
   meetingCount: number;
   possibleHeldCount?: number;
+  possibleRebookingCount?: number;
+  possibleStandardCount?: number;
   forventetKr?: number;
   forventetRatePerMeeting?: number;
 };
@@ -159,9 +164,13 @@ export default function MineSalgPage() {
         <div className="rounded-xl border border-stone-200 bg-white p-5 shadow-sm">
           <h2 className="text-sm font-semibold text-stone-900">Bonus-trappe (pr. afholdt møde)</h2>
           <ul className="mt-3 space-y-2 text-sm text-stone-700">
-            <li>1 afholdt møde samme dag → {rateKrPerHeldMeeting(1)} kr pr. afholdt</li>
-            <li>2 afholdt samme dag → {rateKrPerHeldMeeting(2)} kr pr. afholdt</li>
-            <li>3 eller flere afholdt samme dag → {rateKrPerHeldMeeting(3)} kr pr. afholdt</li>
+            <li>
+              Møder booket fra <strong>genbooking-kampagnen</strong> → {COMMISSION_REBOOKING_FLAT_KR} kr pr.
+              afholdt (tæller ikke med i trappen).
+            </li>
+            <li>1 afholdt møde samme dag (øvrige) → {rateKrPerHeldMeeting(1)} kr pr. afholdt</li>
+            <li>2 afholdt samme dag (øvrige) → {rateKrPerHeldMeeting(2)} kr pr. afholdt</li>
+            <li>3 eller flere afholdt samme dag (øvrige) → {rateKrPerHeldMeeting(3)} kr pr. afholdt</li>
           </ul>
         </div>
       </div>
@@ -176,7 +185,8 @@ export default function MineSalgPage() {
           </li>
           <li>
             Satsen pr. afholdt møde afhænger af, hvor mange møder der reelt blev <strong>afholdt</strong> den dag —
-            annullerede møder tæller ikke med i antallet, men skal stadig have udfald før dagen kan lukkes.
+            annullerede møder tæller ikke med i antallet, men skal stadig have udfald før dagen kan lukkes. Møder
+            booket fra genbooking giver fast {COMMISSION_REBOOKING_FLAT_KR} kr og indgår ikke i bonustrappen.
           </li>
           <li>
             <strong>Forventet provision</strong> regnes kun på møder, der stadig kan blive afholdt — annullerede møder
@@ -218,7 +228,7 @@ export default function MineSalgPage() {
                       {d.heldCount} / {d.cancelledCount} / {d.pendingCount}
                     </td>
                     <td className="px-3 py-2 text-stone-700">
-                      {d.heldCount > 0 ? `${d.ratePerHeld} kr` : "—"}
+                      {d.heldCount > 0 ? (d.rateLabel ?? `${d.ratePerHeld} kr`) : "—"}
                     </td>
                     <td className="px-3 py-2 text-sky-900">
                       {d.meetingCount > 0 ? (
@@ -227,7 +237,23 @@ export default function MineSalgPage() {
                             {(d.forventetKr ?? 0).toLocaleString("da-DK")} kr
                           </span>
                           <span className="mt-0.5 block text-xs text-stone-500">
-                            {(d.forventetRatePerMeeting ?? 0)} kr × {d.possibleHeldCount ?? 0} (ikke-annullerede)
+                            {(d.possibleRebookingCount ?? 0) > 0 || (d.possibleStandardCount ?? 0) > 0 ? (
+                              <>
+                                {(d.possibleRebookingCount ?? 0) > 0 && (
+                                  <span>
+                                    {COMMISSION_REBOOKING_FLAT_KR} kr × {d.possibleRebookingCount} (genbooking)
+                                    {(d.possibleStandardCount ?? 0) > 0 ? " · " : ""}
+                                  </span>
+                                )}
+                                {(d.possibleStandardCount ?? 0) > 0 && (
+                                  <span>
+                                    {(d.forventetRatePerMeeting ?? 0)} kr × {d.possibleStandardCount} (øvrige)
+                                  </span>
+                                )}
+                              </>
+                            ) : (
+                              <>0 kr × 0</>
+                            )}
                           </span>
                         </>
                       ) : (

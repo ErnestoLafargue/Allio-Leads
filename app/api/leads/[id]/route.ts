@@ -73,6 +73,7 @@ export async function GET(_req: Request, { params }: Params) {
       msg.includes("callbackScheduledFor") ||
       msg.includes("callbackReservedByUserId") ||
       msg.includes("lastOutcomeAt") ||
+      msg.includes("bookedFromRebookingCampaign") ||
       msg.includes("no such column") ||
       msg.toLowerCase().includes("does not exist");
     return NextResponse.json(
@@ -95,7 +96,10 @@ export async function PATCH(req: Request, { params }: Params) {
 
   const body = await req.json().catch(() => null);
   await releaseExpiredLocksEverywhere(prisma);
-  const existing = await prisma.lead.findUnique({ where: { id } });
+  const existing = await prisma.lead.findUnique({
+    where: { id },
+    include: { campaign: { select: { systemCampaignType: true } } },
+  });
   if (!existing) return NextResponse.json({ error: "Ikke fundet" }, { status: 404 });
 
   if (!canAccessBookedMeetingNotes(session.user.role, userId, existing)) {
@@ -319,11 +323,23 @@ export async function PATCH(req: Request, { params }: Params) {
 
   const clearLeadLock = status !== "NEW";
 
+  let bookedFromRebookingCampaign = existing.bookedFromRebookingCampaign ?? false;
+  if (status !== "MEETING_BOOKED") {
+    bookedFromRebookingCampaign = false;
+  } else if (existing.status !== "MEETING_BOOKED" || !existing.meetingBookedAt) {
+    bookedFromRebookingCampaign = existing.campaign?.systemCampaignType === "rebooking";
+  }
+
   let campaignIdToSet: string | null | undefined;
   if (status === "MEETING_BOOKED" && meetingScheduledFor) {
     campaignIdToSet = await campaignIdForBookedMeetingOutcome(meetingOutcomeStatus);
   } else if (existing.status === "MEETING_BOOKED" && status !== "MEETING_BOOKED") {
-    campaignIdToSet = (await ensureStandardCampaignId()) ?? undefined;
+    /** I «Genbook møde» skal opkald-udfald (Ny, voicemail m.m.) blive i kampagnen — ellers forsvinder leadet fra genbook-køen. */
+    if (existing.campaign?.systemCampaignType === "rebooking") {
+      campaignIdToSet = undefined;
+    } else {
+      campaignIdToSet = (await ensureStandardCampaignId()) ?? undefined;
+    }
   }
 
   const lead = await prisma.$transaction(async (tx) => {
@@ -350,6 +366,7 @@ export async function PATCH(req: Request, { params }: Params) {
           meetingContactPhonePrivate,
           meetingOutcomeStatus,
           meetingCommissionDayKey,
+          bookedFromRebookingCampaign,
           voicemailMarkedAt,
           notHomeMarkedAt,
           callbackScheduledFor,
