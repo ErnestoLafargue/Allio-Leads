@@ -127,6 +127,31 @@ function normalizeLabel(label: string): string {
     .replace(/[åÅ]/g, "aa");
 }
 
+/**
+ * Finder kampagnens «Start dato»-felt (import/ekstra felt), så filter/sortering kan bruge `customFields[key]`.
+ */
+export function findStartDateExtensionField(cfg: CampaignFieldConfig): CampaignExtraField | null {
+  let fuzzy: CampaignExtraField | null = null;
+  for (const g of FIELD_GROUPS) {
+    for (const f of cfg.extensions[g] ?? []) {
+      const kn = normalizeLabel(f.key);
+      const ln = normalizeLabel(f.label);
+      if (
+        kn === "start_dato" ||
+        kn === "startdato" ||
+        ln === "start dato" ||
+        ln === "startdato"
+      ) {
+        return f;
+      }
+      if (!fuzzy && ln.includes("start") && ln.includes("dato")) {
+        fuzzy = f;
+      }
+    }
+  }
+  return fuzzy;
+}
+
 export function resolveFixedPersonFieldKeys(cfg: CampaignFieldConfig): Record<"stifter" | "direktor" | "fuldtAnsvarligPerson", string> {
   const out = {
     stifter: "stifter",

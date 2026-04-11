@@ -7,7 +7,13 @@ import { LEAD_STATUSES, LEAD_STATUS_LABELS, type LeadStatus } from "@/lib/lead-s
 import { LeadOutcomeModal } from "@/app/components/lead-outcome-modal";
 import { isLockActive } from "@/lib/lead-lock";
 import { parseCustomFields } from "@/lib/custom-fields";
-import { parseFieldConfig, FIELD_GROUPS, FIELD_GROUP_LABELS } from "@/lib/campaign-fields";
+import {
+  parseFieldConfig,
+  FIELD_GROUPS,
+  FIELD_GROUP_LABELS,
+  findStartDateExtensionField,
+} from "@/lib/campaign-fields";
+import { localDayKeyFromMs, parseDateStringLoose, timestampForSort } from "@/lib/parse-date-string";
 
 type LeadRow = {
   id: string;
@@ -139,10 +145,6 @@ function toNumberLike(v: string): number {
   return Number.isFinite(n) ? n : Number.NaN;
 }
 
-function toDateLike(v: string): number {
-  const n = new Date(v).getTime();
-  return Number.isFinite(n) ? n : Number.NaN;
-}
 
 function normalizeText(v: string): string {
   return v.trim().toLocaleLowerCase("da");
@@ -225,10 +227,20 @@ export function LeadsBulkPanel({
   const [dynamicDateInvert, setDynamicDateInvert] = useState(false);
   const [campaignFieldConfigRaw, setCampaignFieldConfigRaw] = useState<string>("");
 
+  const startDateExtensionField = useMemo(() => {
+    if (!campaignId || !campaignFieldConfigRaw.trim()) return null;
+    return findStartDateExtensionField(parseFieldConfig(campaignFieldConfigRaw));
+  }, [campaignId, campaignFieldConfigRaw]);
+
   useEffect(() => {
     setSelected(new Set());
     setSortKey(null);
     setSortDir("desc");
+    if (!campaignId) {
+      setFilterMeetingStart(false);
+      setMeetingStartFrom("");
+      setMeetingStartTo("");
+    }
   }, [campaignId]);
 
   useEffect(() => {
@@ -243,7 +255,8 @@ export function LeadsBulkPanel({
       if (addedToday) qs.set("addedToday", "1");
       if (!addedToday && fromDate) qs.set("fromDate", fromDate);
       if (!addedToday && toDate) qs.set("toDate", toDate);
-      if (filterMeetingStart) {
+      /** Kun planlagt møde i DB — når kampagnen har feltet «Start dato», filtreres i browser på customFields. */
+      if (campaignId && filterMeetingStart && !startDateExtensionField) {
         qs.set("filterByMeetingStart", "1");
         if (meetingStartFrom) qs.set("meetingStartFrom", meetingStartFrom);
         if (meetingStartTo) qs.set("meetingStartTo", meetingStartTo);
@@ -289,6 +302,7 @@ export function LeadsBulkPanel({
     meetingStartTo,
     statusFilter,
     excludeNotInterested,
+    startDateExtensionField,
   ]);
 
   useEffect(() => {
@@ -360,17 +374,35 @@ export function LeadsBulkPanel({
     };
 
     let out = leads;
+
+    if (
+      campaignId &&
+      filterMeetingStart &&
+      startDateExtensionField &&
+      (meetingStartFrom || meetingStartTo)
+    ) {
+      out = out.filter((l) => {
+        const raw = parseCustomFields(l.customFields ?? "")[startDateExtensionField.key] ?? "";
+        const ms = parseDateStringLoose(raw);
+        if (ms == null) return false;
+        const key = localDayKeyFromMs(ms);
+        if (meetingStartFrom && key < meetingStartFrom) return false;
+        if (meetingStartTo && key > meetingStartTo) return false;
+        return true;
+      });
+    }
+
     if (selectedDynamicField && selectedDynamicField.kind === "date" && (dynamicFromDate || dynamicToDate)) {
       out = out.filter((l) => {
-        const t = toDateLike(getDynamicValue(l, selectedDynamicField.id));
+        const t = timestampForSort(getDynamicValue(l, selectedDynamicField.id));
         if (!Number.isFinite(t)) return dynamicDateInvert;
         let inRange = true;
         if (dynamicFromDate) {
-          const from = toDateLike(`${dynamicFromDate}T00:00:00`);
+          const from = new Date(`${dynamicFromDate}T00:00:00`).getTime();
           if (Number.isFinite(from) && t < from) inRange = false;
         }
         if (dynamicToDate) {
-          const to = toDateLike(`${dynamicToDate}T23:59:59.999`);
+          const to = new Date(`${dynamicToDate}T23:59:59.999`).getTime();
           if (Number.isFinite(to) && t > to) inRange = false;
         }
         return dynamicDateInvert ? !inRange : inRange;
@@ -383,8 +415,8 @@ export function LeadsBulkPanel({
         const av = getDynamicValue(a, selectedDynamicField.id);
         const bv = getDynamicValue(b, selectedDynamicField.id);
         if (selectedDynamicField.kind === "date") {
-          const at = toDateLike(av);
-          const bt = toDateLike(bv);
+          const at = timestampForSort(av);
+          const bt = timestampForSort(bv);
           const aHas = Number.isFinite(at);
           const bHas = Number.isFinite(bt);
           if (aHas !== bHas) return aHas ? -1 : 1;
@@ -408,7 +440,21 @@ export function LeadsBulkPanel({
 
     if (!sortKey) return out;
     return [...out].sort((a, b) => compareLeads(a, b, sortKey, sortDir));
-  }, [leads, sortKey, sortDir, selectedDynamicField, dynamicSortDir, dynamicFromDate, dynamicToDate, dynamicDateInvert]);
+  }, [
+    leads,
+    sortKey,
+    sortDir,
+    selectedDynamicField,
+    dynamicSortDir,
+    dynamicFromDate,
+    dynamicToDate,
+    dynamicDateInvert,
+    campaignId,
+    filterMeetingStart,
+    startDateExtensionField,
+    meetingStartFrom,
+    meetingStartTo,
+  ]);
 
   const middleColumnLabel = selectedDynamicField?.label ?? "Adresse";
   const middleColumnValue = (l: LeadRow): string => {
@@ -573,42 +619,62 @@ export function LeadsBulkPanel({
               className="mt-1 block rounded-md border border-stone-200 bg-white px-2 py-1.5 text-xs text-stone-900 disabled:opacity-60"
             />
           </label>
-          <div className="flex flex-col gap-1 rounded-md border border-dashed border-stone-300 bg-white/80 px-2 py-2 sm:min-w-[14rem]">
-            <label className="inline-flex items-center gap-2 text-xs font-medium text-stone-800">
-              <input
-                type="checkbox"
-                checked={filterMeetingStart}
-                onChange={(e) => setFilterMeetingStart(e.target.checked)}
-                className="rounded border-stone-300"
-              />
-              Filtrér på møde-startdato
-            </label>
-            <p className="text-[11px] leading-snug text-stone-500">
-              Kun leads med planlagt møde; dato (ikke klokkeslæt) i forhold til kalenderdag i Danmark.
-            </p>
-            <div className="flex flex-wrap gap-2">
-              <label className="text-xs text-stone-700">
-                Fra
+          {campaignId && (
+            <div className="flex flex-col gap-1 rounded-md border border-dashed border-stone-300 bg-white/80 px-2 py-2 sm:min-w-[14rem]">
+              <label className="inline-flex items-center gap-2 text-xs font-medium text-stone-800">
                 <input
-                  type="date"
-                  value={meetingStartFrom}
-                  onChange={(e) => setMeetingStartFrom(e.target.value)}
-                  disabled={!filterMeetingStart}
-                  className="mt-1 block rounded-md border border-stone-200 bg-white px-2 py-1.5 text-xs text-stone-900 disabled:opacity-60"
+                  type="checkbox"
+                  checked={filterMeetingStart}
+                  onChange={(e) => {
+                    const on = e.target.checked;
+                    setFilterMeetingStart(on);
+                    if (on && startDateExtensionField) {
+                      setDynamicSortFieldId(`custom:${startDateExtensionField.key}`);
+                      setDynamicSortDir("asc");
+                    }
+                  }}
+                  className="rounded border-stone-300"
                 />
+                Filtrér på startdato
               </label>
-              <label className="text-xs text-stone-700">
-                Til
-                <input
-                  type="date"
-                  value={meetingStartTo}
-                  onChange={(e) => setMeetingStartTo(e.target.value)}
-                  disabled={!filterMeetingStart}
-                  className="mt-1 block rounded-md border border-stone-200 bg-white px-2 py-1.5 text-xs text-stone-900 disabled:opacity-60"
-                />
-              </label>
+              <p className="text-[11px] leading-snug text-stone-500">
+                {startDateExtensionField ? (
+                  <>
+                    Bruger kampagnefeltet «{startDateExtensionField.label}» (værdier som{" "}
+                    <span className="font-mono">dd.mm.åååå</span>). Sortering sættes til det felt, når du
+                    slår filteret til.
+                  </>
+                ) : (
+                  <>
+                    Ingen «Start dato»-kolonne i kampagne-layout: bruger i stedet{" "}
+                    <strong>planlagt møde</strong> (mødetid). Dato efter kalenderdag i Danmark.
+                  </>
+                )}
+              </p>
+              <div className="flex flex-wrap gap-2">
+                <label className="text-xs text-stone-700">
+                  Fra
+                  <input
+                    type="date"
+                    value={meetingStartFrom}
+                    onChange={(e) => setMeetingStartFrom(e.target.value)}
+                    disabled={!filterMeetingStart}
+                    className="mt-1 block rounded-md border border-stone-200 bg-white px-2 py-1.5 text-xs text-stone-900 disabled:opacity-60"
+                  />
+                </label>
+                <label className="text-xs text-stone-700">
+                  Til
+                  <input
+                    type="date"
+                    value={meetingStartTo}
+                    onChange={(e) => setMeetingStartTo(e.target.value)}
+                    disabled={!filterMeetingStart}
+                    className="mt-1 block rounded-md border border-stone-200 bg-white px-2 py-1.5 text-xs text-stone-900 disabled:opacity-60"
+                  />
+                </label>
+              </div>
             </div>
-          </div>
+          )}
           <label className="text-xs text-stone-700">
             Udfald/status
             <select

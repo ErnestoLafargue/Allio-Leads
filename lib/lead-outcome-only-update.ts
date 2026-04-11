@@ -46,17 +46,34 @@ export function buildLeadOutcomeOnlyUpdate(
       }
     }
   } else {
-    meetingBookedAt = null;
-    meetingScheduledFor = null;
-    bookedByUserId = null;
-    meetingOutcomeStatus = MEETING_OUTCOME_PENDING;
-    meetingCommissionDayKey = "";
+    const preserveMeetingWhenRebooking = existing.campaign?.systemCampaignType === "rebooking";
+    if (preserveMeetingWhenRebooking) {
+      meetingBookedAt = existing.meetingBookedAt;
+      meetingScheduledFor = existing.meetingScheduledFor;
+      bookedByUserId = existing.bookedByUserId;
+      meetingOutcomeStatus = MEETING_OUTCOME_PENDING;
+      meetingCommissionDayKey = existing.meetingCommissionDayKey ?? "";
+    } else {
+      meetingBookedAt = null;
+      meetingScheduledFor = null;
+      bookedByUserId = null;
+      meetingOutcomeStatus = MEETING_OUTCOME_PENDING;
+      meetingCommissionDayKey = "";
+    }
   }
 
-  const meetingContactName = status === "MEETING_BOOKED" ? existing.meetingContactName : "";
-  const meetingContactEmail = status === "MEETING_BOOKED" ? existing.meetingContactEmail : "";
+  const meetingContactName =
+    status === "MEETING_BOOKED" || existing.campaign?.systemCampaignType === "rebooking"
+      ? existing.meetingContactName ?? ""
+      : "";
+  const meetingContactEmail =
+    status === "MEETING_BOOKED" || existing.campaign?.systemCampaignType === "rebooking"
+      ? existing.meetingContactEmail ?? ""
+      : "";
   const meetingContactPhonePrivate =
-    status === "MEETING_BOOKED" ? existing.meetingContactPhonePrivate : "";
+    status === "MEETING_BOOKED" || existing.campaign?.systemCampaignType === "rebooking"
+      ? existing.meetingContactPhonePrivate ?? ""
+      : "";
 
   let voicemailMarkedAt = existing.voicemailMarkedAt;
   let notHomeMarkedAt = existing.notHomeMarkedAt;

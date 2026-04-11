@@ -236,20 +236,44 @@ export async function PATCH(req: Request, { params }: Params) {
       meetingCommissionDayKey = copenhagenDayKey(meetingBookedAt);
     }
   } else {
-    meetingBookedAt = null;
-    meetingScheduledFor = null;
-    bookedByUserId = null;
-    if (typeof body?.meetingContactName === "string") {
-      meetingContactName = body.meetingContactName.trim();
+    const preserveMeetingWhenRebooking =
+      existing.campaign?.systemCampaignType === "rebooking";
+
+    if (preserveMeetingWhenRebooking) {
+      /** Genbook møde: behold sidste booking + tider ved udfald. Mødekontakt ændres kun hvis klienten sender felter (fx lead-detalje); kampagne-gem uden felter overskriver ikke. */
+      meetingBookedAt = existing.meetingBookedAt;
+      meetingScheduledFor = existing.meetingScheduledFor;
+      bookedByUserId = existing.bookedByUserId;
+      meetingCommissionDayKey = existing.meetingCommissionDayKey ?? "";
+      meetingContactName =
+        typeof body?.meetingContactName === "string"
+          ? body.meetingContactName.trim()
+          : (existing.meetingContactName ?? "");
+      meetingContactEmail =
+        typeof body?.meetingContactEmail === "string"
+          ? body.meetingContactEmail.trim()
+          : (existing.meetingContactEmail ?? "");
+      meetingContactPhonePrivate =
+        typeof body?.meetingContactPhonePrivate === "string"
+          ? body.meetingContactPhonePrivate.trim()
+          : (existing.meetingContactPhonePrivate ?? "");
+      meetingOutcomeStatus = MEETING_OUTCOME_PENDING;
+    } else {
+      meetingBookedAt = null;
+      meetingScheduledFor = null;
+      bookedByUserId = null;
+      if (typeof body?.meetingContactName === "string") {
+        meetingContactName = body.meetingContactName.trim();
+      }
+      if (typeof body?.meetingContactEmail === "string") {
+        meetingContactEmail = body.meetingContactEmail.trim();
+      }
+      if (typeof body?.meetingContactPhonePrivate === "string") {
+        meetingContactPhonePrivate = body.meetingContactPhonePrivate.trim();
+      }
+      meetingOutcomeStatus = MEETING_OUTCOME_PENDING;
+      meetingCommissionDayKey = "";
     }
-    if (typeof body?.meetingContactEmail === "string") {
-      meetingContactEmail = body.meetingContactEmail.trim();
-    }
-    if (typeof body?.meetingContactPhonePrivate === "string") {
-      meetingContactPhonePrivate = body.meetingContactPhonePrivate.trim();
-    }
-    meetingOutcomeStatus = MEETING_OUTCOME_PENDING;
-    meetingCommissionDayKey = "";
   }
 
   if (adminMeetingOutcome !== undefined) {
