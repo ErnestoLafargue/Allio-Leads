@@ -6,6 +6,7 @@ import {
   canDeleteCampaign,
   PROTECTED_CAMPAIGN_DELETE_MESSAGE,
 } from "@/lib/campaign-delete";
+import { workableCampaignLeadsWhere } from "@/lib/campaign-workable-leads";
 
 type Params = { params: Promise<{ id: string }> };
 
@@ -25,7 +26,11 @@ export async function GET(_req: Request, { params }: Params) {
       systemCampaignType: true,
       createdAt: true,
       updatedAt: true,
-      _count: { select: { leads: true } },
+      _count: {
+        select: {
+          leads: { where: workableCampaignLeadsWhere },
+        },
+      },
     },
   });
   if (!campaign) return NextResponse.json({ error: "Ikke fundet" }, { status: 404 });

@@ -3,6 +3,7 @@ import { prisma } from "@/lib/prisma";
 import { requireSession, requireAdmin } from "@/lib/api-auth";
 import { defaultCampaignFieldConfigJson } from "@/lib/campaign-fields";
 import { sortCampaignsForDisplay } from "@/lib/campaign-list-sort";
+import { workableCampaignLeadsWhere } from "@/lib/campaign-workable-leads";
 
 export async function GET() {
   const { session, response } = await requireSession();
@@ -24,7 +25,11 @@ export async function GET() {
         systemCampaignType: true,
         createdAt: true,
         updatedAt: true,
-        _count: { select: { leads: true } },
+        _count: {
+          select: {
+            leads: { where: workableCampaignLeadsWhere },
+          },
+        },
       },
     });
 

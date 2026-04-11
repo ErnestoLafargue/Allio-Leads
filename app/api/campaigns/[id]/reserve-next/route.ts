@@ -7,6 +7,10 @@ import { getLeadIdsWithOutcomeLogToday } from "@/lib/lead-outcome-today";
 import { isLeadInRebookingDialerPool, sortLeadsForCampaignCallQueue } from "@/lib/lead-queue";
 import { MEETING_OUTCOME_CANCELLED, normalizeMeetingOutcomeStatus } from "@/lib/meeting-outcome";
 import { releaseExpiredLocksEverywhere, tryAcquireLeadLock } from "@/lib/lead-lock";
+import {
+  filterLeadsByWorkspaceStartDate,
+  parseWorkspaceStartDateFilterFromRequestBody,
+} from "@/lib/workspace-start-date-filter";
 
 type Params = { params: Promise<{ id: string }> };
 
@@ -31,6 +35,18 @@ export async function POST(req: Request, { params }: Params) {
   const body = await req.json().catch(() => null);
   const preferLeadId = typeof body?.preferLeadId === "string" ? body.preferLeadId.trim() : "";
   const excludeLeadId = typeof body?.excludeLeadId === "string" ? body.excludeLeadId.trim() : "";
+  const workspaceStartFilter = parseWorkspaceStartDateFilterFromRequestBody(body);
+  if (
+    workspaceStartFilter?.enabled &&
+    workspaceStartFilter.from &&
+    workspaceStartFilter.to &&
+    workspaceStartFilter.from > workspaceStartFilter.to
+  ) {
+    return NextResponse.json(
+      { error: "«Fra» skal være før eller samme dag som «til» (startdato-filter)." },
+      { status: 400 },
+    );
+  }
 
   try {
     await applyLeadCooldownResets();
@@ -38,7 +54,12 @@ export async function POST(req: Request, { params }: Params) {
 
     const campaign = await prisma.campaign.findUnique({
       where: { id: campaignId },
-      select: { id: true, includeProtectedBusinesses: true, systemCampaignType: true },
+      select: {
+        id: true,
+        includeProtectedBusinesses: true,
+        systemCampaignType: true,
+        fieldConfig: true,
+      },
     });
     if (!campaign) {
       return NextResponse.json({ error: "Kampagne findes ikke" }, { status: 404 });
@@ -102,16 +123,28 @@ export async function POST(req: Request, { params }: Params) {
         importedAt: true,
         lastOutcomeAt: true,
         customFields: true,
+        meetingScheduledFor: true,
       },
     });
 
+    const fieldConfigJson = typeof campaign.fieldConfig === "string" ? campaign.fieldConfig : "{}";
+    const afterStartDate = filterLeadsByWorkspaceStartDate(
+      rawQueue.map((r) => ({
+        ...r,
+        customFields: r.customFields,
+        meetingScheduledFor: r.meetingScheduledFor,
+      })),
+      fieldConfigJson,
+      workspaceStartFilter,
+    );
+
     const filtered =
       campaign.systemCampaignType === "rebooking"
-        ? rawQueue
+        ? afterStartDate
             .filter((r) => isLeadInRebookingDialerPool(r))
             .map((r) => ({ ...r, customFields: r.customFields }))
         : filterLeadsByCampaignProtectedSetting(
-            rawQueue.map((r) => ({ ...r, customFields: r.customFields })),
+            afterStartDate.map((r) => ({ ...r, customFields: r.customFields })),
             campaign.includeProtectedBusinesses,
           );
     const outcomeToday = await getLeadIdsWithOutcomeLogToday(filtered.map((r) => r.id));

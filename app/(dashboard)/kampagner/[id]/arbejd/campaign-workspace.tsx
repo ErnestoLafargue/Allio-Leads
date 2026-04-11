@@ -15,6 +15,7 @@ import {
   type CampaignLeadFormSnapshot,
 } from "@/lib/campaign-workspace-patch";
 import { isValidCVR } from "@/lib/cvr-import";
+import { buildReserveNextRequestBody } from "@/lib/workspace-start-date-filter";
 
 type Lead = {
   id: string;
@@ -195,7 +196,7 @@ export function CampaignWorkspace({ campaignId, preferredLeadId }: Props) {
       const rRes = await fetch(`/api/campaigns/${campaignId}/reserve-next`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ preferLeadId }),
+        body: buildReserveNextRequestBody(campaignId, { preferLeadId }),
       });
       if (!rRes.ok) {
         const j = await rRes.json().catch(() => ({}));
@@ -344,7 +345,7 @@ export function CampaignWorkspace({ campaignId, preferredLeadId }: Props) {
     const rRes = await fetch(`/api/campaigns/${campaignId}/reserve-next`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ excludeLeadId: savedLeadId }),
+      body: buildReserveNextRequestBody(campaignId, { excludeLeadId: savedLeadId }),
     });
     if (!rRes.ok) {
       const j = await rRes.json().catch(() => ({}));
@@ -430,7 +431,7 @@ export function CampaignWorkspace({ campaignId, preferredLeadId }: Props) {
     const rRes = await fetch(`/api/campaigns/${campaignId}/reserve-next`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ excludeLeadId: currentId }),
+      body: buildReserveNextRequestBody(campaignId, { excludeLeadId: currentId }),
     });
     if (!rRes.ok) {
       const j = await rRes.json().catch(() => ({}));
@@ -657,7 +658,7 @@ export function CampaignWorkspace({ campaignId, preferredLeadId }: Props) {
                   const rRes = await fetch(`/api/campaigns/${campaignId}/reserve-next`, {
                     method: "POST",
                     headers: { "Content-Type": "application/json" },
-                    body: JSON.stringify({}),
+                    body: buildReserveNextRequestBody(campaignId, {}),
                   });
                   if (rRes.ok) {
                     const rj = (await rRes.json()) as { lead: Lead | null };

@@ -14,6 +14,12 @@ import {
   findStartDateExtensionField,
 } from "@/lib/campaign-fields";
 import { localDayKeyFromMs, parseDateStringLoose, timestampForSort } from "@/lib/parse-date-string";
+import {
+  clearWorkspaceStartDateFilter,
+  initialWorkspaceStartFilterFromStorage,
+  readWorkspaceStartDateFilter,
+  writeWorkspaceStartDateFilter,
+} from "@/lib/workspace-start-date-filter";
 
 type LeadRow = {
   id: string;
@@ -215,9 +221,15 @@ export function LeadsBulkPanel({
   const [fromDate, setFromDate] = useState("");
   const [toDate, setToDate] = useState("");
   /** Planlagt møde (`meetingScheduledFor`) — serverfilter, kalenderdato (København). */
-  const [filterMeetingStart, setFilterMeetingStart] = useState(false);
-  const [meetingStartFrom, setMeetingStartFrom] = useState("");
-  const [meetingStartTo, setMeetingStartTo] = useState("");
+  const [filterMeetingStart, setFilterMeetingStart] = useState(
+    () => initialWorkspaceStartFilterFromStorage(campaignId).enabled,
+  );
+  const [meetingStartFrom, setMeetingStartFrom] = useState(
+    () => initialWorkspaceStartFilterFromStorage(campaignId).from,
+  );
+  const [meetingStartTo, setMeetingStartTo] = useState(
+    () => initialWorkspaceStartFilterFromStorage(campaignId).to,
+  );
   const [statusFilter, setStatusFilter] = useState<"ANY" | "NO_OUTCOME" | LeadStatus>("ANY");
   const [excludeNotInterested, setExcludeNotInterested] = useState(false);
   const [dynamicSortFieldId, setDynamicSortFieldId] = useState("");
@@ -240,8 +252,26 @@ export function LeadsBulkPanel({
       setFilterMeetingStart(false);
       setMeetingStartFrom("");
       setMeetingStartTo("");
+      return;
+    }
+    const stored = readWorkspaceStartDateFilter(campaignId);
+    if (stored) {
+      setFilterMeetingStart(stored.enabled);
+      setMeetingStartFrom(stored.from);
+      setMeetingStartTo(stored.to);
+    } else {
+      setFilterMeetingStart(false);
+      setMeetingStartFrom("");
+      setMeetingStartTo("");
     }
   }, [campaignId]);
+
+  /** Ved genbesøg med gemt filter: sæt sortering til startdato-felt (samme som når man slår filteret til). */
+  useEffect(() => {
+    if (!campaignId || !filterMeetingStart || !startDateExtensionField) return;
+    setDynamicSortFieldId(`custom:${startDateExtensionField.key}`);
+    setDynamicSortDir("asc");
+  }, [campaignId, filterMeetingStart, startDateExtensionField]);
 
   useEffect(() => {
     let cancelled = false;
@@ -628,6 +658,13 @@ export function LeadsBulkPanel({
                   onChange={(e) => {
                     const on = e.target.checked;
                     setFilterMeetingStart(on);
+                    if (campaignId) {
+                      writeWorkspaceStartDateFilter(campaignId, {
+                        enabled: on,
+                        from: meetingStartFrom,
+                        to: meetingStartTo,
+                      });
+                    }
                     if (on && startDateExtensionField) {
                       setDynamicSortFieldId(`custom:${startDateExtensionField.key}`);
                       setDynamicSortDir("asc");
@@ -657,7 +694,17 @@ export function LeadsBulkPanel({
                   <input
                     type="date"
                     value={meetingStartFrom}
-                    onChange={(e) => setMeetingStartFrom(e.target.value)}
+                    onChange={(e) => {
+                      const v = e.target.value;
+                      setMeetingStartFrom(v);
+                      if (campaignId) {
+                        writeWorkspaceStartDateFilter(campaignId, {
+                          enabled: filterMeetingStart,
+                          from: v,
+                          to: meetingStartTo,
+                        });
+                      }
+                    }}
                     disabled={!filterMeetingStart}
                     className="mt-1 block rounded-md border border-stone-200 bg-white px-2 py-1.5 text-xs text-stone-900 disabled:opacity-60"
                   />
@@ -667,7 +714,17 @@ export function LeadsBulkPanel({
                   <input
                     type="date"
                     value={meetingStartTo}
-                    onChange={(e) => setMeetingStartTo(e.target.value)}
+                    onChange={(e) => {
+                      const v = e.target.value;
+                      setMeetingStartTo(v);
+                      if (campaignId) {
+                        writeWorkspaceStartDateFilter(campaignId, {
+                          enabled: filterMeetingStart,
+                          from: meetingStartFrom,
+                          to: v,
+                        });
+                      }
+                    }}
                     disabled={!filterMeetingStart}
                     className="mt-1 block rounded-md border border-stone-200 bg-white px-2 py-1.5 text-xs text-stone-900 disabled:opacity-60"
                   />
@@ -777,6 +834,7 @@ export function LeadsBulkPanel({
               setFilterMeetingStart(false);
               setMeetingStartFrom("");
               setMeetingStartTo("");
+              if (campaignId) clearWorkspaceStartDateFilter(campaignId);
               setStatusFilter("ANY");
               setExcludeNotInterested(false);
               setDynamicSortFieldId("");

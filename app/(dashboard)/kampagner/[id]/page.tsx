@@ -425,6 +425,7 @@ export default function RedigerKampagnePage() {
         )}
         <div className="mt-4">
           <LeadsBulkPanel
+            key={id}
             campaignId={id}
             showSearchField
             leadDetailSearchSuffix={`?fromCampaign=${encodeURIComponent(id)}`}
