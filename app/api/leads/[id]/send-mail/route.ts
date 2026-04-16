@@ -35,6 +35,26 @@ function parseRecipientList(v: string): string[] {
     .filter(Boolean);
 }
 
+function stripHtml(html: string): string {
+  return html
+    .replace(/<style[\s\S]*?<\/style>/gi, " ")
+    .replace(/<script[\s\S]*?<\/script>/gi, " ")
+    .replace(/<\/(p|div|h1|h2|h3|h4|h5|h6|li|tr)>/gi, "\n")
+    .replace(/<br\s*\/?>/gi, "\n")
+    .replace(/<[^>]+>/g, " ")
+    .replace(/&nbsp;/gi, " ")
+    .replace(/&amp;/gi, "&")
+    .replace(/&lt;/gi, "<")
+    .replace(/&gt;/gi, ">")
+    .replace(/[ \t]+\n/g, "\n")
+    .replace(/\n{3,}/g, "\n\n")
+    .trim();
+}
+
+function looksLikeHtml(v: string): boolean {
+  return /<html|<body|<table|<div|<p|<a\s/i.test(v);
+}
+
 async function appendToSentMailbox(args: {
   rawMessage: Buffer;
   defaultMailboxName?: string;
@@ -148,7 +168,8 @@ export async function POST(req: Request, { params }: Params) {
       replyTo: fromAddress,
       to,
       subject,
-      text: message,
+      text: looksLikeHtml(message) ? stripHtml(message) : message,
+      html: looksLikeHtml(message) ? message : undefined,
       envelope: { from: fromAddress, to: toRecipients },
     };
     await transporter.sendMail(mailInput);
