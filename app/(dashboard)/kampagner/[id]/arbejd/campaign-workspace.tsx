@@ -10,6 +10,7 @@ import { LeadOutcomeStrip } from "@/app/components/lead-workspace/lead-outcome-s
 import { LeadKundeNoterBooking } from "@/app/components/lead-workspace/lead-kunde-noter-booking";
 import { validateMeetingContactFields } from "@/lib/meeting-contact-validation";
 import { CallbackScheduleDialog } from "@/app/components/callback-schedule-dialog";
+import { SendStandardMailDialog } from "@/app/components/send-standard-mail-dialog";
 import {
   buildCampaignLeadPatchBody,
   type CampaignLeadFormSnapshot,
@@ -62,6 +63,7 @@ async function releaseLockHttp(leadId: string) {
 }
 
 const BG_SAVE_RETRIES = 3;
+const FIXED_MAIL_FROM = "hej@allio.dk";
 
 function delayMs(ms: number) {
   return new Promise<void>((r) => setTimeout(r, ms));
@@ -111,6 +113,10 @@ export function CampaignWorkspace({ campaignId, preferredLeadId }: Props) {
   }>({});
   const [callbackDialogOpen, setCallbackDialogOpen] = useState(false);
   const [callbackSubmitError, setCallbackSubmitError] = useState<string | null>(null);
+  const [mailDialogOpen, setMailDialogOpen] = useState(false);
+  const [mailSending, setMailSending] = useState(false);
+  const [mailError, setMailError] = useState<string | null>(null);
+  const [mailSuccess, setMailSuccess] = useState<string | null>(null);
   const [virkEnrichLoading, setVirkEnrichLoading] = useState(false);
   const [virkEnrichFeedback, setVirkEnrichFeedback] = useState<string | null>(null);
   const [virkNoDataFieldKeys, setVirkNoDataFieldKeys] = useState<string[]>([]);
@@ -599,6 +605,29 @@ export function CampaignWorkspace({ campaignId, preferredLeadId }: Props) {
     setVirkEnrichFeedback(payload.message ?? "Berigelse gennemført");
   }
 
+  async function onSendMail(payload: { to: string; subject: string; message: string }) {
+    if (!activeLead) return;
+    setMailSending(true);
+    setMailError(null);
+    setMailSuccess(null);
+    const res = await fetch(`/api/leads/${activeLead.id}/send-mail`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload),
+    });
+    setMailSending(false);
+    if (!res.ok) {
+      const j = await res.json().catch(() => ({}));
+      const msg = typeof j.error === "string" ? j.error : "Kunne ikke sende mail.";
+      const details =
+        process.env.NODE_ENV === "development" && typeof j.details === "string" ? ` (${j.details})` : "";
+      setMailError(`${msg}${details}`);
+      return;
+    }
+    setMailDialogOpen(false);
+    setMailSuccess(`Mail sendt til ${payload.to}.`);
+  }
+
   if (loading) {
     return <div className="py-12 text-center text-stone-500">Henter kampagne og reserverer lead…</div>;
   }
@@ -777,6 +806,11 @@ export function CampaignWorkspace({ campaignId, preferredLeadId }: Props) {
             . Behandl leadet som opkald i rebooking-køen.
           </div>
         )}
+        {mailSuccess && (
+          <div className="mt-3 rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-2 text-xs text-emerald-950">
+            {mailSuccess}
+          </div>
+        )}
       </div>
 
       <LeadOutcomeStrip
@@ -844,6 +878,30 @@ export function CampaignWorkspace({ campaignId, preferredLeadId }: Props) {
         onCustom={setCustomKey}
         notes={notes}
         onNotesChange={setNotes}
+        mailAction={
+          <div className="flex flex-wrap items-center justify-between gap-2 rounded-xl border border-stone-200 bg-stone-50/60 px-3 py-2.5">
+            <p className="text-xs text-stone-600">Mail sendes fra hej@allio.dk (modtager kan redigeres).</p>
+            <button
+              type="button"
+              onClick={() => {
+                setMailError(null);
+                setMailSuccess(null);
+                setMailDialogOpen(true);
+              }}
+              className="inline-flex items-center gap-1.5 rounded-md border border-stone-300 bg-white px-3 py-1.5 text-xs font-semibold text-stone-800 hover:bg-stone-50"
+            >
+              <svg viewBox="0 0 20 20" fill="none" className="h-4 w-4" aria-hidden="true">
+                <path
+                  d="M2.5 5.5C2.5 4.67157 3.17157 4 4 4H16C16.8284 4 17.5 4.67157 17.5 5.5V14.5C17.5 15.3284 16.8284 16 16 16H4C3.17157 16 2.5 15.3284 2.5 14.5V5.5Z"
+                  stroke="currentColor"
+                  strokeWidth="1.5"
+                />
+                <path d="M3 6L10 10.75L17 6" stroke="currentColor" strokeWidth="1.5" />
+              </svg>
+              Send mail
+            </button>
+          </div>
+        }
         meetingContact={{
           meetingContactName,
           meetingContactEmail,
@@ -889,6 +947,21 @@ export function CampaignWorkspace({ campaignId, preferredLeadId }: Props) {
           setCallbackSubmitError(null);
         }}
         onConfirm={(p) => void handleConfirmCallback(p)}
+      />
+      <SendStandardMailDialog
+        open={mailDialogOpen}
+        fixedFrom={FIXED_MAIL_FROM}
+        defaultTo={email}
+        defaultSubject={`Opfølgning vedr. ${companyName || "jeres virksomhed"}`}
+        defaultMessage=""
+        saving={mailSending}
+        errorText={mailError}
+        onClose={() => {
+          if (mailSending) return;
+          setMailDialogOpen(false);
+          setMailError(null);
+        }}
+        onSubmit={(p) => void onSendMail(p)}
       />
     </div>
   );

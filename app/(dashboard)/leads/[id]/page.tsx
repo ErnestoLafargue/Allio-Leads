@@ -775,9 +775,7 @@ function LeadDetailInner() {
               onNotesChange={setNotes}
               mailAction={
                 <div className="flex flex-wrap items-center justify-between gap-2 rounded-xl border border-stone-200 bg-stone-50/60 px-3 py-2.5">
-                  <p className="text-xs text-stone-600">
-                    Send standardmail til leadets e-mailadresse.
-                  </p>
+                  <p className="text-xs text-stone-600">Mail sendes fra hej@allio.dk (modtager kan redigeres).</p>
                   <button
                     type="button"
                     onClick={() => {
@@ -785,8 +783,16 @@ function LeadDetailInner() {
                       setMailSuccess(null);
                       setMailDialogOpen(true);
                     }}
-                    className="rounded-md border border-stone-300 bg-white px-3 py-1.5 text-xs font-semibold text-stone-800 hover:bg-stone-50"
+                    className="inline-flex items-center gap-1.5 rounded-md border border-stone-300 bg-white px-3 py-1.5 text-xs font-semibold text-stone-800 hover:bg-stone-50"
                   >
+                    <svg viewBox="0 0 20 20" fill="none" className="h-4 w-4" aria-hidden="true">
+                      <path
+                        d="M2.5 5.5C2.5 4.67157 3.17157 4 4 4H16C16.8284 4 17.5 4.67157 17.5 5.5V14.5C17.5 15.3284 16.8284 16 16 16H4C3.17157 16 2.5 15.3284 2.5 14.5V5.5Z"
+                        stroke="currentColor"
+                        strokeWidth="1.5"
+                      />
+                      <path d="M3 6L10 10.75L17 6" stroke="currentColor" strokeWidth="1.5" />
+                    </svg>
                     Send mail
                   </button>
                 </div>

@@ -3,9 +3,10 @@
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
 import { useEffect, useState } from "react";
-import { MeetingContactFields } from "@/app/components/booking/meeting-contact-fields";
-import { AdLibraryCard } from "@/app/components/ad-library-card";
-import { LeadDataLeftPanel } from "@/app/components/lead-data-left-panel";
+import { LeadOutcomeStrip } from "@/app/components/lead-workspace/lead-outcome-strip";
+import { LeadKundeNoterBooking } from "@/app/components/lead-workspace/lead-kunde-noter-booking";
+import { validateMeetingContactFields } from "@/lib/meeting-contact-validation";
+import type { LeadStatus } from "@/lib/lead-status";
 
 type CampaignOption = { id: string; name: string };
 
@@ -28,9 +29,17 @@ export default function NewLeadPage() {
   const [city, setCity] = useState("");
   const [industry, setIndustry] = useState("");
   const [notes, setNotes] = useState("");
+  const [status, setStatus] = useState<LeadStatus>("NEW");
+  const [meetingScheduledFor, setMeetingScheduledFor] = useState("");
+  const [meetingBookedAt] = useState<string | null>(null);
   const [meetingContactName, setMeetingContactName] = useState("");
   const [meetingContactEmail, setMeetingContactEmail] = useState("");
   const [meetingContactPhonePrivate, setMeetingContactPhonePrivate] = useState("");
+  const [meetingContactErrors, setMeetingContactErrors] = useState<{
+    name?: string;
+    email?: string;
+    phone?: string;
+  }>({});
   const [custom, setCustom] = useState<Record<string, string>>({});
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
@@ -83,10 +92,33 @@ export default function NewLeadPage() {
 
   async function onSubmit(e: React.FormEvent) {
     e.preventDefault();
+    if (loading) return;
     if (!campaignId) {
       setError("Vælg en kampagne");
       return;
     }
+    const trimmedCompanyName = companyName.trim();
+    if (!trimmedCompanyName) {
+      setError("Virksomhedsnavn er påkrævet");
+      return;
+    }
+    if (status === "MEETING_BOOKED") {
+      if (!meetingScheduledFor) {
+        setError("Vælg mødedato og -tid i kalenderen.");
+        return;
+      }
+      const contactErrors = validateMeetingContactFields(
+        meetingContactName,
+        meetingContactEmail,
+        meetingContactPhonePrivate,
+      );
+      if (contactErrors) {
+        setMeetingContactErrors(contactErrors);
+        setError("Udfyld mødekontakt før du gemmer et booket møde.");
+        return;
+      }
+    }
+    setMeetingContactErrors({});
     setError(null);
     setLoading(true);
     const res = await fetch("/api/leads", {
@@ -94,7 +126,7 @@ export default function NewLeadPage() {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
         campaignId,
-        companyName,
+        companyName: trimmedCompanyName,
         phone,
         email,
         cvr,
@@ -106,6 +138,8 @@ export default function NewLeadPage() {
         meetingContactName: meetingContactName.trim(),
         meetingContactEmail: meetingContactEmail.trim(),
         meetingContactPhonePrivate: meetingContactPhonePrivate.trim(),
+        status,
+        meetingScheduledFor: status === "MEETING_BOOKED" ? meetingScheduledFor : null,
         customFields: custom,
       }),
     });
@@ -115,8 +149,7 @@ export default function NewLeadPage() {
       setError(j.error ?? "Kunne ikke oprette");
       return;
     }
-    const lead = await res.json();
-    router.push(`/leads/${lead.id}`);
+    router.push("/leads");
   }
 
   if (loadingCampaigns) {
@@ -180,67 +213,82 @@ export default function NewLeadPage() {
       {!campaignId ? (
         <p className="text-sm text-stone-600">Vælg hvilket kampagne leadet skal oprettes under.</p>
       ) : (
-        <form onSubmit={onSubmit} className="rounded-xl border border-stone-200 bg-white p-4 shadow-sm sm:p-6">
-          <div className="grid min-h-[min(70vh,36rem)] gap-8 lg:grid-cols-2 lg:gap-0">
-            <div className="lg:border-r lg:border-stone-100 lg:pr-8">
-              <LeadDataLeftPanel
-                fieldConfigJson={fieldConfigJson}
-                companyName={companyName}
-                onCompanyName={setCompanyName}
-                phone={phone}
-                onPhone={setPhone}
-                email={email}
-                onEmail={setEmail}
-                cvr={cvr}
-                onCvr={setCvr}
-                address={address}
-                onAddress={setAddress}
-                postalCode={postalCode}
-                onPostalCode={setPostalCode}
-                city={city}
-                onCity={setCity}
-                industry={industry}
-                onIndustry={setIndustry}
-                custom={custom}
-                onCustom={setCustomKey}
-              />
-            </div>
-            <div className="flex min-h-[14rem] flex-col lg:min-h-0 lg:pl-8">
-              <label htmlFor="notes-new" className="text-xs font-semibold uppercase tracking-wide text-stone-500">
-                Noter
-              </label>
-              <textarea
-                id="notes-new"
-                value={notes}
-                onChange={(e) => setNotes(e.target.value)}
-                className="mt-2 min-h-[14rem] flex-1 resize-y rounded-lg border border-stone-200 bg-stone-50/50 px-3 py-3 text-sm text-stone-900 shadow-inner outline-none ring-stone-400 focus:ring-2 lg:min-h-[clamp(18rem,62vh,40rem)]"
-                placeholder="Skriv noter, aftaler, opfølgning…"
-              />
-              <MeetingContactFields
-                className="mt-4 shrink-0"
-                contactRequired={false}
-                meetingContactName={meetingContactName}
-                meetingContactEmail={meetingContactEmail}
-                meetingContactPhonePrivate={meetingContactPhonePrivate}
-                onMeetingContactName={setMeetingContactName}
-                onMeetingContactEmail={setMeetingContactEmail}
-                onMeetingContactPhonePrivate={setMeetingContactPhonePrivate}
-              />
-              <AdLibraryCard companyName={companyName} className="mt-4 shrink-0" />
-            </div>
-          </div>
-
+        <form onSubmit={onSubmit} className="space-y-4">
+          <LeadOutcomeStrip
+            status={status}
+            onStatusChange={(nextStatus) => {
+              setStatus(nextStatus);
+              if (nextStatus !== "MEETING_BOOKED") {
+                setMeetingContactErrors({});
+              }
+            }}
+            meetingBookedAt={meetingBookedAt}
+            bookedByUser={null}
+            rightColumn={
+              <button
+                type="submit"
+                disabled={loading}
+                className="rounded-md bg-stone-800 px-5 py-2.5 text-sm font-medium text-white hover:bg-stone-900 disabled:opacity-60"
+              >
+                {loading ? "Gemmer…" : "Gem lead"}
+              </button>
+            }
+          />
+          <LeadKundeNoterBooking
+            gridKey={`new-lead-${campaignId}`}
+            fieldConfigJson={fieldConfigJson}
+            companyName={companyName}
+            onCompanyName={setCompanyName}
+            phone={phone}
+            onPhone={setPhone}
+            email={email}
+            onEmail={setEmail}
+            cvr={cvr}
+            onCvr={setCvr}
+            address={address}
+            onAddress={setAddress}
+            postalCode={postalCode}
+            onPostalCode={setPostalCode}
+            city={city}
+            onCity={setCity}
+            industry={industry}
+            onIndustry={setIndustry}
+            custom={custom}
+            onCustom={setCustomKey}
+            notes={notes}
+            onNotesChange={setNotes}
+            meetingContact={{
+              meetingContactName,
+              meetingContactEmail,
+              meetingContactPhonePrivate,
+              onMeetingContactName: (v) => {
+                setMeetingContactName(v);
+                setMeetingContactErrors((prev) => ({ ...prev, name: undefined }));
+              },
+              onMeetingContactEmail: (v) => {
+                setMeetingContactEmail(v);
+                setMeetingContactErrors((prev) => ({ ...prev, email: undefined }));
+              },
+              onMeetingContactPhonePrivate: (v) => {
+                setMeetingContactPhonePrivate(v);
+                setMeetingContactErrors((prev) => ({ ...prev, phone: undefined }));
+              },
+              contactRequired: status === "MEETING_BOOKED",
+              meetingContactErrors: status === "MEETING_BOOKED" ? meetingContactErrors : undefined,
+            }}
+            booking={{
+              campaignId,
+              initialMeetingLocal: status === "MEETING_BOOKED" ? meetingScheduledFor || undefined : undefined,
+              isSubmitting: loading,
+              allowMeetingConfirm: status === "MEETING_BOOKED",
+              onConfirmBooking: async (detail) => {
+                setMeetingScheduledFor(detail.localDateTimeISO);
+                setStatus("MEETING_BOOKED");
+                setError(null);
+              },
+            }}
+          />
           {error && <p className="mt-6 text-sm text-red-600">{error}</p>}
-
-          <div className="mt-6 border-t border-stone-100 pt-6">
-            <button
-              type="submit"
-              disabled={loading}
-              className="rounded-md bg-stone-800 px-5 py-2.5 text-sm font-medium text-white hover:bg-stone-900 disabled:opacity-60"
-            >
-              {loading ? "Gemmer…" : "Opret lead"}
-            </button>
-          </div>
         </form>
       )}
     </div>

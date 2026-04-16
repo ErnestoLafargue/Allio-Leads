@@ -216,6 +216,10 @@ export async function POST(req: Request) {
   const city = typeof body?.city === "string" ? body.city : "";
   const industry = typeof body?.industry === "string" ? body.industry : "";
   const notes = typeof body?.notes === "string" ? body.notes : "";
+  const rawStatus = typeof body?.status === "string" ? body.status.trim().toUpperCase() : "";
+  const status = isLeadStatus(rawStatus) ? rawStatus : "NEW";
+  const rawMeetingScheduledFor =
+    typeof body?.meetingScheduledFor === "string" ? body.meetingScheduledFor.trim() : "";
   const meetingContactName =
     typeof body?.meetingContactName === "string" ? body.meetingContactName.trim() : "";
   const meetingContactEmail =
@@ -227,6 +231,15 @@ export async function POST(req: Request) {
 
   if (meetingContactEmail.length > 0 && !meetingContactEmailValid(meetingContactEmail)) {
     return NextResponse.json({ error: "Ugyldig e-mail til mødekontakten." }, { status: 400 });
+  }
+  const meetingScheduledFor =
+    status === "MEETING_BOOKED" && rawMeetingScheduledFor
+      ? new Date(rawMeetingScheduledFor)
+      : null;
+  if (status === "MEETING_BOOKED") {
+    if (!meetingScheduledFor || Number.isNaN(meetingScheduledFor.getTime())) {
+      return NextResponse.json({ error: "Mødetid mangler eller er ugyldig." }, { status: 400 });
+    }
   }
 
   const custom: Record<string, string> = {};
@@ -252,7 +265,10 @@ export async function POST(req: Request) {
       meetingContactEmail,
       meetingContactPhonePrivate,
       customFields: stringifyCustomFields(custom),
-      status: "NEW",
+      status,
+      meetingScheduledFor,
+      meetingBookedAt: status === "MEETING_BOOKED" ? new Date() : null,
+      lastOutcomeAt: status === "NEW" ? null : new Date(),
     }),
   });
 
