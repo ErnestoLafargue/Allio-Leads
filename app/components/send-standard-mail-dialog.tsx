@@ -19,6 +19,8 @@ const CLINIC_DEFAULT_MESSAGE = `<!DOCTYPE html>
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta name="color-scheme" content="light">
+<meta name="supported-color-schemes" content="light">
 <title>Allio — Flere bookinger, mindre admin</title>
 <!--[if mso]>
 <noscript>
@@ -30,6 +32,7 @@ const CLINIC_DEFAULT_MESSAGE = `<!DOCTYPE html>
 </noscript>
 <![endif]-->
 <style>
+  :root { color-scheme: light only; }
   body, table, td, a { -webkit-text-size-adjust: 100%; -ms-text-size-adjust: 100%; }
   table, td { mso-table-lspace: 0pt; mso-table-rspace: 0pt; }
   img { -ms-interpolation-mode: bicubic; }
@@ -42,6 +45,12 @@ const CLINIC_DEFAULT_MESSAGE = `<!DOCTYPE html>
   }
   a { color: #6C5CE7; text-decoration: none; }
   a:hover { text-decoration: underline; }
+  /* Behold lilla stats-panel på mobil/dark mode (gradient + rgba understøttes ikke overalt) */
+  .stats-panel { background-color: #6C5CE7 !important; }
+  .stats-panel-title { color: #f0ecff !important; }
+  .stat-cell-inner { background-color: #7d6aeb !important; }
+  .stat-cell-inner p { color: #ffffff !important; }
+  .stat-cell-inner .stat-sub { color: #ede8ff !important; }
   @media only screen and (max-width: 600px) {
     .email-container { width: 100% !important; padding: 0 16px !important; }
     .hero-section { padding: 32px 24px !important; }
@@ -170,33 +179,40 @@ const CLINIC_DEFAULT_MESSAGE = `<!DOCTYPE html>
 <!-- ========== SOCIAL PROOF: TAL ========== -->
 <tr>
 <td style="padding: 0 40px;">
-  <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background: linear-gradient(135deg, #6C5CE7 0%, #8B7BF7 100%); border-radius:12px;">
+  <!-- bgcolor + solid baggrund først: iOS Mail ignorerer ofte linear-gradient på table -->
+  <table role="presentation" class="stats-panel" width="100%" cellpadding="0" cellspacing="0" bgcolor="#6C5CE7" style="background-color:#6C5CE7;background-image:linear-gradient(135deg,#6C5CE7 0%,#8B7BF7 100%);border-radius:12px;border-collapse:separate;">
   <tr>
-  <td style="padding: 28px 28px 8px 28px; text-align:center;">
-    <p style="margin:0 0 4px 0; font-size:13px; font-weight:600; color:rgba(255,255,255,0.8); text-transform:uppercase; letter-spacing:1px;">Resultater fra vores klinikker</p>
+  <td style="padding: 28px 28px 8px 28px; text-align:center; background-color:#6C5CE7;">
+    <p class="stats-panel-title" style="margin:0 0 4px 0; font-size:13px; font-weight:600; color:#f0ecff; text-transform:uppercase; letter-spacing:1px;">Resultater fra vores klinikker</p>
   </td>
   </tr>
   <tr>
-  <td style="padding: 0 28px 28px 28px;">
+  <td style="padding: 0 28px 28px 28px; background-color:#6C5CE7;">
     <table role="presentation" width="100%" cellpadding="0" cellspacing="0">
     <tr>
       <td class="stat-box" width="33%" style="padding: 8px; text-align:center; vertical-align:top;">
-        <div style="background:rgba(255,255,255,0.15); border-radius:10px; padding:16px 8px;">
+        <table role="presentation" width="100%" cellpadding="0" cellspacing="0" class="stat-cell-inner" bgcolor="#7d6aeb" style="background-color:#7d6aeb;border-radius:10px;border-collapse:separate;">
+        <tr><td style="padding:16px 8px;">
           <p style="margin:0; font-size:28px; font-weight:800; color:#ffffff;">+15-20</p>
-          <p style="margin:4px 0 0 0; font-size:12px; color:rgba(255,255,255,0.85); line-height:1.4;">ekstra bookinger<br>pr. måned</p>
-        </div>
+          <p class="stat-sub" style="margin:4px 0 0 0; font-size:12px; color:#ede8ff; line-height:1.4;">ekstra bookinger<br>pr. måned</p>
+        </td></tr>
+        </table>
       </td>
       <td class="stat-box" width="33%" style="padding: 8px; text-align:center; vertical-align:top;">
-        <div style="background:rgba(255,255,255,0.15); border-radius:10px; padding:16px 8px;">
+        <table role="presentation" width="100%" cellpadding="0" cellspacing="0" class="stat-cell-inner" bgcolor="#7d6aeb" style="background-color:#7d6aeb;border-radius:10px;border-collapse:separate;">
+        <tr><td style="padding:16px 8px;">
           <p style="margin:0; font-size:28px; font-weight:800; color:#ffffff;">+30%</p>
-          <p style="margin:4px 0 0 0; font-size:12px; color:rgba(255,255,255,0.85); line-height:1.4;">mere omsætning<br>uden ekstra ads</p>
-        </div>
+          <p class="stat-sub" style="margin:4px 0 0 0; font-size:12px; color:#ede8ff; line-height:1.4;">mere omsætning<br>uden ekstra ads</p>
+        </td></tr>
+        </table>
       </td>
       <td class="stat-box" width="33%" style="padding: 8px; text-align:center; vertical-align:top;">
-        <div style="background:rgba(255,255,255,0.15); border-radius:10px; padding:16px 8px;">
+        <table role="presentation" width="100%" cellpadding="0" cellspacing="0" class="stat-cell-inner" bgcolor="#7d6aeb" style="background-color:#7d6aeb;border-radius:10px;border-collapse:separate;">
+        <tr><td style="padding:16px 8px;">
           <p style="margin:0; font-size:28px; font-weight:800; color:#ffffff;">0 kr.</p>
-          <p style="margin:4px 0 0 0; font-size:12px; color:rgba(255,255,255,0.85); line-height:1.4;">brugt på<br>markedsføring</p>
-        </div>
+          <p class="stat-sub" style="margin:4px 0 0 0; font-size:12px; color:#ede8ff; line-height:1.4;">brugt på<br>markedsføring</p>
+        </td></tr>
+        </table>
       </td>
     </tr>
     </table>
