@@ -144,7 +144,8 @@ export async function POST(req: Request, { params }: Params) {
   const pass = envOrEmpty("SMTP_PASS");
   const from = envOrEmpty("MAIL_FROM") || "hej@allio.dk";
   const fromAddress = extractEmailAddress(from);
-  const fromDisplay = from.includes("<") ? from : `Allio <${from}>`;
+  /** Samme afsender som Reply-To, så «Svar» altid rammer hej@allio.dk (også ved multipart HTML). */
+  const mailIdentity = { name: "Allio", address: fromAddress };
   const toRecipients = parseRecipientList(to);
   if (!host || !user || !pass) {
     return NextResponse.json(
@@ -162,14 +163,21 @@ export async function POST(req: Request, { params }: Params) {
       requireTLS: !parseSecure(secureRaw),
     });
 
+    const isHtml = looksLikeHtml(message);
+    let textPart = isHtml ? stripHtml(message) : message;
+    if (isHtml && textPart.trim().length === 0) {
+      textPart =
+        "Allio har sendt dig en HTML-mail. Åbn den i din mailapp for at se layout og links.";
+    }
+
     const mailInput = {
-      from: fromDisplay,
-      sender: fromAddress,
-      replyTo: fromAddress,
+      from: mailIdentity,
+      /** Ikke sæt `sender` — det kan få nogle klienter til at foreslå forkert svar-adresse. */
+      replyTo: mailIdentity,
       to,
       subject,
-      text: looksLikeHtml(message) ? stripHtml(message) : message,
-      html: looksLikeHtml(message) ? message : undefined,
+      text: textPart,
+      html: isHtml ? message : undefined,
       envelope: { from: fromAddress, to: toRecipients },
     };
     await transporter.sendMail(mailInput);
