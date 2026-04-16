@@ -91,6 +91,8 @@ export async function POST(req: Request, { params }: Params) {
         status: "CALLBACK_SCHEDULED",
         callbackStatus: "PENDING",
         callbackReservedByUserId: userId,
+        /** Et tilbagekald må først komme tilbage i køen, når tidspunktet er nået. */
+        callbackScheduledFor: { lte: now },
       },
       orderBy: { callbackScheduledFor: "asc" },
       select: { id: true },
