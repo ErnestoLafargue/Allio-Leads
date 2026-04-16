@@ -47,6 +47,8 @@ export type LeadKundeNoterBookingProps = {
   notes: string;
   onNotesChange: (v: string) => void;
   meetingContact: MeetingContactProps;
+  /** Valgfri mail-knap/-sektion mellem Noter og Mødekontakt */
+  mailAction?: React.ReactNode;
   booking: BookingPanelProps;
   /** Valgfri bund-linje (fx ekstra «Gem og næste» i kampagne) */
   bottomBar?: React.ReactNode;
@@ -86,6 +88,7 @@ export function LeadKundeNoterBooking({
   notes,
   onNotesChange,
   meetingContact,
+  mailAction,
   booking,
   bottomBar,
   gridClassName = "",
@@ -152,6 +155,7 @@ export function LeadKundeNoterBooking({
             placeholder="Skriv noter… Træk i nederste kant for kortere eller længere."
             rows={6}
           />
+          {mailAction ? <div className="mt-4">{mailAction}</div> : null}
           <MeetingContactFields
             className="mt-4 shrink-0"
             contactRequired={contactRequired}

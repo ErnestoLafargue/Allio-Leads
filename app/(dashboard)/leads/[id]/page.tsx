@@ -10,6 +10,7 @@ import { MeetingOutcomeSelect } from "@/app/components/meeting-outcome-select";
 import { LeadOutcomeStrip } from "@/app/components/lead-workspace/lead-outcome-strip";
 import { LeadKundeNoterBooking } from "@/app/components/lead-workspace/lead-kunde-noter-booking";
 import { CallbackScheduleDialog } from "@/app/components/callback-schedule-dialog";
+import { SendStandardMailDialog } from "@/app/components/send-standard-mail-dialog";
 import type { BookingConfirmPayload } from "@/app/components/booking/booking-panel";
 import { parseCustomFields } from "@/lib/custom-fields";
 import { validateMeetingContactFields } from "@/lib/meeting-contact-validation";
@@ -105,6 +106,12 @@ function LeadDetailInner() {
   const [deletingLead, setDeletingLead] = useState(false);
   const [callbackDialogOpen, setCallbackDialogOpen] = useState(false);
   const [callbackSubmitError, setCallbackSubmitError] = useState<string | null>(null);
+  const [mailDialogOpen, setMailDialogOpen] = useState(false);
+  const [mailSending, setMailSending] = useState(false);
+  const [mailError, setMailError] = useState<string | null>(null);
+  const [mailSuccess, setMailSuccess] = useState<string | null>(null);
+
+  const fixedMailFrom = "hej@allio.dk";
 
   function setCustomKey(key: string, value: string) {
     setCustom((prev) => ({ ...prev, [key]: value }));
@@ -537,6 +544,29 @@ function LeadDetailInner() {
     setVirkEnrichFeedback(payload.message ?? "Berigelse gennemført");
   }
 
+  async function onSendMail(payload: { to: string; subject: string; message: string }) {
+    if (!lead) return;
+    setMailSending(true);
+    setMailError(null);
+    setMailSuccess(null);
+    const res = await fetch(`/api/leads/${lead.id}/send-mail`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload),
+    });
+    setMailSending(false);
+    if (!res.ok) {
+      const j = await res.json().catch(() => ({}));
+      const msg = typeof j.error === "string" ? j.error : "Kunne ikke sende mail.";
+      const details =
+        process.env.NODE_ENV === "development" && typeof j.details === "string" ? ` (${j.details})` : "";
+      setMailError(`${msg}${details}`);
+      return;
+    }
+    setMailDialogOpen(false);
+    setMailSuccess(`Mail sendt til ${payload.to}.`);
+  }
+
   const nextLeadId =
     queue && queue.position < queue.ids.length ? queue.ids[queue.position] : null;
   const prevLeadId = queue && queue.position > 1 ? queue.ids[queue.position - 2] : null;
@@ -661,6 +691,11 @@ function LeadDetailInner() {
             . Vælg udfald og gem — eller skift tilbage til «Ny» og gem for at lægge leadet i køen igen.
           </div>
         )}
+        {mailSuccess && (
+          <div className="mt-3 rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-2 text-xs text-emerald-950">
+            {mailSuccess}
+          </div>
+        )}
       </div>
 
       <form onSubmit={onSave} className="flex min-h-0 flex-1 flex-col gap-4">
@@ -738,6 +773,24 @@ function LeadDetailInner() {
               onCustom={setCustomKey}
               notes={notes}
               onNotesChange={setNotes}
+              mailAction={
+                <div className="flex flex-wrap items-center justify-between gap-2 rounded-xl border border-stone-200 bg-stone-50/60 px-3 py-2.5">
+                  <p className="text-xs text-stone-600">
+                    Send standardmail til leadets e-mailadresse.
+                  </p>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setMailError(null);
+                      setMailSuccess(null);
+                      setMailDialogOpen(true);
+                    }}
+                    className="rounded-md border border-stone-300 bg-white px-3 py-1.5 text-xs font-semibold text-stone-800 hover:bg-stone-50"
+                  >
+                    Send mail
+                  </button>
+                </div>
+              }
               meetingContact={{
                 meetingContactName,
                 meetingContactEmail,
@@ -818,6 +871,21 @@ function LeadDetailInner() {
           setCallbackSubmitError(null);
         }}
         onConfirm={(p) => void handleConfirmCallback(p)}
+      />
+      <SendStandardMailDialog
+        open={mailDialogOpen}
+        fixedFrom={fixedMailFrom}
+        defaultTo={email}
+        defaultSubject={`Opfølgning vedr. ${companyName || "jeres virksomhed"}`}
+        defaultMessage=""
+        saving={mailSending}
+        errorText={mailError}
+        onClose={() => {
+          if (mailSending) return;
+          setMailDialogOpen(false);
+          setMailError(null);
+        }}
+        onSubmit={(p) => void onSendMail(p)}
       />
     </div>
   );
