@@ -1,6 +1,9 @@
 import type { LeadStatus } from "./lead-status";
 import { isLeadStatus } from "./lead-status";
-import { MEETING_OUTCOME_CANCELLED, normalizeMeetingOutcomeStatus } from "./meeting-outcome";
+import {
+  MEETING_OUTCOME_REBOOK,
+  normalizeMeetingOutcomeStatus,
+} from "./meeting-outcome";
 
 /**
  * Lavere tal = tidligere i arbejdskøen (nye / ikke-afsluttede leads først).
@@ -36,7 +39,7 @@ export function isQueueEligibleStatus(status: string): boolean {
 }
 
 /**
- * Genbook «Genbook møde» / reserve-next: kun «Ny» eller annulleret møde (stadig booket) skal kunne trækkes som næste lead.
+ * Genbook «Genbook møde» / reserve-next: kun «Ny» eller genbook-markeret møde (stadig booket) skal kunne trækkes som næste lead.
  * Ikke interesseret m.m. skal aldrig tilbage i opkaldskøen, men leadet forbinder på kampagne (ses i kampagne-layout).
  */
 export function isLeadInRebookingDialerPool(row: {
@@ -47,7 +50,7 @@ export function isLeadInRebookingDialerPool(row: {
   if (st === "NOT_INTERESTED" || st === "UNQUALIFIED") return false;
   if (st === "NEW") return true;
   if (st === "MEETING_BOOKED") {
-    return normalizeMeetingOutcomeStatus(row.meetingOutcomeStatus ?? "") === MEETING_OUTCOME_CANCELLED;
+    return normalizeMeetingOutcomeStatus(row.meetingOutcomeStatus ?? "") === MEETING_OUTCOME_REBOOK;
   }
   return false;
 }

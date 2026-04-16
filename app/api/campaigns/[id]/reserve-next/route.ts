@@ -5,7 +5,7 @@ import { applyLeadCooldownResets } from "@/lib/lead-cooldown";
 import { filterLeadsByCampaignProtectedSetting } from "@/lib/reklamebeskyttet-filter";
 import { getLeadIdsWithOutcomeLogToday } from "@/lib/lead-outcome-today";
 import { isLeadInRebookingDialerPool, sortLeadsForCampaignCallQueue } from "@/lib/lead-queue";
-import { MEETING_OUTCOME_CANCELLED, normalizeMeetingOutcomeStatus } from "@/lib/meeting-outcome";
+import { MEETING_OUTCOME_REBOOK, normalizeMeetingOutcomeStatus } from "@/lib/meeting-outcome";
 import { releaseExpiredLocksEverywhere, tryAcquireLeadLock } from "@/lib/lead-lock";
 import {
   filterLeadsByWorkspaceStartDate,
@@ -112,7 +112,7 @@ export async function POST(req: Request, { params }: Params) {
               /** Afsluttede udfald skal aldrig trækkes som næste lead (ses stadig i kampagne-layout). */
               NOT: { status: { in: ["NOT_INTERESTED", "UNQUALIFIED"] } },
               OR: [
-                { status: "MEETING_BOOKED", meetingOutcomeStatus: MEETING_OUTCOME_CANCELLED },
+                { status: "MEETING_BOOKED", meetingOutcomeStatus: MEETING_OUTCOME_REBOOK },
                 /** Efter opkald/gem som «Ny» (eller auto fra voicemail) — stadig under genbook-kampagnen */
                 { status: "NEW" },
               ],
@@ -155,7 +155,7 @@ export async function POST(req: Request, { params }: Params) {
         id: r.id,
         status:
           campaign.systemCampaignType === "rebooking" &&
-          normalizeMeetingOutcomeStatus(r.meetingOutcomeStatus ?? "") === MEETING_OUTCOME_CANCELLED
+          normalizeMeetingOutcomeStatus(r.meetingOutcomeStatus ?? "") === MEETING_OUTCOME_REBOOK
             ? "NEW"
             : r.status,
         hasOutcomeLogToday: outcomeToday.has(r.id),

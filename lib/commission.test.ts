@@ -5,7 +5,12 @@ import {
   forventetProvisionKrForBookedDay,
   rateKrPerHeldMeeting,
 } from "./commission";
-import { MEETING_OUTCOME_CANCELLED, MEETING_OUTCOME_HELD, MEETING_OUTCOME_PENDING } from "./meeting-outcome";
+import {
+  MEETING_OUTCOME_CANCELLED,
+  MEETING_OUTCOME_HELD,
+  MEETING_OUTCOME_PENDING,
+  MEETING_OUTCOME_REBOOK,
+} from "./meeting-outcome";
 
 describe("commissionKrForBookedDay", () => {
   it("genbooking afholdte giver fast sats og tæller ikke i trappe for standard", () => {
@@ -35,6 +40,16 @@ describe("commissionKrForBookedDay", () => {
       { meetingOutcomeStatus: MEETING_OUTCOME_HELD },
     ]);
     expect(c.kr).toBe(3 * 300);
+  });
+
+  it("genbook-udfald tæller stadig som provisionsgivende møde", () => {
+    const c = commissionKrForBookedDay([
+      { meetingOutcomeStatus: MEETING_OUTCOME_REBOOK },
+      { meetingOutcomeStatus: MEETING_OUTCOME_CANCELLED },
+    ]);
+    expect(c.heldCount).toBe(1);
+    expect(c.cancelledCount).toBe(1);
+    expect(c.kr).toBe(rateKrPerHeldMeeting(1));
   });
 });
 

@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { useEffect, useState } from "react";
 import {
+  meetingOutcomeBadgeClass,
   MEETING_OUTCOME_LABELS,
   MEETING_OUTCOME_PENDING,
   MEETING_OUTCOME_SALE,
@@ -47,6 +48,7 @@ type SalesPayload = {
     totalBooked: number;
     pending: number;
     held: number;
+    rebook?: number;
     sale: number;
     cancelled: number;
   };
@@ -121,7 +123,7 @@ export default function MineSalgPage() {
         </p>
       </div>
 
-      <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-5">
+      <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-6">
         <div className="rounded-xl border border-stone-200 bg-white p-4 shadow-sm">
           <p className="text-xs font-medium uppercase tracking-wide text-stone-500">Bookede møder i alt</p>
           <p className="mt-1 text-2xl font-semibold text-stone-900">{stats.totalBooked}</p>
@@ -138,8 +140,12 @@ export default function MineSalgPage() {
           <p className="text-xs font-medium uppercase tracking-wide text-violet-900/80">Salg</p>
           <p className="mt-1 text-2xl font-semibold text-violet-950">{stats.sale ?? 0}</p>
         </div>
+        <div className="rounded-xl border border-sky-200/80 bg-sky-50/50 p-4 shadow-sm">
+          <p className="text-xs font-medium uppercase tracking-wide text-sky-900/80">Genbook</p>
+          <p className="mt-1 text-2xl font-semibold text-sky-950">{stats.rebook ?? 0}</p>
+        </div>
         <div className="rounded-xl border border-red-200/80 bg-red-50/40 p-4 shadow-sm">
-          <p className="text-xs font-medium uppercase tracking-wide text-red-900/80">Annulleret</p>
+          <p className="text-xs font-medium uppercase tracking-wide text-red-900/80">Ej mødt</p>
           <p className="mt-1 text-2xl font-semibold text-red-950">{stats.cancelled}</p>
         </div>
       </div>
@@ -180,7 +186,7 @@ export default function MineSalgPage() {
         <ul className="mt-3 list-inside list-disc space-y-1.5 text-blue-900/90">
           <li>Provision regnes pr. <strong>kalenderdag</strong>, som du har booket møder på (bookings-dato).</li>
           <li>
-            Når <strong>alle</strong> møder fra den dag er registreret som enten afholdt eller annulleret, kan dagen
+            Når <strong>alle</strong> møder fra den dag er registreret som enten afholdt, genbook eller ej mødt, kan dagen
             afregnes.
           </li>
           <li>
@@ -310,15 +316,7 @@ export default function MineSalgPage() {
                     <td className="px-3 py-2 text-stone-600">{l.campaign?.name ?? "—"}</td>
                     <td className="px-3 py-2">
                       <span
-                        className={`inline-flex rounded-full px-2 py-0.5 text-xs font-semibold ${
-                          String(l.meetingOutcomeStatus).toUpperCase() === "HELD"
-                            ? "bg-emerald-100 text-emerald-900"
-                            : String(l.meetingOutcomeStatus).toUpperCase() === "CANCELLED"
-                              ? "bg-red-100 text-red-900"
-                              : String(l.meetingOutcomeStatus).toUpperCase() === MEETING_OUTCOME_SALE
-                                ? "bg-violet-100 text-violet-950"
-                                : "bg-amber-100 text-amber-950"
-                        }`}
+                        className={`inline-flex rounded-full px-2 py-0.5 text-xs font-semibold ${meetingOutcomeBadgeClass(l.meetingOutcomeStatus)}`}
                       >
                         {outcomeLabel(l.meetingOutcomeStatus)}
                       </span>

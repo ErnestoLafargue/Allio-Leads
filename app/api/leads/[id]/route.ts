@@ -12,6 +12,7 @@ import { copenhagenDayKey } from "@/lib/copenhagen-day";
 import {
   MEETING_OUTCOME_CANCELLED,
   MEETING_OUTCOME_PENDING,
+  MEETING_OUTCOME_REBOOK,
   MEETING_OUTCOME_SALE,
   normalizeMeetingOutcomeStatus,
 } from "@/lib/meeting-outcome";
@@ -141,7 +142,13 @@ export async function PATCH(req: Request, { params }: Params) {
       return NextResponse.json({ error: "Ugyldigt mødeudfald." }, { status: 400 });
     }
     const o = body.meetingOutcomeStatus.trim().toUpperCase();
-    if (o !== "PENDING" && o !== "HELD" && o !== "CANCELLED" && o !== MEETING_OUTCOME_SALE) {
+    if (
+      o !== "PENDING" &&
+      o !== "HELD" &&
+      o !== "CANCELLED" &&
+      o !== MEETING_OUTCOME_REBOOK &&
+      o !== MEETING_OUTCOME_SALE
+    ) {
       return NextResponse.json({ error: "Ugyldigt mødeudfald." }, { status: 400 });
     }
     adminMeetingOutcome = o;

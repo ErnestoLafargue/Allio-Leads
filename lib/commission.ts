@@ -2,6 +2,7 @@ import {
   MEETING_OUTCOME_CANCELLED,
   MEETING_OUTCOME_HELD,
   MEETING_OUTCOME_PENDING,
+  MEETING_OUTCOME_REBOOK,
   MEETING_OUTCOME_SALE,
 } from "@/lib/meeting-outcome";
 
@@ -27,7 +28,7 @@ function normalizeOutcome(s: string): string {
 
 function isHeldOutcome(o: string): boolean {
   const n = normalizeOutcome(o);
-  return n === MEETING_OUTCOME_HELD || n === MEETING_OUTCOME_SALE;
+  return n === MEETING_OUTCOME_HELD || n === MEETING_OUTCOME_REBOOK || n === MEETING_OUTCOME_SALE;
 }
 
 function isRebookingSource(m: MeetingForCommission): boolean {

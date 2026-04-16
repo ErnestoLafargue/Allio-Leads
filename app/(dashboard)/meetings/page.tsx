@@ -4,9 +4,12 @@ import Link from "next/link";
 import { useSession } from "next-auth/react";
 import { useCallback, useEffect, useState } from "react";
 import { StandaloneMeetingBooker } from "@/app/components/booking/standalone-meeting-booker";
+import { MeetingOutcomeSelect } from "@/app/components/meeting-outcome-select";
 import {
+  meetingOutcomeBadgeClass,
   MEETING_OUTCOME_LABELS,
   MEETING_OUTCOME_PENDING,
+  MEETING_OUTCOME_REBOOK,
   MEETING_OUTCOME_SALE,
 } from "@/lib/meeting-outcome";
 
@@ -56,7 +59,12 @@ export default function MeetingsPage() {
 
   async function patchOutcome(
     id: string,
-    meetingOutcomeStatus: "PENDING" | "HELD" | "CANCELLED" | typeof MEETING_OUTCOME_SALE,
+    meetingOutcomeStatus:
+      | "PENDING"
+      | "HELD"
+      | "CANCELLED"
+      | typeof MEETING_OUTCOME_REBOOK
+      | typeof MEETING_OUTCOME_SALE,
   ) {
     const res = await fetch(`/api/leads/${id}`, {
       method: "PATCH",
@@ -82,7 +90,7 @@ export default function MeetingsPage() {
         <p className="mt-1 text-sm text-stone-600">
           Alle kan se oversigt over bookede møder (tid, booket af og status). Kun{" "}
           <strong>administratorer</strong> og <strong>sælgeren der har booket</strong> kan åbne leadet og læse eller
-          redigere noter.           Administratorer registrerer mødeudfald (afventende, afholdt, annulleret, salg) — det styrer bl.a. kø og
+          redigere noter.           Administratorer registrerer mødeudfald (afventende, afholdt, ej mødt, genbook, salg) — det styrer bl.a. kø og
           provision pr. dag.
         </p>
       </div>
@@ -159,51 +167,17 @@ export default function MeetingsPage() {
                   </td>
                   <td className="px-4 py-3">
                     <span
-                      className={`inline-flex rounded-full px-2 py-0.5 text-xs font-semibold ${
-                        String(m.meetingOutcomeStatus).toUpperCase() === "HELD"
-                          ? "bg-emerald-100 text-emerald-900"
-                          : String(m.meetingOutcomeStatus).toUpperCase() === "CANCELLED"
-                            ? "bg-red-100 text-red-900"
-                            : String(m.meetingOutcomeStatus).toUpperCase() === MEETING_OUTCOME_SALE
-                              ? "bg-violet-100 text-violet-950"
-                              : "bg-amber-100 text-amber-950"
-                      }`}
+                      className={`inline-flex rounded-full px-2 py-0.5 text-xs font-semibold ${meetingOutcomeBadgeClass(m.meetingOutcomeStatus)}`}
                     >
                       {outcomeLabel(m.meetingOutcomeStatus)}
                     </span>
                   </td>
                   {isAdmin && (
                     <td className="px-4 py-3">
-                      <div className="flex max-w-[14rem] flex-wrap gap-1">
-                        <button
-                          type="button"
-                          onClick={() => void patchOutcome(m.id, "PENDING")}
-                          className="rounded-md bg-amber-600 px-2 py-1 text-xs font-medium text-white hover:bg-amber-700"
-                        >
-                          Afventende
-                        </button>
-                        <button
-                          type="button"
-                          onClick={() => void patchOutcome(m.id, "HELD")}
-                          className="rounded-md bg-emerald-700 px-2 py-1 text-xs font-medium text-white hover:bg-emerald-800"
-                        >
-                          Afholdt
-                        </button>
-                        <button
-                          type="button"
-                          onClick={() => void patchOutcome(m.id, "CANCELLED")}
-                          className="rounded-md border border-stone-300 bg-white px-2 py-1 text-xs font-medium text-stone-800 hover:bg-stone-50"
-                        >
-                          Annulleret
-                        </button>
-                        <button
-                          type="button"
-                          onClick={() => void patchOutcome(m.id, MEETING_OUTCOME_SALE)}
-                          className="rounded-md bg-violet-700 px-2 py-1 text-xs font-medium text-white hover:bg-violet-800"
-                        >
-                          Salg
-                        </button>
-                      </div>
+                      <MeetingOutcomeSelect
+                        value={String(m.meetingOutcomeStatus ?? "").trim().toUpperCase() || MEETING_OUTCOME_PENDING}
+                        onChange={(value) => void patchOutcome(m.id, value)}
+                      />
                     </td>
                   )}
                 </tr>

@@ -76,11 +76,11 @@ describe("isQueueEligibleStatus", () => {
 });
 
 describe("isLeadInRebookingDialerPool", () => {
-  it("tillader Ny og annulleret booket møde", () => {
+  it("tillader Ny og genbook-markeret møde", () => {
     expect(isLeadInRebookingDialerPool({ status: "NEW", meetingOutcomeStatus: "PENDING" })).toBe(true);
-    expect(
-      isLeadInRebookingDialerPool({ status: "MEETING_BOOKED", meetingOutcomeStatus: "CANCELLED" }),
-    ).toBe(true);
+    expect(isLeadInRebookingDialerPool({ status: "MEETING_BOOKED", meetingOutcomeStatus: "REBOOK" })).toBe(
+      true,
+    );
   });
   it("afviser ikke interesseret og ukvalificeret", () => {
     expect(

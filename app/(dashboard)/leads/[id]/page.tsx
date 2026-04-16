@@ -6,6 +6,7 @@ import { Suspense, useEffect, useRef, useState } from "react";
 import { useSession } from "next-auth/react";
 import { LEAD_STATUSES, type LeadStatus } from "@/lib/lead-status";
 import { isQueueEligibleStatus, sortLeadsForQueue } from "@/lib/lead-queue";
+import { MeetingOutcomeSelect } from "@/app/components/meeting-outcome-select";
 import { LeadOutcomeStrip } from "@/app/components/lead-workspace/lead-outcome-strip";
 import { LeadKundeNoterBooking } from "@/app/components/lead-workspace/lead-kunde-noter-booking";
 import { CallbackScheduleDialog } from "@/app/components/callback-schedule-dialog";
@@ -13,8 +14,10 @@ import type { BookingConfirmPayload } from "@/app/components/booking/booking-pan
 import { parseCustomFields } from "@/lib/custom-fields";
 import { validateMeetingContactFields } from "@/lib/meeting-contact-validation";
 import {
+  meetingOutcomeBadgeClass,
   MEETING_OUTCOME_LABELS,
   MEETING_OUTCOME_PENDING,
+  MEETING_OUTCOME_REBOOK,
   MEETING_OUTCOME_SALE,
 } from "@/lib/meeting-outcome";
 import { defaultCampaignFieldConfigJson } from "@/lib/campaign-fields";
@@ -452,7 +455,9 @@ function LeadDetailInner() {
     router.refresh();
   }
 
-  async function patchMeetingOutcome(o: "PENDING" | "HELD" | "CANCELLED" | typeof MEETING_OUTCOME_SALE) {
+  async function patchMeetingOutcome(
+    o: "PENDING" | "HELD" | "CANCELLED" | typeof MEETING_OUTCOME_REBOOK | typeof MEETING_OUTCOME_SALE,
+  ) {
     if (!lead) return;
     setError(null);
     const res = await fetch(`/api/leads/${id}`, {
@@ -773,15 +778,7 @@ function LeadDetailInner() {
               <div className="flex flex-wrap items-center gap-2">
                 <h2 className="text-sm font-medium text-stone-800">Mødeudfald</h2>
                 <span
-                  className={`inline-flex rounded-full px-2 py-0.5 text-xs font-semibold ${
-                    meetingOutcomeStatus === "HELD"
-                      ? "bg-emerald-100 text-emerald-900"
-                      : meetingOutcomeStatus === "CANCELLED"
-                        ? "bg-red-100 text-red-900"
-                        : meetingOutcomeStatus === MEETING_OUTCOME_SALE
-                          ? "bg-violet-100 text-violet-950"
-                          : "bg-amber-100 text-amber-950"
-                  }`}
+                  className={`inline-flex rounded-full px-2 py-0.5 text-xs font-semibold ${meetingOutcomeBadgeClass(meetingOutcomeStatus)}`}
                 >
                   {MEETING_OUTCOME_LABELS[meetingOutcomeStatus] ??
                     MEETING_OUTCOME_LABELS[MEETING_OUTCOME_PENDING]}
@@ -799,34 +796,11 @@ function LeadDetailInner() {
               {isAdmin && (
                 <div className="mt-4 flex flex-wrap items-center gap-2 border-t border-stone-200 pt-4">
                   <span className="text-xs font-medium text-stone-600">Admin — mødeudfald:</span>
-                  <button
-                    type="button"
-                    onClick={() => void patchMeetingOutcome("PENDING")}
-                    className="rounded-md bg-amber-600 px-3 py-1.5 text-xs font-semibold text-white hover:bg-amber-700"
-                  >
-                    Afventende
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => void patchMeetingOutcome("HELD")}
-                    className="rounded-md bg-emerald-700 px-3 py-1.5 text-xs font-semibold text-white hover:bg-emerald-800"
-                  >
-                    Afholdt
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => void patchMeetingOutcome("CANCELLED")}
-                    className="rounded-md border border-stone-300 bg-white px-3 py-1.5 text-xs font-semibold text-stone-800 hover:bg-stone-50"
-                  >
-                    Annulleret
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => void patchMeetingOutcome(MEETING_OUTCOME_SALE)}
-                    className="rounded-md bg-violet-700 px-3 py-1.5 text-xs font-semibold text-white hover:bg-violet-800"
-                  >
-                    Salg
-                  </button>
+                  <MeetingOutcomeSelect
+                    value={meetingOutcomeStatus}
+                    onChange={(value) => void patchMeetingOutcome(value)}
+                    className="rounded-md border border-stone-300 bg-white px-3 py-1.5 text-xs font-semibold text-stone-800 shadow-sm outline-none ring-stone-400 focus:ring-2"
+                  />
                 </div>
               )}
             </div>

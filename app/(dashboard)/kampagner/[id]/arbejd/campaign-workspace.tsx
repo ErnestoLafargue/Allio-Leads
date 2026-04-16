@@ -16,6 +16,7 @@ import {
 } from "@/lib/campaign-workspace-patch";
 import { isValidCVR } from "@/lib/cvr-import";
 import { buildReserveNextRequestBody } from "@/lib/workspace-start-date-filter";
+import { MEETING_OUTCOME_REBOOK } from "@/lib/meeting-outcome";
 
 type Lead = {
   id: string;
@@ -152,7 +153,7 @@ export function CampaignWorkspace({ campaignId, preferredLeadId }: Props) {
     const cancelledMeetingInRebookingCampaign =
       campaignSystemType === "rebooking" &&
       l.status === "MEETING_BOOKED" &&
-      String(l.meetingOutcomeStatus ?? "").trim().toUpperCase() === "CANCELLED";
+      String(l.meetingOutcomeStatus ?? "").trim().toUpperCase() === MEETING_OUTCOME_REBOOK;
     setStatus(
       l.status === "CALLBACK_SCHEDULED" || cancelledMeetingInRebookingCampaign
         ? "NEW"
@@ -717,7 +718,7 @@ export function CampaignWorkspace({ campaignId, preferredLeadId }: Props) {
   const showOriginalCancelledMeetingInfo =
     campaignSystemType === "rebooking" &&
     current.status === "MEETING_BOOKED" &&
-    String(current.meetingOutcomeStatus ?? "").trim().toUpperCase() === "CANCELLED" &&
+    String(current.meetingOutcomeStatus ?? "").trim().toUpperCase() === MEETING_OUTCOME_REBOOK &&
     Boolean(current.meetingScheduledFor);
 
   const canScheduleCallback =
@@ -764,7 +765,7 @@ export function CampaignWorkspace({ campaignId, preferredLeadId }: Props) {
         )}
         {showOriginalCancelledMeetingInfo && (
           <div className="mt-3 rounded-lg border border-amber-200 bg-amber-50/90 px-3 py-2 text-xs text-amber-950">
-            <strong>Originalt møde (annulleret):</strong>{" "}
+            <strong>Originalt møde (genbook):</strong>{" "}
             {new Date(String(current.meetingScheduledFor)).toLocaleString("da-DK", {
               dateStyle: "short",
               timeStyle: "short",
