@@ -424,7 +424,11 @@ export function CampaignWorkspace({ campaignId, preferredLeadId }: Props) {
     }
 
     const currentId = activeLead.id;
-    const patchBody = buildCampaignLeadPatchBody(getFormSnapshot());
+    const shouldBumpNewQueue = status === "NEW" && activeLead.status === "NEW";
+    const patchBody = {
+      ...buildCampaignLeadPatchBody(getFormSnapshot()),
+      ...(shouldBumpNewQueue ? { queueBump: true } : {}),
+    };
 
     setError(null);
     setBackgroundSyncError(null);

@@ -77,107 +77,135 @@ export async function POST(req: Request) {
   });
   let cvrToLead = indexLeadsByNormalizedCvr(existingLeads);
 
-  const summary: CsvImportResponse = {
-    totalRows: rows.length,
-    newLeadsImported: 0,
-    existingAttached: 0,
-    skippedDuplicateInFile: 0,
-    skippedAlreadyInCampaign: 0,
-    skippedInvalid: 0,
-    details: [],
-  };
+  const encoder = new TextEncoder();
+  const totalRows = rows.length;
 
-  const handledCvrsInFile = new Set<string>();
-
-  function pushDetail(row: ImportDetailRow) {
-    if (summary.details.length < MAX_DETAIL_ROWS) summary.details.push(row);
+  function eventLine(payload: Record<string, unknown>) {
+    return encoder.encode(`${JSON.stringify(payload)}\n`);
   }
 
-  try {
-    for (let i = 0; i < rows.length; i++) {
-      const dataRow = i + 1;
-      const row = rows[i];
-      const n =
-        mapping && Object.keys(mapping).length > 0
-          ? applyColumnMapping(row, mapping)
-          : buildNormRow(row);
-      const base = pickBaseFromNorm(n);
-      const cvrNorm = normalizeCVR(base.cvr);
+  const stream = new ReadableStream<Uint8Array>({
+    async start(controller) {
+      const summary: CsvImportResponse = {
+        totalRows,
+        newLeadsImported: 0,
+        existingAttached: 0,
+        skippedDuplicateInFile: 0,
+        skippedAlreadyInCampaign: 0,
+        skippedInvalid: 0,
+        details: [],
+      };
+      const handledCvrsInFile = new Set<string>();
+      const progressStep = Math.max(1, Math.floor(totalRows / 100));
 
-      if (!cvrNorm) {
-        summary.skippedInvalid += 1;
-        pushDetail({
-          dataRow,
-          cvr: base.cvr?.trim() ? base.cvr.trim() : "—",
-          reason: "invalid_row",
-          note: "Manglende eller ugyldigt CVR (8 cifre efter normalisering)",
-        });
-        continue;
+      function pushDetail(row: ImportDetailRow) {
+        if (summary.details.length < MAX_DETAIL_ROWS) summary.details.push(row);
+      }
+      function pushProgress(processed: number) {
+        const percent = totalRows === 0 ? 100 : Math.min(100, Math.round((processed / totalRows) * 100));
+        controller.enqueue(
+          eventLine({
+            type: "progress",
+            processedRows: processed,
+            totalRows,
+            percent,
+          }),
+        );
       }
 
-      if (handledCvrsInFile.has(cvrNorm)) {
-        summary.skippedDuplicateInFile += 1;
-        pushDetail({ dataRow, cvr: cvrNorm, reason: "duplicate_in_file" });
-        continue;
-      }
+      try {
+        pushProgress(0);
+        for (let i = 0; i < rows.length; i++) {
+          const dataRow = i + 1;
+          const row = rows[i];
+          const n =
+            mapping && Object.keys(mapping).length > 0
+              ? applyColumnMapping(row, mapping)
+              : buildNormRow(row);
+          const base = pickBaseFromNorm(n);
+          const cvrNorm = normalizeCVR(base.cvr);
 
-      const existing = cvrToLead.get(cvrNorm);
-      if (existing) {
-        if (existing.campaignId === campaignId) {
-          summary.skippedAlreadyInCampaign += 1;
-          handledCvrsInFile.add(cvrNorm);
-          pushDetail({ dataRow, cvr: cvrNorm, reason: "already_in_campaign" });
-          continue;
+          if (!cvrNorm) {
+            summary.skippedInvalid += 1;
+            pushDetail({
+              dataRow,
+              cvr: base.cvr?.trim() ? base.cvr.trim() : "—",
+              reason: "invalid_row",
+              note: "Manglende eller ugyldigt CVR (8 cifre efter normalisering)",
+            });
+          } else if (handledCvrsInFile.has(cvrNorm)) {
+            summary.skippedDuplicateInFile += 1;
+            pushDetail({ dataRow, cvr: cvrNorm, reason: "duplicate_in_file" });
+          } else {
+            const existing = cvrToLead.get(cvrNorm);
+            if (existing) {
+              if (existing.campaignId === campaignId) {
+                summary.skippedAlreadyInCampaign += 1;
+                handledCvrsInFile.add(cvrNorm);
+                pushDetail({ dataRow, cvr: cvrNorm, reason: "already_in_campaign" });
+              } else {
+                await prisma.lead.update({
+                  where: { id: existing.id },
+                  data: { campaignId },
+                });
+                cvrToLead.set(cvrNorm, { id: existing.id, campaignId });
+                summary.existingAttached += 1;
+                handledCvrsInFile.add(cvrNorm);
+              }
+            } else if (!base.companyName?.trim()) {
+              summary.skippedInvalid += 1;
+              pushDetail({
+                dataRow,
+                cvr: cvrNorm,
+                reason: "invalid_row",
+                note: "Virksomhedsnavn mangler (påkrævet for nye leads)",
+              });
+            } else {
+              const custom = collectCustomFromRow(n, fieldCfg);
+              const created = await prisma.lead.create({
+                data: pickLeadCreateData({
+                  campaignId,
+                  companyName: base.companyName,
+                  phone: base.phone,
+                  email: base.email,
+                  cvr: cvrNorm,
+                  address: base.address,
+                  postalCode: base.postalCode,
+                  city: base.city,
+                  industry: base.industry,
+                  notes: base.notes,
+                  customFields: stringifyCustomFields(custom),
+                  status: "NEW",
+                }),
+              });
+              cvrToLead.set(cvrNorm, { id: created.id, campaignId });
+              summary.newLeadsImported += 1;
+              handledCvrsInFile.add(cvrNorm);
+            }
+          }
+
+          const processed = i + 1;
+          if (processed === totalRows || processed % progressStep === 0) {
+            pushProgress(processed);
+          }
         }
-        await prisma.lead.update({
-          where: { id: existing.id },
-          data: { campaignId },
-        });
-        cvrToLead.set(cvrNorm, { id: existing.id, campaignId });
-        summary.existingAttached += 1;
-        handledCvrsInFile.add(cvrNorm);
-        continue;
+
+        controller.enqueue(eventLine({ type: "result", result: summary }));
+      } catch (e) {
+        const msg = e instanceof Error ? e.message : String(e);
+        controller.enqueue(
+          eventLine({ type: "error", error: "Import stopped under gemning af leads", details: msg }),
+        );
+      } finally {
+        controller.close();
       }
+    },
+  });
 
-      if (!base.companyName?.trim()) {
-        summary.skippedInvalid += 1;
-        pushDetail({
-          dataRow,
-          cvr: cvrNorm,
-          reason: "invalid_row",
-          note: "Virksomhedsnavn mangler (påkrævet for nye leads)",
-        });
-        continue;
-      }
-
-      const custom = collectCustomFromRow(n, fieldCfg);
-      const created = await prisma.lead.create({
-        data: pickLeadCreateData({
-          campaignId,
-          companyName: base.companyName,
-          phone: base.phone,
-          email: base.email,
-          cvr: cvrNorm,
-          address: base.address,
-          postalCode: base.postalCode,
-          city: base.city,
-          industry: base.industry,
-          notes: base.notes,
-          customFields: stringifyCustomFields(custom),
-          status: "NEW",
-        }),
-      });
-      cvrToLead.set(cvrNorm, { id: created.id, campaignId });
-      summary.newLeadsImported += 1;
-      handledCvrsInFile.add(cvrNorm);
-    }
-  } catch (e) {
-    const msg = e instanceof Error ? e.message : String(e);
-    return NextResponse.json(
-      { error: "Import stopped under gemning af leads", details: msg },
-      { status: 500 },
-    );
-  }
-
-  return NextResponse.json(summary);
+  return new Response(stream, {
+    headers: {
+      "Content-Type": "application/x-ndjson; charset=utf-8",
+      "Cache-Control": "no-cache",
+    },
+  });
 }

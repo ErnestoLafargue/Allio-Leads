@@ -36,6 +36,11 @@ type ImportResult = {
   }[];
 };
 
+type ImportProgressEvent =
+  | { type: "progress"; processedRows: number; totalRows: number; percent: number }
+  | { type: "result"; result: ImportResult }
+  | { type: "error"; error?: string; details?: string };
+
 function detailReasonLabel(r: ImportDetailReason): string {
   switch (r) {
     case "duplicate_in_file":
@@ -86,6 +91,9 @@ export default function ImportPage() {
   const [error, setError] = useState<string | null>(null);
   const [loadingPreview, setLoadingPreview] = useState(false);
   const [loadingImport, setLoadingImport] = useState(false);
+  const [importProgressPercent, setImportProgressPercent] = useState(0);
+  const [importProgressProcessedRows, setImportProgressProcessedRows] = useState(0);
+  const [importProgressTotalRows, setImportProgressTotalRows] = useState(0);
   const [importConfirmOpen, setImportConfirmOpen] = useState(false);
   /** Nulstiller fil-input når import er færdig, så «forsiden» er tydelig */
   const [fileInputKey, setFileInputKey] = useState(0);
@@ -254,13 +262,16 @@ export default function ImportPage() {
     setError(null);
     setResult(null);
     setLoadingImport(true);
+    setImportProgressPercent(0);
+    setImportProgressProcessedRows(0);
+    setImportProgressTotalRows(0);
     const fd = new FormData();
     fd.append("file", file);
     fd.append("campaignId", campaignId);
     fd.append("mapping", JSON.stringify(mapping));
     const res = await fetch("/api/import/csv", { method: "POST", body: fd });
-    setLoadingImport(false);
     if (!res.ok) {
+      setLoadingImport(false);
       const text = await res.text();
       try {
         const j = JSON.parse(text) as { error?: string; details?: string };
@@ -274,8 +285,60 @@ export default function ImportPage() {
       }
       return;
     }
-    const data: ImportResult = await res.json();
-    setResult(data);
+
+    const contentType = res.headers.get("content-type") ?? "";
+    if (!contentType.includes("application/x-ndjson") || !res.body) {
+      const data: ImportResult = await res.json();
+      setResult(data);
+      setLoadingImport(false);
+      setStep(1);
+      setColumns([]);
+      setPreviewRows([]);
+      setMapping({});
+      setFile(null);
+      setFileInputKey((k) => k + 1);
+      return;
+    }
+
+    const reader = res.body.getReader();
+    const decoder = new TextDecoder();
+    let buffer = "";
+    let gotResult = false;
+    while (true) {
+      const { value, done } = await reader.read();
+      if (done) break;
+      buffer += decoder.decode(value, { stream: true });
+      const lines = buffer.split("\n");
+      buffer = lines.pop() ?? "";
+      for (const line of lines) {
+        const trimmed = line.trim();
+        if (!trimmed) continue;
+        let evt: ImportProgressEvent;
+        try {
+          evt = JSON.parse(trimmed) as ImportProgressEvent;
+        } catch {
+          continue;
+        }
+        if (evt.type === "progress") {
+          setImportProgressPercent(Math.max(0, Math.min(100, evt.percent)));
+          setImportProgressProcessedRows(evt.processedRows);
+          setImportProgressTotalRows(evt.totalRows);
+        } else if (evt.type === "result") {
+          setResult(evt.result);
+          gotResult = true;
+        } else if (evt.type === "error") {
+          setError([evt.error, evt.details].filter(Boolean).join(": ") || "Import fejlede");
+          setLoadingImport(false);
+          return;
+        }
+      }
+    }
+    if (!gotResult) {
+      setError("Import blev afbrudt før resultat.");
+      setLoadingImport(false);
+      return;
+    }
+    setLoadingImport(false);
     /* Tilbage til trin 1: skjul kolonne-mapping som om man er på forsiden */
     setStep(1);
     setColumns([]);
@@ -549,6 +612,24 @@ export default function ImportPage() {
               >
                 {loadingImport ? "Importerer…" : "Importer leads"}
               </button>
+              {loadingImport && (
+                <div className="w-full max-w-xl rounded-md border border-stone-200 bg-stone-50 p-3">
+                  <div className="mb-1 flex items-center justify-between text-xs text-stone-700">
+                    <span>
+                      {importProgressTotalRows > 0
+                        ? `Behandler ${importProgressProcessedRows} ud af ${importProgressTotalRows} leads`
+                        : "Starter import…"}
+                    </span>
+                    <span className="font-semibold tabular-nums">{importProgressPercent}%</span>
+                  </div>
+                  <div className="h-2 overflow-hidden rounded-full bg-stone-200">
+                    <div
+                      className="h-full rounded-full bg-stone-800 transition-[width] duration-200"
+                      style={{ width: `${importProgressPercent}%` }}
+                    />
+                  </div>
+                </div>
+              )}
             </div>
           )}
 

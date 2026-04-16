@@ -11,6 +11,7 @@ import {
   filterLeadsByWorkspaceStartDate,
   parseWorkspaceStartDateFilterFromRequestBody,
 } from "@/lib/workspace-start-date-filter";
+import { copenhagenDayKey } from "@/lib/copenhagen-day";
 
 type Params = { params: Promise<{ id: string }> };
 
@@ -83,6 +84,19 @@ export async function POST(req: Request, { params }: Params) {
         where: { id },
         include: leadInclude,
       });
+      if (lead) {
+        await prisma.leadVisitHistory.create({
+          data: {
+            leadId: lead.id,
+            userId,
+            campaignId: lead.campaign?.id ?? null,
+            companyName: lead.companyName,
+            statusAtVisit: lead.status,
+            dayKey: copenhagenDayKey(now),
+            visitedAt: now,
+          },
+        });
+      }
       return lead;
     }
 

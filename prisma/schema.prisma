@@ -27,6 +27,7 @@ model User {
   /// Bruger der oprettede tilbagekaldet (kan være anderledes end tildelt)
   callbackCreatedLeads Lead[] @relation("LeadCallbackCreatedBy")
   outcomeLogs    LeadOutcomeLog[]
+  visitHistory   LeadVisitHistory[]
   loginDays      UserLoginDay[]
 }
 
@@ -59,6 +60,7 @@ model Campaign {
   updatedAt   DateTime @updatedAt
 
   leads Lead[]
+  visitHistory LeadVisitHistory[]
 }
 
 model Lead {
@@ -128,6 +130,7 @@ model Lead {
   updatedAt DateTime @updatedAt
 
   outcomeLogs LeadOutcomeLog[]
+  visitHistory LeadVisitHistory[]
 
   @@index([lockExpiresAt])
   @@index([lockedByUserId])
@@ -149,4 +152,26 @@ model LeadOutcomeLog {
 
   @@index([userId, createdAt])
   @@index([createdAt])
+}
+
+/// Ét log pr. gang en bruger åbner / reserverer et lead i arbejdskøen.
+model LeadVisitHistory {
+  id        String   @id @default(cuid())
+  leadId     String
+  userId     String
+  campaignId String?
+  companyName String
+  statusAtVisit String
+  /// YYYY-MM-DD (Europe/Copenhagen) for hurtig filtrering i historik
+  dayKey    String
+  visitedAt DateTime @default(now())
+
+  lead     Lead @relation(fields: [leadId], references: [id], onDelete: Cascade)
+  user     User @relation(fields: [userId], references: [id], onDelete: Cascade)
+  campaign Campaign? @relation(fields: [campaignId], references: [id], onDelete: SetNull)
+
+  @@index([userId, visitedAt])
+  @@index([userId, dayKey, visitedAt])
+  @@index([leadId, visitedAt])
+  @@index([campaignId, visitedAt])
 }

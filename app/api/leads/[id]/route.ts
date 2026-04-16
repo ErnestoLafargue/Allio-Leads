@@ -96,6 +96,7 @@ export async function PATCH(req: Request, { params }: Params) {
   const userId = session!.user.id;
 
   const body = await req.json().catch(() => null);
+  const queueBump = body?.queueBump === true;
   await releaseExpiredLocksEverywhere(prisma);
   const existing = await prisma.lead.findUnique({
     where: { id },
@@ -349,8 +350,14 @@ export async function PATCH(req: Request, { params }: Params) {
     { status: existing.status, meetingBookedAt: existing.meetingBookedAt },
     status,
   );
+  const bumpNewLeadToQueueBack =
+    queueBump === true && existing.status === "NEW" && status === "NEW";
   const touchedOutcomeAt =
-    existing.status !== status && isRealOutcomeStatus(status) ? new Date() : existing.lastOutcomeAt;
+    existing.status !== status && isRealOutcomeStatus(status)
+      ? new Date()
+      : bumpNewLeadToQueueBack
+        ? new Date()
+        : existing.lastOutcomeAt;
 
   const clearLeadLock = status !== "NEW";
 
