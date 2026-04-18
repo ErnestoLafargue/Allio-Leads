@@ -4,6 +4,7 @@ import { requireSession } from "@/lib/api-auth";
 import { LEAD_LOCK_CLEAR, isLockActive } from "@/lib/lead-lock";
 import { isCallbackTimeInCopenhagenBusinessWindow } from "@/lib/callback-datetime";
 import { parseCustomFields, stringifyCustomFields } from "@/lib/custom-fields";
+import { normalizeLeaderboardOutcomeStatus } from "@/lib/lead-outcome-log";
 
 type Params = { params: Promise<{ id: string }> };
 
@@ -101,7 +102,8 @@ export async function POST(req: Request, { params }: Params) {
         })
       : lead.customFields;
 
-    const updated = await prisma.lead.update({
+    const updated = await prisma.$transaction(async (tx) => {
+      const u = await tx.lead.update({
       where: { id },
       data: {
         companyName: typeof body?.companyName === "string" ? body.companyName.trim() : lead.companyName,
@@ -132,9 +134,21 @@ export async function POST(req: Request, { params }: Params) {
         callbackCreatedByUserId: lead.callbackCreatedByUserId ?? userId,
         callbackStatus: "PENDING",
         callbackNote: lead.callbackNote ?? "",
+        callbackSeenByAssigneeAt: null,
         ...LEAD_LOCK_CLEAR,
       },
       include: leadInclude,
+    });
+      if (!isReschedule) {
+        await tx.leadOutcomeLog.create({
+          data: {
+            leadId: id,
+            userId,
+            status: normalizeLeaderboardOutcomeStatus("CALLBACK_SCHEDULED"),
+          },
+        });
+      }
+      return u;
     });
 
     return NextResponse.json(updated);
@@ -145,6 +159,7 @@ export async function POST(req: Request, { params }: Params) {
       msg.includes("callbackReservedByUserId") ||
       msg.includes("callbackStatus") ||
       msg.includes("callbackCreatedByUserId") ||
+      msg.includes("callbackSeenByAssigneeAt") ||
       msg.includes("no such column") ||
       msg.toLowerCase().includes("does not exist");
     return NextResponse.json(

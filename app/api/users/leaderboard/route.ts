@@ -6,7 +6,7 @@ import {
   copenhagenDayBoundsUtcFromDayKey,
   copenhagenDayKey,
 } from "@/lib/copenhagen-day";
-import { leaderboardDeltasForOutcome } from "@/lib/lead-outcome-log";
+import { leaderboardDeltasForOutcome, leadStatusCountsForScoreboardContact } from "@/lib/lead-outcome-log";
 
 type PresentUser = {
   userId: string;
@@ -50,6 +50,19 @@ async function distinctUserIdsWithOutcomesInRange(start: Date, end: Date): Promi
     return rows.map((r) => r.userId);
   } catch (e) {
     console.warn("[leaderboard] LeadOutcomeLog groupBy failed:", e);
+    return [];
+  }
+}
+
+async function distinctUserIdsWithVisitsInRange(start: Date, end: Date): Promise<string[]> {
+  try {
+    const rows = await prisma.leadVisitHistory.groupBy({
+      by: ["userId"],
+      where: { visitedAt: { gte: start, lt: end } },
+    });
+    return rows.map((r) => r.userId);
+  } catch (e) {
+    console.warn("[leaderboard] LeadVisitHistory groupBy failed:", e);
     return [];
   }
 }
@@ -104,7 +117,9 @@ export async function GET(req: Request) {
 
     let present = await loadPresentUsers(dayKey);
     const outcomeUserIds = await distinctUserIdsWithOutcomesInRange(start, end);
-    present = await mergePresentWithOutcomeUsers(present, outcomeUserIds);
+    const visitUserIds = await distinctUserIdsWithVisitsInRange(start, end);
+    const activityUserIds = [...new Set([...outcomeUserIds, ...visitUserIds])];
+    present = await mergePresentWithOutcomeUsers(present, activityUserIds);
 
     if (present.length === 0) {
       const sellers = await prisma.user.findMany({
@@ -132,6 +147,25 @@ export async function GET(req: Request) {
       }
     }
 
+    let visitRows: { userId: string; statusAtVisit: string; lead: { status: string } | null }[] = [];
+    if (userIds.length > 0) {
+      try {
+        visitRows = await prisma.leadVisitHistory.findMany({
+          where: {
+            visitedAt: { gte: start, lt: end },
+            userId: { in: userIds },
+          },
+          select: {
+            userId: true,
+            statusAtVisit: true,
+            lead: { select: { status: true } },
+          },
+        });
+      } catch (e) {
+        console.warn("[leaderboard] LeadVisitHistory query failed:", e);
+      }
+    }
+
     const tallies = new Map<string, { meetings: number; conversations: number; contacts: number }>();
     for (const p of present) {
       tallies.set(p.userId, { meetings: 0, conversations: 0, contacts: 0 });
@@ -142,7 +176,14 @@ export async function GET(req: Request) {
       const d = leaderboardDeltasForOutcome(row.status);
       t.meetings += d.meetings;
       t.conversations += d.conversations;
-      t.contacts += d.contacts;
+    }
+    for (const row of visitRows) {
+      const t = tallies.get(row.userId);
+      if (!t) continue;
+      const statusForTally = row.lead?.status ?? row.statusAtVisit;
+      if (leadStatusCountsForScoreboardContact(statusForTally)) {
+        t.contacts += 1;
+      }
     }
 
     const dayLabel = new Intl.DateTimeFormat("da-DK", {

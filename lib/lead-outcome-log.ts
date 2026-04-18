@@ -9,6 +9,7 @@ export const LEADERBOARD_LOG_STATUSES = new Set<LeadStatus>([
   "NOT_HOME",
   "NOT_INTERESTED",
   "MEETING_BOOKED",
+  "CALLBACK_SCHEDULED",
 ]);
 
 export type LeaderboardOutcomeDeltas = {
@@ -32,21 +33,24 @@ export function normalizeLeaderboardOutcomeStatus(raw: string): string {
   if (s === "MEETINGBOOKED") return "MEETING_BOOKED";
   if (s === "VOICE_MAIL") return "VOICEMAIL";
   if (s === "UNQUALIIFIED") return "UNQUALIFIED";
+  if (s === "CALLBACK" || s === "CALLBACKPLANLAGT" || s === "CALLBACK_PLANLAGT") {
+    return "CALLBACK_SCHEDULED";
+  }
   return s;
 }
 
-/** Scoreboard-regel: alle loggede udfald giver mindst 1 kontakt, undtagen ukvalificeret (0 på alt). */
+/** Scoreboard-regel for LeadOutcomeLog (samtaler/møder). Kontakter på scoreboard kommer fra besøgshistorik — se leadStatusCountsForScoreboardContact. */
 const LEADERBOARD_DELTAS: Partial<Record<LeadStatus, LeaderboardOutcomeDeltas>> = {
-  VOICEMAIL: { meetings: 0, conversations: 0, contacts: 1 },
+  VOICEMAIL: { meetings: 0, conversations: 1, contacts: 1 },
   NOT_HOME: { meetings: 0, conversations: 1, contacts: 1 },
   NOT_INTERESTED: { meetings: 0, conversations: 1, contacts: 1 },
   MEETING_BOOKED: { meetings: 1, conversations: 1, contacts: 1 },
+  CALLBACK_SCHEDULED: { meetings: 0, conversations: 1, contacts: 1 },
   UNQUALIFIED: { meetings: 0, conversations: 0, contacts: 0 },
 };
 
 /**
- * Per LeadOutcomeLog-række på scoreboard.
- * Kontakter: voicemail, ikke hjemme, ikke interesseret og møde booket tæller; kun ukvalificeret tæller ikke (0).
+ * Per LeadOutcomeLog-række: møder og samtaler (kontakter tælles via besøg — leaderboard bruger ikke contacts her).
  */
 export function leaderboardDeltasForOutcome(status: string): LeaderboardOutcomeDeltas {
   const key = normalizeLeaderboardOutcomeStatus(status);
@@ -54,6 +58,16 @@ export function leaderboardDeltasForOutcome(status: string): LeaderboardOutcomeD
     return { meetings: 0, conversations: 0, contacts: 0 };
   }
   return LEADERBOARD_DELTAS[key] ?? { meetings: 0, conversations: 0, contacts: 0 };
+}
+
+/**
+ * Om leadets udfald (typisk aktuel status fra DB) skal tælle som én kontakt for et besøg på scoreboard.
+ * Ny og ukvalificeret tæller ikke; øvrige udfald (inkl. voicemail og callback planlagt) tæller.
+ */
+export function leadStatusCountsForScoreboardContact(statusRaw: string | null | undefined): boolean {
+  const key = normalizeLeaderboardOutcomeStatus(String(statusRaw ?? ""));
+  if (!key || !isLeadStatus(key)) return false;
+  return key !== "NEW" && key !== "UNQUALIFIED";
 }
 
 type ExistingForLog = {
@@ -70,6 +84,9 @@ export function shouldLogOutcomeForLeaderboard(existing: ExistingForLog, newStat
   const prev = normalizeLeaderboardOutcomeStatus(existing.status);
   if (normalized === "MEETING_BOOKED") {
     return prev !== "MEETING_BOOKED" || !existing.meetingBookedAt;
+  }
+  if (normalized === "CALLBACK_SCHEDULED") {
+    return prev !== "CALLBACK_SCHEDULED";
   }
   return prev !== normalized;
 }

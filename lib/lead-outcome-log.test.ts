@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+  leadStatusCountsForScoreboardContact,
   leaderboardDeltasForOutcome,
   normalizeLeaderboardOutcomeStatus,
   shouldLogOutcomeForLeaderboard,
@@ -44,15 +45,23 @@ describe("leaderboardDeltasForOutcome", () => {
     });
   });
 
-  it("voicemail tæller som kontakt", () => {
+  it("voicemail tæller som samtale og kontakt i outcome-log", () => {
     expect(leaderboardDeltasForOutcome("VOICEMAIL")).toEqual({
       meetings: 0,
-      conversations: 0,
+      conversations: 1,
       contacts: 1,
     });
     expect(leaderboardDeltasForOutcome("voice mail")).toEqual(
       leaderboardDeltasForOutcome("VOICEMAIL"),
     );
+  });
+
+  it("tilbagekald planlagt tæller som samtale i outcome-log", () => {
+    expect(leaderboardDeltasForOutcome("CALLBACK_SCHEDULED")).toEqual({
+      meetings: 0,
+      conversations: 1,
+      contacts: 1,
+    });
   });
 
   it("møde booket tæller møde, samtale og kontakt", () => {
@@ -80,5 +89,30 @@ describe("shouldLogOutcomeForLeaderboard", () => {
         "not_interested",
       ),
     ).toBe(true);
+  });
+
+  it("logger første callback-planlægning, ikke gentagelse", () => {
+    expect(
+      shouldLogOutcomeForLeaderboard({ status: "NEW", meetingBookedAt: null }, "CALLBACK_SCHEDULED"),
+    ).toBe(true);
+    expect(
+      shouldLogOutcomeForLeaderboard(
+        { status: "CALLBACK_SCHEDULED", meetingBookedAt: null },
+        "CALLBACK_SCHEDULED",
+      ),
+    ).toBe(false);
+  });
+});
+
+describe("leadStatusCountsForScoreboardContact", () => {
+  it("ny og ukvalificeret tæller ikke", () => {
+    expect(leadStatusCountsForScoreboardContact("NEW")).toBe(false);
+    expect(leadStatusCountsForScoreboardContact("UNQUALIFIED")).toBe(false);
+  });
+
+  it("øvrige udfald tæller", () => {
+    expect(leadStatusCountsForScoreboardContact("NOT_INTERESTED")).toBe(true);
+    expect(leadStatusCountsForScoreboardContact("CALLBACK_SCHEDULED")).toBe(true);
+    expect(leadStatusCountsForScoreboardContact("VOICEMAIL")).toBe(true);
   });
 });

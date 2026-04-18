@@ -4,7 +4,7 @@ import { requireSession } from "@/lib/api-auth";
 import { isLeadStatus } from "@/lib/lead-status";
 import { parseCustomFields, stringifyCustomFields } from "@/lib/custom-fields";
 import { pickLeadUpdateData } from "@/lib/prisma-lead-write";
-import { applyLeadCooldownResets } from "@/lib/lead-cooldown";
+import { applyLeadCooldownResets, markCallbackSeenByAssignee } from "@/lib/lead-cooldown";
 import {
   normalizeLeaderboardOutcomeStatus,
   shouldLogOutcomeForLeaderboard,
@@ -66,6 +66,19 @@ export async function GET(_req: Request, { params }: Params) {
         { status: 403 },
       );
     }
+    if (lead.status === "CALLBACK_SCHEDULED" && lead.callbackReservedByUserId === session.user.id) {
+      await markCallbackSeenByAssignee(lead.id, session.user.id);
+      const refreshed = await prisma.lead.findUnique({
+        where: { id },
+        include: {
+          bookedByUser: { select: { id: true, name: true, username: true } },
+          campaign: { select: { id: true, name: true, fieldConfig: true } },
+          lockedByUser: { select: { id: true, name: true, username: true } },
+          callbackReservedByUser: { select: { id: true, name: true, username: true } },
+        },
+      });
+      return NextResponse.json(refreshed ?? lead);
+    }
     return NextResponse.json(lead);
   } catch (e) {
     const msg = e instanceof Error ? e.message : String(e);
@@ -76,6 +89,7 @@ export async function GET(_req: Request, { params }: Params) {
       msg.includes("lockExpiresAt") ||
       msg.includes("callbackScheduledFor") ||
       msg.includes("callbackReservedByUserId") ||
+      msg.includes("callbackSeenByAssigneeAt") ||
       msg.includes("lastOutcomeAt") ||
       msg.includes("bookedFromRebookingCampaign") ||
       msg.includes("no such column") ||
@@ -180,15 +194,30 @@ export async function PATCH(req: Request, { params }: Params) {
   let status = existing.status;
   if (typeof body?.status === "string" && isLeadStatus(body.status)) {
     if (body.status === "CALLBACK_SCHEDULED") {
-      return NextResponse.json(
-        {
-          error:
-            "Status «Callback planlagt» kan kun sættes via callback-planlægning i kampagne-arbejdet (ikke ved almindelig gem).",
-        },
-        { status: 400 },
-      );
+      if (existing.status !== "CALLBACK_SCHEDULED") {
+        return NextResponse.json(
+          {
+            error:
+              "Status «Callback planlagt» kan kun sættes via callback-planlægning i kampagne-arbejdet (ikke ved almindelig gem).",
+          },
+          { status: 400 },
+        );
+      }
+      status = "CALLBACK_SCHEDULED";
+    } else {
+      status = body.status;
     }
-    status = body.status;
+  }
+
+  /** Forhindrer forsinkede PATCH (fx baggrundsgem) i at sætte lead tilbage til «Ny» mens tilbagekald er aktivt — så andre ikke kan trække det i køen. */
+  if (existing.status === "CALLBACK_SCHEDULED" && status !== "CALLBACK_SCHEDULED") {
+    return NextResponse.json(
+      {
+        error:
+          "Leadet har et planlagt tilbagekald. Afslut eller annullér tilbagekaldet (tilbagekald & kalender / lead-detalje) før du ændrer udfald via almindelig gem.",
+      },
+      { status: 409 },
+    );
   }
 
   let meetingBookedAt = existing.meetingBookedAt;
@@ -344,12 +373,14 @@ export async function PATCH(req: Request, { params }: Params) {
   let callbackNote = existing.callbackNote ?? "";
   let callbackCreatedByUserId: string | null = existing.callbackCreatedByUserId;
   let callbackStatus = existing.callbackStatus ?? "PENDING";
+  let callbackSeenByAssigneeAt: Date | null = existing.callbackSeenByAssigneeAt ?? null;
   if (existing.status === "CALLBACK_SCHEDULED" && status !== "CALLBACK_SCHEDULED") {
     callbackScheduledFor = null;
     callbackReservedByUserId = null;
     callbackNote = "";
     callbackCreatedByUserId = null;
     callbackStatus = "PENDING";
+    callbackSeenByAssigneeAt = null;
   }
 
   const logOutcome = shouldLogOutcomeForLeaderboard(
@@ -418,6 +449,7 @@ export async function PATCH(req: Request, { params }: Params) {
           callbackNote,
           callbackCreatedByUserId,
           callbackStatus,
+          callbackSeenByAssigneeAt,
           lastOutcomeAt: touchedOutcomeAt,
         }),
         ...(campaignIdToSet !== undefined && campaignIdToSet !== null ? { campaignId: campaignIdToSet } : {}),

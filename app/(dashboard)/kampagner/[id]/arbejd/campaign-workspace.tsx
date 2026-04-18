@@ -563,6 +563,7 @@ export function CampaignWorkspace({ campaignId, preferredLeadId }: Props) {
       setCallbackSubmitError(typeof j.error === "string" ? j.error : "Kunne ikke planlægge tilbagekald.");
       return;
     }
+    pendingPatchBodiesRef.current.delete(activeLead.id);
     setCallbackDialogOpen(false);
     await advanceToNextReservedAfterSave(activeLead.id);
   }

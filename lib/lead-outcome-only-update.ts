@@ -98,12 +98,14 @@ export function buildLeadOutcomeOnlyUpdate(
   let callbackNote = existing.callbackNote ?? "";
   let callbackCreatedByUserId: string | null = existing.callbackCreatedByUserId;
   let callbackStatus = existing.callbackStatus ?? "PENDING";
+  let callbackSeenByAssigneeAt: Date | null = existing.callbackSeenByAssigneeAt ?? null;
   if (existing.status === "CALLBACK_SCHEDULED" && status !== "CALLBACK_SCHEDULED") {
     callbackScheduledFor = null;
     callbackReservedByUserId = null;
     callbackNote = "";
     callbackCreatedByUserId = null;
     callbackStatus = "PENDING";
+    callbackSeenByAssigneeAt = null;
   }
 
   let bookedFromRebookingCampaign = existing.bookedFromRebookingCampaign ?? false;
@@ -143,6 +145,7 @@ export function buildLeadOutcomeOnlyUpdate(
       callbackNote,
       callbackCreatedByUserId,
       callbackStatus,
+      callbackSeenByAssigneeAt,
     }),
   };
 }

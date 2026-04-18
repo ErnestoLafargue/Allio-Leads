@@ -125,6 +125,8 @@ model Lead {
   callbackNote             String @default("")
   callbackCreatedByUserId  String?
   callbackCreatedByUser    User? @relation("LeadCallbackCreatedBy", fields: [callbackCreatedByUserId], references: [id], onDelete: SetNull)
+  /// Første gang den tildelte åbner/reserverer leadet efter planlagt tilbagekald (bruges til genudlevering i kø).
+  callbackSeenByAssigneeAt DateTime?
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt

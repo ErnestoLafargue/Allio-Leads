@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { requireSession } from "@/lib/api-auth";
-import { applyLeadCooldownResets } from "@/lib/lead-cooldown";
+import { applyLeadCooldownResets, markCallbackSeenByAssignee } from "@/lib/lead-cooldown";
 import { filterLeadsByCampaignProtectedSetting } from "@/lib/reklamebeskyttet-filter";
 import { getLeadIdsWithOutcomeLogToday } from "@/lib/lead-outcome-today";
 import { isLeadInRebookingDialerPool, sortLeadsForCampaignCallQueue } from "@/lib/lead-queue";
@@ -115,8 +115,22 @@ export async function POST(req: Request, { params }: Params) {
     for (const row of pendingCallbacks) {
       if (excludeLeadId && row.id === excludeLeadId) continue;
       const got = await tryReserve(row.id);
-      if (got) return NextResponse.json({ lead: got });
+      if (got) {
+        await markCallbackSeenByAssignee(got.id, userId);
+        const refreshed = await prisma.lead.findUnique({
+          where: { id: got.id },
+          include: leadInclude,
+        });
+        return NextResponse.json({ lead: refreshed ?? got });
+      }
     }
+
+    /** «Ny» i køen må ikke have hængende tilbagekald-metadata (defensivt ved racedata / fejl). */
+    const newInDialerPool = {
+      status: "NEW" as const,
+      callbackScheduledFor: null,
+      callbackReservedByUserId: null,
+    };
 
     const rawQueue = await prisma.lead.findMany({
       where:
@@ -128,10 +142,10 @@ export async function POST(req: Request, { params }: Params) {
               OR: [
                 { status: "MEETING_BOOKED", meetingOutcomeStatus: MEETING_OUTCOME_REBOOK },
                 /** Efter opkald/gem som «Ny» (eller auto fra voicemail) — stadig under genbook-kampagnen */
-                { status: "NEW" },
+                newInDialerPool,
               ],
             }
-          : { campaignId, status: "NEW" },
+          : { campaignId, ...newInDialerPool },
       select: {
         id: true,
         status: true,
@@ -202,6 +216,7 @@ export async function POST(req: Request, { params }: Params) {
       msg.includes("lockExpiresAt") ||
       msg.includes("callbackScheduledFor") ||
       msg.includes("callbackReservedByUserId") ||
+      msg.includes("callbackSeenByAssigneeAt") ||
       msg.includes("lastOutcomeAt") ||
       msg.includes("no such column") ||
       msg.toLowerCase().includes("does not exist");

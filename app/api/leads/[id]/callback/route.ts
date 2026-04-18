@@ -48,6 +48,7 @@ export async function PATCH(req: Request, { params }: Params) {
         callbackStatus: "PENDING",
         callbackNote: "",
         callbackCreatedByUserId: null,
+        callbackSeenByAssigneeAt: null,
         ...LEAD_LOCK_CLEAR,
       },
       include: leadInclude,
