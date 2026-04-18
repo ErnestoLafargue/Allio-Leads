@@ -5,16 +5,24 @@ import { defaultCampaignFieldConfigJson } from "@/lib/campaign-fields";
 import { sortCampaignsForDisplay } from "@/lib/campaign-list-sort";
 import { workableCampaignLeadsWhere } from "@/lib/campaign-workable-leads";
 
+/** Sælgere: alle kampagner undtagen «Aktive kunder». Almindelige kampagner har typisk systemCampaignType = null — `NOT (kolonne = …)` udelukker NULL i SQL, så vi skal eksplicit inkludere null. */
+function campaignWhereForRole(role: string | undefined) {
+  if (role === "ADMIN") return {};
+  return {
+    OR: [
+      { systemCampaignType: null },
+      { NOT: { systemCampaignType: "active_customers" } },
+    ],
+  };
+}
+
 export async function GET() {
   const { session, response } = await requireSession();
   if (response) return response;
 
   try {
     const rows = await prisma.campaign.findMany({
-      where:
-        session!.user.role === "ADMIN"
-          ? {}
-          : { NOT: { systemCampaignType: "active_customers" } },
+      where: campaignWhereForRole(session!.user.role),
       orderBy: { name: "asc" },
       select: {
         id: true,
