@@ -1,9 +1,12 @@
 "use client";
 
 import Link from "next/link";
+import { useSession } from "next-auth/react";
 import { useEffect, useState } from "react";
 import { LEAD_STATUS_LABELS, type LeadStatus } from "@/lib/lead-status";
 import { copenhagenDayKey } from "@/lib/copenhagen-day";
+
+type UserOption = { id: string; name: string; username: string; role: string };
 
 type HistoryRow = {
   id: string;
@@ -28,37 +31,72 @@ function statusLabel(status: string | null | undefined): string {
 }
 
 export default function HistorikPage() {
+  const { data: session, status: sessionStatus } = useSession();
+  const isAdmin = session?.user?.role === "ADMIN";
+  const myUserId = session?.user?.id ?? "";
+
   const [dayKey, setDayKey] = useState(() => copenhagenDayKey());
+  const [selectedUserId, setSelectedUserId] = useState("");
+  const [userOptions, setUserOptions] = useState<UserOption[]>([]);
   const [rows, setRows] = useState<HistoryRow[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
-    let cancelled = false;
-    async function load() {
-      setLoading(true);
-      setError(null);
-      const res = await fetch(`/api/history?dayKey=${encodeURIComponent(dayKey)}`);
-      if (!res.ok) {
-        const j = await res.json().catch(() => ({}));
-        if (!cancelled) {
-          setError(typeof j.error === "string" ? j.error : "Kunne ikke hente historik.");
-          setRows([]);
-          setLoading(false);
-        }
-        return;
-      }
-      const payload = (await res.json()) as Payload;
-      if (!cancelled) {
-        setRows(Array.isArray(payload.rows) ? payload.rows : []);
-        setLoading(false);
-      }
+    if (myUserId && !selectedUserId) {
+      setSelectedUserId(myUserId);
     }
-    void load();
+  }, [myUserId, selectedUserId]);
+
+  useEffect(() => {
+    if (!isAdmin || sessionStatus !== "authenticated") return;
+    let cancelled = false;
+    void (async () => {
+      const res = await fetch("/api/users/for-assignment");
+      if (!res.ok || cancelled) return;
+      const data = (await res.json().catch(() => [])) as UserOption[];
+      if (!cancelled && Array.isArray(data)) {
+        setUserOptions(data);
+      }
+    })();
     return () => {
       cancelled = true;
     };
-  }, [dayKey]);
+  }, [isAdmin, sessionStatus]);
+
+  useEffect(() => {
+    if (sessionStatus === "loading") return;
+    if (isAdmin && !selectedUserId) return;
+    let cancelled = false;
+    void (async () => {
+      setLoading(true);
+      setError(null);
+      const params = new URLSearchParams({ dayKey });
+      if (isAdmin && selectedUserId) {
+        params.set("userId", selectedUserId);
+      }
+      const res = await fetch(`/api/history?${params.toString()}`);
+      if (cancelled) return;
+      if (!res.ok) {
+        const j = await res.json().catch(() => ({}));
+        setError(typeof j.error === "string" ? j.error : "Kunne ikke hente historik.");
+        setRows([]);
+        setLoading(false);
+        return;
+      }
+      const payload = (await res.json()) as Payload;
+      setRows(Array.isArray(payload.rows) ? payload.rows : []);
+      setLoading(false);
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [sessionStatus, isAdmin, selectedUserId, dayKey]);
+
+  const selectedUserLabel =
+    isAdmin && selectedUserId
+      ? userOptions.find((u) => u.id === selectedUserId)?.name ?? null
+      : null;
 
   return (
     <div className="space-y-6">
@@ -66,18 +104,46 @@ export default function HistorikPage() {
         <div>
           <h1 className="text-xl font-semibold text-stone-900">Historik</h1>
           <p className="mt-1 text-sm text-stone-600">
-            Se hvilke leads du har været inde på i arbejdskøen, også når der ikke blev ændret udfald.
+            {isAdmin && selectedUserId && selectedUserId !== myUserId ? (
+              <>
+                Historik for <strong>{selectedUserLabel ?? "valgt bruger"}</strong> — leads åbnet i
+                arbejdskøen den valgte dag.
+              </>
+            ) : (
+              <>
+                Se hvilke leads du har været inde på i arbejdskøen, også når der ikke blev ændret
+                udfald.
+              </>
+            )}
           </p>
         </div>
-        <label className="text-sm text-stone-700">
-          Dato
-          <input
-            type="date"
-            value={dayKey}
-            onChange={(e) => setDayKey(e.target.value)}
-            className="mt-1 block rounded-md border border-stone-300 bg-white px-3 py-2 text-sm text-stone-900 shadow-sm outline-none ring-stone-400 focus:ring-2"
-          />
-        </label>
+        <div className="flex flex-col gap-3 sm:flex-row sm:items-end">
+          {isAdmin && userOptions.length > 0 && (
+            <label className="text-sm text-stone-700">
+              Bruger
+              <select
+                value={selectedUserId}
+                onChange={(e) => setSelectedUserId(e.target.value)}
+                className="mt-1 block w-full min-w-[12rem] rounded-md border border-stone-300 bg-white px-3 py-2 text-sm text-stone-900 shadow-sm outline-none ring-stone-400 focus:ring-2 sm:w-auto"
+              >
+                {userOptions.map((u) => (
+                  <option key={u.id} value={u.id}>
+                    {u.name} ({u.username}){u.role === "ADMIN" ? " · Admin" : ""}
+                  </option>
+                ))}
+              </select>
+            </label>
+          )}
+          <label className="text-sm text-stone-700">
+            Dato
+            <input
+              type="date"
+              value={dayKey}
+              onChange={(e) => setDayKey(e.target.value)}
+              className="mt-1 block rounded-md border border-stone-300 bg-white px-3 py-2 text-sm text-stone-900 shadow-sm outline-none ring-stone-400 focus:ring-2"
+            />
+          </label>
+        </div>
       </div>
 
       {error && <p className="text-sm text-red-600">{error}</p>}
@@ -89,7 +155,7 @@ export default function HistorikPage() {
               <th className="px-4 py-3 font-medium">Tidspunkt</th>
               <th className="px-4 py-3 font-medium">Virksomhed</th>
               <th className="px-4 py-3 font-medium">Kampagne</th>
-              <th className="px-4 py-3 font-medium">Status da du åbnede</th>
+              <th className="px-4 py-3 font-medium">Status ved åbning</th>
               <th className="px-4 py-3 font-medium">Status nu</th>
             </tr>
           </thead>

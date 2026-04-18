@@ -5,7 +5,10 @@ import { isLeadStatus } from "@/lib/lead-status";
 import { parseCustomFields, stringifyCustomFields } from "@/lib/custom-fields";
 import { pickLeadUpdateData } from "@/lib/prisma-lead-write";
 import { applyLeadCooldownResets } from "@/lib/lead-cooldown";
-import { shouldLogOutcomeForLeaderboard } from "@/lib/lead-outcome-log";
+import {
+  normalizeLeaderboardOutcomeStatus,
+  shouldLogOutcomeForLeaderboard,
+} from "@/lib/lead-outcome-log";
 import { canAccessBookedMeetingNotes } from "@/lib/lead-meeting-access";
 import { canAccessCallbackLead } from "@/lib/lead-callback-access";
 import { copenhagenDayKey } from "@/lib/copenhagen-day";
@@ -428,7 +431,7 @@ export async function PATCH(req: Request, { params }: Params) {
     });
     if (logOutcome) {
       await tx.leadOutcomeLog.create({
-        data: { leadId: id, userId, status },
+        data: { leadId: id, userId, status: normalizeLeaderboardOutcomeStatus(status) },
       });
     }
     return updated;

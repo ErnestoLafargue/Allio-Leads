@@ -118,6 +118,11 @@ function LeadDetailInner() {
   }
 
   useEffect(() => {
+    setMailSuccess(null);
+    setMailError(null);
+  }, [id]);
+
+  useEffect(() => {
     let cancelled = false;
     async function load() {
       setLoading(true);

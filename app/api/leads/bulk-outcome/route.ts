@@ -5,7 +5,10 @@ import { requireSession } from "@/lib/api-auth";
 import { isLeadStatus, type LeadStatus } from "@/lib/lead-status";
 import { buildLeadOutcomeOnlyUpdate } from "@/lib/lead-outcome-only-update";
 import { applyLeadCooldownResets } from "@/lib/lead-cooldown";
-import { shouldLogOutcomeForLeaderboard } from "@/lib/lead-outcome-log";
+import {
+  normalizeLeaderboardOutcomeStatus,
+  shouldLogOutcomeForLeaderboard,
+} from "@/lib/lead-outcome-log";
 import { isLockedByOtherUser, releaseExpiredLocksEverywhere } from "@/lib/lead-lock";
 import { findLeadBookingOverlapInDb } from "@/lib/booking/overlap-db";
 import { campaignIdForBookedMeetingOutcome } from "@/lib/meeting-campaign-routing";
@@ -112,7 +115,11 @@ export async function POST(req: Request) {
       }
       updates.push({ id: existing.id, data });
       if (shouldLogOutcomeForLeaderboard(existing, status)) {
-        logRows.push({ leadId: existing.id, userId, status });
+        logRows.push({
+          leadId: existing.id,
+          userId,
+          status: normalizeLeaderboardOutcomeStatus(status),
+        });
       }
     }
 

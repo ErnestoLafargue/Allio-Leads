@@ -21,9 +21,28 @@ export async function GET(req: Request) {
     return NextResponse.json({ error: "Ugyldig dato." }, { status: 400 });
   }
 
+  const requestedUserId = searchParams.get("userId")?.trim() ?? "";
+  let historyUserId = session.user.id;
+  if (requestedUserId) {
+    if (session.user.role !== "ADMIN") {
+      if (requestedUserId !== session.user.id) {
+        return NextResponse.json({ error: "Kun administrator kan se andres historik." }, { status: 403 });
+      }
+    } else {
+      const userExists = await prisma.user.findUnique({
+        where: { id: requestedUserId },
+        select: { id: true },
+      });
+      if (!userExists) {
+        return NextResponse.json({ error: "Bruger findes ikke." }, { status: 400 });
+      }
+      historyUserId = requestedUserId;
+    }
+  }
+
   const rows = await prisma.leadVisitHistory.findMany({
     where: {
-      userId: session.user.id,
+      userId: historyUserId,
       visitedAt: { gte: start, lt: end },
     },
     orderBy: { visitedAt: "desc" },

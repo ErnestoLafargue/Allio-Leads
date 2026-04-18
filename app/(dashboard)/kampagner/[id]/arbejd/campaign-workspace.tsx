@@ -126,6 +126,11 @@ export function CampaignWorkspace({ campaignId, preferredLeadId }: Props) {
     activeLeadRef.current = activeLead;
   }, [activeLead]);
 
+  useEffect(() => {
+    setMailSuccess(null);
+    setMailError(null);
+  }, [activeLead?.id]);
+
   backgroundLockLeadIdsRef.current = backgroundLockLeadIds;
 
   useEffect(() => {
