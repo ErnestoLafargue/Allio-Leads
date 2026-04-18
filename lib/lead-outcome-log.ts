@@ -20,7 +20,7 @@ export type LeaderboardOutcomeDeltas = {
 
 /**
  * Kanoniserer status fra DB / ældre logs (mellemrum, bindestreg, kasse).
- * Bruges på scoreboard og ved oprettelse af log, så «ikke interesseret» altid tæller som samtale.
+ * Bruges på scoreboard og ved oprettelse af log (samtale-kolonnen: kun ikke interesseret + møde booket).
  */
 export function normalizeLeaderboardOutcomeStatus(raw: string): string {
   let s = String(raw ?? "")
@@ -39,18 +39,21 @@ export function normalizeLeaderboardOutcomeStatus(raw: string): string {
   return s;
 }
 
-/** Scoreboard-regel for LeadOutcomeLog (samtaler/møder). Kontakter på scoreboard kommer fra besøgshistorik — se leadStatusCountsForScoreboardContact. */
+/**
+ * Scoreboard: samtaler tælles kun for «Ikke interesseret» og «Møde booket» (per LeadOutcomeLog).
+ * Kontakter kommer fra besøgshistorik — se leadStatusCountsForScoreboardContact.
+ */
 const LEADERBOARD_DELTAS: Partial<Record<LeadStatus, LeaderboardOutcomeDeltas>> = {
-  VOICEMAIL: { meetings: 0, conversations: 1, contacts: 1 },
-  NOT_HOME: { meetings: 0, conversations: 1, contacts: 1 },
+  VOICEMAIL: { meetings: 0, conversations: 0, contacts: 1 },
+  NOT_HOME: { meetings: 0, conversations: 0, contacts: 1 },
   NOT_INTERESTED: { meetings: 0, conversations: 1, contacts: 1 },
   MEETING_BOOKED: { meetings: 1, conversations: 1, contacts: 1 },
-  CALLBACK_SCHEDULED: { meetings: 0, conversations: 1, contacts: 1 },
+  CALLBACK_SCHEDULED: { meetings: 0, conversations: 0, contacts: 1 },
   UNQUALIFIED: { meetings: 0, conversations: 0, contacts: 0 },
 };
 
 /**
- * Per LeadOutcomeLog-række: møder og samtaler (kontakter tælles via besøg — leaderboard bruger ikke contacts her).
+ * Per LeadOutcomeLog-række: møder og samtaler (kontakter på boardet tælles kun via besøg — contacts-felt bruges ikke i leaderboard).
  */
 export function leaderboardDeltasForOutcome(status: string): LeaderboardOutcomeDeltas {
   const key = normalizeLeaderboardOutcomeStatus(status);
@@ -62,12 +65,12 @@ export function leaderboardDeltasForOutcome(status: string): LeaderboardOutcomeD
 
 /**
  * Om leadets udfald (typisk aktuel status fra DB) skal tælle som én kontakt for et besøg på scoreboard.
- * Ny og ukvalificeret tæller ikke; øvrige udfald (inkl. voicemail og callback planlagt) tæller.
+ * Kun ukvalificeret tæller ikke; alle andre kendte udfald (inkl. Ny) tæller.
  */
 export function leadStatusCountsForScoreboardContact(statusRaw: string | null | undefined): boolean {
   const key = normalizeLeaderboardOutcomeStatus(String(statusRaw ?? ""));
   if (!key || !isLeadStatus(key)) return false;
-  return key !== "NEW" && key !== "UNQUALIFIED";
+  return key !== "UNQUALIFIED";
 }
 
 type ExistingForLog = {

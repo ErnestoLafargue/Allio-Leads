@@ -32,6 +32,7 @@ export async function applyLeadCooldownResets(): Promise<void> {
       )
   `;
 
+  /** Ikke hjemme: først tilbage som «Ny» i køen når der er gået 6 t fra markering (`notHomeMarkedAt`). Ingen fallback til `updatedAt` (undgår for tidlig genåbning). */
   await prisma.$executeRaw`
     UPDATE "Lead"
     SET
@@ -41,10 +42,8 @@ export async function applyLeadCooldownResets(): Promise<void> {
       "updatedAt" = ${touchedAt}
     WHERE "status" = 'NOT_HOME'
       AND "callbackScheduledFor" IS NULL
-      AND (
-        ("notHomeMarkedAt" IS NOT NULL AND "notHomeMarkedAt" <= ${notHomeCutoff})
-        OR ("notHomeMarkedAt" IS NULL AND "updatedAt" <= ${notHomeCutoff})
-      )
+      AND "notHomeMarkedAt" IS NOT NULL
+      AND "notHomeMarkedAt" <= ${notHomeCutoff}
   `;
 
   await releaseStaleCallbacksToCampaignPool(touchedAt);
