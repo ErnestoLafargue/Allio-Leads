@@ -1,6 +1,9 @@
 import { isLeadStatus, type LeadStatus } from "@/lib/lead-status";
 
-/** Udfald der tæller på daglig leaderboard (ét log pr. reel handling). */
+/**
+ * Udfald der skriver ét LeadOutcomeLog (én tællende handling pr. statusskifte / første møde).
+ * Ukvalificeret er bevidst udeladt: det tæller ikke på scoreboard (ingen kontakt/samtale/møde).
+ */
 export const LEADERBOARD_LOG_STATUSES = new Set<LeadStatus>([
   "VOICEMAIL",
   "NOT_HOME",
@@ -19,38 +22,38 @@ export type LeaderboardOutcomeDeltas = {
  * Bruges på scoreboard og ved oprettelse af log, så «ikke interesseret» altid tæller som samtale.
  */
 export function normalizeLeaderboardOutcomeStatus(raw: string): string {
-  let s = String(raw ?? "").trim();
+  let s = String(raw ?? "")
+    .trim()
+    .replace(/^\uFEFF/, "");
   if (!s) return "";
   s = s.replace(/-/g, "_").replace(/\s+/g, "_").toUpperCase();
   if (s === "NOTINTERESTED") return "NOT_INTERESTED";
   if (s === "NOTHOME") return "NOT_HOME";
   if (s === "MEETINGBOOKED") return "MEETING_BOOKED";
+  if (s === "VOICE_MAIL") return "VOICEMAIL";
+  if (s === "UNQUALIIFIED") return "UNQUALIFIED";
   return s;
 }
 
+/** Scoreboard-regel: alle loggede udfald giver mindst 1 kontakt, undtagen ukvalificeret (0 på alt). */
+const LEADERBOARD_DELTAS: Partial<Record<LeadStatus, LeaderboardOutcomeDeltas>> = {
+  VOICEMAIL: { meetings: 0, conversations: 0, contacts: 1 },
+  NOT_HOME: { meetings: 0, conversations: 1, contacts: 1 },
+  NOT_INTERESTED: { meetings: 0, conversations: 1, contacts: 1 },
+  MEETING_BOOKED: { meetings: 1, conversations: 1, contacts: 1 },
+  UNQUALIFIED: { meetings: 0, conversations: 0, contacts: 0 },
+};
+
 /**
- * Per registreret udfald på scoreboard:
- * - Voicemail = 1 kontakt (ikke samtale).
- * - Ikke hjemme / ikke interesseret = 1 samtale + 1 kontakt.
- * - Ukvalificeret = ingen samtale (og ingen kontakt her — logges normalt ikke).
- * - Møde booket = 1 møde + 1 samtale + 1 kontakt.
+ * Per LeadOutcomeLog-række på scoreboard.
+ * Kontakter: voicemail, ikke hjemme, ikke interesseret og møde booket tæller; kun ukvalificeret tæller ikke (0).
  */
 export function leaderboardDeltasForOutcome(status: string): LeaderboardOutcomeDeltas {
   const key = normalizeLeaderboardOutcomeStatus(status);
-  switch (key) {
-    case "VOICEMAIL":
-      return { meetings: 0, conversations: 0, contacts: 1 };
-    case "NOT_HOME":
-      return { meetings: 0, conversations: 1, contacts: 1 };
-    case "NOT_INTERESTED":
-      return { meetings: 0, conversations: 1, contacts: 1 };
-    case "UNQUALIFIED":
-      return { meetings: 0, conversations: 0, contacts: 0 };
-    case "MEETING_BOOKED":
-      return { meetings: 1, conversations: 1, contacts: 1 };
-    default:
-      return { meetings: 0, conversations: 0, contacts: 0 };
+  if (!isLeadStatus(key)) {
+    return { meetings: 0, conversations: 0, contacts: 0 };
   }
+  return LEADERBOARD_DELTAS[key] ?? { meetings: 0, conversations: 0, contacts: 0 };
 }
 
 type ExistingForLog = {

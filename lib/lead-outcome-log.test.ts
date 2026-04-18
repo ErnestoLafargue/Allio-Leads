@@ -43,6 +43,33 @@ describe("leaderboardDeltasForOutcome", () => {
       contacts: 1,
     });
   });
+
+  it("voicemail tæller som kontakt", () => {
+    expect(leaderboardDeltasForOutcome("VOICEMAIL")).toEqual({
+      meetings: 0,
+      conversations: 0,
+      contacts: 1,
+    });
+    expect(leaderboardDeltasForOutcome("voice mail")).toEqual(
+      leaderboardDeltasForOutcome("VOICEMAIL"),
+    );
+  });
+
+  it("møde booket tæller møde, samtale og kontakt", () => {
+    expect(leaderboardDeltasForOutcome("MEETING_BOOKED")).toEqual({
+      meetings: 1,
+      conversations: 1,
+      contacts: 1,
+    });
+  });
+
+  it("ukvalificeret tæller ikke på nogen kolonne", () => {
+    expect(leaderboardDeltasForOutcome("UNQUALIIFIED")).toEqual({
+      meetings: 0,
+      conversations: 0,
+      contacts: 0,
+    });
+  });
 });
 
 describe("shouldLogOutcomeForLeaderboard", () => {
