@@ -6,7 +6,10 @@ import {
   copenhagenDayBoundsUtcFromDayKey,
   copenhagenDayKey,
 } from "@/lib/copenhagen-day";
-import { leaderboardDeltasForOutcome, leadStatusCountsForScoreboardContact } from "@/lib/lead-outcome-log";
+import {
+  leaderboardDeltasForOutcome,
+  warnIfScoreboardUserTallyInconsistent,
+} from "@/lib/lead-outcome-log";
 
 type PresentUser = {
   userId: string;
@@ -41,32 +44,6 @@ async function loadPresentUsers(dayKey: string): Promise<PresentUser[]> {
   return sellers.map((u) => ({ userId: u.id, user: u }));
 }
 
-async function distinctUserIdsWithOutcomesInRange(start: Date, end: Date): Promise<string[]> {
-  try {
-    const rows = await prisma.leadOutcomeLog.groupBy({
-      by: ["userId"],
-      where: { createdAt: { gte: start, lt: end } },
-    });
-    return rows.map((r) => r.userId);
-  } catch (e) {
-    console.warn("[leaderboard] LeadOutcomeLog groupBy failed:", e);
-    return [];
-  }
-}
-
-async function distinctUserIdsWithVisitsInRange(start: Date, end: Date): Promise<string[]> {
-  try {
-    const rows = await prisma.leadVisitHistory.groupBy({
-      by: ["userId"],
-      where: { visitedAt: { gte: start, lt: end } },
-    });
-    return rows.map((r) => r.userId);
-  } catch (e) {
-    console.warn("[leaderboard] LeadVisitHistory groupBy failed:", e);
-    return [];
-  }
-}
-
 async function mergePresentWithOutcomeUsers(
   present: PresentUser[],
   outcomeUserIds: string[],
@@ -87,6 +64,28 @@ async function mergePresentWithOutcomeUsers(
     map.set(u.id, { userId: u.id, user: u });
   }
   return Array.from(map.values());
+}
+
+/**
+ * Seneste LeadOutcomeLog pr. lead inden for [start, end) — én tællende udfaldsregistrering pr. lead pr. dag.
+ * (PostgreSQL DISTINCT ON)
+ */
+async function latestOutcomeLogRowsPerLeadInRange(
+  start: Date,
+  end: Date,
+): Promise<{ leadId: string; userId: string; status: string }[]> {
+  try {
+    const rows = await prisma.$queryRaw<{ leadId: string; userId: string; status: string }[]>`
+      SELECT DISTINCT ON ("leadId") "leadId", "userId", "status"
+      FROM "LeadOutcomeLog"
+      WHERE "createdAt" >= ${start} AND "createdAt" < ${end}
+      ORDER BY "leadId", "createdAt" DESC
+    `;
+    return rows;
+  } catch (e) {
+    console.warn("[leaderboard] DISTINCT ON LeadOutcomeLog failed:", e);
+    return [];
+  }
 }
 
 export async function GET(req: Request) {
@@ -115,11 +114,11 @@ export async function GET(req: Request) {
     }
     const todayKey = copenhagenDayKey();
 
+    const latestRows = await latestOutcomeLogRowsPerLeadInRange(start, end);
+    const scoringUserIds = [...new Set(latestRows.map((r) => r.userId))];
+
     let present = await loadPresentUsers(dayKey);
-    const outcomeUserIds = await distinctUserIdsWithOutcomesInRange(start, end);
-    const visitUserIds = await distinctUserIdsWithVisitsInRange(start, end);
-    const activityUserIds = [...new Set([...outcomeUserIds, ...visitUserIds])];
-    present = await mergePresentWithOutcomeUsers(present, activityUserIds);
+    present = await mergePresentWithOutcomeUsers(present, scoringUserIds);
 
     if (present.length === 0) {
       const sellers = await prisma.user.findMany({
@@ -130,60 +129,18 @@ export async function GET(req: Request) {
       present = sellers.map((u) => ({ userId: u.id, user: u }));
     }
 
-    const userIds = present.map((p) => p.userId);
-
-    let logs: { userId: string; status: string }[] = [];
-    if (userIds.length > 0) {
-      try {
-        logs = await prisma.leadOutcomeLog.findMany({
-          where: {
-            createdAt: { gte: start, lt: end },
-            userId: { in: userIds },
-          },
-          select: { userId: true, status: true },
-        });
-      } catch (e) {
-        console.warn("[leaderboard] LeadOutcomeLog query failed:", e);
-      }
-    }
-
-    let visitRows: { userId: string; statusAtVisit: string; lead: { status: string } | null }[] = [];
-    if (userIds.length > 0) {
-      try {
-        visitRows = await prisma.leadVisitHistory.findMany({
-          where: {
-            visitedAt: { gte: start, lt: end },
-            userId: { in: userIds },
-          },
-          select: {
-            userId: true,
-            statusAtVisit: true,
-            lead: { select: { status: true } },
-          },
-        });
-      } catch (e) {
-        console.warn("[leaderboard] LeadVisitHistory query failed:", e);
-      }
-    }
-
     const tallies = new Map<string, { meetings: number; conversations: number; contacts: number }>();
     for (const p of present) {
       tallies.set(p.userId, { meetings: 0, conversations: 0, contacts: 0 });
     }
-    for (const row of logs) {
+
+    for (const row of latestRows) {
       const t = tallies.get(row.userId);
       if (!t) continue;
       const d = leaderboardDeltasForOutcome(row.status);
       t.meetings += d.meetings;
       t.conversations += d.conversations;
-    }
-    for (const row of visitRows) {
-      const t = tallies.get(row.userId);
-      if (!t) continue;
-      const statusForTally = row.lead?.status ?? row.statusAtVisit;
-      if (leadStatusCountsForScoreboardContact(statusForTally)) {
-        t.contacts += 1;
-      }
+      t.contacts += d.contacts;
     }
 
     const dayLabel = new Intl.DateTimeFormat("da-DK", {
@@ -197,6 +154,7 @@ export async function GET(req: Request) {
     const board = present
       .map((p) => {
         const t = tallies.get(p.userId)!;
+        warnIfScoreboardUserTallyInconsistent(p.userId, t.meetings, t.conversations, t.contacts);
         return {
           userId: p.user.id,
           name: p.user.name,

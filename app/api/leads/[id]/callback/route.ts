@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { requireSession } from "@/lib/api-auth";
 import { LEAD_LOCK_CLEAR } from "@/lib/lead-lock";
+import { normalizeLeaderboardOutcomeStatus } from "@/lib/lead-outcome-log";
 
 type Params = { params: Promise<{ id: string }> };
 
@@ -39,19 +40,29 @@ export async function PATCH(req: Request, { params }: Params) {
       return NextResponse.json({ error: "Kun den tildelte bruger eller admin kan lukke tilbagekaldet." }, { status: 403 });
     }
 
-    const updated = await prisma.lead.update({
-      where: { id },
-      data: {
-        status: "NEW",
-        callbackScheduledFor: null,
-        callbackReservedByUserId: null,
-        callbackStatus: "PENDING",
-        callbackNote: "",
-        callbackCreatedByUserId: null,
-        callbackSeenByAssigneeAt: null,
-        ...LEAD_LOCK_CLEAR,
-      },
-      include: leadInclude,
+    const updated = await prisma.$transaction(async (tx) => {
+      const u = await tx.lead.update({
+        where: { id },
+        data: {
+          status: "NEW",
+          callbackScheduledFor: null,
+          callbackReservedByUserId: null,
+          callbackStatus: "PENDING",
+          callbackNote: "",
+          callbackCreatedByUserId: null,
+          callbackSeenByAssigneeAt: null,
+          ...LEAD_LOCK_CLEAR,
+        },
+        include: leadInclude,
+      });
+      await tx.leadOutcomeLog.create({
+        data: {
+          leadId: id,
+          userId,
+          status: normalizeLeaderboardOutcomeStatus("NEW"),
+        },
+      });
+      return u;
     });
 
     return NextResponse.json(updated);

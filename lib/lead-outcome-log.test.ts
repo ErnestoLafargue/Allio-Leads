@@ -1,8 +1,9 @@
 import { describe, expect, it } from "vitest";
+import { LEAD_STATUSES } from "@/lib/lead-status";
 import {
-  leadStatusCountsForScoreboardContact,
   leaderboardDeltasForOutcome,
   normalizeLeaderboardOutcomeStatus,
+  scoreboardDeltaInvariantHolds,
   shouldLogOutcomeForLeaderboard,
 } from "./lead-outcome-log";
 
@@ -14,30 +15,21 @@ describe("normalizeLeaderboardOutcomeStatus", () => {
   });
 });
 
-describe("leaderboardDeltasForOutcome", () => {
-  it("ikke interesseret tæller som samtale (kontakt tælles via historik på boardet)", () => {
-    expect(leaderboardDeltasForOutcome("NOT_INTERESTED")).toEqual({
-      meetings: 0,
-      conversations: 1,
-      contacts: 1,
-    });
-  });
-
-  it("ukvalificeret tæller ikke som samtale", () => {
-    expect(leaderboardDeltasForOutcome("UNQUALIFIED")).toEqual({
+describe("leaderboardDeltasForOutcome (scoreboard-udfald)", () => {
+  it("ny: 0 på alt", () => {
+    expect(leaderboardDeltasForOutcome("NEW")).toEqual({
       meetings: 0,
       conversations: 0,
       contacts: 0,
     });
   });
 
-  it("fallback: små bogstaver og mellemrum for ikke interesseret", () => {
-    expect(leaderboardDeltasForOutcome("not_interested")).toEqual(
-      leaderboardDeltasForOutcome("NOT_INTERESTED"),
-    );
-  });
-
-  it("ikke hjemme tæller ikke som samtale på scoreboard", () => {
+  it("voicemail / ikke hjemme: kun kontakt", () => {
+    expect(leaderboardDeltasForOutcome("VOICEMAIL")).toEqual({
+      meetings: 0,
+      conversations: 0,
+      contacts: 1,
+    });
     expect(leaderboardDeltasForOutcome("NOT_HOME")).toEqual({
       meetings: 0,
       conversations: 0,
@@ -45,26 +37,28 @@ describe("leaderboardDeltasForOutcome", () => {
     });
   });
 
-  it("voicemail tæller ikke som samtale på scoreboard", () => {
-    expect(leaderboardDeltasForOutcome("VOICEMAIL")).toEqual({
+  it("ikke interesseret / tilbagekald: samtale + kontakt", () => {
+    expect(leaderboardDeltasForOutcome("NOT_INTERESTED")).toEqual({
       meetings: 0,
-      conversations: 0,
+      conversations: 1,
       contacts: 1,
     });
-    expect(leaderboardDeltasForOutcome("voice mail")).toEqual(
-      leaderboardDeltasForOutcome("VOICEMAIL"),
-    );
-  });
-
-  it("tilbagekald planlagt tæller ikke som samtale på scoreboard", () => {
     expect(leaderboardDeltasForOutcome("CALLBACK_SCHEDULED")).toEqual({
       meetings: 0,
-      conversations: 0,
+      conversations: 1,
       contacts: 1,
     });
   });
 
-  it("møde booket tæller møde og samtale", () => {
+  it("ukvalificeret: 0", () => {
+    expect(leaderboardDeltasForOutcome("UNQUALIFIED")).toEqual({
+      meetings: 0,
+      conversations: 0,
+      contacts: 0,
+    });
+  });
+
+  it("møde booket: møde + samtale + kontakt", () => {
     expect(leaderboardDeltasForOutcome("MEETING_BOOKED")).toEqual({
       meetings: 1,
       conversations: 1,
@@ -72,12 +66,11 @@ describe("leaderboardDeltasForOutcome", () => {
     });
   });
 
-  it("ukvalificeret tæller ikke på nogen kolonne", () => {
-    expect(leaderboardDeltasForOutcome("UNQUALIIFIED")).toEqual({
-      meetings: 0,
-      conversations: 0,
-      contacts: 0,
-    });
+  it("alle kendte udfald: kontakt ≥ samtale ≥ møde", () => {
+    for (const st of LEAD_STATUSES) {
+      const d = leaderboardDeltasForOutcome(st);
+      expect(scoreboardDeltaInvariantHolds(d), st).toBe(true);
+    }
   });
 });
 
@@ -91,6 +84,15 @@ describe("shouldLogOutcomeForLeaderboard", () => {
     ).toBe(true);
   });
 
+  it("logger skifte til ny (scoreboard-seneste udfald)", () => {
+    expect(
+      shouldLogOutcomeForLeaderboard({ status: "VOICEMAIL", meetingBookedAt: null }, "NEW"),
+    ).toBe(true);
+    expect(shouldLogOutcomeForLeaderboard({ status: "NEW", meetingBookedAt: null }, "NEW")).toBe(
+      false,
+    );
+  });
+
   it("logger første callback-planlægning, ikke gentagelse", () => {
     expect(
       shouldLogOutcomeForLeaderboard({ status: "NEW", meetingBookedAt: null }, "CALLBACK_SCHEDULED"),
@@ -101,18 +103,5 @@ describe("shouldLogOutcomeForLeaderboard", () => {
         "CALLBACK_SCHEDULED",
       ),
     ).toBe(false);
-  });
-});
-
-describe("leadStatusCountsForScoreboardContact", () => {
-  it("kun ukvalificeret tæller ikke", () => {
-    expect(leadStatusCountsForScoreboardContact("UNQUALIFIED")).toBe(false);
-  });
-
-  it("ny og øvrige udfald tæller", () => {
-    expect(leadStatusCountsForScoreboardContact("NEW")).toBe(true);
-    expect(leadStatusCountsForScoreboardContact("NOT_INTERESTED")).toBe(true);
-    expect(leadStatusCountsForScoreboardContact("CALLBACK_SCHEDULED")).toBe(true);
-    expect(leadStatusCountsForScoreboardContact("VOICEMAIL")).toBe(true);
   });
 });

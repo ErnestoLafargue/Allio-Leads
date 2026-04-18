@@ -145,7 +145,7 @@ model LeadOutcomeLog {
   id        String   @id @default(cuid())
   leadId    String
   userId    String
-  /// VOICEMAIL | NOT_HOME | NOT_INTERESTED | MEETING_BOOKED
+  /// Seneste gemte udfald pr. lead pr. dag (scoreboard): NEW, VOICEMAIL, NOT_HOME, NOT_INTERESTED, UNQUALIFIED, MEETING_BOOKED, CALLBACK_SCHEDULED
   status    String
   createdAt DateTime @default(now())
 

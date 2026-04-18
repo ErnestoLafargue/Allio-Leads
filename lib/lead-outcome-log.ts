@@ -1,13 +1,15 @@
 import { isLeadStatus, type LeadStatus } from "@/lib/lead-status";
 
 /**
- * Udfald der skriver ét LeadOutcomeLog (én tællende handling pr. statusskifte / første møde).
- * Ukvalificeret er bevidst udeladt: det tæller ikke på scoreboard (ingen kontakt/samtale/møde).
+ * Udfald der skriver ét LeadOutcomeLog ved gem (én række pr. reelt statusskifte).
+ * Inkl. NEW og UNQUALIFIED så scoreboard kan tage «seneste udfald pr. lead pr. dag» uden besøgsdata.
  */
 export const LEADERBOARD_LOG_STATUSES = new Set<LeadStatus>([
+  "NEW",
   "VOICEMAIL",
   "NOT_HOME",
   "NOT_INTERESTED",
+  "UNQUALIFIED",
   "MEETING_BOOKED",
   "CALLBACK_SCHEDULED",
 ]);
@@ -20,7 +22,6 @@ export type LeaderboardOutcomeDeltas = {
 
 /**
  * Kanoniserer status fra DB / ældre logs (mellemrum, bindestreg, kasse).
- * Bruges på scoreboard og ved oprettelse af log (samtale-kolonnen: kun ikke interesseret + møde booket).
  */
 export function normalizeLeaderboardOutcomeStatus(raw: string): string {
   let s = String(raw ?? "")
@@ -40,21 +41,39 @@ export function normalizeLeaderboardOutcomeStatus(raw: string): string {
 }
 
 /**
- * Scoreboard: samtaler tælles kun for «Ikke interesseret» og «Møde booket» (per LeadOutcomeLog).
- * Kontakter kommer fra besøgshistorik — se leadStatusCountsForScoreboardContact.
+ * Scoreboard: kun seneste gemte udfald pr. lead pr. dag — disse tal pr. udfaldstype.
+ * Invariant: kontakter ≥ samtaler for alle udfald.
  */
 const LEADERBOARD_DELTAS: Partial<Record<LeadStatus, LeaderboardOutcomeDeltas>> = {
+  NEW: { meetings: 0, conversations: 0, contacts: 0 },
   VOICEMAIL: { meetings: 0, conversations: 0, contacts: 1 },
   NOT_HOME: { meetings: 0, conversations: 0, contacts: 1 },
   NOT_INTERESTED: { meetings: 0, conversations: 1, contacts: 1 },
-  MEETING_BOOKED: { meetings: 1, conversations: 1, contacts: 1 },
-  CALLBACK_SCHEDULED: { meetings: 0, conversations: 0, contacts: 1 },
   UNQUALIFIED: { meetings: 0, conversations: 0, contacts: 0 },
+  MEETING_BOOKED: { meetings: 1, conversations: 1, contacts: 1 },
+  CALLBACK_SCHEDULED: { meetings: 0, conversations: 1, contacts: 1 },
 };
 
-/**
- * Per LeadOutcomeLog-række: møder og samtaler (kontakter på boardet tælles kun via besøg — contacts-felt bruges ikke i leaderboard).
- */
+/** Udvikling: opdag logikfejl (samtaler > kontakter m.m.). */
+export function warnIfScoreboardUserTallyInconsistent(
+  userId: string,
+  meetings: number,
+  conversations: number,
+  contacts: number,
+): void {
+  if (process.env.NODE_ENV !== "development") return;
+  if (conversations > contacts) {
+    console.warn(
+      `[scoreboard] Bruger ${userId}: samtaler (${conversations}) > kontakter (${contacts})`,
+    );
+  }
+  if (meetings > conversations) {
+    console.warn(
+      `[scoreboard] Bruger ${userId}: møder (${meetings}) > samtaler (${conversations})`,
+    );
+  }
+}
+
 export function leaderboardDeltasForOutcome(status: string): LeaderboardOutcomeDeltas {
   const key = normalizeLeaderboardOutcomeStatus(status);
   if (!isLeadStatus(key)) {
@@ -63,14 +82,9 @@ export function leaderboardDeltasForOutcome(status: string): LeaderboardOutcomeD
   return LEADERBOARD_DELTAS[key] ?? { meetings: 0, conversations: 0, contacts: 0 };
 }
 
-/**
- * Om leadets udfald (typisk aktuel status fra DB) skal tælle som én kontakt for et besøg på scoreboard.
- * Kun ukvalificeret tæller ikke; alle andre kendte udfald (inkl. Ny) tæller.
- */
-export function leadStatusCountsForScoreboardContact(statusRaw: string | null | undefined): boolean {
-  const key = normalizeLeaderboardOutcomeStatus(String(statusRaw ?? ""));
-  if (!key || !isLeadStatus(key)) return false;
-  return key !== "UNQUALIFIED";
+/** Til test: alle kendte udfald skal have kontakt ≥ samtale. */
+export function scoreboardDeltaInvariantHolds(d: LeaderboardOutcomeDeltas): boolean {
+  return d.contacts >= d.conversations && d.conversations >= d.meetings;
 }
 
 type ExistingForLog = {
@@ -79,7 +93,7 @@ type ExistingForLog = {
 };
 
 /**
- * Undgå dobbelttælling: kun når status faktisk skifter til udfaldet, eller første mødebookning.
+ * Undgå dobbelttælling i log-tabellen: kun ved reelt skifte til status (eller første møde / første callback-plan).
  */
 export function shouldLogOutcomeForLeaderboard(existing: ExistingForLog, newStatus: string): boolean {
   const normalized = normalizeLeaderboardOutcomeStatus(newStatus);
