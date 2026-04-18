@@ -20,6 +20,8 @@ export type TimeBlockMs = { startMs: number; endMs: number };
 
 export type CopenhagenBookingSlot = { time: string; utcMs: number };
 
+export type CopenhagenBookingSlotWithAvailability = CopenhagenBookingSlot & { available: boolean };
+
 export function getMeetingBlockStartMs(startMs: number): number {
   return startMs - BOOKING_MEETING_BLOCK_BEFORE_MIN * 60 * 1000;
 }
@@ -78,12 +80,13 @@ export function isPastCopenhagenDayKey(dayKey: string): boolean {
 }
 
 /**
- * Ledige 15-min starttider på en kalenderdag i Europe/Copenhagen, efter +/- mødeblok.
+ * Alle 15-min starttider på en kalenderdag (København) inden for arbejdsvinduet,
+ * med flag for om tiden er ledig ift. optagne mødeblokke (-75/+75).
  */
-export function getAvailableCopenhagenBookingSlots(
+export function getCopenhagenBookingSlotsWithAvailability(
   dayKey: string,
   occupied: TimeBlockMs[],
-): CopenhagenBookingSlot[] {
+): CopenhagenBookingSlotWithAvailability[] {
   if (isPastCopenhagenDayKey(dayKey)) return [];
 
   const { start } = copenhagenDayBoundsUtcFromDayKey(dayKey);
@@ -92,7 +95,7 @@ export function getAvailableCopenhagenBookingSlots(
   const todayKey = copenhagenDayKey();
   const isToday = dayKey === todayKey;
 
-  const out: CopenhagenBookingSlot[] = [];
+  const out: CopenhagenBookingSlotWithAvailability[] = [];
 
   for (let ms = start.getTime(); ms < dayEnd.getTime(); ms += 60 * 1000) {
     const d = new Date(ms);
@@ -115,14 +118,23 @@ export function getAvailableCopenhagenBookingSlots(
 
     if (isToday && ms < now) continue;
 
-    if (!isSlotStartBlocked(ms, BOOKING_SLOT_STEP_MIN, occupied)) {
-      out.push({
-        time: `${String(h).padStart(2, "0")}:${String(m).padStart(2, "0")}`,
-        utcMs: ms,
-      });
-    }
+    const time = `${String(h).padStart(2, "0")}:${String(m).padStart(2, "0")}`;
+    const blocked = isSlotStartBlocked(ms, BOOKING_SLOT_STEP_MIN, occupied);
+    out.push({ time, utcMs: ms, available: !blocked });
   }
   return out;
+}
+
+/**
+ * Ledige 15-min starttider på en kalenderdag i Europe/Copenhagen, efter +/- mødeblok.
+ */
+export function getAvailableCopenhagenBookingSlots(
+  dayKey: string,
+  occupied: TimeBlockMs[],
+): CopenhagenBookingSlot[] {
+  return getCopenhagenBookingSlotsWithAvailability(dayKey, occupied)
+    .filter((s) => s.available)
+    .map(({ time, utcMs }) => ({ time, utcMs }));
 }
 
 export function parseOccupiedBlocksFromApi(

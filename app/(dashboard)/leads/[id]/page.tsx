@@ -327,6 +327,9 @@ function LeadDetailInner() {
       meetingContactEmail: meetingContactEmail.trim(),
       meetingContactPhonePrivate: meetingContactPhonePrivate.trim(),
     };
+    if (detail.adminSkipBookingOverlap) {
+      body.adminSkipBookingOverlap = true;
+    }
     const res = await fetch(`/api/leads/${id}`, {
       method: "PATCH",
       headers: { "Content-Type": "application/json" },
@@ -827,6 +830,7 @@ function LeadDetailInner() {
                 initialMeetingLocal: status === "MEETING_BOOKED" ? meetingScheduledFor || undefined : undefined,
                 isSubmitting: saving,
                 allowMeetingConfirm: status === "MEETING_BOOKED",
+                allowAdminAvailabilityOverride: isAdmin,
                 onConfirmBooking: (d) => void onConfirmBookingFromPanel(d),
               }}
               onVirkEnrich={() => void onVirkEnrich()}

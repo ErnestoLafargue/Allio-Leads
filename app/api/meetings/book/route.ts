@@ -54,15 +54,19 @@ export async function POST(req: Request) {
     return NextResponse.json({ error: "Ugyldig dato for møde." }, { status: 400 });
   }
 
-  const overlap = await findLeadBookingOverlapInDb(meetingScheduledFor);
-  if (overlap) {
-    return NextResponse.json(
-      {
-        error:
+  const adminSkipBookingOverlap =
+    session!.user.role === "ADMIN" && body?.adminSkipBookingOverlap === true;
+  if (!adminSkipBookingOverlap) {
+    const overlap = await findLeadBookingOverlapInDb(meetingScheduledFor);
+    if (overlap) {
+      return NextResponse.json(
+        {
+          error:
             "Tidspunktet overlapper et eksisterende møde. Hvert møde reserverer 75 min før og 75 min efter start — vælg et andet tidspunkt.",
-      },
-      { status: 409 },
-    );
+        },
+        { status: 409 },
+      );
+    }
   }
 
   const campaignId = await ensureSystemCampaignId("upcoming_meetings");

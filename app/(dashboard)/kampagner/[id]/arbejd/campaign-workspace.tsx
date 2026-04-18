@@ -72,6 +72,7 @@ function delayMs(ms: number) {
 export function CampaignWorkspace({ campaignId, preferredLeadId }: Props) {
   const { data: session } = useSession();
   const sessionUserId = session?.user?.id ?? "";
+  const isAdmin = session?.user?.role === "ADMIN";
   const [campaignName, setCampaignName] = useState("");
   const [campaignSystemType, setCampaignSystemType] = useState<string | null>(null);
   const [fieldConfigJson, setFieldConfigJson] = useState("{}");
@@ -329,8 +330,12 @@ export function CampaignWorkspace({ campaignId, preferredLeadId }: Props) {
   async function saveLead(
     l: Lead,
     meetingScheduledForISO?: string,
+    adminSkipBookingOverlap?: boolean,
   ): Promise<{ next: Lead[]; updated: Lead } | null> {
-    const body = buildCampaignLeadPatchBody(getFormSnapshot(), { meetingScheduledForISO });
+    const body = buildCampaignLeadPatchBody(getFormSnapshot(), {
+      meetingScheduledForISO,
+      adminSkipBookingOverlap,
+    });
     const res = await fetch(`/api/leads/${l.id}`, {
       method: "PATCH",
       headers: { "Content-Type": "application/json" },
@@ -389,7 +394,7 @@ export function CampaignWorkspace({ campaignId, preferredLeadId }: Props) {
     }
   }
 
-  async function onNext(meetingScheduledForISO?: string) {
+  async function onNext(meetingScheduledForISO?: string, adminSkipBookingOverlap?: boolean) {
     if (!activeLead) return;
 
     /** Mødebooking: vent på bekræftet gem — ingen optimistisk navigation (data integritet). */
@@ -420,7 +425,7 @@ export function CampaignWorkspace({ campaignId, preferredLeadId }: Props) {
       const currentId = activeLead.id;
       setSaving(true);
       setError(null);
-      const saved = await saveLead(activeLead, meetingScheduledForISO);
+      const saved = await saveLead(activeLead, meetingScheduledForISO, adminSkipBookingOverlap);
       setSaving(false);
       if (!saved) return;
 
@@ -564,7 +569,7 @@ export function CampaignWorkspace({ campaignId, preferredLeadId }: Props) {
 
   async function onConfirmBookingFromPanel(detail: BookingConfirmPayload) {
     if (!activeLead || status !== "MEETING_BOOKED") return;
-    await onNext(detail.localDateTimeISO);
+    await onNext(detail.localDateTimeISO, detail.adminSkipBookingOverlap);
   }
 
   async function onVirkEnrich() {
@@ -932,6 +937,7 @@ export function CampaignWorkspace({ campaignId, preferredLeadId }: Props) {
           initialMeetingLocal: status === "MEETING_BOOKED" ? meetingScheduledFor || undefined : undefined,
           isSubmitting: saving,
           allowMeetingConfirm: status === "MEETING_BOOKED",
+          allowAdminAvailabilityOverride: isAdmin,
           onConfirmBooking: onConfirmBookingFromPanel,
         }}
         onVirkEnrich={() => void onVirkEnrich()}

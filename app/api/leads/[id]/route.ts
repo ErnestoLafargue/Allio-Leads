@@ -100,6 +100,8 @@ export async function PATCH(req: Request, { params }: Params) {
 
   const body = await req.json().catch(() => null);
   const queueBump = body?.queueBump === true;
+  const adminSkipBookingOverlap =
+    session!.user.role === "ADMIN" && body?.adminSkipBookingOverlap === true;
   await releaseExpiredLocksEverywhere(prisma);
   const existing = await prisma.lead.findUnique({
     where: { id },
@@ -304,7 +306,8 @@ export async function PATCH(req: Request, { params }: Params) {
     status === "MEETING_BOOKED" &&
     meetingScheduledFor &&
     meetingTimeChangedForOverlap &&
-    normalizeMeetingOutcomeStatus(meetingOutcomeStatus) !== MEETING_OUTCOME_CANCELLED
+    normalizeMeetingOutcomeStatus(meetingOutcomeStatus) !== MEETING_OUTCOME_CANCELLED &&
+    !adminSkipBookingOverlap
   ) {
     const overlap = await findLeadBookingOverlapInDb(meetingScheduledFor, { excludeLeadId: id });
     if (overlap) {

@@ -1,6 +1,7 @@
 "use client";
 
 import { useRouter } from "next/navigation";
+import { useSession } from "next-auth/react";
 import { useState } from "react";
 import { BookingPanel, type BookingConfirmPayload } from "@/app/components/booking/booking-panel";
 import { MeetingContactFields } from "@/app/components/booking/meeting-contact-fields";
@@ -13,6 +14,8 @@ type Props = {
 
 export function StandaloneMeetingBooker({ className = "", onBooked }: Props) {
   const router = useRouter();
+  const { data: session } = useSession();
+  const isAdmin = session?.user?.role === "ADMIN";
   const [notes, setNotes] = useState("");
   const [meetingContactName, setMeetingContactName] = useState("");
   const [meetingContactEmail, setMeetingContactEmail] = useState("");
@@ -44,6 +47,7 @@ export function StandaloneMeetingBooker({ className = "", onBooked }: Props) {
         meetingContactEmail: ce,
         meetingContactPhonePrivate: cp,
         meetingScheduledFor: detail.localDateTimeISO,
+        ...(detail.adminSkipBookingOverlap ? { adminSkipBookingOverlap: true } : {}),
       }),
     });
     setSubmitting(false);
@@ -97,6 +101,7 @@ export function StandaloneMeetingBooker({ className = "", onBooked }: Props) {
 
       <BookingPanel
         allowMeetingConfirm
+        allowAdminAvailabilityOverride={isAdmin}
         isSubmitting={submitting}
         onConfirmBooking={(d) => void onConfirmBooking(d)}
       />

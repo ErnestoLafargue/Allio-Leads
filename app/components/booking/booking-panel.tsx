@@ -4,9 +4,9 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { BookingCalendar } from "@/app/components/booking/booking-calendar";
 import { BookingTimeSlots } from "@/app/components/booking/booking-time-slots";
 import {
-  getAvailableCopenhagenBookingSlots,
+  getCopenhagenBookingSlotsWithAvailability,
   parseOccupiedBlocksFromApi,
-  type CopenhagenBookingSlot,
+  type CopenhagenBookingSlotWithAvailability,
 } from "@/lib/booking/availability";
 import { startOfLocalDay, toCopenhagenDateKey } from "@/lib/booking/mock-availability";
 
@@ -17,6 +17,10 @@ export type BookingConfirmPayload = {
   time: string;
   campaignId?: string;
   leadId?: string;
+  /**
+   * Kun administrator: spring overlap-tjek over (75 min før/efter). Det nye møde får stadig sin egen blok i systemet.
+   */
+  adminSkipBookingOverlap?: boolean;
 };
 
 export type BookingPanelProps = {
@@ -26,6 +30,8 @@ export type BookingPanelProps = {
   onConfirmBooking?: (detail: BookingConfirmPayload) => void | Promise<void>;
   isSubmitting?: boolean;
   allowMeetingConfirm?: boolean;
+  /** Administrator: vis «Overskrid» og tillad valg af optagne tider */
+  allowAdminAvailabilityOverride?: boolean;
   className?: string;
 };
 
@@ -36,6 +42,7 @@ export function BookingPanel({
   onConfirmBooking,
   isSubmitting = false,
   allowMeetingConfirm = true,
+  allowAdminAvailabilityOverride = false,
   className = "",
 }: BookingPanelProps) {
   const [monthAnchor, setMonthAnchor] = useState(() => {
@@ -43,9 +50,10 @@ export function BookingPanel({
     return new Date(n.getFullYear(), n.getMonth(), 1);
   });
   const [selectedDate, setSelectedDate] = useState<Date | null>(null);
-  const [selectedSlot, setSelectedSlot] = useState<CopenhagenBookingSlot | null>(null);
-  const [slotOptions, setSlotOptions] = useState<CopenhagenBookingSlot[]>([]);
+  const [selectedSlot, setSelectedSlot] = useState<CopenhagenBookingSlotWithAvailability | null>(null);
+  const [slotOptions, setSlotOptions] = useState<CopenhagenBookingSlotWithAvailability[]>([]);
   const [slotsLoading, setSlotsLoading] = useState(false);
+  const [adminAvailabilityOverride, setAdminAvailabilityOverride] = useState(false);
 
   useEffect(() => {
     if (!initialMeetingLocal?.trim()) {
@@ -64,6 +72,12 @@ export function BookingPanel({
   }, [leadId, initialMeetingLocal]);
 
   useEffect(() => {
+    if (!allowAdminAvailabilityOverride && adminAvailabilityOverride) {
+      setAdminAvailabilityOverride(false);
+    }
+  }, [allowAdminAvailabilityOverride, adminAvailabilityOverride]);
+
+  useEffect(() => {
     if (!selectedDate) {
       setSlotOptions([]);
       return;
@@ -78,16 +92,31 @@ export function BookingPanel({
       const occupied = res.ok
         ? parseOccupiedBlocksFromApi((await res.json()).blocks as { start: string; end: string }[])
         : [];
-      const slots = getAvailableCopenhagenBookingSlots(dayKey, occupied);
+      const allSlots = getCopenhagenBookingSlotsWithAvailability(dayKey, occupied);
+      const display =
+        allowAdminAvailabilityOverride && adminAvailabilityOverride
+          ? allSlots
+          : allSlots.filter((s) => s.available);
       if (!cancelled) {
-        setSlotOptions(slots);
+        setSlotOptions(display);
         setSlotsLoading(false);
       }
     })();
     return () => {
       cancelled = true;
     };
-  }, [selectedDate, leadId]);
+  }, [selectedDate, leadId, allowAdminAvailabilityOverride, adminAvailabilityOverride]);
+
+  useEffect(() => {
+    if (
+      !adminAvailabilityOverride &&
+      selectedSlot &&
+      !selectedSlot.available &&
+      allowAdminAvailabilityOverride
+    ) {
+      setSelectedSlot(null);
+    }
+  }, [adminAvailabilityOverride, selectedSlot, allowAdminAvailabilityOverride]);
 
   useEffect(() => {
     if (!initialMeetingLocal?.trim() || slotOptions.length === 0 || !selectedDate) return;
@@ -104,7 +133,14 @@ export function BookingPanel({
     }
   }, [slotOptions, selectedSlot]);
 
-  const slotLabels = useMemo(() => slotOptions.map((s) => s.time), [slotOptions]);
+  const slotEntries = useMemo(
+    () =>
+      slotOptions.map((s) => ({
+        time: s.time,
+        busy: allowAdminAvailabilityOverride && adminAvailabilityOverride && !s.available,
+      })),
+    [slotOptions, allowAdminAvailabilityOverride, adminAvailabilityOverride],
+  );
 
   const dateLabel = selectedDate
     ? new Intl.DateTimeFormat("da-DK", {
@@ -139,12 +175,19 @@ export function BookingPanel({
     if (!selectedDate || !selectedSlot || isSubmitting) return;
 
     const dayKey = toCopenhagenDateKey(selectedDate);
+    const adminSkipBookingOverlap = Boolean(
+      allowAdminAvailabilityOverride &&
+        adminAvailabilityOverride &&
+        selectedSlot &&
+        !selectedSlot.available,
+    );
     const payload: BookingConfirmPayload = {
       dateKey: dayKey,
       time: selectedSlot.time,
       localDateTimeISO: new Date(selectedSlot.utcMs).toISOString(),
       campaignId,
       leadId,
+      ...(adminSkipBookingOverlap ? { adminSkipBookingOverlap: true } : {}),
     };
 
     await onConfirmBooking?.(payload);
@@ -161,11 +204,35 @@ export function BookingPanel({
         className,
       ].join(" ")}
     >
-      <div className="mb-4 flex flex-col gap-3 border-b border-slate-100 pb-4 sm:flex-row sm:items-center sm:justify-between">
-        <h2 className="text-lg font-semibold tracking-tight text-slate-900">Vælg tid til møde</h2>
-        <p className="text-xs text-slate-600">
-          Hvert møde reserverer <strong>75 min før</strong> og <strong>75 min efter</strong> start (gitter 15 min) —
-          ledige tider er allerede filtreret.
+      <div className="mb-4 flex flex-col gap-3 border-b border-slate-100 pb-4 sm:flex-row sm:items-start sm:justify-between">
+        <div className="space-y-2">
+          <h2 className="text-lg font-semibold tracking-tight text-slate-900">Vælg tid til møde</h2>
+          {allowAdminAvailabilityOverride ? (
+            <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:gap-3">
+              <button
+                type="button"
+                aria-pressed={adminAvailabilityOverride}
+                onClick={() => setAdminAvailabilityOverride((v) => !v)}
+                className={[
+                  "rounded-lg border px-3 py-2 text-left text-xs font-semibold shadow-sm transition sm:text-sm",
+                  adminAvailabilityOverride
+                    ? "border-amber-600 bg-amber-100 text-amber-950 ring-2 ring-amber-400/60"
+                    : "border-slate-200 bg-white text-slate-800 hover:border-slate-300 hover:bg-slate-50",
+                ].join(" ")}
+              >
+                Overskrid
+                <span className="mt-0.5 block font-normal text-slate-600">
+                  Vis alle tider inkl. optagne — book alligevel som admin (75 min blokering gælder stadig for det nye møde).
+                </span>
+              </button>
+            </div>
+          ) : null}
+        </div>
+        <p className="text-xs text-slate-600 sm:max-w-sm">
+          Hvert møde reserverer <strong>75 min før</strong> og <strong>75 min efter</strong> start (gitter 15 min).
+          {!adminAvailabilityOverride || !allowAdminAvailabilityOverride
+            ? " Ledige tider er filtreret."
+            : null}
         </p>
       </div>
 
@@ -188,7 +255,7 @@ export function BookingPanel({
         />
 
         <BookingTimeSlots
-          slots={slotLabels}
+          slots={slotEntries}
           selectedTime={selectedSlot?.time ?? null}
           onSelectTime={(time) => {
             const s = slotOptions.find((x) => x.time === time) ?? null;
@@ -196,6 +263,7 @@ export function BookingPanel({
           }}
           dateLabel={dateLabel}
           loading={slotsLoading}
+          allowSelectBusySlots={allowAdminAvailabilityOverride && adminAvailabilityOverride}
         />
       </div>
 
