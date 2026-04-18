@@ -7,7 +7,7 @@ import {
   copenhagenDayKey,
 } from "@/lib/copenhagen-day";
 import {
-  leaderboardDeltasForOutcome,
+  tallyScoreboardFromContactEpisodes,
   warnIfScoreboardUserTallyInconsistent,
 } from "@/lib/lead-outcome-log";
 
@@ -66,28 +66,6 @@ async function mergePresentWithOutcomeUsers(
   return Array.from(map.values());
 }
 
-/**
- * Seneste LeadOutcomeLog pr. lead inden for [start, end) — én tællende udfaldsregistrering pr. lead pr. dag.
- * (PostgreSQL DISTINCT ON)
- */
-async function latestOutcomeLogRowsPerLeadInRange(
-  start: Date,
-  end: Date,
-): Promise<{ leadId: string; userId: string; status: string }[]> {
-  try {
-    const rows = await prisma.$queryRaw<{ leadId: string; userId: string; status: string }[]>`
-      SELECT DISTINCT ON ("leadId") "leadId", "userId", "status"
-      FROM "LeadOutcomeLog"
-      WHERE "createdAt" >= ${start} AND "createdAt" < ${end}
-      ORDER BY "leadId", "createdAt" DESC
-    `;
-    return rows;
-  } catch (e) {
-    console.warn("[leaderboard] DISTINCT ON LeadOutcomeLog failed:", e);
-    return [];
-  }
-}
-
 export async function GET(req: Request) {
   const { response } = await requireSession();
   if (response) return response;
@@ -114,8 +92,14 @@ export async function GET(req: Request) {
     }
     const todayKey = copenhagenDayKey();
 
-    const latestRows = await latestOutcomeLogRowsPerLeadInRange(start, end);
-    const scoringUserIds = [...new Set(latestRows.map((r) => r.userId))];
+    const logRows = await prisma.leadOutcomeLog.findMany({
+      where: { createdAt: { gte: start, lt: end } },
+      select: { leadId: true, userId: true, status: true, createdAt: true },
+      orderBy: { createdAt: "asc" },
+    });
+
+    const episodeTallies = tallyScoreboardFromContactEpisodes(logRows);
+    const scoringUserIds = [...episodeTallies.keys()];
 
     let present = await loadPresentUsers(dayKey);
     present = await mergePresentWithOutcomeUsers(present, scoringUserIds);
@@ -129,31 +113,13 @@ export async function GET(req: Request) {
       present = sellers.map((u) => ({ userId: u.id, user: u }));
     }
 
-    const tallies = new Map<string, { meetings: number; conversations: number; contacts: number }>();
-    for (const p of present) {
-      tallies.set(p.userId, { meetings: 0, conversations: 0, contacts: 0 });
-    }
-
-    for (const row of latestRows) {
-      const t = tallies.get(row.userId);
-      if (!t) continue;
-      const d = leaderboardDeltasForOutcome(row.status);
-      t.meetings += d.meetings;
-      t.conversations += d.conversations;
-      t.contacts += d.contacts;
-    }
-
-    const dayLabel = new Intl.DateTimeFormat("da-DK", {
-      timeZone: "Europe/Copenhagen",
-      weekday: "long",
-      year: "numeric",
-      month: "long",
-      day: "numeric",
-    }).format(start);
-
     const board = present
       .map((p) => {
-        const t = tallies.get(p.userId)!;
+        const t = episodeTallies.get(p.userId) ?? {
+          meetings: 0,
+          conversations: 0,
+          contacts: 0,
+        };
         warnIfScoreboardUserTallyInconsistent(p.userId, t.meetings, t.conversations, t.contacts);
         return {
           userId: p.user.id,
@@ -170,6 +136,14 @@ export async function GET(req: Request) {
         if (b.conversations !== a.conversations) return b.conversations - a.conversations;
         return b.contacts - a.contacts;
       });
+
+    const dayLabel = new Intl.DateTimeFormat("da-DK", {
+      timeZone: "Europe/Copenhagen",
+      weekday: "long",
+      year: "numeric",
+      month: "long",
+      day: "numeric",
+    }).format(start);
 
     return NextResponse.json({
       dayKey,

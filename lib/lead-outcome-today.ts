@@ -2,7 +2,8 @@ import { prisma } from "@/lib/prisma";
 import { copenhagenDayBoundsUtc } from "@/lib/copenhagen-day";
 
 /**
- * Lead-id'er der har mindst ét LeadOutcomeLog i dag (Europe/Copenhagen).
+ * Lead-id'er der har mindst ét bruger-udfaldslog i dag (Europe/Copenhagen).
+ * System-logs (userId null, fx auto «Ny») tælles ikke — undgår at kø-sortering påvirkes af cooldown.
  */
 export async function getLeadIdsWithOutcomeLogToday(
   leadIds: string[],
@@ -17,6 +18,7 @@ export async function getLeadIdsWithOutcomeLogToday(
     where: {
       leadId: { in: leadIds },
       createdAt: { gte: start, lt: end },
+      userId: { not: null },
     },
   });
 

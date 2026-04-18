@@ -144,13 +144,14 @@ model Lead {
 model LeadOutcomeLog {
   id        String   @id @default(cuid())
   leadId    String
-  userId    String
-  /// Seneste gemte udfald pr. lead pr. dag (scoreboard): NEW, VOICEMAIL, NOT_HOME, NOT_INTERESTED, UNQUALIFIED, MEETING_BOOKED, CALLBACK_SCHEDULED
+  /// Null ved systemhændelser (fx auto «Ny» efter voicemail/ikke hjemme) — markerer ny kontakt-episode til scoreboard.
+  userId    String?
+  /// NEW, VOICEMAIL, NOT_HOME, NOT_INTERESTED, UNQUALIFIED, MEETING_BOOKED, CALLBACK_SCHEDULED
   status    String
   createdAt DateTime @default(now())
 
   lead Lead @relation(fields: [leadId], references: [id], onDelete: Cascade)
-  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+  user User? @relation(fields: [userId], references: [id], onDelete: SetNull)
 
   @@index([userId, createdAt])
   @@index([createdAt])

@@ -2,7 +2,7 @@ import { isLeadStatus, type LeadStatus } from "@/lib/lead-status";
 
 /**
  * Udfald der skriver ét LeadOutcomeLog ved gem (én række pr. reelt statusskifte).
- * Inkl. NEW og UNQUALIFIED så scoreboard kan tage «seneste udfald pr. lead pr. dag» uden besøgsdata.
+ * Inkl. NEW og UNQUALIFIED. Scoreboard grupperer i «kontakt-episoder» adskilt af NEW (også system-logs ved auto-reset).
  */
 export const LEADERBOARD_LOG_STATUSES = new Set<LeadStatus>([
   "NEW",
@@ -85,6 +85,66 @@ export function leaderboardDeltasForOutcome(status: string): LeaderboardOutcomeD
 /** Til test: alle kendte udfald skal have kontakt ≥ samtale. */
 export function scoreboardDeltaInvariantHolds(d: LeaderboardOutcomeDeltas): boolean {
   return d.contacts >= d.conversations && d.conversations >= d.meetings;
+}
+
+export type OutcomeLogRowForScoreboard = {
+  leadId: string;
+  userId: string | null;
+  status: string;
+  createdAt: Date;
+};
+
+/**
+ * Scoreboard pr. valgt dag: summer én gang pr. kontakt-episode pr. lead.
+ * Episoder adskilles af log med status NEW (bruger eller system). Inden for én episode tæller kun seneste bruger-udfald (ikke NEW).
+ * Samme lead kan give flere episoder samme dag (fx voicemail → auto Ny → ikke interesseret).
+ */
+export function tallyScoreboardFromContactEpisodes(
+  rows: OutcomeLogRowForScoreboard[],
+): Map<string, LeaderboardOutcomeDeltas> {
+  const sorted = [...rows].sort((a, b) => a.createdAt.getTime() - b.createdAt.getTime());
+  const byLead = new Map<string, OutcomeLogRowForScoreboard[]>();
+  for (const r of sorted) {
+    const arr = byLead.get(r.leadId) ?? [];
+    arr.push(r);
+    byLead.set(r.leadId, arr);
+  }
+
+  const tallies = new Map<string, LeaderboardOutcomeDeltas>();
+  function add(userId: string, d: LeaderboardOutcomeDeltas) {
+    const p = tallies.get(userId) ?? { meetings: 0, conversations: 0, contacts: 0 };
+    tallies.set(userId, {
+      meetings: p.meetings + d.meetings,
+      conversations: p.conversations + d.conversations,
+      contacts: p.contacts + d.contacts,
+    });
+  }
+
+  for (const [, logs] of byLead) {
+    let segment: OutcomeLogRowForScoreboard[] = [];
+    const flushSegment = () => {
+      const scoring = segment.filter((r) => {
+        if (!r.userId) return false;
+        return normalizeLeaderboardOutcomeStatus(r.status) !== "NEW";
+      });
+      if (scoring.length > 0) {
+        const last = scoring[scoring.length - 1]!;
+        add(last.userId!, leaderboardDeltasForOutcome(last.status));
+      }
+      segment = [];
+    };
+
+    for (const r of logs) {
+      if (normalizeLeaderboardOutcomeStatus(r.status) === "NEW") {
+        flushSegment();
+        continue;
+      }
+      segment.push(r);
+    }
+    flushSegment();
+  }
+
+  return tallies;
 }
 
 type ExistingForLog = {

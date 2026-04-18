@@ -5,6 +5,7 @@ import {
   normalizeLeaderboardOutcomeStatus,
   scoreboardDeltaInvariantHolds,
   shouldLogOutcomeForLeaderboard,
+  tallyScoreboardFromContactEpisodes,
 } from "./lead-outcome-log";
 
 describe("normalizeLeaderboardOutcomeStatus", () => {
@@ -103,5 +104,37 @@ describe("shouldLogOutcomeForLeaderboard", () => {
         "CALLBACK_SCHEDULED",
       ),
     ).toBe(false);
+  });
+});
+
+describe("tallyScoreboardFromContactEpisodes", () => {
+  const L = "lead-1";
+  const U = "user-a";
+  const at = (iso: string) => new Date(iso);
+
+  it("voicemail → Ny-grænse → ikke interesseret: 1 samtale, 2 kontakter", () => {
+    const m = tallyScoreboardFromContactEpisodes([
+      { leadId: L, userId: U, status: "VOICEMAIL", createdAt: at("2026-04-18T10:00:00.000Z") },
+      { leadId: L, userId: null, status: "NEW", createdAt: at("2026-04-18T12:00:00.000Z") },
+      { leadId: L, userId: U, status: "NOT_INTERESTED", createdAt: at("2026-04-18T12:30:00.000Z") },
+    ]);
+    expect(m.get(U)).toEqual({ meetings: 0, conversations: 1, contacts: 2 });
+  });
+
+  it("voicemail → ikke interesseret uden Ny imellem: kun sidste udfald (1 samtale, 1 kontakt)", () => {
+    const m = tallyScoreboardFromContactEpisodes([
+      { leadId: L, userId: U, status: "VOICEMAIL", createdAt: at("2026-04-18T10:00:00.000Z") },
+      { leadId: L, userId: U, status: "NOT_INTERESTED", createdAt: at("2026-04-18T10:05:00.000Z") },
+    ]);
+    expect(m.get(U)).toEqual({ meetings: 0, conversations: 1, contacts: 1 });
+  });
+
+  it("bruger-Ny afslutter episode som callback (0 point for Ny)", () => {
+    const m = tallyScoreboardFromContactEpisodes([
+      { leadId: L, userId: U, status: "CALLBACK_SCHEDULED", createdAt: at("2026-04-18T09:00:00.000Z") },
+      { leadId: L, userId: U, status: "NEW", createdAt: at("2026-04-18T09:10:00.000Z") },
+      { leadId: L, userId: U, status: "VOICEMAIL", createdAt: at("2026-04-18T11:00:00.000Z") },
+    ]);
+    expect(m.get(U)).toEqual({ meetings: 0, conversations: 1, contacts: 2 });
   });
 });

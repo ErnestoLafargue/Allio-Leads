@@ -5,11 +5,9 @@ const NOT_HOME_MS = 6 * 60 * 60 * 1000;
 
 /**
  * Sætter leads med udløbet ventetid tilbage til NEW (kaldes før læsning af leads).
- * Bruger rå SQL så opdateringen ikke afhænger af Prisma Clients filter-API for de nye felter
- * (undgår bl.a. «Unknown argument voicemailMarkedAt» ved gammel/cached client).
+ * Opretter LeadOutcomeLog (userId null, status NEW) så scoreboard får episode-grænse ved genåbning i køen.
  *
- * Tilbagekald: rækker med planlagt genopkald må ikke auto-nulstilles til «Ny» af 2t/6t-reglen
- * (kun rækker uden callback-plan).
+ * Tilbagekald: rækker med planlagt genopkald må ikke auto-nulstilles af 2t/6t-reglen.
  */
 export async function applyLeadCooldownResets(): Promise<void> {
   const now = Date.now();
@@ -17,34 +15,56 @@ export async function applyLeadCooldownResets(): Promise<void> {
   const notHomeCutoff = new Date(now - NOT_HOME_MS);
   const touchedAt = new Date();
 
-  await prisma.$executeRaw`
-    UPDATE "Lead"
-    SET
-      "status" = 'NEW',
-      "voicemailMarkedAt" = NULL,
-      "notHomeMarkedAt" = NULL,
-      "updatedAt" = ${touchedAt}
-    WHERE "status" = 'VOICEMAIL'
-      AND "callbackScheduledFor" IS NULL
-      AND (
-        ("voicemailMarkedAt" IS NOT NULL AND "voicemailMarkedAt" <= ${voicemailCutoff})
-        OR ("voicemailMarkedAt" IS NULL AND "updatedAt" <= ${voicemailCutoff})
-      )
-  `;
+  const toResetVm = await prisma.lead.findMany({
+    where: {
+      status: "VOICEMAIL",
+      callbackScheduledFor: null,
+      OR: [
+        { voicemailMarkedAt: { lte: voicemailCutoff } },
+        { AND: [{ voicemailMarkedAt: null }, { updatedAt: { lte: voicemailCutoff } }] },
+      ],
+    },
+    select: { id: true },
+  });
+  if (toResetVm.length > 0) {
+    const ids = toResetVm.map((l) => l.id);
+    await prisma.lead.updateMany({
+      where: { id: { in: ids } },
+      data: {
+        status: "NEW",
+        voicemailMarkedAt: null,
+        notHomeMarkedAt: null,
+        updatedAt: touchedAt,
+      },
+    });
+    await prisma.leadOutcomeLog.createMany({
+      data: ids.map((leadId) => ({ leadId, userId: null, status: "NEW" })),
+    });
+  }
 
-  /** Ikke hjemme: først tilbage som «Ny» i køen når der er gået 6 t fra markering (`notHomeMarkedAt`). Ingen fallback til `updatedAt` (undgår for tidlig genåbning). */
-  await prisma.$executeRaw`
-    UPDATE "Lead"
-    SET
-      "status" = 'NEW',
-      "voicemailMarkedAt" = NULL,
-      "notHomeMarkedAt" = NULL,
-      "updatedAt" = ${touchedAt}
-    WHERE "status" = 'NOT_HOME'
-      AND "callbackScheduledFor" IS NULL
-      AND "notHomeMarkedAt" IS NOT NULL
-      AND "notHomeMarkedAt" <= ${notHomeCutoff}
-  `;
+  const toResetNh = await prisma.lead.findMany({
+    where: {
+      status: "NOT_HOME",
+      callbackScheduledFor: null,
+      notHomeMarkedAt: { not: null, lte: notHomeCutoff },
+    },
+    select: { id: true },
+  });
+  if (toResetNh.length > 0) {
+    const ids = toResetNh.map((l) => l.id);
+    await prisma.lead.updateMany({
+      where: { id: { in: ids } },
+      data: {
+        status: "NEW",
+        voicemailMarkedAt: null,
+        notHomeMarkedAt: null,
+        updatedAt: touchedAt,
+      },
+    });
+    await prisma.leadOutcomeLog.createMany({
+      data: ids.map((leadId) => ({ leadId, userId: null, status: "NEW" })),
+    });
+  }
 
   await releaseStaleCallbacksToCampaignPool(touchedAt);
 }
@@ -55,26 +75,37 @@ export async function applyLeadCooldownResets(): Promise<void> {
  */
 export async function releaseStaleCallbacksToCampaignPool(now: Date = new Date()): Promise<void> {
   const touchedAt = new Date();
-  await prisma.$executeRaw`
-    UPDATE "Lead"
-    SET
-      "status" = 'NEW',
-      "callbackScheduledFor" = NULL,
-      "callbackReservedByUserId" = NULL,
-      "callbackStatus" = 'PENDING',
-      "callbackNote" = '',
-      "callbackCreatedByUserId" = NULL,
-      "callbackSeenByAssigneeAt" = NULL,
-      "lockedByUserId" = NULL,
-      "lockedAt" = NULL,
-      "lockExpiresAt" = NULL,
-      "updatedAt" = ${touchedAt}
-    WHERE "status" = 'CALLBACK_SCHEDULED'
-      AND "callbackStatus" = 'PENDING'
-      AND "callbackScheduledFor" IS NOT NULL
-      AND "callbackScheduledFor" <= ${now}
-      AND "callbackSeenByAssigneeAt" IS NOT NULL
-  `;
+  const toRelease = await prisma.lead.findMany({
+    where: {
+      status: "CALLBACK_SCHEDULED",
+      callbackStatus: "PENDING",
+      callbackScheduledFor: { not: null, lte: now },
+      callbackSeenByAssigneeAt: { not: null },
+    },
+    select: { id: true },
+  });
+  if (toRelease.length === 0) return;
+
+  const ids = toRelease.map((l) => l.id);
+  await prisma.lead.updateMany({
+    where: { id: { in: ids } },
+    data: {
+      status: "NEW",
+      callbackScheduledFor: null,
+      callbackReservedByUserId: null,
+      callbackStatus: "PENDING",
+      callbackNote: "",
+      callbackCreatedByUserId: null,
+      callbackSeenByAssigneeAt: null,
+      lockedByUserId: null,
+      lockedAt: null,
+      lockExpiresAt: null,
+      updatedAt: touchedAt,
+    },
+  });
+  await prisma.leadOutcomeLog.createMany({
+    data: ids.map((leadId) => ({ leadId, userId: null, status: "NEW" })),
+  });
 }
 
 /** Første gang tildelte åbner/reserverer lead med aktivt tilbagekald (bevares til genudlevering ved udløb). */

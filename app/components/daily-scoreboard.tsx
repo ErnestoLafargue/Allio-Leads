@@ -77,7 +77,7 @@ export function DailyScoreboard() {
     <div className="space-y-3 rounded-xl border border-amber-200/80 bg-gradient-to-b from-amber-50/90 to-white p-6 shadow-sm">
       <div className="flex flex-wrap items-baseline justify-between gap-2">
         <h2 className="text-sm font-semibold text-amber-950">
-          Scoreboard pr. dag · seneste gemte udfald pr. lead (København)
+          Scoreboard pr. dag · kontakt-episoder (Ny markerer nyt forsøg, København)
         </h2>
         <div className="flex flex-wrap items-center gap-2">
           <button
