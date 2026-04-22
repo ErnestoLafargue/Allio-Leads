@@ -57,7 +57,8 @@ export function LeadActivityPanel({ leadId, reloadToken = 0 }: Props) {
         </button>
       </div>
       <p className="mt-1 text-xs text-stone-500">
-        Åbning af dette lead, besøg i arbejdskøen, gemt udfald og mødeudfald, tilbagekald, ændringer i noter (ved gem) og opkaldsforsøg/optagelser.
+        Fuld tidslinje for leadet (tilføjelse i systemet, scoreboard-udfald, besøg, gemte hændelser, noter og
+        opkald) — nyeste øverst.
       </p>
       {loading && <p className="mt-3 text-sm text-stone-500">Henter…</p>}
       {error && (
@@ -69,7 +70,7 @@ export function LeadActivityPanel({ leadId, reloadToken = 0 }: Props) {
         <p className="mt-3 text-sm text-stone-500">Ingen aktivitet endnu.</p>
       )}
       {!loading && items.length > 0 && (
-        <ul className="mt-3 max-h-72 space-y-3 overflow-y-auto pr-1 text-sm">
+        <ul className="mt-3 max-h-[min(70vh,28rem)] space-y-3 overflow-y-auto pr-1 text-sm">
           {items.map((row, i) => (
             <li
               key={`${row.at}-${i}`}

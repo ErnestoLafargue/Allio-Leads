@@ -315,10 +315,11 @@ export function CampaignWorkspace({ campaignId, preferredLeadId, voipSession = f
     };
   }, [pulseAllLeadLocks]);
 
-  const voipSessionAllowed = Boolean(voipSession) && !preferredLeadId?.trim();
+  /** Kun automatisk opkald / power-dial demo — manuel VoIP er altid tilgængelig ved VoIP-kampagne. */
+  const voipAutoDialAllowed = Boolean(voipSession) && !preferredLeadId?.trim();
 
   useEffect(() => {
-    if (!voipSessionAllowed) {
+    if (!voipAutoDialAllowed) {
       setPowerDialPhase("connected");
       return;
     }
@@ -333,7 +334,7 @@ export function CampaignWorkspace({ campaignId, preferredLeadId, voipSession = f
     setPowerDialPhase("dialing");
     const t = window.setTimeout(() => setPowerDialPhase("connected"), 2200);
     return () => window.clearTimeout(t);
-  }, [activeLead?.id, campaignDialMode, voipSessionAllowed]);
+  }, [activeLead?.id, campaignDialMode, voipAutoDialAllowed]);
 
   useEffect(() => {
     if (!activeLead) return;
@@ -851,16 +852,15 @@ export function CampaignWorkspace({ campaignId, preferredLeadId, voipSession = f
 
   const current = activeLead!;
   const showPowerDialWaiting =
-    voipSessionAllowed &&
+    voipAutoDialAllowed &&
     campaignDialMode === "POWER_DIALER" &&
     powerDialPhase === "dialing" &&
     Boolean(activeLead);
   const voipAutoStart =
-    voipSessionAllowed &&
+    voipAutoDialAllowed &&
     (campaignDialMode === "PREDICTIVE" ||
       (campaignDialMode === "POWER_DIALER" && powerDialPhase === "connected"));
-  const showVoipStrip =
-    voipSessionAllowed && campaignUsesVoipUi(campaignDialMode) && !showPowerDialWaiting;
+  const showVoipStrip = campaignUsesVoipUi(campaignDialMode) && !showPowerDialWaiting;
 
   const showOriginalCancelledMeetingInfo =
     campaignSystemType === "rebooking" &&
@@ -947,20 +947,21 @@ export function CampaignWorkspace({ campaignId, preferredLeadId, voipSession = f
             {mailSuccess}
           </div>
         )}
-        {campaignUsesVoipUi(campaignDialMode) && !voipSessionAllowed ? (
-          <div className="mt-3 rounded-lg border border-amber-200 bg-amber-50/90 px-3 py-2 text-xs text-amber-950">
-            <strong>VoIP er slået fra</strong> her — enten fordi du ikke er kommet ind via{" "}
-            <strong>Start</strong> på kampagneoversigten, eller fordi du har åbnet et bestemt lead via link (fx
-            historik). For at ringe med kampagnens VoIP-mode: gå til oversigten og tryk{" "}
+        {campaignUsesVoipUi(campaignDialMode) && !voipAutoDialAllowed ? (
+          <div className="mt-3 rounded-lg border border-sky-200 bg-sky-50/90 px-3 py-2 text-xs text-sky-950">
+            <strong>Automatisk opkald</strong> (predictive / power dial) starter kun, når du har trykket{" "}
+            <strong>Start</strong> på kampagneoversigten uden at åbne et bestemt lead via link.{" "}
+            <strong>Manuelt opkald</strong> kan du altid foretage i boksen «Telefonnummer (opkald)» nedenfor. Vil du
+            også auto-opkald:{" "}
             <Link href="/kampagner" className="font-semibold underline-offset-2 hover:underline">
               Kampagner
-            </Link>
-            , eller{" "}
+            </Link>{" "}
+            → <strong>Start</strong>, eller{" "}
             <Link
               href={`/kampagner/${encodeURIComponent(campaignId)}/arbejd?voipSession=1`}
               className="font-semibold underline-offset-2 hover:underline"
             >
-              start opkaldskøen her
+              start opkaldskø her
             </Link>
             .
           </div>

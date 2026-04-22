@@ -4,6 +4,18 @@ import { requireSession } from "@/lib/api-auth";
 import { canAccessBookedMeetingNotes } from "@/lib/lead-meeting-access";
 import { canAccessCallbackLead } from "@/lib/lead-callback-access";
 import { LEAD_ACTIVITY_KIND } from "@/lib/lead-activity-kinds";
+import { isLeadStatus, LEAD_STATUS_LABELS, type LeadStatus } from "@/lib/lead-status";
+import { normalizeLeaderboardOutcomeStatus } from "@/lib/lead-outcome-log";
+
+/** Hent nok rækker til komplet tidslinje (ældste øverst efter sortering). */
+const ACTIVITY_FETCH_LIMIT = 2000;
+const ACTIVITY_RESPONSE_MAX = 2500;
+
+function outcomeLogLabel(status: string): string {
+  const n = normalizeLeaderboardOutcomeStatus(status);
+  if (isLeadStatus(n)) return LEAD_STATUS_LABELS[n as LeadStatus];
+  return n || status;
+}
 
 type ActivityItemKind =
   | "visit"
@@ -49,6 +61,8 @@ export async function GET(_req: Request, { params }: Params) {
         status: true,
         bookedByUserId: true,
         callbackReservedByUserId: true,
+        importedAt: true,
+        createdAt: true,
       },
     });
     if (!lead) return NextResponse.json({ error: "Ikke fundet" }, { status: 404 });
@@ -66,11 +80,11 @@ export async function GET(_req: Request, { params }: Params) {
       );
     }
 
-    const [visits, events] = await Promise.all([
+    const [visits, events, outcomeLogs] = await Promise.all([
       prisma.leadVisitHistory.findMany({
         where: { leadId: id },
         orderBy: { visitedAt: "desc" },
-        take: 60,
+        take: ACTIVITY_FETCH_LIMIT,
         include: {
           user: { select: { id: true, name: true, username: true } },
         },
@@ -78,7 +92,15 @@ export async function GET(_req: Request, { params }: Params) {
       prisma.leadActivityEvent.findMany({
         where: { leadId: id },
         orderBy: { createdAt: "desc" },
-        take: 60,
+        take: ACTIVITY_FETCH_LIMIT,
+        include: {
+          user: { select: { id: true, name: true, username: true } },
+        },
+      }),
+      prisma.leadOutcomeLog.findMany({
+        where: { leadId: id },
+        orderBy: { createdAt: "desc" },
+        take: ACTIVITY_FETCH_LIMIT,
         include: {
           user: { select: { id: true, name: true, username: true } },
         },
@@ -103,11 +125,41 @@ export async function GET(_req: Request, { params }: Params) {
       durationSeconds: e.durationSeconds,
     }));
 
-    const items = [...visitItems, ...eventItems].sort(
+    /** Undgå dobbeltlinje når samme gem både skrev LeadActivityEvent (OUTCOME_SET) og LeadOutcomeLog. */
+    const activityOutcomeTimestampsMs = events
+      .filter((e) => e.kind === LEAD_ACTIVITY_KIND.OUTCOME_SET)
+      .map((e) => e.createdAt.getTime());
+    const outcomeLogsDeduped = outcomeLogs.filter((log) => {
+      const t = log.createdAt.getTime();
+      return !activityOutcomeTimestampsMs.some((ot) => Math.abs(ot - t) < 3000);
+    });
+
+    const outcomeLogItems = outcomeLogsDeduped.map((log) => ({
+      kind: "outcome" as const,
+      at: log.createdAt.toISOString(),
+      summary: log.user
+        ? `${log.user.name} registrerede udfald «${outcomeLogLabel(log.status)}»`
+        : `System registrerede udfald «${outcomeLogLabel(log.status)}»`,
+      user: log.user ? { name: log.user.name, username: log.user.username } : null,
+      recordingUrl: null as string | null,
+      durationSeconds: null as number | null,
+    }));
+
+    const leadOriginAt = lead.importedAt ?? lead.createdAt;
+    const originItem = {
+      kind: "note" as const,
+      at: leadOriginAt.toISOString(),
+      summary: "Lead tilføjet / oprettet i systemet",
+      user: null as { name: string; username: string } | null,
+      recordingUrl: null as string | null,
+      durationSeconds: null as number | null,
+    };
+
+    const items = [...visitItems, ...eventItems, ...outcomeLogItems, originItem].sort(
       (a, b) => new Date(b.at).getTime() - new Date(a.at).getTime(),
     );
 
-    return NextResponse.json({ items: items.slice(0, 100) });
+    return NextResponse.json({ items: items.slice(0, ACTIVITY_RESPONSE_MAX) });
   } catch (e) {
     const msg = e instanceof Error ? e.message : String(e);
     const migrationHint =
