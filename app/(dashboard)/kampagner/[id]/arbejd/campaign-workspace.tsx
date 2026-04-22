@@ -948,20 +948,20 @@ export function CampaignWorkspace({ campaignId, preferredLeadId, voipSession = f
           </div>
         )}
         {campaignUsesVoipUi(campaignDialMode) && !voipAutoDialAllowed ? (
-          <div className="mt-3 rounded-lg border border-sky-200 bg-sky-50/90 px-3 py-2 text-xs text-sky-950">
-            <strong>Automatisk opkald</strong> (predictive / power dial) starter kun, når du har trykket{" "}
-            <strong>Start</strong> på kampagneoversigten uden at åbne et bestemt lead via link.{" "}
-            <strong>Manuelt opkald</strong> kan du altid foretage i boksen «Telefonnummer (opkald)» nedenfor. Vil du
-            også auto-opkald:{" "}
-            <Link href="/kampagner" className="font-semibold underline-offset-2 hover:underline">
+          <div className="mt-3 rounded-lg border border-sky-200/90 bg-sky-50/80 px-3 py-2 text-xs leading-relaxed text-sky-950">
+            <span className="font-medium text-sky-900">Manuelt opkald:</span> Brug feltet «Telefonnummer
+            (opkald)» længere nede.{" "}
+            <span className="font-medium text-sky-900">Automatisk udringning</span> (predictive / power dial) er kun
+            aktiv, når du åbner køen via <strong>Start</strong> på oversigten —{" "}
+            <Link href="/kampagner" className="font-semibold text-sky-900 underline-offset-2 hover:underline">
               Kampagner
             </Link>{" "}
-            → <strong>Start</strong>, eller{" "}
+            eller{" "}
             <Link
               href={`/kampagner/${encodeURIComponent(campaignId)}/arbejd?voipSession=1`}
-              className="font-semibold underline-offset-2 hover:underline"
+              className="font-semibold text-sky-900 underline-offset-2 hover:underline"
             >
-              start opkaldskø her
+              åbn med Start her
             </Link>
             .
           </div>
