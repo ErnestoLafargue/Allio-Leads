@@ -146,9 +146,10 @@ export default function TilbagekaldKalenderPage() {
   const nowLinePct = (nowMinutesFromStart / nowWindowMinutes) * 100;
   const showNowLine = nowLinePct >= 0 && nowLinePct <= 100;
 
+  /** Mandag–lørdag (6 dage) */
   const weekDays = useMemo(() => {
     const out: Date[] = [];
-    for (let i = 0; i < 5; i++) out.push(addDays(weekAnchor, i));
+    for (let i = 0; i < 6; i++) out.push(addDays(weekAnchor, i));
     return out;
   }, [weekAnchor]);
 
@@ -289,7 +290,7 @@ export default function TilbagekaldKalenderPage() {
             </button>
             <span className="text-sm font-medium text-stone-700">
               Uge {formatCallbackDa(weekAnchor).split(" kl.")[0]} –{" "}
-              {formatCallbackDa(addDays(weekAnchor, 4)).split(" kl.")[0]}
+              {formatCallbackDa(addDays(weekAnchor, 5)).split(" kl.")[0]}
             </span>
             <button
               type="button"
@@ -301,8 +302,8 @@ export default function TilbagekaldKalenderPage() {
           </div>
 
           <div className="overflow-x-auto rounded-2xl border border-slate-200 bg-white shadow-sm">
-            <div className="relative min-w-[720px]">
-              <div className="grid" style={{ gridTemplateColumns: `4.5rem repeat(5, 1fr)` }}>
+            <div className="relative min-w-[860px]">
+              <div className="grid" style={{ gridTemplateColumns: `4.5rem repeat(6, 1fr)` }}>
                 <div className="border-b border-r border-slate-200 bg-slate-50/80" />
                 {weekDays.map((d, i) => {
                   const { weekday, dayMonth } = formatWeekColumnHeaderDa(d);
@@ -357,7 +358,7 @@ export default function TilbagekaldKalenderPage() {
           </div>
 
           <p className="text-xs text-slate-500">
-            Ugevisning: man–fre, {HOUR_START}:00–{HOUR_END}:00. Rød linje = omtrent nu (kun hvis i dag er i ugen).
+            Ugevisning: man–lør, {HOUR_START}:00–{HOUR_END}:00. Rød linje = omtrent nu (kun hvis i dag er i ugen).
           </p>
         </div>
       )}
@@ -446,8 +447,8 @@ function WeekNowLine({
       <div
         className="absolute h-0.5 bg-red-500 shadow-[0_0_6px_rgba(239,68,68,0.8)]"
         style={{
-          left: `calc(4.5rem + ((100% - 4.5rem) / 5) * ${col})`,
-          width: "calc((100% - 4.5rem) / 5)",
+          left: `calc(4.5rem + ((100% - 4.5rem) / 6) * ${col})`,
+          width: "calc((100% - 4.5rem) / 6)",
           top: `${top}px`,
         }}
       />
