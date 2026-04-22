@@ -104,9 +104,9 @@ function LeadDetailInner() {
   const [virkNoDataToken, setVirkNoDataToken] = useState(0);
 
   const leadWorkspaceRef = useRef<HTMLDivElement>(null);
-  const [deletingLead, setDeletingLead] = useState(false);
   const [callbackDialogOpen, setCallbackDialogOpen] = useState(false);
   const [callbackSubmitError, setCallbackSubmitError] = useState<string | null>(null);
+  const [activityReloadToken, setActivityReloadToken] = useState(0);
   const [mailDialogOpen, setMailDialogOpen] = useState(false);
   const [mailSending, setMailSending] = useState(false);
   const [mailError, setMailError] = useState<string | null>(null);
@@ -172,6 +172,14 @@ function LeadDetailInner() {
       );
       setForbidden(false);
       setLoading(false);
+      if (!cancelled) {
+        try {
+          const rv = await fetch(`/api/leads/${id}/record-view`, { method: "POST" });
+          if (!cancelled && rv.ok) setActivityReloadToken((t) => t + 1);
+        } catch {
+          /* ignore */
+        }
+      }
     }
     void load();
     return () => {
@@ -417,6 +425,7 @@ function LeadDetailInner() {
       setEditLockBlocked(false);
       setLockBusyMessage(null);
     }
+    setActivityReloadToken((t) => t + 1);
     router.refresh();
   }
 
@@ -468,6 +477,7 @@ function LeadDetailInner() {
     if ((LEAD_STATUSES as readonly string[]).includes(data.status)) {
       setStatus(data.status as LeadStatus);
     }
+    setActivityReloadToken((t) => t + 1);
     router.refresh();
   }
 
@@ -491,22 +501,7 @@ function LeadDetailInner() {
     setMeetingOutcomeStatus(
       String(data.meetingOutcomeStatus ?? "").trim().toUpperCase() || MEETING_OUTCOME_PENDING,
     );
-    router.refresh();
-  }
-
-  async function onDeleteLead() {
-    if (!lead) return;
-    if (!confirm(`Slet leadet «${lead.companyName}» permanent? Dette kan ikke fortrydes.`)) return;
-    setDeletingLead(true);
-    setError(null);
-    const res = await fetch(`/api/leads/${id}`, { method: "DELETE" });
-    setDeletingLead(false);
-    if (!res.ok) {
-      const j = await res.json().catch(() => ({}));
-      setError(j.error ?? "Kunne ikke slette");
-      return;
-    }
-    router.push(fromCampaign ? "/kampagner" : "/leads");
+    setActivityReloadToken((t) => t + 1);
     router.refresh();
   }
 
@@ -751,19 +746,9 @@ function LeadDetailInner() {
                 >
                   {saving ? "Gemmer…" : "Gem ændringer"}
                 </button>
-                <button
-                  type="button"
-                  disabled={deletingLead || (editLockBlocked && !isAdmin)}
-                  onClick={() => void onDeleteLead()}
-                  className="rounded-xl border-2 border-red-200 bg-red-50 px-5 py-2.5 text-sm font-semibold text-red-900 shadow-sm transition hover:bg-red-100 disabled:opacity-60"
-                >
-                  {deletingLead ? "Sletter…" : "Slet lead"}
-                </button>
               </>
             }
           />
-
-          <LeadActivityPanel leadId={lead.id} />
 
           {error && <p className="shrink-0 text-sm text-red-600">{error}</p>}
 
@@ -884,6 +869,8 @@ function LeadDetailInner() {
               )}
             </div>
           )}
+
+          <LeadActivityPanel leadId={lead.id} reloadToken={activityReloadToken} />
         </fieldset>
       </form>
 

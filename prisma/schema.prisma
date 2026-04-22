@@ -188,7 +188,7 @@ model LeadActivityEvent {
   id              String   @id @default(cuid())
   leadId          String
   userId          String?
-  /// NOTE_UPDATE | OUTCOME_SET | CALLBACK_SCHEDULE | CALL_ATTEMPT | CALL_RECORDING
+  /// NOTE_UPDATE | OUTCOME_SET | MEETING_OUTCOME_SET | CALLBACK_SCHEDULE | LEAD_DETAIL_OPEN | CALL_ATTEMPT | CALL_RECORDING
   kind            String
   /// Kort tekst til UI (fx «Marie opdaterede noterne») — aldrig fuld notetekst
   summary         String

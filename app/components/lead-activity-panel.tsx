@@ -11,9 +11,9 @@ export type ActivityItem = {
   durationSeconds: number | null;
 };
 
-type Props = { leadId: string };
+type Props = { leadId: string; /** Inkrementér efter record-view så listen henter igen (undgår tom liste ved første load). */ reloadToken?: number };
 
-export function LeadActivityPanel({ leadId }: Props) {
+export function LeadActivityPanel({ leadId, reloadToken = 0 }: Props) {
   const [items, setItems] = useState<ActivityItem[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -36,7 +36,7 @@ export function LeadActivityPanel({ leadId }: Props) {
 
   useEffect(() => {
     void load();
-  }, [load]);
+  }, [load, reloadToken]);
 
   return (
     <section
@@ -57,7 +57,7 @@ export function LeadActivityPanel({ leadId }: Props) {
         </button>
       </div>
       <p className="mt-1 text-xs text-stone-500">
-        Besøg i køen, gemt udfald, planlagte tilbagekald, noter (kort log) og opkaldsforsøg/optagelser — uden hver eneste tastning.
+        Åbning af dette lead, besøg i arbejdskøen, gemt udfald og mødeudfald, tilbagekald, noter (kort log) og opkaldsforsøg/optagelser — uden støj ved hver tastning.
       </p>
       {loading && <p className="mt-3 text-sm text-stone-500">Henter…</p>}
       {error && (

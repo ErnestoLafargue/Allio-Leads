@@ -14,6 +14,7 @@ import { canAccessCallbackLead } from "@/lib/lead-callback-access";
 import { copenhagenDayKey } from "@/lib/copenhagen-day";
 import {
   MEETING_OUTCOME_CANCELLED,
+  MEETING_OUTCOME_LABELS,
   MEETING_OUTCOME_PENDING,
   MEETING_OUTCOME_REBOOK,
   MEETING_OUTCOME_SALE,
@@ -412,6 +413,11 @@ export async function PATCH(req: Request, { params }: Params) {
     bookedFromRebookingCampaign = existing.campaign?.systemCampaignType === "rebooking";
   }
 
+  const prevMeetingOutcomeNorm = normalizeMeetingOutcomeStatus(existing.meetingOutcomeStatus);
+  const finalMeetingOutcomeNorm = normalizeMeetingOutcomeStatus(meetingOutcomeStatus);
+  const logMeetingOutcomeActivity =
+    adminMeetingOutcome !== undefined && prevMeetingOutcomeNorm !== finalMeetingOutcomeNorm;
+
   let campaignIdToSet: string | null | undefined;
   if (status === "MEETING_BOOKED" && meetingScheduledFor) {
     campaignIdToSet = await campaignIdForBookedMeetingOutcome(meetingOutcomeStatus);
@@ -527,20 +533,33 @@ export async function PATCH(req: Request, { params }: Params) {
         });
       }
     }
+
+    if (logMeetingOutcomeActivity) {
+      const actor = await tx.user.findUnique({
+        where: { id: userId },
+        select: { name: true },
+      });
+      const label = actor?.name?.trim() || "Bruger";
+      const moLabel =
+        MEETING_OUTCOME_LABELS[finalMeetingOutcomeNorm] ?? finalMeetingOutcomeNorm;
+      await tx.leadActivityEvent.create({
+        data: {
+          leadId: id,
+          userId,
+          kind: LEAD_ACTIVITY_KIND.MEETING_OUTCOME_SET,
+          summary: `${label} satte mødeudfald til «${moLabel}»`,
+        },
+      });
+    }
     return updated;
   });
 
   return NextResponse.json(lead);
 }
 
-export async function DELETE(_req: Request, { params }: Params) {
-  const { response } = await requireSession();
-  if (response) return response;
-  const { id } = await params;
-
-  const existing = await prisma.lead.findUnique({ where: { id } });
-  if (!existing) return NextResponse.json({ error: "Ikke fundet" }, { status: 404 });
-
-  await prisma.lead.delete({ where: { id } });
-  return NextResponse.json({ ok: true });
+export async function DELETE() {
+  return NextResponse.json(
+    { error: "Sletning af leads er deaktiveret." },
+    { status: 403 },
+  );
 }

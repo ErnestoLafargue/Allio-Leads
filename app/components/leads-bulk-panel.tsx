@@ -212,7 +212,6 @@ export function LeadsBulkPanel({
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [selected, setSelected] = useState<Set<string>>(new Set());
-  const [deleting, setDeleting] = useState(false);
   const [sortKey, setSortKey] = useState<SortColumn | null>(null);
   const [sortDir, setSortDir] = useState<"asc" | "desc">("desc");
   const [refreshNonce, setRefreshNonce] = useState(0);
@@ -536,28 +535,6 @@ export function LeadsBulkPanel({
     });
   }, [visibleIds, allSelected]);
 
-  async function onBulkDelete() {
-    const ids = [...selected];
-    if (ids.length === 0) return;
-    if (!confirm(`Slet ${ids.length} lead(s)? Dette kan ikke fortrydes.`)) return;
-    setDeleting(true);
-    setError(null);
-    const res = await fetch("/api/leads/bulk-delete", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ ids }),
-    });
-    setDeleting(false);
-    if (!res.ok) {
-      const j = await res.json().catch(() => ({}));
-      setError(j.error ?? "Kunne ikke slette");
-      return;
-    }
-    const remove = new Set(ids);
-    setSelected(new Set());
-    setLeads((prev) => prev.filter((l) => !remove.has(l.id)));
-  }
-
   const selectedOne = selected.size === 1 ? leads.find((l) => l.id === [...selected][0]) : undefined;
   function leadOpenHref(lead: LeadRow): string {
     if (campaignId) {
@@ -608,14 +585,6 @@ export function LeadsBulkPanel({
               Ændre udfald{selected.size > 1 ? ` (${selected.size})` : ""}
             </button>
           )}
-          <button
-            type="button"
-            disabled={selected.size === 0 || deleting}
-            onClick={() => void onBulkDelete()}
-            className="rounded-md border border-red-200 bg-red-50 px-3 py-1.5 text-sm font-medium text-red-800 hover:bg-red-100 disabled:cursor-not-allowed disabled:opacity-50"
-          >
-            {deleting ? "Sletter…" : `Slet valgte (${selected.size})`}
-          </button>
         </div>
       </div>
       {showFilters && (

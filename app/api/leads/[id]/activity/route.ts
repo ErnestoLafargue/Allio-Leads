@@ -23,6 +23,10 @@ function mapDbKindToItemKind(dbKind: string): ActivityItemKind {
       return "outcome";
     case LEAD_ACTIVITY_KIND.CALLBACK_SCHEDULE:
       return "callback_schedule";
+    case LEAD_ACTIVITY_KIND.LEAD_DETAIL_OPEN:
+      return "visit";
+    case LEAD_ACTIVITY_KIND.MEETING_OUTCOME_SET:
+      return "outcome";
     case LEAD_ACTIVITY_KIND.NOTE_UPDATE:
     default:
       return "note";

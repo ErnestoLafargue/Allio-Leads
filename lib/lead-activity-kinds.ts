@@ -8,6 +8,10 @@ export const LEAD_ACTIVITY_KIND = {
   OUTCOME_SET: "OUTCOME_SET",
   /** Callback-plan gemt: ny reservation eller ny tid (én linje pr. gem) */
   CALLBACK_SCHEDULE: "CALLBACK_SCHEDULE",
+  /** Leaddetalje åbnet (liste, historik, møder, m.m.) — ikke kun arbejdskø */
+  LEAD_DETAIL_OPEN: "LEAD_DETAIL_OPEN",
+  /** Admin har ændret mødeudfald (afholdt, salg, …) */
+  MEETING_OUTCOME_SET: "MEETING_OUTCOME_SET",
 } as const;
 
 export type LeadActivityKind = (typeof LEAD_ACTIVITY_KIND)[keyof typeof LEAD_ACTIVITY_KIND];
