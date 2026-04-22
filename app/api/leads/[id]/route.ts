@@ -23,6 +23,7 @@ import { campaignIdForBookedMeetingOutcome } from "@/lib/meeting-campaign-routin
 import { ensureStandardCampaignId } from "@/lib/ensure-system-campaigns";
 import { releaseExpiredLocksEverywhere, sellerMayEditLead } from "@/lib/lead-lock";
 import { findLeadBookingOverlapInDb } from "@/lib/booking/overlap-db";
+import { LEAD_ACTIVITY_KIND } from "@/lib/lead-activity-kinds";
 
 type Params = { params: Promise<{ id: string }> };
 
@@ -185,6 +186,9 @@ export async function PATCH(req: Request, { params }: Params) {
   const city = typeof body?.city === "string" ? body.city : existing.city;
   const industry = typeof body?.industry === "string" ? body.industry : existing.industry;
   const notes = typeof body?.notes === "string" ? body.notes : existing.notes;
+  const prevNotesTrim = existing.notes.trim();
+  const nextNotesTrim = notes.trim();
+  const notesChangedForActivity = prevNotesTrim !== nextNotesTrim;
 
   let customMerged = parseCustomFields(existing.customFields);
   if (body?.customFields && typeof body.customFields === "object" && body.customFields !== null) {
@@ -467,6 +471,26 @@ export async function PATCH(req: Request, { params }: Params) {
     if (logOutcome) {
       await tx.leadOutcomeLog.create({
         data: { leadId: id, userId, status: normalizeLeaderboardOutcomeStatus(status) },
+      });
+    }
+    if (notesChangedForActivity) {
+      const actor = await tx.user.findUnique({
+        where: { id: userId },
+        select: { name: true },
+      });
+      const label = actor?.name?.trim() || "Bruger";
+      const summary =
+        nextNotesTrim.length > prevNotesTrim.length ||
+        (prevNotesTrim === "" && nextNotesTrim !== "")
+          ? `${label} tilføjede til noter`
+          : `${label} opdaterede noterne`;
+      await tx.leadActivityEvent.create({
+        data: {
+          leadId: id,
+          userId,
+          kind: LEAD_ACTIVITY_KIND.NOTE_UPDATE,
+          summary,
+        },
       });
     }
     return updated;

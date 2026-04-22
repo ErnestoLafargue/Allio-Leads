@@ -23,6 +23,7 @@ import {
 } from "@/lib/meeting-outcome";
 import { defaultCampaignFieldConfigJson } from "@/lib/campaign-fields";
 import { isValidCVR } from "@/lib/cvr-import";
+import { LeadActivityPanel } from "@/app/components/lead-activity-panel";
 
 type Lead = {
   id: string;
@@ -678,7 +679,15 @@ function LeadDetailInner() {
           </div>
         )}
 
-        <h1 className="mt-2 text-xl font-semibold text-stone-900">{lead.companyName}</h1>
+        <div className="mt-2 flex flex-wrap items-start justify-between gap-3">
+          <h1 className="text-xl font-semibold text-stone-900">{lead.companyName}</h1>
+          <a
+            href="#lead-aktivitet"
+            className="shrink-0 rounded-lg border border-stone-200 bg-white px-3 py-1.5 text-xs font-semibold text-stone-800 shadow-sm hover:bg-stone-50"
+          >
+            Aktivitet
+          </a>
+        </div>
         <p className="text-sm text-stone-500">
           Kampagne:{" "}
           {lead.campaign ? lead.campaign.name : "Ingen kampagne (kampagne slettet)"}
@@ -753,6 +762,8 @@ function LeadDetailInner() {
               </>
             }
           />
+
+          <LeadActivityPanel leadId={lead.id} />
 
           {error && <p className="shrink-0 text-sm text-red-600">{error}</p>}
 

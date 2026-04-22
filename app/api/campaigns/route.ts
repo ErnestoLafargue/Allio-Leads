@@ -31,6 +31,7 @@ export async function GET() {
         includeProtectedBusinesses: true,
         isSystemCampaign: true,
         systemCampaignType: true,
+        dialMode: true,
         createdAt: true,
         updatedAt: true,
         _count: {
@@ -50,6 +51,7 @@ export async function GET() {
       msg.includes("includeProtectedBusinesses") ||
       msg.includes("isSystemCampaign") ||
       msg.includes("systemCampaignType") ||
+      msg.includes("dialMode") ||
       msg.includes("no such column") ||
       msg.toLowerCase().includes("does not exist");
     return NextResponse.json(

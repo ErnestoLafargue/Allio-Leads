@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { useSession } from "next-auth/react";
 import { useCallback, useEffect, useState } from "react";
+import { campaignShowsStartButton, normalizeCampaignDialMode } from "@/lib/dial-mode";
 
 type Campaign = {
   id: string;
@@ -11,6 +12,7 @@ type Campaign = {
   createdAt: string;
   updatedAt: string;
   systemCampaignType?: string | null;
+  dialMode?: string | null;
   _count: { leads: number };
 };
 
@@ -24,6 +26,7 @@ export default function KampagnerPage() {
   const [loadError, setLoadError] = useState<string | null>(null);
 
   const isAdmin = session?.user.role === "ADMIN";
+  const colCount = isAdmin ? 4 : 3;
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -61,7 +64,7 @@ export default function KampagnerPage() {
             Leads
           </Link>{" "}
           ser du alle leads på tværs af kampagner. Som administrator: kolonnen{" "}
-          <strong>Kampagne-layout</strong> er til felter — ikke den daglige opkaldsside. Nye kampagner under{" "}
+          <strong>Kampagne indstillinger</strong> er til felter — ikke den daglige opkaldsside. Nye kampagner under{" "}
           <Link href="/import" className="font-medium text-stone-800 underline-offset-2 hover:underline">
             Opret &amp; Import
           </Link>
@@ -88,19 +91,20 @@ export default function KampagnerPage() {
             <tr>
               <th className="px-4 py-3 font-medium">Navn</th>
               <th className="px-4 py-3 font-medium">Leads</th>
+              <th className="px-4 py-3 font-medium">Start</th>
               {isAdmin && <th className="px-4 py-3 font-medium">Admin</th>}
             </tr>
           </thead>
           <tbody className="divide-y divide-stone-100">
             {loading ? (
               <tr>
-                <td colSpan={isAdmin ? 3 : 2} className="px-4 py-8 text-center text-stone-500">
+                <td colSpan={colCount} className="px-4 py-8 text-center text-stone-500">
                   Henter…
                 </td>
               </tr>
             ) : campaigns.length === 0 ? (
               <tr>
-                <td colSpan={isAdmin ? 3 : 2} className="px-4 py-8 text-center text-stone-500">
+                <td colSpan={colCount} className="px-4 py-8 text-center text-stone-500">
                   Ingen kampagner endnu.{" "}
                   {isAdmin ? (
                     <>
@@ -134,13 +138,25 @@ export default function KampagnerPage() {
                     </Link>
                   </td>
                   <td className="px-4 py-3 text-stone-600">{c._count.leads}</td>
+                  <td className="px-4 py-3">
+                    {campaignShowsStartButton(normalizeCampaignDialMode(c.dialMode)) ? (
+                      <Link
+                        href={`/kampagner/${c.id}/arbejd`}
+                        className="inline-flex rounded-md bg-emerald-700 px-3 py-1.5 text-xs font-semibold text-white hover:bg-emerald-800"
+                      >
+                        Start
+                      </Link>
+                    ) : (
+                      <span className="text-stone-400">—</span>
+                    )}
+                  </td>
                   {isAdmin && (
                     <td className="px-4 py-3">
                       <Link
                         href={`/kampagner/${c.id}`}
                         className="text-sm font-medium text-stone-700 underline-offset-2 hover:underline"
                       >
-                        Kampagne-layout
+                        Kampagne indstillinger
                       </Link>
                     </td>
                   )}

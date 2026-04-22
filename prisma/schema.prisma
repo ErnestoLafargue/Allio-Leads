@@ -29,6 +29,7 @@ model User {
   outcomeLogs    LeadOutcomeLog[]
   visitHistory   LeadVisitHistory[]
   loginDays      UserLoginDay[]
+  leadActivityEvents LeadActivityEvent[]
 }
 
 /// Én række pr. bruger pr. kalenderdag (København) ved vellykket login.
@@ -56,6 +57,8 @@ model Campaign {
   isSystemCampaign   Boolean @default(false)
   /// upcoming_meetings | rebooking | active_customers | direct_booking | null
   systemCampaignType String?
+  /// NO_DIAL | CLICK_TO_CALL | POWER_DIALER | PREDICTIVE — styrer Telnyx VOIP / opkaldsflow
+  dialMode    String   @default("NO_DIAL")
   createdAt   DateTime @default(now())
   updatedAt   DateTime @updatedAt
 
@@ -133,6 +136,7 @@ model Lead {
 
   outcomeLogs LeadOutcomeLog[]
   visitHistory LeadVisitHistory[]
+  activityEvents LeadActivityEvent[]
 
   @@index([lockExpiresAt])
   @@index([lockedByUserId])
@@ -177,4 +181,24 @@ model LeadVisitHistory {
   @@index([userId, dayKey, visitedAt])
   @@index([leadId, visitedAt])
   @@index([campaignId, visitedAt])
+}
+
+/// Tidslinje for lead: noter (meta), opkaldsoptagelser m.m. — besøg hentes fra LeadVisitHistory i API.
+model LeadActivityEvent {
+  id              String   @id @default(cuid())
+  leadId          String
+  userId          String?
+  /// NOTE_UPDATE | CALL_RECORDING (flere efter behov)
+  kind            String
+  /// Kort tekst til UI (fx «Marie opdaterede noterne») — aldrig fuld notetekst
+  summary         String
+  recordingUrl    String?
+  durationSeconds Int?
+  telnyxCallLegId String?
+  createdAt       DateTime @default(now())
+
+  lead Lead @relation(fields: [leadId], references: [id], onDelete: Cascade)
+  user User? @relation(fields: [userId], references: [id], onDelete: SetNull)
+
+  @@index([leadId, createdAt])
 }

@@ -7,6 +7,7 @@ import {
   PROTECTED_CAMPAIGN_DELETE_MESSAGE,
 } from "@/lib/campaign-delete";
 import { workableCampaignLeadsWhere } from "@/lib/campaign-workable-leads";
+import { DIAL_MODES, normalizeCampaignDialMode, type CampaignDialMode } from "@/lib/dial-mode";
 
 type Params = { params: Promise<{ id: string }> };
 
@@ -24,6 +25,7 @@ export async function GET(_req: Request, { params }: Params) {
       includeProtectedBusinesses: true,
       isSystemCampaign: true,
       systemCampaignType: true,
+      dialMode: true,
       createdAt: true,
       updatedAt: true,
       _count: {
@@ -98,6 +100,15 @@ export async function PATCH(req: Request, { params }: Params) {
     includeProtectedBusinesses = body.includeProtectedBusinesses;
   }
 
+  let dialMode: CampaignDialMode = normalizeCampaignDialMode(existing.dialMode);
+  if (typeof body?.dialMode === "string") {
+    const next = normalizeCampaignDialMode(body.dialMode);
+    if (!DIAL_MODES.includes(next)) {
+      return NextResponse.json({ error: "Ugyldig dial mode" }, { status: 400 });
+    }
+    dialMode = next;
+  }
+
   let fieldConfigStr = existing.fieldConfig;
   if (body?.fieldConfig !== undefined) {
     const raw =
@@ -113,12 +124,13 @@ export async function PATCH(req: Request, { params }: Params) {
 
   const campaign = await prisma.campaign.update({
     where: { id },
-    data: { name, fieldConfig: fieldConfigStr, includeProtectedBusinesses },
+    data: { name, fieldConfig: fieldConfigStr, includeProtectedBusinesses, dialMode },
     select: {
       id: true,
       name: true,
       fieldConfig: true,
       includeProtectedBusinesses: true,
+      dialMode: true,
       updatedAt: true,
     },
   });

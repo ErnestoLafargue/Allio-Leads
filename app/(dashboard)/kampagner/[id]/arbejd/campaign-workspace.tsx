@@ -18,6 +18,12 @@ import {
 import { isValidCVR } from "@/lib/cvr-import";
 import { buildReserveNextRequestBody } from "@/lib/workspace-start-date-filter";
 import { MEETING_OUTCOME_REBOOK } from "@/lib/meeting-outcome";
+import {
+  type CampaignDialMode,
+  campaignUsesVoipUi,
+  normalizeCampaignDialMode,
+} from "@/lib/dial-mode";
+import { CampaignVoipStrip } from "@/app/components/campaign-voip-strip";
 
 type Lead = {
   id: string;
@@ -74,6 +80,8 @@ export function CampaignWorkspace({ campaignId, preferredLeadId }: Props) {
   const sessionUserId = session?.user?.id ?? "";
   const isAdmin = session?.user?.role === "ADMIN";
   const [campaignName, setCampaignName] = useState("");
+  const [campaignDialMode, setCampaignDialMode] = useState<CampaignDialMode>("NO_DIAL");
+  const [powerDialPhase, setPowerDialPhase] = useState<"dialing" | "connected">("connected");
   const [campaignSystemType, setCampaignSystemType] = useState<string | null>(null);
   const [fieldConfigJson, setFieldConfigJson] = useState("{}");
   const [campaignLeadCount, setCampaignLeadCount] = useState<number | null>(null);
@@ -216,6 +224,7 @@ export function CampaignWorkspace({ campaignId, preferredLeadId }: Props) {
         if (!cancelled) {
           setError(typeof j.error === "string" ? j.error : "Kunne ikke reservere lead.");
           setCampaignName(c.name ?? "");
+          setCampaignDialMode(normalizeCampaignDialMode(c.dialMode));
           setCampaignSystemType(
             typeof c.systemCampaignType === "string" && c.systemCampaignType.trim()
               ? c.systemCampaignType.trim()
@@ -231,6 +240,7 @@ export function CampaignWorkspace({ campaignId, preferredLeadId }: Props) {
       const rj = (await rRes.json()) as { lead: Lead | null };
       if (cancelled) return;
       setCampaignName(c.name ?? "");
+      setCampaignDialMode(normalizeCampaignDialMode(c.dialMode));
       setCampaignSystemType(
         typeof c.systemCampaignType === "string" && c.systemCampaignType.trim()
           ? c.systemCampaignType.trim()
@@ -295,6 +305,20 @@ export function CampaignWorkspace({ campaignId, preferredLeadId }: Props) {
   }, [pulseAllLeadLocks]);
 
   useEffect(() => {
+    if (campaignDialMode !== "POWER_DIALER") {
+      setPowerDialPhase("connected");
+      return;
+    }
+    if (!activeLead?.id) {
+      setPowerDialPhase("connected");
+      return;
+    }
+    setPowerDialPhase("dialing");
+    const t = window.setTimeout(() => setPowerDialPhase("connected"), 2200);
+    return () => window.clearTimeout(t);
+  }, [activeLead?.id, campaignDialMode]);
+
+  useEffect(() => {
     if (!activeLead) return;
     loadFormFromLead(activeLead);
   }, [activeLead, loadFormFromLead]);
@@ -307,7 +331,8 @@ export function CampaignWorkspace({ campaignId, preferredLeadId }: Props) {
     setCustom((prev) => ({ ...prev, [key]: value }));
   }
 
-  function getFormSnapshot(): CampaignLeadFormSnapshot {
+  function getFormSnapshot(statusOverride?: LeadStatus): CampaignLeadFormSnapshot {
+    const st = statusOverride ?? status;
     return {
       companyName,
       phone,
@@ -319,7 +344,7 @@ export function CampaignWorkspace({ campaignId, preferredLeadId }: Props) {
       industry,
       notes,
       customFields: custom,
-      status,
+      status: st,
       meetingScheduledFor,
       meetingContactName,
       meetingContactEmail,
@@ -394,11 +419,15 @@ export function CampaignWorkspace({ campaignId, preferredLeadId }: Props) {
     }
   }
 
-  async function onNext(meetingScheduledForISO?: string, adminSkipBookingOverlap?: boolean) {
+  async function onNext(
+    meetingScheduledForISO?: string,
+    adminSkipBookingOverlap?: boolean,
+    predictiveOutcome?: LeadStatus,
+  ) {
     if (!activeLead) return;
 
     /** Mødebooking: vent på bekræftet gem — ingen optimistisk navigation (data integritet). */
-    if (status === "MEETING_BOOKED") {
+    if (status === "MEETING_BOOKED" && predictiveOutcome === undefined) {
       const iso =
         meetingScheduledForISO ??
         (meetingScheduledFor ? new Date(meetingScheduledFor).toISOString() : undefined);
@@ -440,9 +469,10 @@ export function CampaignWorkspace({ campaignId, preferredLeadId }: Props) {
     }
 
     const currentId = activeLead.id;
-    const shouldBumpNewQueue = status === "NEW" && activeLead.status === "NEW";
+    const snapshotStatus = predictiveOutcome ?? status;
+    const shouldBumpNewQueue = snapshotStatus === "NEW" && activeLead.status === "NEW";
     const patchBody = {
-      ...buildCampaignLeadPatchBody(getFormSnapshot()),
+      ...buildCampaignLeadPatchBody(getFormSnapshot(predictiveOutcome)),
       ...(shouldBumpNewQueue ? { queueBump: true } : {}),
     };
 
@@ -616,6 +646,19 @@ export function CampaignWorkspace({ campaignId, preferredLeadId }: Props) {
     setVirkEnrichFeedback(payload.message ?? "Berigelse gennemført");
   }
 
+  const onNextRef = useRef(onNext);
+  onNextRef.current = onNext;
+
+  const handleOutcomeStatusChange = useCallback(
+    (next: LeadStatus) => {
+      setStatus(next);
+      if (campaignDialMode !== "PREDICTIVE") return;
+      if (next === "NEW" || next === "MEETING_BOOKED" || next === "CALLBACK_SCHEDULED") return;
+      queueMicrotask(() => void onNextRef.current(undefined, undefined, next));
+    },
+    [campaignDialMode],
+  );
+
   async function onSendMail(payload: { to: string; subject: string; message: string }) {
     if (!activeLead) return;
     setMailSending(true);
@@ -759,6 +802,13 @@ export function CampaignWorkspace({ campaignId, preferredLeadId }: Props) {
   }
 
   const current = activeLead!;
+  const showPowerDialWaiting =
+    campaignDialMode === "POWER_DIALER" && powerDialPhase === "dialing" && Boolean(activeLead);
+  const voipAutoStart =
+    campaignDialMode === "PREDICTIVE" ||
+    (campaignDialMode === "POWER_DIALER" && powerDialPhase === "connected");
+  const showVoipStrip = campaignUsesVoipUi(campaignDialMode) && !showPowerDialWaiting;
+
   const showOriginalCancelledMeetingInfo =
     campaignSystemType === "rebooking" &&
     current.status === "MEETING_BOOKED" &&
@@ -786,7 +836,29 @@ export function CampaignWorkspace({ campaignId, preferredLeadId }: Props) {
   }
 
   return (
-    <div className="flex min-h-[calc(100dvh-5.5rem)] flex-col gap-4 pb-4">
+    <div className="relative flex min-h-[calc(100dvh-5.5rem)] flex-col gap-4 pb-4">
+      {showPowerDialWaiting && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-stone-950/45 p-4 backdrop-blur-[2px]"
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="power-dial-wait-title"
+        >
+          <div className="w-full max-w-md rounded-2xl border border-stone-200 bg-white p-8 text-center shadow-2xl">
+            <div className="mx-auto mb-4 h-12 w-12 animate-spin rounded-full border-2 border-emerald-600 border-t-transparent" />
+            <h2 id="power-dial-wait-title" className="text-lg font-semibold text-stone-900">
+              Ringer til leads…
+            </h2>
+            <p className="mt-2 text-sm text-stone-600">
+              Telnyx Power Dialer ringer til flere numre parallelt. Når en person tager, vises leadet, og du kan tale
+              videre som ved Click to call.
+            </p>
+            <p className="mt-3 text-xs text-stone-500">
+              (Demo: venteskærm — kobl jeres Call Control + AMD på for rigtig parallel kø.)
+            </p>
+          </div>
+        </div>
+      )}
       <div className="shrink-0">
         <Link href="/kampagner" className="text-sm text-stone-500 hover:text-stone-800">
           ← Kampagner
@@ -826,7 +898,7 @@ export function CampaignWorkspace({ campaignId, preferredLeadId }: Props) {
 
       <LeadOutcomeStrip
         status={status}
-        onStatusChange={setStatus}
+        onStatusChange={handleOutcomeStatusChange}
         meetingBookedAt={meetingBookedAt}
         bookedByUser={bookedByUser}
         inlineAfterOutcomes={
@@ -852,6 +924,16 @@ export function CampaignWorkspace({ campaignId, preferredLeadId }: Props) {
           </>
         }
       />
+
+      {showVoipStrip && (
+        <CampaignVoipStrip
+          leadId={current.id}
+          campaignId={campaignId}
+          phoneDisplay={phone.trim() || current.phone}
+          dialMode={campaignDialMode}
+          autoStartCall={voipAutoStart}
+        />
+      )}
 
       {showBackgroundSaveHint && (
         <p className="shrink-0 text-xs text-stone-500" aria-live="polite">

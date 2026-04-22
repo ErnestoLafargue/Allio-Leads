@@ -34,6 +34,12 @@ import {
   getReklamebeskyttetNormalized,
   leadIncludedForCampaignProtectedSetting,
 } from "@/lib/reklamebeskyttet-filter";
+import {
+  DIAL_MODES,
+  DIAL_MODE_LABELS,
+  type CampaignDialMode,
+  normalizeCampaignDialMode,
+} from "@/lib/dial-mode";
 
 /** Samme gruppering som i lead-formular: vej + postnr + by i én ramme. */
 const KAMPAGNE_FORM_GROUPS = FIELD_GROUPS.filter((g) => g !== "postalCode" && g !== "city");
@@ -81,6 +87,7 @@ export default function RedigerKampagnePage() {
   const [exportFormat, setExportFormat] = useState<"csv" | "xlsx">("xlsx");
   const [exporting, setExporting] = useState(false);
   const [exportMessage, setExportMessage] = useState<string | null>(null);
+  const [dialMode, setDialMode] = useState<CampaignDialMode>("NO_DIAL");
 
   const isAdmin = session?.user.role === "ADMIN";
 
@@ -113,6 +120,7 @@ export default function RedigerKampagnePage() {
             : null,
       });
       setIncludeProtectedBusinesses(Boolean(c.includeProtectedBusinesses));
+      setDialMode(normalizeCampaignDialMode(c.dialMode));
       const cfg = parseFieldConfig(c.fieldConfig);
       const next: Record<FieldGroupKey, Row[]> = {
         companyName: [],
@@ -282,6 +290,7 @@ export default function RedigerKampagnePage() {
         name: name.trim(),
         fieldConfig: serializeFieldConfig({ extensions }),
         includeProtectedBusinesses,
+        dialMode,
       }),
     });
     setSaving(false);
@@ -316,7 +325,7 @@ export default function RedigerKampagnePage() {
         <Link href="/kampagner" className="text-sm text-stone-500 hover:text-stone-800">
           ← Tilbage til kampagner
         </Link>
-        <h1 className="mt-2 text-xl font-semibold text-stone-900">Kampagne-layout</h1>
+        <h1 className="mt-2 text-xl font-semibold text-stone-900">Kampagne indstillinger</h1>
         <p className="mt-1 text-sm text-stone-600">
           Standardfelterne (virksomhed, telefon, CVR, adresse, branche) er altid synlige. Tilføj ekstra felter
           under det område, de hører til — fx &quot;Stifter navn&quot; under virksomhedsnavn eller &quot;Direktør
@@ -324,26 +333,28 @@ export default function RedigerKampagnePage() {
         </p>
       </div>
 
-      {campaignMeta && (
-        <section className="rounded-lg border border-stone-200 bg-white p-6 shadow-sm">
-          <h2 className="text-sm font-semibold text-stone-900">Slet kampagne</h2>
-          <p className="mt-1 text-xs text-stone-500">
-            Fjerner kun selve kampagnen. Leads bevares uden tilknytning til denne kampagne.
-          </p>
-          <div className="mt-4 flex flex-col gap-2 sm:flex-row sm:items-start sm:gap-4">
-            <CampaignDeleteFlow
-              campaignId={id}
-              campaignName={name.trim() || campaignMeta.name}
-              deletable={canDeleteCampaign(campaignMeta)}
-              protectedExplanation={PROTECTED_CAMPAIGN_DELETE_MESSAGE}
-              onDeleted={() => {
-                router.push("/kampagner");
-                router.refresh();
-              }}
+      <section className="rounded-lg border border-stone-200 bg-white p-6 shadow-sm">
+        <h2 className="text-sm font-semibold text-stone-900">
+          Kampagnenavn &amp; Medtag reklamebeskyttede virksomheder
+        </h2>
+        <div className="mt-4">
+          <label className="block text-sm font-medium text-stone-700">Kampagnenavn</label>
+          <input
+            form="campaign-settings-form"
+            required
+            value={name}
+            onChange={(e) => setName(e.target.value)}
+            className="mt-2 w-full max-w-md rounded-md border border-stone-200 px-3 py-2 text-stone-900 shadow-sm outline-none ring-stone-400 focus:ring-2"
+          />
+          <div className="mt-8 max-w-md border-t border-stone-100 pt-6">
+            <CampaignProtectedSwitch
+              includeProtected={includeProtectedBusinesses}
+              onChange={setIncludeProtectedBusinesses}
+              disabled={saving}
             />
           </div>
-        </section>
-      )}
+        </div>
+      </section>
 
       {outcomeStats && (
         <section className="rounded-lg border border-stone-200 bg-stone-50/80 p-6 shadow-sm">
@@ -433,23 +444,57 @@ export default function RedigerKampagnePage() {
         </div>
       </section>
 
-      <form onSubmit={onSave} className="space-y-8">
-        <div className="rounded-lg border border-stone-200 bg-white p-6 shadow-sm">
-          <label className="block text-sm font-medium text-stone-700">Kampagnenavn</label>
-          <input
-            required
-            value={name}
-            onChange={(e) => setName(e.target.value)}
-            className="mt-2 w-full max-w-md rounded-md border border-stone-200 px-3 py-2 text-stone-900 shadow-sm outline-none ring-stone-400 focus:ring-2"
-          />
-          <div className="mt-8 max-w-md border-t border-stone-100 pt-6">
-            <CampaignProtectedSwitch
-              includeProtected={includeProtectedBusinesses}
-              onChange={setIncludeProtectedBusinesses}
-              disabled={saving}
-            />
-          </div>
-        </div>
+      <form id="campaign-settings-form" onSubmit={onSave} className="space-y-8">
+        <section className="rounded-lg border border-stone-200 bg-white p-6 shadow-sm">
+          <h2 className="text-sm font-semibold text-stone-900">Dial mode (Telnyx VOIP)</h2>
+          <p className="mt-1 text-xs text-stone-500">
+            Ét valg pr. kampagne. Click to call, Predictive og Power Dialer viser «Start» på kampagneoversigten og VoIP
+            under udfald i arbejdet (når Telnyx er konfigureret).
+          </p>
+          <fieldset className="mt-4 space-y-2 border-0 p-0">
+            <legend className="sr-only">Dial mode</legend>
+            {DIAL_MODES.map((m) => (
+              <label
+                key={m}
+                className={`flex cursor-pointer gap-3 rounded-lg border px-3 py-2.5 text-sm ${
+                  dialMode === m
+                    ? "border-emerald-300 bg-emerald-50/80"
+                    : "border-stone-200 bg-stone-50/60 hover:bg-stone-50"
+                }`}
+              >
+                <input
+                  type="radio"
+                  name="dialMode"
+                  value={m}
+                  checked={dialMode === m}
+                  onChange={() => setDialMode(m)}
+                  className="mt-0.5"
+                />
+                <span>
+                  <span className="font-medium text-stone-900">{DIAL_MODE_LABELS[m]}</span>
+                  {m === "NO_DIAL" ? (
+                    <span className="mt-0.5 block text-xs text-stone-600">Standard — ingen VoIP.</span>
+                  ) : null}
+                  {m === "CLICK_TO_CALL" ? (
+                    <span className="mt-0.5 block text-xs text-stone-600">
+                      Manuelt opkald — grøn knap under udfald.
+                    </span>
+                  ) : null}
+                  {m === "PREDICTIVE" ? (
+                    <span className="mt-0.5 block text-xs text-stone-600">
+                      Auto-opkald pr. lead og videre når udfald vælges.
+                    </span>
+                  ) : null}
+                  {m === "POWER_DIALER" ? (
+                    <span className="mt-0.5 block text-xs text-stone-600">
+                      Parallel udringning via Telnyx — lead først når nogen svarer.
+                    </span>
+                  ) : null}
+                </span>
+              </label>
+            ))}
+          </fieldset>
+        </section>
 
         <div className="space-y-6">
           {KAMPAGNE_FORM_GROUPS.map((g) => {
@@ -620,6 +665,27 @@ export default function RedigerKampagnePage() {
           {saving ? "Gemmer…" : "Gem kampagne"}
         </button>
       </form>
+
+      {campaignMeta && (
+        <section className="rounded-lg border border-stone-200 bg-white p-6 shadow-sm">
+          <h2 className="text-sm font-semibold text-stone-900">Slet kampagne</h2>
+          <p className="mt-1 text-xs text-stone-500">
+            Fjerner kun selve kampagnen. Leads bevares uden tilknytning til denne kampagne.
+          </p>
+          <div className="mt-4 flex flex-col gap-2 sm:flex-row sm:items-start sm:gap-4">
+            <CampaignDeleteFlow
+              campaignId={id}
+              campaignName={name.trim() || campaignMeta.name}
+              deletable={canDeleteCampaign(campaignMeta)}
+              protectedExplanation={PROTECTED_CAMPAIGN_DELETE_MESSAGE}
+              onDeleted={() => {
+                router.push("/kampagner");
+                router.refresh();
+              }}
+            />
+          </div>
+        </section>
+      )}
     </div>
   );
 }
