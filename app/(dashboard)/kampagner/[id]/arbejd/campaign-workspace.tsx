@@ -24,6 +24,7 @@ import {
   normalizeCampaignDialMode,
 } from "@/lib/dial-mode";
 import { CampaignVoipStrip } from "@/app/components/campaign-voip-strip";
+import type { ActivityItem } from "@/app/components/lead-activity-panel";
 
 type Lead = {
   id: string;
@@ -130,6 +131,10 @@ export function CampaignWorkspace({ campaignId, preferredLeadId }: Props) {
   const [virkEnrichFeedback, setVirkEnrichFeedback] = useState<string | null>(null);
   const [virkNoDataFieldKeys, setVirkNoDataFieldKeys] = useState<string[]>([]);
   const [virkNoDataToken, setVirkNoDataToken] = useState(0);
+  const [activityOpen, setActivityOpen] = useState(false);
+  const [activityItems, setActivityItems] = useState<ActivityItem[]>([]);
+  const [activityLoading, setActivityLoading] = useState(false);
+  const [activityError, setActivityError] = useState<string | null>(null);
 
   useEffect(() => {
     activeLeadRef.current = activeLead;
@@ -138,6 +143,7 @@ export function CampaignWorkspace({ campaignId, preferredLeadId }: Props) {
   useEffect(() => {
     setMailSuccess(null);
     setMailError(null);
+    setActivityOpen(false);
   }, [activeLead?.id]);
 
   backgroundLockLeadIdsRef.current = backgroundLockLeadIds;
@@ -322,6 +328,31 @@ export function CampaignWorkspace({ campaignId, preferredLeadId }: Props) {
     if (!activeLead) return;
     loadFormFromLead(activeLead);
   }, [activeLead, loadFormFromLead]);
+
+  useEffect(() => {
+    if (!activityOpen || !activeLead?.id) return;
+    const leadIdForActivity = activeLead.id;
+    let cancelled = false;
+    (async () => {
+      setActivityLoading(true);
+      setActivityError(null);
+      const res = await fetch(`/api/leads/${leadIdForActivity}/activity`);
+      if (cancelled) return;
+      if (!res.ok) {
+        const j = await res.json().catch(() => ({}));
+        setActivityError(typeof j.error === "string" ? j.error : "Kunne ikke hente aktivitet");
+        setActivityItems([]);
+        setActivityLoading(false);
+        return;
+      }
+      const data = (await res.json()) as { items?: ActivityItem[] };
+      setActivityItems(Array.isArray(data.items) ? data.items : []);
+      setActivityLoading(false);
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [activityOpen, activeLead?.id]);
 
   useEffect(() => {
     if (status !== "MEETING_BOOKED") setMeetingContactErrors({});
@@ -901,6 +932,66 @@ export function CampaignWorkspace({ campaignId, preferredLeadId }: Props) {
         onStatusChange={handleOutcomeStatusChange}
         meetingBookedAt={meetingBookedAt}
         bookedByUser={bookedByUser}
+        aboveOutcomeButtons={
+          activityOpen ? (
+            <div className="rounded-xl border-2 border-blue-300 bg-blue-50/95 p-4 shadow-md">
+              <div className="flex items-start justify-between gap-2">
+                <h3 className="text-sm font-semibold text-blue-950">Aktivitet på dette lead</h3>
+                <button
+                  type="button"
+                  onClick={() => setActivityOpen(false)}
+                  className="shrink-0 rounded-md px-2 py-1 text-xs font-semibold text-blue-900 hover:bg-blue-100/80"
+                >
+                  Luk
+                </button>
+              </div>
+              <p className="mt-1 text-xs text-blue-900/80">
+                Besøg i køen, noter (uden indhold) og optagelser når Telnyx er aktiv.
+              </p>
+              {activityLoading && <p className="mt-3 text-sm text-blue-900/70">Henter…</p>}
+              {activityError && (
+                <p className="mt-3 text-sm text-red-700" role="alert">
+                  {activityError}
+                </p>
+              )}
+              {!activityLoading && !activityError && activityItems.length === 0 && (
+                <p className="mt-3 text-sm text-blue-900/70">Ingen aktivitet registreret endnu.</p>
+              )}
+              {!activityLoading && activityItems.length > 0 && (
+                <ul className="mt-3 max-h-64 space-y-2.5 overflow-y-auto pr-1 text-sm">
+                  {activityItems.map((row, i) => (
+                    <li
+                      key={`${row.at}-${i}`}
+                      className="rounded-lg border border-blue-200/80 bg-white/90 px-3 py-2 text-blue-950"
+                    >
+                      <p className="text-xs text-blue-800/80">
+                        {new Date(row.at).toLocaleString("da-DK", {
+                          dateStyle: "short",
+                          timeStyle: "short",
+                        })}
+                      </p>
+                      <p className="mt-0.5 font-medium">{row.summary}</p>
+                      {row.user && (
+                        <p className="mt-0.5 text-xs text-blue-900/75">
+                          {row.user.name}{" "}
+                          <span className="text-blue-700/70">(@{row.user.username})</span>
+                        </p>
+                      )}
+                      {row.kind === "call" && row.recordingUrl ? (
+                        <audio controls className="mt-2 h-8 w-full max-w-md" src={row.recordingUrl}>
+                          <track kind="captions" />
+                        </audio>
+                      ) : null}
+                      {row.kind === "call" && !row.recordingUrl ? (
+                        <p className="mt-1 text-xs text-blue-800/70">Ingen optagelse tilknyttet endnu.</p>
+                      ) : null}
+                    </li>
+                  ))}
+                </ul>
+              )}
+            </div>
+          ) : null
+        }
         inlineAfterOutcomes={
           canScheduleCallback ? (
             <button
@@ -915,6 +1006,17 @@ export function CampaignWorkspace({ campaignId, preferredLeadId }: Props) {
         }
         rightColumn={
           <>
+            <button
+              type="button"
+              onClick={() => setActivityOpen((o) => !o)}
+              className={`w-full min-w-[10rem] rounded-xl border-2 px-6 py-3 text-sm font-semibold shadow-md transition sm:min-w-[12rem] ${
+                activityOpen
+                  ? "border-blue-800 bg-blue-800 text-white hover:bg-blue-900"
+                  : "border-blue-600 bg-blue-600 text-white hover:bg-blue-700"
+              }`}
+            >
+              Aktivitet
+            </button>
             {status === "NEW" && showNextForMeeting ? (
               <p className="max-w-[14rem] text-right text-xs text-stone-500">
                 Gemmer noter og går til næste lead uden at ændre udfald.
@@ -929,7 +1031,7 @@ export function CampaignWorkspace({ campaignId, preferredLeadId }: Props) {
         <CampaignVoipStrip
           leadId={current.id}
           campaignId={campaignId}
-          phoneDisplay={phone.trim() || current.phone}
+          leadPhone={current.phone}
           dialMode={campaignDialMode}
           autoStartCall={voipAutoStart}
         />

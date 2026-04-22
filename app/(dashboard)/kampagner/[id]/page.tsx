@@ -356,6 +356,57 @@ export default function RedigerKampagnePage() {
         </div>
       </section>
 
+      <section className="rounded-lg border border-stone-200 bg-white p-6 shadow-sm">
+        <h2 className="text-sm font-semibold text-stone-900">Dial mode (Telnyx VOIP)</h2>
+        <p className="mt-1 text-xs text-stone-500">
+          Ét valg pr. kampagne. Click to call, Predictive og Power Dialer viser «Start» på kampagneoversigten og VoIP
+          under udfald i arbejdet (når Telnyx er konfigureret).
+        </p>
+        <fieldset className="mt-4 space-y-2 border-0 p-0">
+          <legend className="sr-only">Dial mode</legend>
+          {DIAL_MODES.map((m) => (
+            <label
+              key={m}
+              className={`flex cursor-pointer gap-3 rounded-lg border px-3 py-2.5 text-sm ${
+                dialMode === m
+                  ? "border-emerald-300 bg-emerald-50/80"
+                  : "border-stone-200 bg-stone-50/60 hover:bg-stone-50"
+              }`}
+            >
+              <input
+                type="radio"
+                name="dialMode"
+                value={m}
+                checked={dialMode === m}
+                onChange={() => setDialMode(m)}
+                className="mt-0.5"
+              />
+              <span>
+                <span className="font-medium text-stone-900">{DIAL_MODE_LABELS[m]}</span>
+                {m === "NO_DIAL" ? (
+                  <span className="mt-0.5 block text-xs text-stone-600">Standard — ingen VoIP.</span>
+                ) : null}
+                {m === "CLICK_TO_CALL" ? (
+                  <span className="mt-0.5 block text-xs text-stone-600">
+                    Manuelt opkald — grøn knap under udfald.
+                  </span>
+                ) : null}
+                {m === "PREDICTIVE" ? (
+                  <span className="mt-0.5 block text-xs text-stone-600">
+                    Auto-opkald pr. lead og videre når udfald vælges.
+                  </span>
+                ) : null}
+                {m === "POWER_DIALER" ? (
+                  <span className="mt-0.5 block text-xs text-stone-600">
+                    Parallel udringning via Telnyx — lead først når nogen svarer.
+                  </span>
+                ) : null}
+              </span>
+            </label>
+          ))}
+        </fieldset>
+      </section>
+
       {outcomeStats && (
         <section className="rounded-lg border border-stone-200 bg-stone-50/80 p-6 shadow-sm">
           <h2 className="text-xs font-semibold uppercase tracking-wide text-stone-500">
@@ -445,57 +496,6 @@ export default function RedigerKampagnePage() {
       </section>
 
       <form id="campaign-settings-form" onSubmit={onSave} className="space-y-8">
-        <section className="rounded-lg border border-stone-200 bg-white p-6 shadow-sm">
-          <h2 className="text-sm font-semibold text-stone-900">Dial mode (Telnyx VOIP)</h2>
-          <p className="mt-1 text-xs text-stone-500">
-            Ét valg pr. kampagne. Click to call, Predictive og Power Dialer viser «Start» på kampagneoversigten og VoIP
-            under udfald i arbejdet (når Telnyx er konfigureret).
-          </p>
-          <fieldset className="mt-4 space-y-2 border-0 p-0">
-            <legend className="sr-only">Dial mode</legend>
-            {DIAL_MODES.map((m) => (
-              <label
-                key={m}
-                className={`flex cursor-pointer gap-3 rounded-lg border px-3 py-2.5 text-sm ${
-                  dialMode === m
-                    ? "border-emerald-300 bg-emerald-50/80"
-                    : "border-stone-200 bg-stone-50/60 hover:bg-stone-50"
-                }`}
-              >
-                <input
-                  type="radio"
-                  name="dialMode"
-                  value={m}
-                  checked={dialMode === m}
-                  onChange={() => setDialMode(m)}
-                  className="mt-0.5"
-                />
-                <span>
-                  <span className="font-medium text-stone-900">{DIAL_MODE_LABELS[m]}</span>
-                  {m === "NO_DIAL" ? (
-                    <span className="mt-0.5 block text-xs text-stone-600">Standard — ingen VoIP.</span>
-                  ) : null}
-                  {m === "CLICK_TO_CALL" ? (
-                    <span className="mt-0.5 block text-xs text-stone-600">
-                      Manuelt opkald — grøn knap under udfald.
-                    </span>
-                  ) : null}
-                  {m === "PREDICTIVE" ? (
-                    <span className="mt-0.5 block text-xs text-stone-600">
-                      Auto-opkald pr. lead og videre når udfald vælges.
-                    </span>
-                  ) : null}
-                  {m === "POWER_DIALER" ? (
-                    <span className="mt-0.5 block text-xs text-stone-600">
-                      Parallel udringning via Telnyx — lead først når nogen svarer.
-                    </span>
-                  ) : null}
-                </span>
-              </label>
-            ))}
-          </fieldset>
-        </section>
-
         <div className="space-y-6">
           {KAMPAGNE_FORM_GROUPS.map((g) => {
             if (g === "address") {

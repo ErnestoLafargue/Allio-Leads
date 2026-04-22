@@ -14,6 +14,8 @@ export type LeadOutcomeStripProps = {
   rightColumn: React.ReactNode;
   /** Fx «Tilbagekald» inline med udfaldsknapperne */
   inlineAfterOutcomes?: React.ReactNode;
+  /** Fx aktivitetsmenu — vises mellem «Udfald»-titlen og udfaldsknapperne */
+  aboveOutcomeButtons?: React.ReactNode;
 };
 
 /**
@@ -26,12 +28,14 @@ export function LeadOutcomeStrip({
   bookedByUser,
   rightColumn,
   inlineAfterOutcomes,
+  aboveOutcomeButtons,
 }: LeadOutcomeStripProps) {
   return (
     <div className="shrink-0 space-y-4 rounded-2xl border border-stone-200 bg-white p-4 shadow-lg sm:p-5">
       <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between lg:gap-6">
         <div className="min-w-0 flex-1 space-y-3">
           <p className="text-xs font-semibold uppercase tracking-wide text-stone-500">Udfald</p>
+          {aboveOutcomeButtons}
           <div className="flex flex-wrap items-center gap-2 sm:gap-3">
             {OUTCOME_ORDER.map((s) => (
               <button
