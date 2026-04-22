@@ -126,7 +126,7 @@ export default function KampagnerPage() {
                   <td className="px-4 py-3">
                     {campaignShowsStartButton(normalizeCampaignDialMode(c.dialMode)) ? (
                       <Link
-                        href={`/kampagner/${c.id}/arbejd`}
+                        href={`/kampagner/${c.id}/arbejd?voipSession=1`}
                         className="inline-flex rounded-md bg-emerald-700 px-3 py-1.5 text-xs font-semibold text-white hover:bg-emerald-800"
                       >
                         Start
