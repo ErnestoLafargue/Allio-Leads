@@ -104,6 +104,11 @@ export async function POST(req: Request, { params }: Params) {
         })
       : lead.customFields;
 
+    const nextNotesForLead = typeof body?.notes === "string" ? body.notes : lead.notes;
+    const prevNotesTrim = String(lead.notes ?? "").trim();
+    const nextNotesTrim = String(nextNotesForLead ?? "").trim();
+    const notesChangedForActivity = prevNotesTrim !== nextNotesTrim;
+
     const updated = await prisma.$transaction(async (tx) => {
       const u = await tx.lead.update({
       where: { id },
@@ -116,7 +121,7 @@ export async function POST(req: Request, { params }: Params) {
         postalCode: typeof body?.postalCode === "string" ? body.postalCode : lead.postalCode,
         city: typeof body?.city === "string" ? body.city : lead.city,
         industry: typeof body?.industry === "string" ? body.industry : lead.industry,
-        notes: typeof body?.notes === "string" ? body.notes : lead.notes,
+        notes: nextNotesForLead,
         customFields: mergedCustom,
         meetingContactName:
           typeof body?.meetingContactName === "string"
@@ -165,6 +170,21 @@ export async function POST(req: Request, { params }: Params) {
             : `${label} satte udfald til «${LEAD_STATUS_LABELS.CALLBACK_SCHEDULED}»`,
         },
       });
+      if (notesChangedForActivity) {
+        const noteSummary =
+          nextNotesTrim.length > prevNotesTrim.length ||
+          (prevNotesTrim === "" && nextNotesTrim !== "")
+            ? `${label} tilføjede til noter`
+            : `${label} opdaterede noterne`;
+        await tx.leadActivityEvent.create({
+          data: {
+            leadId: id,
+            userId,
+            kind: LEAD_ACTIVITY_KIND.NOTE_UPDATE,
+            summary: noteSummary,
+          },
+        });
+      }
       return u;
     });
 

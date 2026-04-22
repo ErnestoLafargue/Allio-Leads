@@ -57,7 +57,7 @@ export function LeadActivityPanel({ leadId, reloadToken = 0 }: Props) {
         </button>
       </div>
       <p className="mt-1 text-xs text-stone-500">
-        Åbning af dette lead, besøg i arbejdskøen, gemt udfald og mødeudfald, tilbagekald, noter (kort log) og opkaldsforsøg/optagelser — uden støj ved hver tastning.
+        Åbning af dette lead, besøg i arbejdskøen, gemt udfald og mødeudfald, tilbagekald, ændringer i noter (ved gem) og opkaldsforsøg/optagelser.
       </p>
       {loading && <p className="mt-3 text-sm text-stone-500">Henter…</p>}
       {error && (

@@ -26,9 +26,6 @@ import { releaseExpiredLocksEverywhere, sellerMayEditLead } from "@/lib/lead-loc
 import { findLeadBookingOverlapInDb } from "@/lib/booking/overlap-db";
 import { LEAD_ACTIVITY_KIND } from "@/lib/lead-activity-kinds";
 
-/** Undgår støj: højst én note-aktivitet pr. bruger pr. lead i dette tidsrum */
-const NOTE_ACTIVITY_COOLDOWN_MS = 120_000;
-
 type Params = { params: Promise<{ id: string }> };
 
 function isRealOutcomeStatus(status: string): boolean {
@@ -190,8 +187,8 @@ export async function PATCH(req: Request, { params }: Params) {
   const city = typeof body?.city === "string" ? body.city : existing.city;
   const industry = typeof body?.industry === "string" ? body.industry : existing.industry;
   const notes = typeof body?.notes === "string" ? body.notes : existing.notes;
-  const prevNotesTrim = existing.notes.trim();
-  const nextNotesTrim = notes.trim();
+  const prevNotesTrim = String(existing.notes ?? "").trim();
+  const nextNotesTrim = String(notes ?? "").trim();
   const notesChangedForActivity = prevNotesTrim !== nextNotesTrim;
 
   let customMerged = parseCustomFields(existing.customFields);
@@ -503,35 +500,24 @@ export async function PATCH(req: Request, { params }: Params) {
     }
 
     if (notesChangedForActivity) {
-      const recentNote = await tx.leadActivityEvent.findFirst({
-        where: {
+      const actor = await tx.user.findUnique({
+        where: { id: userId },
+        select: { name: true },
+      });
+      const label = actor?.name?.trim() || "Bruger";
+      const summary =
+        nextNotesTrim.length > prevNotesTrim.length ||
+        (prevNotesTrim === "" && nextNotesTrim !== "")
+          ? `${label} tilføjede til noter`
+          : `${label} opdaterede noterne`;
+      await tx.leadActivityEvent.create({
+        data: {
           leadId: id,
           userId,
           kind: LEAD_ACTIVITY_KIND.NOTE_UPDATE,
-          createdAt: { gte: new Date(Date.now() - NOTE_ACTIVITY_COOLDOWN_MS) },
+          summary,
         },
-        orderBy: { createdAt: "desc" },
       });
-      if (!recentNote) {
-        const actor = await tx.user.findUnique({
-          where: { id: userId },
-          select: { name: true },
-        });
-        const label = actor?.name?.trim() || "Bruger";
-        const summary =
-          nextNotesTrim.length > prevNotesTrim.length ||
-          (prevNotesTrim === "" && nextNotesTrim !== "")
-            ? `${label} tilføjede til noter`
-            : `${label} opdaterede noterne`;
-        await tx.leadActivityEvent.create({
-          data: {
-            leadId: id,
-            userId,
-            kind: LEAD_ACTIVITY_KIND.NOTE_UPDATE,
-            summary,
-          },
-        });
-      }
     }
 
     if (logMeetingOutcomeActivity) {
