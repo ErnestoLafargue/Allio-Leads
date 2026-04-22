@@ -55,22 +55,7 @@ export default function KampagnerPage() {
 
   return (
     <div className="space-y-8">
-      <div>
-        <h1 className="text-xl font-semibold text-stone-900">Kampagner</h1>
-        <p className="mt-1 text-sm text-stone-600">
-          <strong>Kampagnenavn</strong> åbner arbejdssiden: ét lead ad gangen, udfald øverst, kundedata til venstre,
-          noter til højre, <strong>Næste</strong> gemmer og går videre i køen. Under{" "}
-          <Link href="/leads" className="font-medium text-stone-800 underline-offset-2 hover:underline">
-            Leads
-          </Link>{" "}
-          ser du alle leads på tværs af kampagner. Som administrator: kolonnen{" "}
-          <strong>Kampagne indstillinger</strong> er til felter — ikke den daglige opkaldsside. Nye kampagner under{" "}
-          <Link href="/import" className="font-medium text-stone-800 underline-offset-2 hover:underline">
-            Opret &amp; Import
-          </Link>
-          .
-        </p>
-      </div>
+      <h1 className="text-xl font-semibold text-stone-900">Kampagner</h1>
 
       {loadError && (
         <div className="rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-950">
