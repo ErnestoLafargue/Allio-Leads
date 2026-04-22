@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { requireSession } from "@/lib/api-auth";
-import { isLeadStatus } from "@/lib/lead-status";
+import { isLeadStatus, LEAD_STATUS_LABELS, type LeadStatus } from "@/lib/lead-status";
 import { parseCustomFields, stringifyCustomFields } from "@/lib/custom-fields";
 import { pickLeadUpdateData } from "@/lib/prisma-lead-write";
 import { applyLeadCooldownResets, markCallbackSeenByAssignee } from "@/lib/lead-cooldown";
@@ -24,6 +24,9 @@ import { ensureStandardCampaignId } from "@/lib/ensure-system-campaigns";
 import { releaseExpiredLocksEverywhere, sellerMayEditLead } from "@/lib/lead-lock";
 import { findLeadBookingOverlapInDb } from "@/lib/booking/overlap-db";
 import { LEAD_ACTIVITY_KIND } from "@/lib/lead-activity-kinds";
+
+/** Undgår støj: højst én note-aktivitet pr. bruger pr. lead i dette tidsrum */
+const NOTE_ACTIVITY_COOLDOWN_MS = 120_000;
 
 type Params = { params: Promise<{ id: string }> };
 
@@ -473,25 +476,56 @@ export async function PATCH(req: Request, { params }: Params) {
         data: { leadId: id, userId, status: normalizeLeaderboardOutcomeStatus(status) },
       });
     }
-    if (notesChangedForActivity) {
+    const statusChangedForActivity = existing.status !== status;
+    if (statusChangedForActivity) {
       const actor = await tx.user.findUnique({
         where: { id: userId },
         select: { name: true },
       });
       const label = actor?.name?.trim() || "Bruger";
-      const summary =
-        nextNotesTrim.length > prevNotesTrim.length ||
-        (prevNotesTrim === "" && nextNotesTrim !== "")
-          ? `${label} tilføjede til noter`
-          : `${label} opdaterede noterne`;
+      const stLabel = isLeadStatus(status)
+        ? LEAD_STATUS_LABELS[status as LeadStatus]
+        : status;
       await tx.leadActivityEvent.create({
         data: {
           leadId: id,
           userId,
-          kind: LEAD_ACTIVITY_KIND.NOTE_UPDATE,
-          summary,
+          kind: LEAD_ACTIVITY_KIND.OUTCOME_SET,
+          summary: `${label} satte udfald til «${stLabel}»`,
         },
       });
+    }
+
+    if (notesChangedForActivity) {
+      const recentNote = await tx.leadActivityEvent.findFirst({
+        where: {
+          leadId: id,
+          userId,
+          kind: LEAD_ACTIVITY_KIND.NOTE_UPDATE,
+          createdAt: { gte: new Date(Date.now() - NOTE_ACTIVITY_COOLDOWN_MS) },
+        },
+        orderBy: { createdAt: "desc" },
+      });
+      if (!recentNote) {
+        const actor = await tx.user.findUnique({
+          where: { id: userId },
+          select: { name: true },
+        });
+        const label = actor?.name?.trim() || "Bruger";
+        const summary =
+          nextNotesTrim.length > prevNotesTrim.length ||
+          (prevNotesTrim === "" && nextNotesTrim !== "")
+            ? `${label} tilføjede til noter`
+            : `${label} opdaterede noterne`;
+        await tx.leadActivityEvent.create({
+          data: {
+            leadId: id,
+            userId,
+            kind: LEAD_ACTIVITY_KIND.NOTE_UPDATE,
+            summary,
+          },
+        });
+      }
     }
     return updated;
   });

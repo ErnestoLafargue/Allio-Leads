@@ -330,7 +330,13 @@ export function CampaignWorkspace({ campaignId, preferredLeadId }: Props) {
   }, [activeLead, loadFormFromLead]);
 
   useEffect(() => {
-    if (!activityOpen || !activeLead?.id) return;
+    if (!isAdmin) {
+      setActivityOpen(false);
+    }
+  }, [isAdmin]);
+
+  useEffect(() => {
+    if (!isAdmin || !activityOpen || !activeLead?.id) return;
     const leadIdForActivity = activeLead.id;
     let cancelled = false;
     (async () => {
@@ -352,7 +358,7 @@ export function CampaignWorkspace({ campaignId, preferredLeadId }: Props) {
     return () => {
       cancelled = true;
     };
-  }, [activityOpen, activeLead?.id]);
+  }, [isAdmin, activityOpen, activeLead?.id]);
 
   useEffect(() => {
     if (status !== "MEETING_BOOKED") setMeetingContactErrors({});
@@ -933,7 +939,7 @@ export function CampaignWorkspace({ campaignId, preferredLeadId }: Props) {
         meetingBookedAt={meetingBookedAt}
         bookedByUser={bookedByUser}
         aboveOutcomeButtons={
-          activityOpen ? (
+          isAdmin && activityOpen ? (
             <div className="rounded-xl border-2 border-blue-300 bg-blue-50/95 p-4 shadow-md">
               <div className="flex items-start justify-between gap-2">
                 <h3 className="text-sm font-semibold text-blue-950">Aktivitet på dette lead</h3>
@@ -945,9 +951,6 @@ export function CampaignWorkspace({ campaignId, preferredLeadId }: Props) {
                   Luk
                 </button>
               </div>
-              <p className="mt-1 text-xs text-blue-900/80">
-                Besøg i køen, noter (uden indhold) og optagelser når Telnyx er aktiv.
-              </p>
               {activityLoading && <p className="mt-3 text-sm text-blue-900/70">Henter…</p>}
               {activityError && (
                 <p className="mt-3 text-sm text-red-700" role="alert">
@@ -1006,17 +1009,19 @@ export function CampaignWorkspace({ campaignId, preferredLeadId }: Props) {
         }
         rightColumn={
           <>
-            <button
-              type="button"
-              onClick={() => setActivityOpen((o) => !o)}
-              className={`w-full min-w-[10rem] rounded-xl border-2 px-6 py-3 text-sm font-semibold shadow-md transition sm:min-w-[12rem] ${
-                activityOpen
-                  ? "border-blue-800 bg-blue-800 text-white hover:bg-blue-900"
-                  : "border-blue-600 bg-blue-600 text-white hover:bg-blue-700"
-              }`}
-            >
-              Aktivitet
-            </button>
+            {isAdmin ? (
+              <button
+                type="button"
+                onClick={() => setActivityOpen((o) => !o)}
+                className={`w-full min-w-[10rem] rounded-xl border-2 px-6 py-3 text-sm font-semibold shadow-md transition sm:min-w-[12rem] ${
+                  activityOpen
+                    ? "border-blue-800 bg-blue-800 text-white hover:bg-blue-900"
+                    : "border-blue-600 bg-blue-600 text-white hover:bg-blue-700"
+                }`}
+              >
+                Aktivitet
+              </button>
+            ) : null}
             {status === "NEW" && showNextForMeeting ? (
               <p className="max-w-[14rem] text-right text-xs text-stone-500">
                 Gemmer noter og går til næste lead uden at ændre udfald.

@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useState } from "react";
 
 export type ActivityItem = {
-  kind: "visit" | "note" | "call";
+  kind: "visit" | "note" | "call" | "call_attempt" | "outcome" | "callback_schedule";
   at: string;
   summary: string;
   user: { name: string; username: string } | null;
@@ -57,7 +57,7 @@ export function LeadActivityPanel({ leadId }: Props) {
         </button>
       </div>
       <p className="mt-1 text-xs text-stone-500">
-        Seneste besøg i køen, noter (uden indhold) og opkaldsoptagelser når Telnyx er slået til.
+        Besøg i køen, gemt udfald, planlagte tilbagekald, noter (kort log) og opkaldsforsøg/optagelser — uden hver eneste tastning.
       </p>
       {loading && <p className="mt-3 text-sm text-stone-500">Henter…</p>}
       {error && (
@@ -88,14 +88,14 @@ export function LeadActivityPanel({ leadId }: Props) {
                   <span className="text-stone-400">(@{row.user.username})</span>
                 </p>
               )}
-              {row.kind === "call" && row.recordingUrl && (
+              {row.kind === "call" && row.recordingUrl ? (
                 <audio controls className="mt-2 h-8 w-full max-w-md" src={row.recordingUrl}>
                   <track kind="captions" />
                 </audio>
-              )}
-              {row.kind === "call" && !row.recordingUrl && (
+              ) : null}
+              {row.kind === "call" && !row.recordingUrl ? (
                 <p className="mt-1 text-xs text-stone-500">Optagelse ikke tilgængelig endnu.</p>
-              )}
+              ) : null}
             </li>
           ))}
         </ul>

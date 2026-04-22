@@ -3,6 +3,31 @@ import { prisma } from "@/lib/prisma";
 import { requireSession } from "@/lib/api-auth";
 import { canAccessBookedMeetingNotes } from "@/lib/lead-meeting-access";
 import { canAccessCallbackLead } from "@/lib/lead-callback-access";
+import { LEAD_ACTIVITY_KIND } from "@/lib/lead-activity-kinds";
+
+type ActivityItemKind =
+  | "visit"
+  | "note"
+  | "call"
+  | "call_attempt"
+  | "outcome"
+  | "callback_schedule";
+
+function mapDbKindToItemKind(dbKind: string): ActivityItemKind {
+  switch (dbKind) {
+    case LEAD_ACTIVITY_KIND.CALL_RECORDING:
+      return "call";
+    case LEAD_ACTIVITY_KIND.CALL_ATTEMPT:
+      return "call_attempt";
+    case LEAD_ACTIVITY_KIND.OUTCOME_SET:
+      return "outcome";
+    case LEAD_ACTIVITY_KIND.CALLBACK_SCHEDULE:
+      return "callback_schedule";
+    case LEAD_ACTIVITY_KIND.NOTE_UPDATE:
+    default:
+      return "note";
+  }
+}
 
 type Params = { params: Promise<{ id: string }> };
 
@@ -66,7 +91,7 @@ export async function GET(_req: Request, { params }: Params) {
     }));
 
     const eventItems = events.map((e) => ({
-      kind: e.kind === "CALL_RECORDING" ? ("call" as const) : ("note" as const),
+      kind: mapDbKindToItemKind(e.kind),
       at: e.createdAt.toISOString(),
       summary: e.summary,
       user: e.user ? { name: e.user.name, username: e.user.username } : null,

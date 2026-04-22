@@ -48,7 +48,7 @@ export function CampaignVoipStrip({ leadId, campaignId, leadPhone, dialMode, aut
     }
     inFlightRef.current = true;
     setLineStatus("ringing");
-    setDetail("Forbinder via Telnyx…");
+    setDetail(null);
     try {
       const res = await fetch("/api/telnyx/calls/start", {
         method: "POST",
@@ -66,17 +66,18 @@ export function CampaignVoipStrip({ leadId, campaignId, leadPhone, dialMode, aut
       };
       if (!res.ok) {
         setLineStatus("error");
-        setDetail(
+        const base =
           typeof j.message === "string"
             ? j.message
             : typeof j.error === "string"
               ? j.error
-              : "Kunne ikke starte opkald",
-        );
+              : "Kunne ikke starte opkald";
+        const code = typeof j.code === "string" && j.code.trim() ? ` [${j.code.trim()}]` : "";
+        setDetail(`${base}${code}`);
         return;
       }
       setLineStatus("live");
-      setDetail("Forbundet (demo) — optagelse kobles på når Telnyx WebRTC er aktiv.");
+      setDetail(null);
     } catch {
       setLineStatus("error");
       setDetail("Netværksfejl ved opkald.");
@@ -133,19 +134,12 @@ export function CampaignVoipStrip({ leadId, campaignId, leadPhone, dialMode, aut
             onChange={(e) => setDialDraft(e.target.value)}
             placeholder="Nummer til opkald"
             className="mt-1 w-full max-w-sm rounded-md border border-emerald-200/80 bg-white px-3 py-2 font-mono text-sm font-medium text-stone-900 shadow-sm outline-none ring-emerald-400/40 focus:ring-2"
-            title="Ændrer ikke telefonfeltet på leadet — kun nummeret der ringes til."
           />
-          <p className="mt-1 text-[11px] text-stone-500">
-            Standard er leadets telefon. Du kan ringe til et andet nummer uden at ændre leadets telefonfelt.
-          </p>
-          {detail && (
-            <p className="mt-2 text-xs text-stone-600" role="status">
+          {lineStatus === "error" && detail ? (
+            <p className="mt-2 text-xs font-medium text-red-700" role="alert">
               {detail}
             </p>
-          )}
-          <p className="mt-1 text-[11px] text-stone-500">
-            Brug headset. Opkald kører via Telnyx når API + WebRTC er konfigureret.
-          </p>
+          ) : null}
         </div>
         <div className="flex shrink-0 items-start pt-5">
           <button
@@ -170,16 +164,6 @@ export function CampaignVoipStrip({ leadId, campaignId, leadPhone, dialMode, aut
           </button>
         </div>
       </div>
-      {lineStatus === "ringing" ? (
-        <p className="mt-2 text-xs text-emerald-800">
-          Status: <strong>ringer</strong> — optagelse startes ved «svaret» når Telnyx rapporterer det.
-        </p>
-      ) : null}
-      {lineStatus === "live" ? (
-        <p className="mt-2 text-xs text-emerald-800">
-          Status: <strong>forbundet</strong> — samtale kan gemmes under Aktivitet når optagelse er aktiveret.
-        </p>
-      ) : null}
     </section>
   );
 }

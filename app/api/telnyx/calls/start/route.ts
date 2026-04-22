@@ -3,6 +3,17 @@ import { requireSession } from "@/lib/api-auth";
 import { prisma } from "@/lib/prisma";
 import { releaseExpiredLocksEverywhere, sellerMayEditLead } from "@/lib/lead-lock";
 import { normalizeCampaignDialMode, campaignUsesVoipUi } from "@/lib/dial-mode";
+import { LEAD_ACTIVITY_KIND, maskPhoneForActivity } from "@/lib/lead-activity-kinds";
+
+async function logCallAttempt(leadId: string, userId: string, summary: string) {
+  try {
+    await prisma.leadActivityEvent.create({
+      data: { leadId, userId, kind: LEAD_ACTIVITY_KIND.CALL_ATTEMPT, summary },
+    });
+  } catch {
+    /* aktivitet må ikke blokere opkaldssvar */
+  }
+}
 
 /**
  * Starter browser-opkald mod et lead via Telnyx (WebRTC / Call Control).
@@ -34,8 +45,14 @@ export async function POST(req: Request) {
     return NextResponse.json({ error: "Lead findes ikke" }, { status: 404 });
   }
 
+  const masked = maskPhoneForActivity(toNumber);
   const mode = normalizeCampaignDialMode(lead.campaign?.dialMode);
   if (!campaignUsesVoipUi(mode)) {
+    await logCallAttempt(
+      leadId,
+      session.user.id,
+      `Opkald til ${masked} ikke startet — kampagnen bruger ikke VoIP.`,
+    );
     return NextResponse.json(
       { error: "Kampagnen er ikke sat til et opkalds-mode (VoIP)." },
       { status: 409 },
@@ -43,6 +60,11 @@ export async function POST(req: Request) {
   }
 
   if (!sellerMayEditLead(session.user.role, session.user.id, lead)) {
+    await logCallAttempt(
+      leadId,
+      session.user.id,
+      `Opkald til ${masked} ikke startet — leadet er låst af en anden bruger.`,
+    );
     return NextResponse.json(
       { error: "Leadet er låst af en anden bruger — du kan ikke starte opkald." },
       { status: 409 },
@@ -50,6 +72,11 @@ export async function POST(req: Request) {
   }
 
   if (!process.env.TELNYX_API_KEY?.trim()) {
+    await logCallAttempt(
+      leadId,
+      session.user.id,
+      `Opkald til ${masked} ikke startet — Telnyx er ikke konfigureret.`,
+    );
     return NextResponse.json(
       {
         ok: false,
@@ -61,6 +88,11 @@ export async function POST(req: Request) {
     );
   }
 
+  await logCallAttempt(
+    leadId,
+    session.user.id,
+    `Opkald til ${masked} ikke startet — server-integration mangler endnu.`,
+  );
   return NextResponse.json(
     {
       ok: false,

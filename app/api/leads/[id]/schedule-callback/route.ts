@@ -5,6 +5,8 @@ import { LEAD_LOCK_CLEAR, isLockActive } from "@/lib/lead-lock";
 import { isCallbackTimeInCopenhagenBusinessWindow } from "@/lib/callback-datetime";
 import { parseCustomFields, stringifyCustomFields } from "@/lib/custom-fields";
 import { normalizeLeaderboardOutcomeStatus } from "@/lib/lead-outcome-log";
+import { LEAD_ACTIVITY_KIND } from "@/lib/lead-activity-kinds";
+import { LEAD_STATUS_LABELS } from "@/lib/lead-status";
 
 type Params = { params: Promise<{ id: string }> };
 
@@ -148,6 +150,21 @@ export async function POST(req: Request, { params }: Params) {
           },
         });
       }
+      const actor = await tx.user.findUnique({
+        where: { id: userId },
+        select: { name: true },
+      });
+      const label = actor?.name?.trim() || "Bruger";
+      await tx.leadActivityEvent.create({
+        data: {
+          leadId: id,
+          userId,
+          kind: LEAD_ACTIVITY_KIND.CALLBACK_SCHEDULE,
+          summary: isReschedule
+            ? `${label} ændrede tid for planlagt tilbagekald`
+            : `${label} satte udfald til «${LEAD_STATUS_LABELS.CALLBACK_SCHEDULED}»`,
+        },
+      });
       return u;
     });
 

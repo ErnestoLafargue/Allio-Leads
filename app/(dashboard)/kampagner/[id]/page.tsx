@@ -331,6 +331,16 @@ export default function RedigerKampagnePage() {
           under det område, de hører til — fx &quot;Stifter navn&quot; under virksomhedsnavn eller &quot;Direktør
           telefon&quot; under telefon.
         </p>
+        <div className="mt-4 flex justify-end">
+          <button
+            type="submit"
+            form="campaign-settings-form"
+            disabled={saving}
+            className="rounded-md bg-stone-800 px-5 py-2.5 text-sm font-medium text-white hover:bg-stone-900 disabled:opacity-60"
+          >
+            {saving ? "Gemmer…" : "Gem kampagne"}
+          </button>
+        </div>
       </div>
 
       <section className="rounded-lg border border-stone-200 bg-white p-6 shadow-sm">
