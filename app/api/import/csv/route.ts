@@ -40,6 +40,7 @@ export async function POST(req: Request) {
   const campaignIdRaw = form.get("campaignId");
   const campaignId = typeof campaignIdRaw === "string" ? campaignIdRaw.trim() : "";
   const mappingRaw = form.get("mapping");
+  const includeExistingCvrs = form.get("includeExistingCvrs") === "1";
   let mapping: MappingRecord | null = null;
   if (typeof mappingRaw === "string" && mappingRaw.trim()) {
     try {
@@ -73,7 +74,7 @@ export async function POST(req: Request) {
   const rows = parsed.rows;
 
   const existingLeads = await prisma.lead.findMany({
-    select: { id: true, campaignId: true, cvr: true },
+    select: { id: true, campaignId: true, cvr: true, status: true },
   });
   let cvrToLead = indexLeadsByNormalizedCvr(existingLeads);
 
@@ -139,7 +140,25 @@ export async function POST(req: Request) {
           } else {
             const existing = cvrToLead.get(cvrNorm);
             if (existing) {
-              if (existing.campaignId === campaignId) {
+              if (existing.status === "NOT_INTERESTED" || existing.status === "UNQUALIFIED") {
+                summary.skippedInvalid += 1;
+                handledCvrsInFile.add(cvrNorm);
+                pushDetail({
+                  dataRow,
+                  cvr: cvrNorm,
+                  reason: "invalid_row",
+                  note: "Findes allerede med udfald Ikke interesseret/Ukvalificeret",
+                });
+              } else if (!includeExistingCvrs) {
+                summary.skippedAlreadyInCampaign += 1;
+                handledCvrsInFile.add(cvrNorm);
+                pushDetail({
+                  dataRow,
+                  cvr: cvrNorm,
+                  reason: "already_in_campaign",
+                  note: "Findes allerede i systemet",
+                });
+              } else if (existing.campaignId === campaignId) {
                 summary.skippedAlreadyInCampaign += 1;
                 handledCvrsInFile.add(cvrNorm);
                 pushDetail({ dataRow, cvr: cvrNorm, reason: "already_in_campaign" });
@@ -148,7 +167,7 @@ export async function POST(req: Request) {
                   where: { id: existing.id },
                   data: { campaignId },
                 });
-                cvrToLead.set(cvrNorm, { id: existing.id, campaignId });
+                cvrToLead.set(cvrNorm, { id: existing.id, campaignId, status: existing.status });
                 summary.existingAttached += 1;
                 handledCvrsInFile.add(cvrNorm);
               }
@@ -178,7 +197,7 @@ export async function POST(req: Request) {
                   status: "NEW",
                 }),
               });
-              cvrToLead.set(cvrNorm, { id: created.id, campaignId });
+              cvrToLead.set(cvrNorm, { id: created.id, campaignId, status: "NEW" });
               summary.newLeadsImported += 1;
               handledCvrsInFile.add(cvrNorm);
             }

@@ -95,6 +95,7 @@ export default function ImportPage() {
   const [importProgressProcessedRows, setImportProgressProcessedRows] = useState(0);
   const [importProgressTotalRows, setImportProgressTotalRows] = useState(0);
   const [importConfirmOpen, setImportConfirmOpen] = useState(false);
+  const [includeExistingCvrs, setIncludeExistingCvrs] = useState(false);
   /** Nulstiller fil-input når import er færdig, så «forsiden» er tydelig */
   const [fileInputKey, setFileInputKey] = useState(0);
 
@@ -269,6 +270,7 @@ export default function ImportPage() {
     fd.append("file", file);
     fd.append("campaignId", campaignId);
     fd.append("mapping", JSON.stringify(mapping));
+    fd.append("includeExistingCvrs", includeExistingCvrs ? "1" : "0");
     const res = await fetch("/api/import/csv", { method: "POST", body: fd });
     if (!res.ok) {
       setLoadingImport(false);
@@ -604,6 +606,22 @@ export default function ImportPage() {
                 </details>
               )}
 
+              <label className="flex items-start gap-3 rounded-md border border-stone-200 bg-stone-50 px-3 py-2 text-sm text-stone-800">
+                <input
+                  type="checkbox"
+                  checked={includeExistingCvrs}
+                  onChange={(e) => setIncludeExistingCvrs(e.target.checked)}
+                  className="mt-0.5 h-4 w-4 rounded border-stone-300 text-stone-900 focus:ring-stone-400"
+                />
+                <span>
+                  Medtag allerede eksisterende CVR-numre
+                  <span className="mt-0.5 block text-xs text-stone-600">
+                    Slå til for at knytte eksisterende leads til den valgte kampagne. Leads med udfald Ikke interesseret
+                    eller Ukvalificeret medtages stadig ikke.
+                  </span>
+                </span>
+              </label>
+
               <button
                 type="button"
                 disabled={loadingImport || !hasRequiredMapping}
@@ -654,8 +672,11 @@ export default function ImportPage() {
               Bekræft import
             </h3>
             <p className="mt-2 text-sm text-stone-600">
-              Leads med samme CVR (8 cifre) som allerede findes, oprettes ikke igen — eksisterende knyttes til
-              kampagne hvis de ligger et andet sted. Dubletter i filen springes over. Bekræfter import til{' '}
+              Leads med samme CVR (8 cifre) oprettes ikke igen. {includeExistingCvrs
+                ? "Eksisterende leads knyttes til kampagnen, hvis de ligger et andet sted."
+                : "Eksisterende leads springes over."}{" "}
+              Leads med udfald Ikke interesseret eller Ukvalificeret springes altid over. Dubletter i filen springes
+              over. Bekræfter import til{" "}
               <strong className="text-stone-800">{campaigns.find((c) => c.id === campaignId)?.name ?? "—"}</strong>
               ?
             </p>
