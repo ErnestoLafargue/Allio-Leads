@@ -5,6 +5,7 @@ import {
   buildGoogleSearchUrl,
   buildKrakUrl,
   buildVirkUrl,
+  buildWebsiteUrl,
   openExternalUrl,
 } from "@/lib/external-search-urls";
 
@@ -14,14 +15,15 @@ export const ENRICHMENT_ICON_BUTTON_CLASS =
 
 const ICON_IMG = "h-7 w-7 object-contain";
 
-const SEARCH_ICONS: Record<"krak" | "virk" | "google", { src: string; alt: string }> = {
+const SEARCH_ICONS: Record<"krak" | "virk" | "google" | "website", { src: string; alt: string }> = {
   krak: { src: "/enrichment/krak.png", alt: "Krak" },
   virk: { src: "/enrichment/virk.png", alt: "VIRK" },
   google: { src: "/enrichment/google.png", alt: "Google" },
+  website: { src: "/enrichment/google.png", alt: "Åbn hjemmeside" },
 };
 
 type Props = {
-  type: "krak" | "virk" | "google";
+  type: "krak" | "virk" | "google" | "website";
   /** Rå feltværdi (navn, CVR eller søgestreng) */
   value: string;
   /** false = render intet */
@@ -36,7 +38,9 @@ export function ExternalSearchButton({ type, value, visible, tooltip }: Props) {
       ? buildKrakUrl(value)
       : type === "virk"
         ? buildVirkUrl(value)
-        : buildGoogleSearchUrl(value);
+        : type === "google"
+          ? buildGoogleSearchUrl(value)
+          : buildWebsiteUrl(value);
   if (!url) return null;
 
   const { src, alt } = SEARCH_ICONS[type];

@@ -14,6 +14,21 @@ export function isKrakPersonFieldLabel(label: string): boolean {
   return false;
 }
 
+/** Felter der typisk indeholder hjemmeside/domæne. */
+export function isWebsiteFieldLabel(label: string): boolean {
+  const t = label.trim().toLowerCase();
+  if (!t) return false;
+  const noAccent = t.normalize("NFD").replace(/\p{M}/gu, "");
+  return (
+    t.includes("hjemmeside") ||
+    t.includes("domæne") ||
+    noAccent.includes("domaene") ||
+    t.includes("website") ||
+    t.includes("webside") ||
+    t.includes("url")
+  );
+}
+
 /** Krak personsøgning — bruges når feltet har indhold (alle kampagner). */
 export function buildKrakUrl(name: string): string | null {
   const trimmed = name.trim();
@@ -34,6 +49,20 @@ export function buildGoogleSearchUrl(query: string): string | null {
   const t = query.trim();
   if (!t) return null;
   return `https://www.google.com/search?q=${encodeURIComponent(t)}`;
+}
+
+/** Direkte åbning af hjemmeside/domæne fra feltværdi. */
+export function buildWebsiteUrl(raw: string): string | null {
+  const t = raw.trim();
+  if (!t || /\s/.test(t)) return null;
+  const normalized = /^https?:\/\//i.test(t) ? t : `https://${t}`;
+  try {
+    const parsed = new URL(normalized);
+    if (!parsed.hostname) return null;
+    return parsed.toString();
+  } catch {
+    return null;
+  }
 }
 
 export function openExternalUrl(url: string) {

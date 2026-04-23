@@ -3,7 +3,7 @@
 import { useEffect, useRef, useState } from "react";
 import { FIELD_GROUP_LABELS, parseFieldConfig, type FieldGroupKey } from "@/lib/campaign-fields";
 import { ExternalSearchButton } from "@/app/components/external-search-button";
-import { isKrakPersonFieldLabel } from "@/lib/external-search-urls";
+import { isKrakPersonFieldLabel, isWebsiteFieldLabel } from "@/lib/external-search-urls";
 
 type Props = {
   fieldConfigJson: string;
@@ -181,6 +181,8 @@ export function LeadDataLeftPanel({
               const extVal = custom[f.key] ?? "";
               const showKrak =
                 g === "companyName" && isKrakPersonFieldLabel(f.label) && extVal.trim().length > 0;
+              const showWebsite =
+                g === "companyName" && isWebsiteFieldLabel(f.label) && extVal.trim().length > 0;
               const noData = !extVal.trim() && noDataPhase[f.key];
               return (
                 <div key={f.key}>
@@ -208,6 +210,12 @@ export function LeadDataLeftPanel({
                       value={extVal}
                       visible={showKrak}
                       tooltip="Søg på Krak"
+                    />
+                    <ExternalSearchButton
+                      type="website"
+                      value={extVal}
+                      visible={showWebsite}
+                      tooltip="Åbn hjemmeside"
                     />
                   </div>
                 </div>

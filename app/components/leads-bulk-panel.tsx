@@ -87,7 +87,7 @@ function formatDateCell(isoLike: string): string {
   return new Date(t).toLocaleDateString("da-DK");
 }
 
-type SortColumn = "company" | "phone" | "address" | "status" | "imported";
+type SortColumn = "company" | "phone" | "address" | "status" | "campaign" | "imported";
 
 function compareLeads(a: LeadRow, b: LeadRow, key: SortColumn, dir: "asc" | "desc"): number {
   let cmp = 0;
@@ -102,6 +102,12 @@ function compareLeads(a: LeadRow, b: LeadRow, key: SortColumn, dir: "asc" | "des
       const la = LEAD_STATUS_LABELS[a.status as LeadStatus] ?? a.status;
       const lb = LEAD_STATUS_LABELS[b.status as LeadStatus] ?? b.status;
       cmp = la.localeCompare(lb, "da", { sensitivity: "base" });
+      break;
+    }
+    case "campaign": {
+      const ca = a.campaign?.name?.trim() || "";
+      const cb = b.campaign?.name?.trim() || "";
+      cmp = ca.localeCompare(cb, "da", { sensitivity: "base" });
       break;
     }
     case "phone": {
@@ -168,6 +174,8 @@ function sortSummary(key: SortColumn | null, dir: "asc" | "desc"): string {
       return `Adresse alfabetisk (${d})`;
     case "status":
       return `Status alfabetisk (${d})`;
+    case "campaign":
+      return `Kampagne alfabetisk (${d})`;
     case "phone":
       return `Telefon numerisk (${d})`;
     case "imported":
@@ -912,7 +920,18 @@ export function LeadsBulkPanel({
                   {sortKey === "status" && <span aria-hidden>{sortDir === "asc" ? "↑" : "↓"}</span>}
                 </button>
               </th>
-              {showCampaignColumn && <th className="px-2 py-3 font-medium">Kampagne</th>}
+              {showCampaignColumn && (
+                <th className="px-2 py-3 font-medium">
+                  <button
+                    type="button"
+                    onClick={() => onSortColumnClick("campaign")}
+                    className="-mx-1 flex w-full items-center gap-0.5 rounded px-1 text-left font-medium text-stone-700 hover:bg-stone-200/80 hover:text-stone-900"
+                  >
+                    Kampagne
+                    {sortKey === "campaign" && <span aria-hidden>{sortDir === "asc" ? "↑" : "↓"}</span>}
+                  </button>
+                </th>
+              )}
               {isAdmin && <th className="px-2 py-3 font-medium">Sidst udfald</th>}
               <th className="px-2 py-3 font-medium">
                 <button
