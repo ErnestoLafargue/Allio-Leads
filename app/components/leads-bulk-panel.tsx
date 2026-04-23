@@ -216,6 +216,7 @@ export function LeadsBulkPanel({
   const [sortDir, setSortDir] = useState<"asc" | "desc">("desc");
   const [refreshNonce, setRefreshNonce] = useState(0);
   const [outcomeForIds, setOutcomeForIds] = useState<string[] | null>(null);
+  const [deleting, setDeleting] = useState(false);
   const [addedToday, setAddedToday] = useState(false);
   const [fromDate, setFromDate] = useState("");
   const [toDate, setToDate] = useState("");
@@ -536,6 +537,29 @@ export function LeadsBulkPanel({
   }, [visibleIds, allSelected]);
 
   const selectedOne = selected.size === 1 ? leads.find((l) => l.id === [...selected][0]) : undefined;
+  const selectedIdsInView = sortedLeads.filter((l) => selected.has(l.id)).map((l) => l.id);
+  async function onDeleteSelected() {
+    if (!isAdmin || deleting || selectedIdsInView.length === 0) return;
+    const confirmed = window.confirm(
+      `Er du sikker på, at du vil slette ${selectedIdsInView.length} lead${selectedIdsInView.length > 1 ? "s" : ""}? Dette kan ikke fortrydes.`,
+    );
+    if (!confirmed) return;
+    setDeleting(true);
+    setError(null);
+    const res = await fetch("/api/leads/bulk-delete", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ ids: selectedIdsInView }),
+    });
+    setDeleting(false);
+    if (!res.ok) {
+      const j = await res.json().catch(() => ({}));
+      setError(typeof j.error === "string" ? j.error : "Kunne ikke slette leads");
+      return;
+    }
+    setSelected(new Set());
+    setRefreshNonce((n) => n + 1);
+  }
   function leadOpenHref(lead: LeadRow): string {
     if (campaignId) {
       return `/kampagner/${encodeURIComponent(campaignId)}/arbejd?leadId=${encodeURIComponent(lead.id)}`;
@@ -577,12 +601,21 @@ export function LeadsBulkPanel({
             <button
               type="button"
               onClick={() => {
-                const ids = sortedLeads.filter((l) => selected.has(l.id)).map((l) => l.id);
-                setOutcomeForIds(ids);
+                setOutcomeForIds(selectedIdsInView);
               }}
               className={actionsBtnClass}
             >
               Ændre udfald{selected.size > 1 ? ` (${selected.size})` : ""}
+            </button>
+          )}
+          {isAdmin && selected.size >= 1 && (
+            <button
+              type="button"
+              onClick={() => void onDeleteSelected()}
+              disabled={deleting}
+              className="rounded-md border border-red-200 bg-red-50 px-3 py-1.5 text-sm font-medium text-red-700 shadow-sm hover:bg-red-100 disabled:cursor-not-allowed disabled:opacity-60"
+            >
+              {deleting ? "Sletter…" : `Slet leads${selected.size > 1 ? ` (${selected.size})` : ""}`}
             </button>
           )}
         </div>

@@ -97,6 +97,7 @@ export default function ImportPage() {
   const [importConfirmOpen, setImportConfirmOpen] = useState(false);
   const [includeExistingCvrs, setIncludeExistingCvrs] = useState(false);
   const [allowMissingCvr, setAllowMissingCvr] = useState(false);
+  const [allowMissingCompanyName, setAllowMissingCompanyName] = useState(false);
   /** Nulstiller fil-input når import er færdig, så «forsiden» er tydelig */
   const [fileInputKey, setFileInputKey] = useState(0);
 
@@ -154,7 +155,7 @@ export default function ImportPage() {
   const mappingOptions = buildMappingSelectOptions(fieldConfigJson);
 
   const hasRequiredMapping =
-    Object.values(mapping).includes("companyName") &&
+    (allowMissingCompanyName || Object.values(mapping).includes("companyName")) &&
     (allowMissingCvr || Object.values(mapping).includes("cvr"));
 
   async function onCreateCampaign(e: React.FormEvent) {
@@ -274,6 +275,7 @@ export default function ImportPage() {
     fd.append("mapping", JSON.stringify(mapping));
     fd.append("includeExistingCvrs", includeExistingCvrs ? "1" : "0");
     fd.append("allowMissingCvr", allowMissingCvr ? "1" : "0");
+    fd.append("allowMissingCompanyName", allowMissingCompanyName ? "1" : "0");
     const res = await fetch("/api/import/csv", { method: "POST", body: fd });
     if (!res.ok) {
       setLoadingImport(false);
@@ -395,7 +397,8 @@ export default function ImportPage() {
         <p className="mt-1 text-xs text-stone-500">
           Trin 1: Vælg kampagne og fil. Trin 2: Map kolonner — <strong>CVR-nummer</strong> og{' '}
           <strong>Virksomhedsnavn</strong> er påkrævet som standard (CVR bruges til dubletkontrol; kun cifre/mellemrum
-          normaliseres til 8 cifre). Telefon er valgfrit, og CVR kan gøres valgfrit via indstillingen nedenfor.
+          normaliseres til 8 cifre). Telefon er valgfrit, og både CVR og virksomhedsnavn kan gøres valgfrie via
+          indstillingerne nedenfor.
         </p>
 
         {result && (
@@ -534,13 +537,21 @@ export default function ImportPage() {
 
               {!hasRequiredMapping && (
                 <p className="rounded-md bg-amber-50 px-3 py-2 text-sm text-amber-900">
-                  Map mindst én kolonne til <strong>Virksomhedsnavn</strong>
-                  {!allowMissingCvr && (
+                  Map mindst én kolonne
+                  {!allowMissingCompanyName && (
                     <>
                       {" "}
-                      og én til <strong>CVR-nummer</strong>.
+                      til <strong>Virksomhedsnavn</strong>
                     </>
                   )}
+                  {!allowMissingCvr && (
+                    <>
+                      {!allowMissingCompanyName ? " og" : " til"} én til <strong>CVR-nummer</strong>.
+                    </>
+                  )}
+                  {allowMissingCompanyName
+                    ? " Uden virksomhedsnavn kan rækken importeres."
+                    : " Uden virksomhedsnavn kan rækken ikke importeres."}
                   {allowMissingCvr ? " Uden CVR kan rækken importeres." : " Uden CVR kan rækken ikke importeres."}
                 </p>
               )}
@@ -634,6 +645,22 @@ export default function ImportPage() {
               <label className="flex items-start gap-3 rounded-md border border-stone-200 bg-stone-50 px-3 py-2 text-sm text-stone-800">
                 <input
                   type="checkbox"
+                  checked={allowMissingCompanyName}
+                  onChange={(e) => setAllowMissingCompanyName(e.target.checked)}
+                  className="mt-0.5 h-4 w-4 rounded border-stone-300 text-stone-900 focus:ring-stone-400"
+                />
+                <span>
+                  Medtag uden virksomhedsnavn
+                  <span className="mt-0.5 block text-xs text-stone-600">
+                    Når slået til er virksomhedsnavn ikke påkrævet. Rækker uden virksomhedsnavn importeres med en
+                    standardtekst.
+                  </span>
+                </span>
+              </label>
+
+              <label className="flex items-start gap-3 rounded-md border border-stone-200 bg-stone-50 px-3 py-2 text-sm text-stone-800">
+                <input
+                  type="checkbox"
                   checked={allowMissingCvr}
                   onChange={(e) => setAllowMissingCvr(e.target.checked)}
                   className="mt-0.5 h-4 w-4 rounded border-stone-300 text-stone-900 focus:ring-stone-400"
@@ -702,6 +729,9 @@ export default function ImportPage() {
                 : "Eksisterende leads springes over."}{" "}
               Leads med udfald Ikke interesseret eller Ukvalificeret springes altid over. Dubletter i filen springes
               over. {allowMissingCvr ? "Leads uden CVR importeres som nye leads." : "Leads uden CVR springes over."}{" "}
+              {allowMissingCompanyName
+                ? "Leads uden virksomhedsnavn importeres med standardnavn."
+                : "Leads uden virksomhedsnavn springes over."}{" "}
               Bekræfter import til{" "}
               <strong className="text-stone-800">{campaigns.find((c) => c.id === campaignId)?.name ?? "—"}</strong>
               ?

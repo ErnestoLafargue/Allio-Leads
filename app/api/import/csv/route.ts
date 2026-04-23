@@ -42,6 +42,7 @@ export async function POST(req: Request) {
   const mappingRaw = form.get("mapping");
   const includeExistingCvrs = form.get("includeExistingCvrs") === "1";
   const allowMissingCvr = form.get("allowMissingCvr") === "1";
+  const allowMissingCompanyName = form.get("allowMissingCompanyName") === "1";
   let mapping: MappingRecord | null = null;
   if (typeof mappingRaw === "string" && mappingRaw.trim()) {
     try {
@@ -172,7 +173,7 @@ export async function POST(req: Request) {
                 summary.existingAttached += 1;
                 handledCvrsInFile.add(cvrNorm);
               }
-            } else if (!base.companyName?.trim()) {
+            } else if (!base.companyName?.trim() && !allowMissingCompanyName) {
               summary.skippedInvalid += 1;
               pushDetail({
                 dataRow,
@@ -185,7 +186,7 @@ export async function POST(req: Request) {
               const created = await prisma.lead.create({
                 data: pickLeadCreateData({
                   campaignId,
-                  companyName: base.companyName,
+                  companyName: base.companyName?.trim() || "(Uden virksomhedsnavn)",
                   phone: base.phone,
                   email: base.email,
                   cvr: cvrNorm ?? "",
