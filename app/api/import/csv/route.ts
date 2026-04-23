@@ -41,6 +41,7 @@ export async function POST(req: Request) {
   const campaignId = typeof campaignIdRaw === "string" ? campaignIdRaw.trim() : "";
   const mappingRaw = form.get("mapping");
   const includeExistingCvrs = form.get("includeExistingCvrs") === "1";
+  const allowMissingCvr = form.get("allowMissingCvr") === "1";
   let mapping: MappingRecord | null = null;
   if (typeof mappingRaw === "string" && mappingRaw.trim()) {
     try {
@@ -126,7 +127,7 @@ export async function POST(req: Request) {
           const base = pickBaseFromNorm(n);
           const cvrNorm = normalizeCVR(base.cvr);
 
-          if (!cvrNorm) {
+          if (!cvrNorm && !allowMissingCvr) {
             summary.skippedInvalid += 1;
             pushDetail({
               dataRow,
@@ -134,12 +135,12 @@ export async function POST(req: Request) {
               reason: "invalid_row",
               note: "Manglende eller ugyldigt CVR (8 cifre efter normalisering)",
             });
-          } else if (handledCvrsInFile.has(cvrNorm)) {
+          } else if (cvrNorm && handledCvrsInFile.has(cvrNorm)) {
             summary.skippedDuplicateInFile += 1;
             pushDetail({ dataRow, cvr: cvrNorm, reason: "duplicate_in_file" });
           } else {
-            const existing = cvrToLead.get(cvrNorm);
-            if (existing) {
+            const existing = cvrNorm ? cvrToLead.get(cvrNorm) : null;
+            if (existing && cvrNorm) {
               if (existing.status === "NOT_INTERESTED" || existing.status === "UNQUALIFIED") {
                 summary.skippedInvalid += 1;
                 handledCvrsInFile.add(cvrNorm);
@@ -175,7 +176,7 @@ export async function POST(req: Request) {
               summary.skippedInvalid += 1;
               pushDetail({
                 dataRow,
-                cvr: cvrNorm,
+                cvr: cvrNorm ?? "—",
                 reason: "invalid_row",
                 note: "Virksomhedsnavn mangler (påkrævet for nye leads)",
               });
@@ -187,7 +188,7 @@ export async function POST(req: Request) {
                   companyName: base.companyName,
                   phone: base.phone,
                   email: base.email,
-                  cvr: cvrNorm,
+                  cvr: cvrNorm ?? "",
                   address: base.address,
                   postalCode: base.postalCode,
                   city: base.city,
@@ -197,9 +198,11 @@ export async function POST(req: Request) {
                   status: "NEW",
                 }),
               });
-              cvrToLead.set(cvrNorm, { id: created.id, campaignId, status: "NEW" });
+              if (cvrNorm) {
+                cvrToLead.set(cvrNorm, { id: created.id, campaignId, status: "NEW" });
+                handledCvrsInFile.add(cvrNorm);
+              }
               summary.newLeadsImported += 1;
-              handledCvrsInFile.add(cvrNorm);
             }
           }
 
