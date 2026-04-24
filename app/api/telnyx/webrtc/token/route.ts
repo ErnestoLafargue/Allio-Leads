@@ -74,10 +74,22 @@ export async function POST(req: Request) {
   const token = await createTelnyxWebRtcToken({ telephonyCredentialId, apiKey });
   if (!token.ok) {
     const status = token.status >= 500 ? 502 : 400;
+    const credentialMask =
+      telephonyCredentialId.length > 4
+        ? `…${telephonyCredentialId.slice(-4)}`
+        : telephonyCredentialId;
+    console.error("[telnyx:webrtc-token] failed", {
+      status: token.status,
+      message: token.message,
+      telephonyCredentialId: credentialMask,
+      telnyx: token.telnyx,
+    });
     return NextResponse.json(
       {
         code: "TELNYX_WEBRTC_TOKEN_FAILED",
         error: token.message,
+        telnyxStatus: token.status,
+        telephonyCredentialIdHint: credentialMask,
       },
       { status },
     );

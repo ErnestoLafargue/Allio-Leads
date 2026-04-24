@@ -67,44 +67,78 @@ export async function createTelnyxWebRtcToken(params: {
   telephonyCredentialId: string;
   apiKey: string;
 }): Promise<WebRtcTokenResult> {
+  // Telnyx' token-endpoint: POST /v2/telephony_credentials/{id}/token
+  // Intet request body. Respons er ren JWT-tekst (content-type kan være text/plain eller application/jwt).
   const res = await fetch(
     `${TELNYX_API_BASE}/telephony_credentials/${encodeURIComponent(params.telephonyCredentialId)}/token`,
     {
       method: "POST",
       headers: {
         Authorization: `Bearer ${params.apiKey}`,
-        "Content-Type": "application/json",
+        Accept: "text/plain, application/jwt, application/json",
       },
     },
   );
 
-  const json: unknown = await res.json().catch(() => null);
-  if (!res.ok) {
-    const msg = formatTelnyxError(json) || `Telnyx HTTP ${res.status}`;
-    return { ok: false, status: res.status, message: msg, telnyx: json };
+  const rawText = await res.text().catch(() => "");
+  let jsonBody: unknown = null;
+  if (rawText && rawText.trim().startsWith("{")) {
+    try {
+      jsonBody = JSON.parse(rawText);
+    } catch {
+      jsonBody = null;
+    }
   }
 
-  const data =
-    json && typeof json === "object" && "data" in json
-      ? (json as { data: unknown }).data
-      : null;
-  const d = data && typeof data === "object" ? (data as Record<string, unknown>) : null;
-  const tokenRaw = d?.token ?? d?.login_token ?? d?.jwt;
-  const token =
-    typeof tokenRaw === "string"
-      ? tokenRaw.trim()
-      : typeof tokenRaw === "number"
-        ? String(tokenRaw)
-        : "";
-  if (!token) {
+  if (!res.ok) {
+    const fromJson = formatTelnyxError(jsonBody);
+    const snippet = rawText.length > 400 ? `${rawText.slice(0, 400)}…` : rawText;
+    const msg =
+      fromJson ||
+      (snippet && !snippet.trim().startsWith("<")
+        ? `Telnyx HTTP ${res.status} — ${snippet.trim()}`
+        : `Telnyx HTTP ${res.status}`);
+    if (typeof console !== "undefined") {
+      console.error("[telnyx:webrtc-token] HTTP", res.status, rawText);
+    }
     return {
       ok: false,
-      status: 502,
-      message: "Uventet svar fra Telnyx (mangler WebRTC token).",
-      telnyx: json,
+      status: res.status,
+      message: msg,
+      telnyx: jsonBody ?? rawText,
     };
   }
-  return { ok: true, token, raw: json };
+
+  // Forsøg 1: JSON med data.{token|login_token|jwt}
+  if (jsonBody && typeof jsonBody === "object") {
+    const data = (jsonBody as { data?: unknown }).data;
+    const d = data && typeof data === "object" ? (data as Record<string, unknown>) : null;
+    const tokenRaw = d?.token ?? d?.login_token ?? d?.jwt;
+    const token =
+      typeof tokenRaw === "string"
+        ? tokenRaw.trim()
+        : typeof tokenRaw === "number"
+          ? String(tokenRaw)
+          : "";
+    if (token) return { ok: true, token, raw: jsonBody };
+  }
+
+  // Forsøg 2: ren JWT-tekst
+  const candidate = rawText.trim();
+  if (candidate && /^[A-Za-z0-9_\-]+\.[A-Za-z0-9_\-]+\.[A-Za-z0-9_\-]+$/.test(candidate)) {
+    return { ok: true, token: candidate, raw: candidate };
+  }
+  // Forsøg 3: anden tekstform — returner hvis ikke tom og ikke HTML
+  if (candidate && !candidate.startsWith("<") && candidate.length < 4096) {
+    return { ok: true, token: candidate, raw: candidate };
+  }
+
+  return {
+    ok: false,
+    status: 502,
+    message: "Uventet svar fra Telnyx (mangler WebRTC token).",
+    telnyx: jsonBody ?? rawText,
+  };
 }
 
 export async function dialTelnyxOutbound(params: {
