@@ -9,6 +9,12 @@ export function getTelnyxConnectionId(): string | null {
   return c || null;
 }
 
+/** Credential-id til WebRTC login_token. */
+export function getTelnyxTelephonyCredentialId(): string | null {
+  const id = process.env.TELNYX_TELEPHONY_CREDENTIAL_ID?.trim();
+  return id || null;
+}
+
 function parseFromNumbersList(): string[] {
   const raw = process.env.TELNYX_FROM_NUMBERS?.trim();
   if (!raw) return [];
@@ -52,6 +58,54 @@ function formatTelnyxError(json: unknown): string | null {
 export type DialResult =
   | { ok: true; callControlId: string; callSessionId?: string; raw: unknown }
   | { ok: false; status: number; message: string; telnyx?: unknown };
+
+export type WebRtcTokenResult =
+  | { ok: true; token: string; raw: unknown }
+  | { ok: false; status: number; message: string; telnyx?: unknown };
+
+export async function createTelnyxWebRtcToken(params: {
+  telephonyCredentialId: string;
+  apiKey: string;
+}): Promise<WebRtcTokenResult> {
+  const res = await fetch(
+    `${TELNYX_API_BASE}/telephony_credentials/${encodeURIComponent(params.telephonyCredentialId)}/token`,
+    {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${params.apiKey}`,
+        "Content-Type": "application/json",
+      },
+    },
+  );
+
+  const json: unknown = await res.json().catch(() => null);
+  if (!res.ok) {
+    const msg = formatTelnyxError(json) || `Telnyx HTTP ${res.status}`;
+    return { ok: false, status: res.status, message: msg, telnyx: json };
+  }
+
+  const data =
+    json && typeof json === "object" && "data" in json
+      ? (json as { data: unknown }).data
+      : null;
+  const d = data && typeof data === "object" ? (data as Record<string, unknown>) : null;
+  const tokenRaw = d?.token ?? d?.login_token ?? d?.jwt;
+  const token =
+    typeof tokenRaw === "string"
+      ? tokenRaw.trim()
+      : typeof tokenRaw === "number"
+        ? String(tokenRaw)
+        : "";
+  if (!token) {
+    return {
+      ok: false,
+      status: 502,
+      message: "Uventet svar fra Telnyx (mangler WebRTC token).",
+      telnyx: json,
+    };
+  }
+  return { ok: true, token, raw: json };
+}
 
 export async function dialTelnyxOutbound(params: {
   connectionId: string;
