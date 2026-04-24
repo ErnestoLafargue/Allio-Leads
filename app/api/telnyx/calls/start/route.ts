@@ -1,9 +1,12 @@
 import { NextResponse } from "next/server";
+import { Buffer } from "node:buffer";
 import { requireSession } from "@/lib/api-auth";
 import { prisma } from "@/lib/prisma";
 import { releaseExpiredLocksEverywhere, sellerMayEditLead } from "@/lib/lead-lock";
 import { normalizeCampaignDialMode, campaignUsesVoipUi } from "@/lib/dial-mode";
 import { LEAD_ACTIVITY_KIND, maskPhoneForActivity } from "@/lib/lead-activity-kinds";
+import { normalizePhoneToE164ForDial } from "@/lib/phone-e164";
+import { dialTelnyxOutbound, getTelnyxConnectionId, pickTelnyxFromNumber } from "@/lib/telnyx-call-control";
 
 async function logCallAttempt(leadId: string, userId: string, summary: string) {
   try {
@@ -16,9 +19,7 @@ async function logCallAttempt(leadId: string, userId: string, summary: string) {
 }
 
 /**
- * Starter browser-opkald mod et lead via Telnyx (WebRTC / Call Control).
- * MVP: validerer session, kampagne-dial mode og returnerer struktureret svar —
- * fuld Telnyx WebRTC-token + opkaldsoprettelse tilføjes når integrationen er klar.
+ * Starter udgående opkald mod et lead via Telnyx Call Control (POST /v2/calls).
  */
 export async function POST(req: Request) {
   const { session, response } = await requireSession();
@@ -27,6 +28,8 @@ export async function POST(req: Request) {
   const body = await req.json().catch(() => null);
   const leadId = typeof body?.leadId === "string" ? body.leadId.trim() : "";
   const toNumber = typeof body?.toNumber === "string" ? body.toNumber.trim() : "";
+  const campaignIdFromBody =
+    typeof body?.campaignId === "string" ? body.campaignId.trim() : "";
   if (!leadId) {
     return NextResponse.json({ error: "leadId er påkrævet" }, { status: 400 });
   }
@@ -45,7 +48,22 @@ export async function POST(req: Request) {
     return NextResponse.json({ error: "Lead findes ikke" }, { status: 404 });
   }
 
-  const masked = maskPhoneForActivity(toNumber);
+  if (campaignIdFromBody && lead.campaignId !== campaignIdFromBody) {
+    return NextResponse.json(
+      { error: "Lead hører ikke til den angivne kampagne." },
+      { status: 403 },
+    );
+  }
+
+  const toE164 = normalizePhoneToE164ForDial(toNumber);
+  if (!toE164) {
+    return NextResponse.json(
+      { error: "Ugyldigt telefonnummer — brug E.164 eller 8 cifre (DK)." },
+      { status: 400 },
+    );
+  }
+
+  const masked = maskPhoneForActivity(toE164);
   const mode = normalizeCampaignDialMode(lead.campaign?.dialMode);
   if (!campaignUsesVoipUi(mode)) {
     await logCallAttempt(
@@ -71,7 +89,8 @@ export async function POST(req: Request) {
     );
   }
 
-  if (!process.env.TELNYX_API_KEY?.trim()) {
+  const apiKey = process.env.TELNYX_API_KEY?.trim();
+  if (!apiKey) {
     await logCallAttempt(
       leadId,
       session.user.id,
@@ -82,25 +101,95 @@ export async function POST(req: Request) {
         ok: false,
         code: "TELNYX_NOT_CONFIGURED",
         message:
-          "Telnyx er ikke konfigureret (mangler TELNYX_API_KEY). Når nøglen og WebRTC er på plads, fortsætter opkaldet herfra.",
+          "Telnyx er ikke konfigureret (mangler TELNYX_API_KEY). Sæt også TELNYX_CONNECTION_ID og TELNYX_FROM_NUMBER (eller TELNYX_FROM_NUMBERS).",
       },
       { status: 503 },
+    );
+  }
+
+  const connectionId = getTelnyxConnectionId();
+  if (!connectionId) {
+    await logCallAttempt(
+      leadId,
+      session.user.id,
+      `Opkald til ${masked} ikke startet — mangler TELNYX_CONNECTION_ID.`,
+    );
+    return NextResponse.json(
+      {
+        ok: false,
+        code: "TELNYX_CONNECTION_MISSING",
+        message:
+          "Mangler TELNYX_CONNECTION_ID (Call Control Application ID fra Telnyx-portalen).",
+      },
+      { status: 503 },
+    );
+  }
+
+  const fromE164 = pickTelnyxFromNumber(leadId);
+  if (!fromE164) {
+    await logCallAttempt(
+      leadId,
+      session.user.id,
+      `Opkald til ${masked} ikke startet — mangler afsender-nummer (FROM).`,
+    );
+    return NextResponse.json(
+      {
+        ok: false,
+        code: "TELNYX_FROM_MISSING",
+        message:
+          "Sæt TELNYX_FROM_NUMBER eller TELNYX_FROM_NUMBERS til ét af jeres Telnyx-numre (E.164, fx +4512345678).",
+      },
+      { status: 503 },
+    );
+  }
+
+  const clientState = Buffer.from(
+    JSON.stringify({ leadId, userId: session.user.id, v: 1 }),
+    "utf8",
+  ).toString("base64");
+
+  const webhookOverride = process.env.TELNYX_CALL_WEBHOOK_URL?.trim() || undefined;
+
+  const dial = await dialTelnyxOutbound({
+    connectionId,
+    from: fromE164,
+    to: toE164,
+    apiKey,
+    clientState,
+    webhookUrl: webhookOverride,
+  });
+
+  if (!dial.ok) {
+    const logStatus = dial.status >= 500 ? "Telnyx-serverfejl" : "Telnyx afviste opkaldet";
+    await logCallAttempt(
+      leadId,
+      session.user.id,
+      `Opkald til ${masked} ikke startet — ${logStatus}: ${dial.message}`,
+    );
+    const status = dial.status === 422 || dial.status === 400 ? 400 : dial.status >= 500 ? 502 : 400;
+    return NextResponse.json(
+      {
+        ok: false,
+        code: "TELNYX_DIAL_FAILED",
+        message: dial.message,
+        dialMode: mode,
+      },
+      { status },
     );
   }
 
   await logCallAttempt(
     leadId,
     session.user.id,
-    `Opkald til ${masked} ikke startet — server-integration mangler endnu.`,
+    `Opkald startet til ${masked} (Telnyx ${dial.callControlId}).`,
   );
-  return NextResponse.json(
-    {
-      ok: false,
-      code: "TELNYX_CALL_NOT_IMPLEMENTED",
-      message:
-        "Telnyx-nøgle er sat, men server-side opkalds/WebRTC-session er endnu ikke koblet på. Brug webhook + Call Control som beskrevet i jeres Telnyx-setup.",
-      dialMode: mode,
-    },
-    { status: 501 },
-  );
+
+  return NextResponse.json({
+    ok: true,
+    callControlId: dial.callControlId,
+    callSessionId: dial.callSessionId,
+    dialMode: mode,
+    from: fromE164,
+    to: toE164,
+  });
 }
