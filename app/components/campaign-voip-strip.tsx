@@ -66,6 +66,8 @@ type TelnyxCall = {
   /// Hvor opkaldet kommer fra: outbound = vi ringede ud, inbound = vi modtog opkald (bridge fra dispatcher)
   direction?: "outbound" | "inbound";
   options?: { destinationNumber?: string; remoteCallerName?: string };
+  /** Telnyx server-side call leg — sættes når opkallet er forbundet (Call Control). */
+  telnyxIDs?: { telnyxCallControlId?: string; telnyxSessionId?: string; telnyxLegId?: string };
   hangup?: () => Promise<void> | void;
   answer?: (options?: { audio?: MediaTrackConstraints | boolean; video?: boolean }) => Promise<void> | void;
   localStream?: MediaStream;
@@ -500,6 +502,58 @@ export function CampaignVoipStrip({
       cancelled = true;
     };
   }, [leadId]);
+
+  /**
+   * Registrér Telnyx call_control_id for det aktive WebRTC-opkald på AgentSession.
+   * Bruges af admin-metrics og fremtidig optimering af bridge; rydes ved idle.
+   */
+  useEffect(() => {
+    if (!campaignId) return;
+
+    if (lineStatus === "idle" || lineStatus === "error") {
+      void fetch("/api/dialer/agent/call-control", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ campaignId, callControlId: null }),
+        credentials: "include",
+      }).catch(() => {});
+      return;
+    }
+
+    let ticks = 0;
+    const interval = window.setInterval(() => {
+      ticks += 1;
+      const call = activeCallRef.current;
+      const cc = call?.telnyxIDs?.telnyxCallControlId;
+      if (cc) {
+        void fetch("/api/dialer/agent/call-control", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ campaignId, callControlId: cc }),
+          credentials: "include",
+        }).catch(() => {});
+        window.clearInterval(interval);
+        return;
+      }
+      if (ticks >= 40) window.clearInterval(interval);
+    }, 500);
+
+    return () => {
+      window.clearInterval(interval);
+    };
+  }, [lineStatus, campaignId]);
+
+  useEffect(() => {
+    return () => {
+      if (!campaignId) return;
+      void fetch("/api/dialer/agent/call-control", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ campaignId, callControlId: null }),
+        credentials: "include",
+      }).catch(() => {});
+    };
+  }, [campaignId]);
 
   /**
    * Ryd ugyldige valg — men kun når enhedslisten faktisk er indlæst.

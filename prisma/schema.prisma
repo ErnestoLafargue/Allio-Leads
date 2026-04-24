@@ -240,6 +240,10 @@ model AgentSession {
   currentAgentCallControlId String?
   /// Lead-id der er bridged til agenten lige nu.
   currentLeadId             String?
+  /// Seneste Telnyx call_control_id fra agentens browser-WebRTC-leg (click-to-call el. inbound bridge).
+  /// Bruges til observabilitet, fejlsøgning og fremtidig «bridge til eksisterende leg»-optimering.
+  /// Rydes når opkaldet slutter (klient sender null).
+  webRtcCallControlId       String?
   lastHeartbeat             DateTime @updatedAt
   createdAt                 DateTime @default(now())
 

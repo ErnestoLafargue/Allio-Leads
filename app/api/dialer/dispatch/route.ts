@@ -10,6 +10,7 @@ import {
 import { campaignUsesVoipUi, normalizeCampaignDialMode } from "@/lib/dial-mode";
 import { normalizePhoneToE164ForDial } from "@/lib/phone-e164";
 import { encodeDialerClientState, PRESENCE_FRESH_WINDOW_MS, QUEUE_RESERVATION_TTL_MS } from "@/lib/dialer-shared";
+import { DIALER_ABANDON_TARGET, PACING_WINDOW_MS, getTargetPacingRatioAndStats } from "@/lib/dialer-pacing";
 
 /**
  * Server-side parallel dialer — placerer N udgående opkald baseret på antal ledige agenter
@@ -39,16 +40,40 @@ const DEFAULT_AMD: AmdConfig = {
 };
 
 /**
- * Pacing-ratio: hvor mange opkald pr. ledig agent vi gerne vil have i luften samtidigt.
- * - POWER_DIALER: 1.0 (sekventielt, men næste lead placeres straks)
- * - PREDICTIVE:   3.0 (3 numre i luften pr. ledig agent — typisk 2-3 svarer ikke)
- *
- * Justeres automatisk hvis abandon rate stiger (TODO: pacing-justering i senere fase).
+ * Pacing-ratio: hvor mange opkald pr. ledig agent der må være i luften.
+ * - POWER_DIALER: fast 1.0
+ * - PREDICTIVE:   dynamisk 1.0–3.0 baseret på rullende 1h-vindue (bridges vs. no-agent abandons);
+ *   sigter mod DIALER_ABANDON_TARGET (~3 %)
  */
-function targetPacingRatio(dialMode: string): number {
-  if (dialMode === "PREDICTIVE") return 3.0;
-  if (dialMode === "POWER_DIALER") return 1.0;
-  return 0;
+async function targetPacingRatio(
+  dialMode: string,
+  campaignId: string,
+): Promise<{
+  ratio: number;
+  abandonRate: number | null;
+  sampleSize: number;
+  bridgeCount: number;
+  noAgentAbandonCount: number;
+}> {
+  if (dialMode === "PREDICTIVE") {
+    return getTargetPacingRatioAndStats(prisma, { campaignId, dialMode: "PREDICTIVE" });
+  }
+  if (dialMode === "POWER_DIALER") {
+    return {
+      ratio: 1.0,
+      abandonRate: null,
+      sampleSize: 0,
+      bridgeCount: 0,
+      noAgentAbandonCount: 0,
+    };
+  }
+  return {
+    ratio: 0,
+    abandonRate: null,
+    sampleSize: 0,
+    bridgeCount: 0,
+    noAgentAbandonCount: 0,
+  };
 }
 
 /**
@@ -128,6 +153,7 @@ export async function POST(req: Request) {
     },
   });
 
+  const pacing = await targetPacingRatio(mode, campaignId);
   if (readyCount === 0) {
     return NextResponse.json({
       ok: true,
@@ -136,17 +162,35 @@ export async function POST(req: Request) {
       ready: 0,
       inFlight: inFlightCalls,
       reason: "Ingen ledige agenter (provisioneret + ready + frisk heartbeat).",
+      pacing: {
+        mode,
+        targetAbandonRate: DIALER_ABANDON_TARGET,
+        windowMs: PACING_WINDOW_MS,
+        ratio: pacing.ratio,
+        abandonRate1h: pacing.abandonRate,
+        sampleSize1h: pacing.sampleSize,
+        bridges1h: pacing.bridgeCount,
+        noAgentAbandons1h: pacing.noAgentAbandonCount,
+      },
     });
   }
 
   // 3) Beregn antal nye opkald
-  const ratio = targetPacingRatio(mode);
+  const { ratio } = pacing;
   if (ratio <= 0) {
     return NextResponse.json({
       ok: true,
       dispatched: 0,
       attempted: 0,
       reason: `dialMode=${mode} understøtter ikke server-side dispatch`,
+      pacing: {
+        mode,
+        targetAbandonRate: DIALER_ABANDON_TARGET,
+        windowMs: PACING_WINDOW_MS,
+        ratio: pacing.ratio,
+        abandonRate1h: pacing.abandonRate,
+        sampleSize1h: pacing.sampleSize,
+      },
     });
   }
   const targetTotal = Math.min(
@@ -165,6 +209,17 @@ export async function POST(req: Request) {
       ready: readyCount,
       inFlight: inFlightCalls,
       reason: `Allerede ${inFlightCalls}/${targetTotal} i luften — ingen nye nu.`,
+      pacing: {
+        mode,
+        targetAbandonRate: DIALER_ABANDON_TARGET,
+        windowMs: PACING_WINDOW_MS,
+        ratio: pacing.ratio,
+        abandonRate1h: pacing.abandonRate,
+        sampleSize1h: pacing.sampleSize,
+        bridges1h: pacing.bridgeCount,
+        noAgentAbandons1h: pacing.noAgentAbandonCount,
+        targetTotal,
+      },
     });
   }
 
@@ -322,6 +377,17 @@ export async function POST(req: Request) {
     target: targetTotal,
     dispatchId,
     errors: failures.length > 0 ? failures : undefined,
+    pacing: {
+      mode,
+      targetAbandonRate: DIALER_ABANDON_TARGET,
+      windowMs: PACING_WINDOW_MS,
+      ratio: pacing.ratio,
+      abandonRate1h: pacing.abandonRate,
+      sampleSize1h: pacing.sampleSize,
+      bridges1h: pacing.bridgeCount,
+      noAgentAbandons1h: pacing.noAgentAbandonCount,
+      targetTotal,
+    },
   });
 }
 

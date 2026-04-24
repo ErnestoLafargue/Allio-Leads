@@ -20,6 +20,12 @@ Lead-numre  ──(parallel dial m. AMD)──►  Telnyx  ──webhooks──�
                               Telnyx bridger lead ↔ agent automatisk
 ```
 
+## Premium AMD (konto / fakturering)
+
+- **Aktivering:** Der er som udgangspunkt **ikke** en enkelt «tænd for premium AMD»-knap på kontoen. Hvert udgående opkald sættes med `answering_machine_detection: "premium"` i `POST /v2/calls` (allerede i vores dispatch).
+- **Omkostning:** Telnyx fakturerer premium-AMD (og evt. relateret analyse) efter faktisk brug — tjek [Telnyx-priser](https://telnyx.com/pricing) og kontoopgørelse.
+- **Pacing i Allio:** Predictive justerer parallelitet mod **~3 % abandon-rate** (ingen ledig agent da lead blev human) i et rullende 1h-vindue; se `lib/dialer-pacing.ts` og admin-siden **Dialer**.
+
 ## Krav i Telnyx-portalen
 
 1. **Voice API (Call Control) Application**

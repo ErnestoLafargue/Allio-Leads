@@ -178,19 +178,21 @@ Power Dialer: ratio er fast = 1.0 (1 opkald pr. ledig agent ad gangen, men start
 - Lead bliver injiceret i UI'en når bridge'en sker (server pusher lead-id via WebSocket eller server-sent events).
 - Workspace skal kunne **modtage** et lead i stedet for at trække det selv.
 
-### Implementations-faser
+### Implementations-faser (A–G) — status
 
-| Fase | Indhold | Indikativ tid |
+| Fase | Indhold | Status (2026-04) |
 |---|---|---|
-| **A** | DB-schema + migrations | 1 dag |
-| **B** | Webhook-route + DialerCallLog (passiv logging) | 1-2 dage |
-| **C** | AgentSession + presence-API + workspace-heartbeat | 1 dag |
-| **D** | "Always-on" agent-leg via WebRTC + capture call_control_id | 2-3 dage |
-| **E** | Server-side dispatcher: 1 opkald → bridge ved AMD=human | 3-4 dage |
-| **F** | Parallel dispatch + pacing | 2-3 dage |
-| **G** | Admin-dashboard (abandon rate, calls pr. agent, AMD-fordeling) | 2 dage |
+| **A** | DB-schema: `AgentSession`, `DialerCallLog`, `DialerQueueItem` + Prisma-migrationer | **Leveret** — se `prisma/schema.prisma` + `prisma/migrations/20260425000000_dialer_multi_agent_parallel` og `20260425120000_dialer_agent_webrtc_leg_id` (felt `webRtcCallControlId`). |
+| **B** | Webhook `POST /api/telnyx/webhooks/call-events` + idempotent logging i `DialerCallLog` | **Leveret** — AMD premium/standard events, `call.recording.saved`, hangup-cleanup. |
+| **C** | `POST /api/dialer/agent/presence` + workspace-heartbeat (`useDialerPresence`) | **Leveret** — tæller `ready`/`ringing`/`talking`, skubber `assignedLead` ved bridge. |
+| **D** | Agent-WebRTC `call_control_id` mod server: `POST /api/dialer/agent/call-control` + polling i `CampaignVoipStrip` (`telnyxIDs.telnyxCallControlId`) | **Leveret** — «altid klar» = registreret SIP + presence; faktisk bridge til agent sker via `link_to` + auto-svar (se `lib/dialer-bridge.ts`). |
+| **E** | Server-side: `dialTelnyxOutbound` m. `answering_machine_detection: "premium"`, `handleAmdHuman` → originate til `sip:agent@…` m. `link_to` | **Leveret** — se `app/api/dialer/dispatch/route.ts`, `lib/dialer-bridge.ts`. |
+| **F** | Parallel dispatch + **pacing m. mål ~3 % abandon** (`lib/dialer-pacing.ts`, rullende 1h-vindue) | **Leveret** — predictive ratio clampes 1.0–3.0; power dialer fast 1.0. |
+| **G** | Admin: **`/administration/dialer`**, `GET /api/dialer/metrics?campaignId=` | **Leveret** — agenter, in-flight, bridges/abandons/AMD-maskine, pacing-snapshot. |
 
-**Total:** ~3 ugers fokuseret arbejde for én udvikler.
+**Premium-AMD:** Aktiveres **pr. opkald** i API’et (ikke en separat konto-toggler). Fakturering følger Telnyx’ pris for premium AMD / optagelse efter faktisk brug.
+
+**Total oprindelig vurdering:** ~3 ugers fokuseret arbejde — kernen er nu implementeret; finjustering (fx hurtigere bridge, flere mærker i logs) fortsætter efter produktionstest.
 
 ### Risici og åbne spørgsmål
 
