@@ -125,7 +125,7 @@ export async function POST(req: Request) {
     );
   }
 
-  const fromE164 = pickTelnyxFromNumber(leadId);
+  const fromE164 = pickTelnyxFromNumber(leadId, { userId: session.user.id });
   if (!fromE164) {
     await logCallAttempt(
       leadId,

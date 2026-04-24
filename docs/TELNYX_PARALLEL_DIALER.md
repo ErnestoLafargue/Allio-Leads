@@ -51,7 +51,8 @@ Lead-numre  ──(parallel dial m. AMD)──►  Telnyx  ──webhooks──�
 | `TELNYX_API_KEY` | Telnyx Bearer-token. |
 | `TELNYX_CONNECTION_ID` | Voice API Application id (Call Control). |
 | `TELNYX_TELEPHONY_CREDENTIAL_ID` | **Fallback** for agenter der ikke er per-agent provisioneret endnu. Når alle er provisioneret kan dette fjernes. |
-| `TELNYX_FROM_NUMBER` *eller* `TELNYX_FROM_NUMBERS` | Afsender-nummer(re) i E.164. Komma-separeret hvis flere. |
+| `TELNYX_FROM_NUMBERS` | **Anbefalet** — alle købte udgående numre, kommasepareret (E.164), fx fire numre. Kode fordeler pr. `leadId` + sælger, så I ikke kun bruger én linje. |
+| `TELNYX_FROM_NUMBER` | Bruges **kun** hvis `TELNYX_FROM_NUMBERS` er tom = ét CLI til alle. |
 | `TELNYX_CALL_WEBHOOK_URL` *(valgfri)* | Override af webhook URL — bruges kun hvis Call Control Application ikke har en korrekt URL sat. |
 
 ## Databasen
@@ -68,7 +69,7 @@ Migration `20260425000000_dialer_multi_agent_parallel` introducerer:
 | Mode | Pacing-ratio | Forklaring |
 |------|--------------|------------|
 | `POWER_DIALER` | 1.0 | Sekventielt — næste lead placeres først når forrige er afgjort, men én pr. agent samtidigt. |
-| `PREDICTIVE` | 3.0 | 3 numre pr. ledig agent — typisk svarer 1-2 ikke, så dispatcheren rammer ca. 1:1. |
+| `PREDICTIVE` | 1.0–3.0 (dynamisk) | Justeres mod ~3 % abandon; se `lib/dialer-pacing.ts`. |
 | `MAX_IN_FLIGHT_PER_CAMPAIGN` | 50 | Hard cap uanset antal agenter (justerbar i `app/api/dialer/dispatch/route.ts`). |
 
 Dispatcheren kaldes af klienten ved hver heartbeat (5 sek), men kun når agenten er `ready` og auto-dial ikke er pauset. Dispatcher-kaldet er idempotent og placerer kun nye opkald hvis pacing-budgettet tillader det.

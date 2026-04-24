@@ -181,7 +181,7 @@ export async function handleAmdHuman(params: {
     await releaseAgentSession({ sessionId: reserved.sessionId, newStatus: "ready" });
     return { status: "failed", message: "TELNYX_CONNECTION_ID mangler — kan ikke bridge" };
   }
-  const fromNumber = pickTelnyxFromNumber(params.leadId);
+  const fromNumber = pickTelnyxFromNumber(params.leadId, { userId: reserved.userId });
   if (!fromNumber) {
     await releaseAgentSession({ sessionId: reserved.sessionId, newStatus: "ready" });
     return { status: "failed", message: "TELNYX_FROM_NUMBER mangler — kan ikke bridge" };

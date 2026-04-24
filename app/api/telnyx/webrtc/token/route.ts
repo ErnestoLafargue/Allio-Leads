@@ -7,6 +7,7 @@ import {
   createTelnyxWebRtcToken,
   getTelnyxCredentialInfo,
   getTelnyxTelephonyCredentialId,
+  getTelnyxFromPoolInfo,
   pickTelnyxFromNumber,
 } from "@/lib/telnyx-call-control";
 
@@ -73,12 +74,14 @@ export async function POST(req: Request) {
     );
   }
 
-  const callerNumber = pickTelnyxFromNumber(leadId);
+  const fromPool = getTelnyxFromPoolInfo();
+  const callerNumber = pickTelnyxFromNumber(leadId, { userId: session.user.id });
   if (!callerNumber) {
     return NextResponse.json(
       {
         code: "TELNYX_FROM_MISSING",
-        error: "Sæt TELNYX_FROM_NUMBER eller TELNYX_FROM_NUMBERS.",
+        error:
+          "Sæt TELNYX_FROM_NUMBER eller TELNYX_FROM_NUMBERS (flere udgangsnumre som kommaseparerede E.164).",
       },
       { status: 503 },
     );
@@ -173,6 +176,9 @@ export async function POST(req: Request) {
     ok: true,
     loginToken: token.token,
     callerNumber,
+    /** Antal udgående numre i pool (1 = sæt TELNYX_FROM_NUMBERS med alle købte numre for fordeling). */
+    fromNumberPoolSize: fromPool.size,
+    fromNumberPoolSampleMasked: fromPool.sampleMasked,
     dialMode: mode,
     sipUsername: userRow?.telnyxSipUsername ?? null,
     sharedCredential: sharedFallback,

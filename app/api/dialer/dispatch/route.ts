@@ -287,7 +287,10 @@ export async function POST(req: Request) {
 
   const dialResults = await Promise.all(
     reserved.map(async (r) => {
-      const fromE164 = pickTelnyxFromNumber(r.leadId);
+      const fromE164 = pickTelnyxFromNumber(r.leadId, {
+        userId: session!.user.id,
+        extraSalt: dispatchId,
+      });
       if (!fromE164) {
         return { leadId: r.leadId, ok: false as const, error: "TELNYX_FROM_NUMBER mangler" };
       }

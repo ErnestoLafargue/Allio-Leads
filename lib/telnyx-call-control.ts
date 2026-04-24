@@ -18,28 +18,77 @@ export function getTelnyxTelephonyCredentialId(): string | null {
 function parseFromNumbersList(): string[] {
   const raw = process.env.TELNYX_FROM_NUMBERS?.trim();
   if (!raw) return [];
-  return raw.split(",").map((s) => s.trim()).filter(Boolean);
+  // Komma, semikolon eller linjeskift – undgå at hele strengen læses som ét nummer
+  return raw
+    .split(/[,;\n\r]+/u)
+    .map((s) => s.trim())
+    .filter(Boolean);
 }
 
+export type OutboundFromPoolInfo = {
+  /** Antal ugyldige/duplikerede filtre væk */
+  size: number;
+  /** True når både TELNYX_FROM_NUMBERS og TELNYX_FROM_NUMBER er ugyldige/ tomme */
+  isEmpty: boolean;
+  /** Første 2 cifre + sidste 2 pr. nummer til fejlsøgning (ingen fuld nummerværdi i log) */
+  sampleMasked: string[];
+};
+
 /**
- * Vælger afsender (ét af jeres Telnyx-numre). Flere numre: kommasepareret i TELNYX_FROM_NUMBERS;
- * fordeling efter leadId så samme lead typisk får samme linje.
+ * Alle gyldige E.164-udgangsnumre (deduplikeret) fra miljøet.
+ * Prioritet: 1) TELNYX_FROM_NUMBERS (flere) 2) ellers TELNYX_FROM_NUMBER (enkel fallback).
  */
-export function pickTelnyxFromNumber(leadId: string): string | null {
+export function getTelnyxFromNumberPoolE164(): string[] {
   const list = parseFromNumbersList();
   const normalized = list
     .map((n) => normalizePhoneToE164ForDial(n))
     .filter((n): n is string => Boolean(n));
   if (normalized.length > 0) {
-    let h = 0;
-    for (let i = 0; i < leadId.length; i++) {
-      h = (h * 31 + leadId.charCodeAt(i)) | 0;
-    }
-    return normalized[Math.abs(h) % normalized.length] ?? null;
+    return [...new Set(normalized)];
   }
   const single = process.env.TELNYX_FROM_NUMBER?.trim();
-  if (!single) return null;
-  return normalizePhoneToE164ForDial(single) ?? null;
+  if (!single) return [];
+  const e = normalizePhoneToE164ForDial(single);
+  return e ? [e] : [];
+}
+
+function maskE164ForDebug(e164: string): string {
+  const d = e164.replace(/\D/g, "");
+  if (d.length <= 4) return "••••";
+  return `+${d.slice(0, 2)}…${d.slice(-2)}`;
+}
+
+export function getTelnyxFromPoolInfo(): OutboundFromPoolInfo {
+  const pool = getTelnyxFromNumberPoolE164();
+  return {
+    size: pool.length,
+    isEmpty: pool.length === 0,
+    sampleMasked: pool.slice(0, 6).map(maskE164ForDebug),
+  };
+}
+
+/**
+ * Vælger afsender-CLI (ét af jeres Telnyx-numre).
+ *
+ * - **Flere numre** (`TELNYX_FROM_NUMBERS` kommasepareret): fordeling med stabil hash
+ *   over `leadId` + valgfri `userId` + `extraSalt` så forskellige sælgere og parallelle
+ *   opkald spreder sig jævnere over købte numre end kun leadId alene.
+ * - **Kun ét numre** (kun `TELNYX_FROM_NUMBER` eller ét felt i listen): returer altid det — skal
+ *   fikses i Vercel med `TELNYX_FROM_NUMBERS=+45...,+45...,+45...,+45...` for at få 4 li linjer.
+ */
+export function pickTelnyxFromNumber(
+  leadId: string,
+  options?: { userId?: string; extraSalt?: string },
+): string | null {
+  const pool = getTelnyxFromNumberPoolE164();
+  if (pool.length === 0) return null;
+  if (pool.length === 1) return pool[0] ?? null;
+  const routingKey = [leadId, options?.userId ?? "", options?.extraSalt ?? ""].join("\0");
+  let h = 0;
+  for (let i = 0; i < routingKey.length; i++) {
+    h = (h * 31 + routingKey.charCodeAt(i)) | 0;
+  }
+  return pool[Math.abs(h) % pool.length] ?? null;
 }
 
 function formatTelnyxError(json: unknown): string | null {
