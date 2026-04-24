@@ -1,8 +1,19 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import type { CampaignDialMode } from "@/lib/dial-mode";
 import { normalizePhoneToE164ForDial } from "@/lib/phone-e164";
+import {
+  ensureMicPermissionAndEnumerate,
+  headsetSetupBlockedReason,
+  labelForDeviceId,
+  readSessionDeviceId,
+  setAudioElementSink,
+  verifyMicDevice,
+  VOIP_SESSION_MIC_KEY,
+  VOIP_SESSION_SPK_KEY,
+  writeSessionDeviceId,
+} from "@/lib/voip-audio-devices";
 
 type Props = {
   leadId: string;
@@ -20,27 +31,179 @@ type TelnyxClient = {
   remoteElement?: string;
   connect: () => void;
   disconnect: () => void;
-  newCall: (options: { destinationNumber?: string; callerNumber?: string; remoteElement?: string }) => unknown;
+  newCall: (options: {
+    destinationNumber?: string;
+    callerNumber?: string;
+    remoteElement?: string;
+    micId?: string;
+    speakerId?: string;
+  }) => unknown;
   on: (eventName: string, callback: (...args: unknown[]) => void) => TelnyxClient;
   off: (eventName: string, callback?: (...args: unknown[]) => void) => TelnyxClient;
 };
 
 type TelnyxCall = {
-  state?: string;
+  state?: unknown;
   hangup?: () => Promise<void> | void;
+  localStream?: MediaStream;
+  remoteStream?: MediaStream;
 };
 
 function normalizeDialDraft(s: string) {
   return s.replace(/\s/g, "").trim();
 }
 
+const LIVE_STATES = new Set(["active", "early", "answering"]);
+const RINGING_STATES = new Set(["new", "requesting", "trying", "ringing", "recovering"]);
+const CLOSED_STATES = new Set(["hangup", "destroy", "purge"]);
+
+function stateToken(stateRaw: unknown): string {
+  if (typeof stateRaw === "string") return stateRaw.toLowerCase();
+  if (typeof stateRaw === "number") {
+    const map: Record<number, string> = {
+      0: "new",
+      1: "requesting",
+      2: "trying",
+      3: "recovering",
+      4: "ringing",
+      5: "answering",
+      6: "early",
+      7: "active",
+      8: "held",
+      9: "hangup",
+      10: "destroy",
+      11: "purge",
+    };
+    return map[stateRaw] ?? "";
+  }
+  return "";
+}
+
 function callStateToLineStatus(stateRaw: unknown): LineStatus | null {
-  const state = String(stateRaw ?? "").toLowerCase();
-  if (!state) return null;
-  if (state.includes("ring") || state.includes("trying") || state.includes("requesting")) return "ringing";
-  if (state.includes("active") || state.includes("early") || state.includes("answer")) return "live";
-  if (state.includes("hangup") || state.includes("destroy") || state.includes("purge")) return "idle";
+  const token = stateToken(stateRaw);
+  if (!token) return null;
+  if (CLOSED_STATES.has(token)) return "idle";
+  if (LIVE_STATES.has(token)) return "live";
+  if (RINGING_STATES.has(token)) return "ringing";
   return null;
+}
+
+function formatCallDuration(totalSeconds: number): string {
+  const s = Math.max(0, Math.floor(totalSeconds));
+  const mm = Math.floor(s / 60)
+    .toString()
+    .padStart(2, "0");
+  const ss = (s % 60).toString().padStart(2, "0");
+  return `${mm}:${ss}`;
+}
+
+/** Web Audio niveau-måler: 0..1 baseret på RMS. */
+function useAudioLevel(stream: MediaStream | null): number {
+  const [level, setLevel] = useState(0);
+  useEffect(() => {
+    if (!stream || stream.getAudioTracks().length === 0) {
+      setLevel(0);
+      return;
+    }
+    const AC =
+      typeof window !== "undefined" &&
+      ((window as unknown as { AudioContext?: typeof AudioContext }).AudioContext ??
+        (window as unknown as { webkitAudioContext?: typeof AudioContext }).webkitAudioContext);
+    if (!AC) return;
+    const ctx = new AC();
+    let raf = 0;
+    let source: MediaStreamAudioSourceNode | null = null;
+    let analyser: AnalyserNode | null = null;
+    try {
+      source = ctx.createMediaStreamSource(stream);
+      analyser = ctx.createAnalyser();
+      analyser.fftSize = 512;
+      analyser.smoothingTimeConstant = 0.6;
+      source.connect(analyser);
+    } catch {
+      try {
+        ctx.close();
+      } catch {
+        /* no-op */
+      }
+      return;
+    }
+    const buffer = new Uint8Array(analyser.fftSize);
+    const tick = () => {
+      if (!analyser) return;
+      analyser.getByteTimeDomainData(buffer);
+      let sum = 0;
+      for (let i = 0; i < buffer.length; i++) {
+        const v = (buffer[i] - 128) / 128;
+        sum += v * v;
+      }
+      const rms = Math.sqrt(sum / buffer.length);
+      // Lidt kompression så normal samtale fylder bjælken pænt
+      const scaled = Math.min(1, rms * 3.2);
+      setLevel(scaled);
+      raf = requestAnimationFrame(tick);
+    };
+    raf = requestAnimationFrame(tick);
+    return () => {
+      cancelAnimationFrame(raf);
+      try {
+        source?.disconnect();
+      } catch {
+        /* no-op */
+      }
+      try {
+        analyser?.disconnect();
+      } catch {
+        /* no-op */
+      }
+      try {
+        void ctx.close();
+      } catch {
+        /* no-op */
+      }
+      setLevel(0);
+    };
+  }, [stream]);
+  return level;
+}
+
+function AudioLevelBar({
+  level,
+  label,
+  variant,
+}: {
+  level: number;
+  label: string;
+  variant: "out" | "in";
+}) {
+  // 4 prikker — tænder nedefra og op ved ~0.12, 0.30, 0.55, 0.80.
+  const thresholds = [0.12, 0.3, 0.55, 0.8];
+  const activeColor = variant === "out" ? "bg-emerald-500" : "bg-sky-500";
+  const activeGlow = variant === "out" ? "shadow-[0_0_4px_rgba(16,185,129,0.9)]" : "shadow-[0_0_4px_rgba(14,165,233,0.9)]";
+  return (
+    <div
+      className="flex flex-col items-center gap-1"
+      role="img"
+      aria-label={`${label}: niveau ${(level * 100).toFixed(0)}%`}
+    >
+      <div className="flex flex-col-reverse gap-0.5">
+        {thresholds.map((t, i) => {
+          const on = level >= t;
+          return (
+            <span
+              key={i}
+              className={`block h-1.5 w-1.5 rounded-full transition-colors ${
+                on ? `${activeColor} ${activeGlow}` : "bg-stone-300"
+              }`}
+            />
+          );
+        })}
+      </div>
+      <span className="select-none text-[9px] font-semibold uppercase tracking-wider text-stone-500">
+        {label}
+      </span>
+    </div>
+  );
 }
 
 export function CampaignVoipStrip({ leadId, campaignId, leadPhone, autoStartCall }: Props) {
@@ -49,6 +212,23 @@ export function CampaignVoipStrip({ leadId, campaignId, leadPhone, autoStartCall
   const [dialDraft, setDialDraft] = useState(() => (leadPhone || "").trim());
   const [webrtcReady, setWebrtcReady] = useState(false);
 
+  const [devices, setDevices] = useState<MediaDeviceInfo[]>([]);
+  const [permissionDone, setPermissionDone] = useState(false);
+  const [setupBusy, setSetupBusy] = useState(false);
+  const [setupError, setSetupError] = useState<string | null>(null);
+  const [micId, setMicId] = useState("");
+  const [speakerId, setSpeakerId] = useState("");
+  const [micVerifyOk, setMicVerifyOk] = useState(false);
+  const [verifyError, setVerifyError] = useState<string | null>(null);
+  const [manualHeadsetConfirm, setManualHeadsetConfirm] = useState(false);
+
+  const [callStartAt, setCallStartAt] = useState<number | null>(null);
+  const [callEndAt, setCallEndAt] = useState<number | null>(null);
+  const [nowTick, setNowTick] = useState(Date.now());
+  const [remoteStream, setRemoteStream] = useState<MediaStream | null>(null);
+  /** Persistent mikrofon-stream kun til lydniveau-måling (altid tændt så længe mikrofon er valgt). */
+  const [micMonitorStream, setMicMonitorStream] = useState<MediaStream | null>(null);
+
   const clientRef = useRef<TelnyxClient | null>(null);
   const activeCallRef = useRef<TelnyxCall | null>(null);
   const callerNumberRef = useRef<string>("");
@@ -56,8 +236,58 @@ export function CampaignVoipStrip({ leadId, campaignId, leadPhone, autoStartCall
   const inFlightRef = useRef(false);
   const autoKeyRef = useRef<string | null>(null);
   const lastLeadIdRef = useRef<string | null>(null);
+  const remoteAudioRef = useRef<HTMLAudioElement | null>(null);
 
   const remoteAudioId = `voip-remote-audio-${leadId}`;
+
+  const inputDevs = useMemo(() => devices.filter((d) => d.kind === "audioinput"), [devices]);
+  const outputDevs = useMemo(() => devices.filter((d) => d.kind === "audiooutput"), [devices]);
+
+  const micLabel = micId ? labelForDeviceId(devices, micId) : "";
+  const spkLabel = speakerId ? labelForDeviceId(devices, speakerId) : "";
+
+  const needsSpeakerPick = outputDevs.length > 0 && !speakerId;
+
+  const headsetBlockReason = useMemo(() => {
+    if (!permissionDone || !micId) return null;
+    return headsetSetupBlockedReason(micLabel, spkLabel, {
+      checkBuiltInSpeaker: outputDevs.length > 0 && Boolean(speakerId),
+    });
+  }, [permissionDone, micId, micLabel, spkLabel, outputDevs.length, speakerId]);
+
+  const headsetBlockedEffective = Boolean(headsetBlockReason) && !manualHeadsetConfirm;
+
+  const audioSetupReady =
+    permissionDone &&
+    Boolean(micId) &&
+    !needsSpeakerPick &&
+    micVerifyOk &&
+    !headsetBlockedEffective &&
+    inputDevs.length > 0;
+
+  const activeCall =
+    lineStatus === "ringing" || lineStatus === "live" || lineStatus === "connecting";
+  const canPlaceCall = audioSetupReady && !activeCall;
+
+  const outLevel = useAudioLevel(micMonitorStream);
+  const inLevel = useAudioLevel(activeCall ? remoteStream : null);
+
+  useEffect(() => {
+    if (!callStartAt) return;
+    const end = callEndAt;
+    if (end) {
+      setNowTick(end);
+      return;
+    }
+    const id = window.setInterval(() => setNowTick(Date.now()), 500);
+    return () => window.clearInterval(id);
+  }, [callStartAt, callEndAt]);
+
+  const shownSeconds = useMemo(() => {
+    if (!callStartAt) return 0;
+    const end = callEndAt ?? nowTick;
+    return Math.max(0, (end - callStartAt) / 1000);
+  }, [callStartAt, callEndAt, nowTick]);
 
   useEffect(() => {
     if (lastLeadIdRef.current === leadId) return;
@@ -66,6 +296,10 @@ export function CampaignVoipStrip({ leadId, campaignId, leadPhone, autoStartCall
     setLineStatus("idle");
     setDetail(null);
     autoKeyRef.current = null;
+    setManualHeadsetConfirm(false);
+    setCallStartAt(null);
+    setCallEndAt(null);
+    setRemoteStream(null);
     // Kun nyt lead — ikke når brugeren retter telefonfeltet på leadet
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [leadId]);
@@ -89,6 +323,147 @@ export function CampaignVoipStrip({ leadId, campaignId, leadPhone, autoStartCall
       initPromiseRef.current = null;
     };
   }, []);
+
+  useEffect(() => {
+    if (!permissionDone) return;
+    const onChange = async () => {
+      try {
+        const list = await navigator.mediaDevices.enumerateDevices();
+        setDevices(list);
+      } catch {
+        /* no-op */
+      }
+    };
+    navigator.mediaDevices.addEventListener("devicechange", onChange);
+    return () => navigator.mediaDevices.removeEventListener("devicechange", onChange);
+  }, [permissionDone]);
+
+  useEffect(() => {
+    if (!permissionDone || !micId) {
+      setMicVerifyOk(false);
+      setVerifyError(null);
+      return;
+    }
+    let cancelled = false;
+    void (async () => {
+      const r = await verifyMicDevice(micId);
+      if (cancelled) return;
+      if (r.ok) {
+        setMicVerifyOk(true);
+        setVerifyError(null);
+      } else {
+        setMicVerifyOk(false);
+        setVerifyError(r.message);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [permissionDone, micId]);
+
+  /** Åbn mikrofon-monitor så niveau-bjælken altid kan vise udgående lyd. */
+  useEffect(() => {
+    if (!permissionDone || !micId) {
+      setMicMonitorStream(null);
+      return;
+    }
+    let cancelled = false;
+    let active: MediaStream | null = null;
+    void (async () => {
+      try {
+        const stream = await navigator.mediaDevices.getUserMedia({
+          audio: { deviceId: { exact: micId } },
+        });
+        if (cancelled) {
+          stream.getTracks().forEach((t) => t.stop());
+          return;
+        }
+        active = stream;
+        setMicMonitorStream(stream);
+      } catch {
+        if (!cancelled) setMicMonitorStream(null);
+      }
+    })();
+    return () => {
+      cancelled = true;
+      if (active) active.getTracks().forEach((t) => t.stop());
+      setMicMonitorStream(null);
+    };
+  }, [permissionDone, micId]);
+
+  useEffect(() => {
+    void setAudioElementSink(remoteAudioRef.current, speakerId);
+  }, [speakerId]);
+
+  useEffect(() => {
+    if (!micId || !inputDevs.some((d) => d.deviceId === micId)) {
+      if (micId) {
+        setMicId("");
+        setManualHeadsetConfirm(false);
+        writeSessionDeviceId(VOIP_SESSION_MIC_KEY, "");
+      }
+    }
+    if (!speakerId || !outputDevs.some((d) => d.deviceId === speakerId)) {
+      if (speakerId) {
+        setSpeakerId("");
+        setManualHeadsetConfirm(false);
+        writeSessionDeviceId(VOIP_SESSION_SPK_KEY, "");
+      }
+    }
+  }, [inputDevs, outputDevs, micId, speakerId]);
+
+  async function requestDevices() {
+    if (typeof navigator === "undefined" || !navigator.mediaDevices?.getUserMedia) {
+      setSetupError("Denne browser understøtter ikke mikrofon til WebRTC.");
+      return;
+    }
+    setSetupBusy(true);
+    setSetupError(null);
+    try {
+      const list = await ensureMicPermissionAndEnumerate();
+      setDevices(list);
+      setPermissionDone(true);
+
+      const storedMic = readSessionDeviceId(VOIP_SESSION_MIC_KEY);
+      const storedSpk = readSessionDeviceId(VOIP_SESSION_SPK_KEY);
+      const inputs = list.filter((d) => d.kind === "audioinput");
+      const outputs = list.filter((d) => d.kind === "audiooutput");
+
+      if (storedMic && inputs.some((i) => i.deviceId === storedMic)) {
+        setMicId(storedMic);
+      } else if (inputs.length === 1) {
+        const only = inputs[0].deviceId;
+        setMicId(only);
+        writeSessionDeviceId(VOIP_SESSION_MIC_KEY, only);
+      }
+
+      if (storedSpk && outputs.some((o) => o.deviceId === storedSpk)) {
+        setSpeakerId(storedSpk);
+      } else if (outputs.length === 1) {
+        const only = outputs[0].deviceId;
+        setSpeakerId(only);
+        writeSessionDeviceId(VOIP_SESSION_SPK_KEY, only);
+      }
+    } catch (e) {
+      setSetupError(
+        e instanceof Error ? e.message : "Mikrofon blev afvist eller er ikke tilgængelig.",
+      );
+    } finally {
+      setSetupBusy(false);
+    }
+  }
+
+  function clearCallAudioState(finalizeTimer: boolean) {
+    setRemoteStream(null);
+    if (finalizeTimer) {
+      setCallEndAt((prev) => (prev ?? Date.now()));
+    }
+  }
+
+  function attachCallStreams(call: TelnyxCall | null) {
+    if (!call) return;
+    if (call.remoteStream) setRemoteStream(call.remoteStream);
+  }
 
   async function ensureClientConnected() {
     if (clientRef.current) return;
@@ -161,10 +536,14 @@ export function CampaignVoipStrip({ leadId, campaignId, leadPhone, autoStartCall
             payload.call && typeof payload.call === "object" ? (payload.call as TelnyxCall) : null;
           if (!maybeCall) return;
           activeCallRef.current = maybeCall;
+          attachCallStreams(maybeCall);
           const mapped = callStateToLineStatus(maybeCall.state);
-          if (mapped) setLineStatus(mapped);
-          if (mapped === "idle") {
-            activeCallRef.current = null;
+          if (mapped) {
+            setLineStatus(mapped);
+            if (mapped === "idle") {
+              activeCallRef.current = null;
+              clearCallAudioState(true);
+            }
           }
         };
 
@@ -185,6 +564,13 @@ export function CampaignVoipStrip({ leadId, campaignId, leadPhone, autoStartCall
   }
 
   async function startCall() {
+    if (!audioSetupReady) {
+      setLineStatus("error");
+      setDetail(
+        "Tilslut headset med mikrofon, tillad mikrofon, og vælg rigtige enheder før du ringer.",
+      );
+      return;
+    }
     if (inFlightRef.current) return;
     const raw = normalizeDialDraft(dialDraft);
     const toE164 = normalizePhoneToE164ForDial(raw);
@@ -197,21 +583,34 @@ export function CampaignVoipStrip({ leadId, campaignId, leadPhone, autoStartCall
     inFlightRef.current = true;
     setLineStatus("connecting");
     setDetail("Forbinder WebRTC…");
+    setCallStartAt(Date.now());
+    setCallEndAt(null);
     try {
       await ensureClientConnected();
       if (!clientRef.current) throw new Error("WebRTC-klient blev ikke initialiseret.");
 
-      const call = clientRef.current.newCall({
+      await setAudioElementSink(remoteAudioRef.current, speakerId);
+
+      const callOptions: Parameters<TelnyxClient["newCall"]>[0] = {
         destinationNumber: toE164,
         callerNumber: callerNumberRef.current || undefined,
         remoteElement: remoteAudioId,
-      }) as TelnyxCall;
+        micId,
+      };
+      if (speakerId) {
+        callOptions.speakerId = speakerId;
+      }
+
+      const call = clientRef.current.newCall(callOptions) as TelnyxCall;
       activeCallRef.current = call;
+      attachCallStreams(call);
       setLineStatus("ringing");
       setDetail(null);
     } catch (err) {
       setLineStatus("error");
       setDetail(err instanceof Error ? err.message : "Kunne ikke starte WebRTC-opkald.");
+      setCallEndAt(Date.now());
+      clearCallAudioState(false);
     } finally {
       inFlightRef.current = false;
     }
@@ -227,6 +626,7 @@ export function CampaignVoipStrip({ leadId, campaignId, leadPhone, autoStartCall
     setLineStatus("idle");
     setDetail(null);
     inFlightRef.current = false;
+    clearCallAudioState(true);
   }
 
   function onRoundButtonClick() {
@@ -243,30 +643,214 @@ export function CampaignVoipStrip({ leadId, campaignId, leadPhone, autoStartCall
       autoKeyRef.current = null;
       return;
     }
+    if (!audioSetupReady) return;
     if (autoKeyRef.current === key) return;
     if (!normalizeDialDraft(dialDraft)) return;
     autoKeyRef.current = key;
     void startCall();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [leadId, dialDraft, autoStartCall]);
+  }, [leadId, dialDraft, autoStartCall, audioSetupReady]);
 
-  const activeCall =
-    lineStatus === "ringing" || lineStatus === "live" || lineStatus === "connecting";
+  const timerLabel = formatCallDuration(shownSeconds);
+  const timerTone =
+    lineStatus === "live"
+      ? "text-emerald-700"
+      : lineStatus === "ringing" || lineStatus === "connecting"
+        ? "text-amber-700"
+        : callStartAt
+          ? "text-stone-600"
+          : "text-stone-400";
 
   return (
     <section
-      className="rounded-xl border border-emerald-200/80 bg-gradient-to-br from-emerald-50/90 to-white px-4 py-3 shadow-sm"
+      className="rounded-2xl border border-emerald-200/80 bg-gradient-to-br from-emerald-50/95 via-white to-white px-4 py-4 shadow-sm"
       aria-label="VoIP opkald"
     >
-      <audio id={remoteAudioId} autoPlay />
-      <div className="flex flex-wrap items-start gap-3">
-        <div className="min-w-0 flex-1">
-          <label
-            htmlFor={`voip-dial-${leadId}`}
-            className="text-xs font-semibold uppercase tracking-wide text-emerald-900/80"
+      <audio ref={remoteAudioRef} id={remoteAudioId} autoPlay playsInline />
+
+      <header className="flex items-start justify-between gap-3">
+        <div className="min-w-0">
+          <h3 className="text-xs font-semibold uppercase tracking-[0.12em] text-emerald-900/85">
+            VoIP opkald
+          </h3>
+          <p className="mt-1 text-[11px] leading-snug text-stone-600">
+            Tale sendes ud via Telnyx; lyd fra modparten afspilles gennem den valgte lydudgang.
+          </p>
+        </div>
+        <span
+          className={`inline-flex items-center gap-1.5 rounded-full border px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wider ${
+            lineStatus === "live"
+              ? "border-emerald-300 bg-emerald-50 text-emerald-800"
+              : lineStatus === "ringing" || lineStatus === "connecting"
+                ? "border-amber-300 bg-amber-50 text-amber-800"
+                : lineStatus === "error"
+                  ? "border-red-300 bg-red-50 text-red-700"
+                  : "border-stone-300 bg-stone-50 text-stone-600"
+          }`}
+          aria-live="polite"
+        >
+          <span
+            className={`h-1.5 w-1.5 rounded-full ${
+              lineStatus === "live"
+                ? "bg-emerald-500"
+                : lineStatus === "ringing" || lineStatus === "connecting"
+                  ? "bg-amber-500"
+                  : lineStatus === "error"
+                    ? "bg-red-500"
+                    : "bg-stone-400"
+            }`}
+          />
+          {lineStatus === "live"
+            ? "I samtale"
+            : lineStatus === "ringing"
+              ? "Ringer"
+              : lineStatus === "connecting"
+                ? "Forbinder"
+                : lineStatus === "error"
+                  ? "Fejl"
+                  : "Klar"}
+        </span>
+      </header>
+
+      <div className="mt-3 rounded-xl border border-emerald-100 bg-white/85 px-3 py-3">
+        <h4 className="text-[11px] font-semibold uppercase tracking-wide text-emerald-900/85">
+          Headset før opkald
+        </h4>
+        <p className="mt-0.5 text-[11px] leading-snug text-stone-600">
+          Brug et headset med mikrofon. Du kan ikke ringe fra indbygget Mac-mikrofon/højttalere.
+        </p>
+        {!permissionDone ? (
+          <button
+            type="button"
+            onClick={() => void requestDevices()}
+            disabled={setupBusy}
+            className="mt-3 rounded-md bg-emerald-700 px-3 py-2 text-xs font-semibold text-white shadow hover:bg-emerald-800 disabled:opacity-60"
           >
-            Telefonnummer (opkald)
+            {setupBusy ? "Åbner mikrofon…" : "Tillad mikrofon og indlæs enheder"}
+          </button>
+        ) : (
+          <div className="mt-3 grid gap-3 sm:grid-cols-2">
+            <div>
+              <label
+                htmlFor={`voip-mic-${leadId}`}
+                className="text-[11px] font-medium text-emerald-900/90"
+              >
+                Mikrofon
+              </label>
+              <select
+                id={`voip-mic-${leadId}`}
+                value={micId}
+                onChange={(e) => {
+                  const v = e.target.value;
+                  setMicId(v);
+                  setManualHeadsetConfirm(false);
+                  writeSessionDeviceId(VOIP_SESSION_MIC_KEY, v);
+                }}
+                className="mt-1 w-full rounded-md border border-emerald-200/80 bg-white px-2 py-2 text-sm text-stone-900 shadow-sm outline-none ring-emerald-400/40 focus:ring-2"
+              >
+                <option value="">Vælg mikrofon…</option>
+                {inputDevs.map((d) => (
+                  <option key={d.deviceId} value={d.deviceId}>
+                    {d.label || `Mikrofon (${d.deviceId.slice(0, 8)}…)`}
+                  </option>
+                ))}
+              </select>
+            </div>
+            <div>
+              <label
+                htmlFor={`voip-spk-${leadId}`}
+                className="text-[11px] font-medium text-emerald-900/90"
+              >
+                Lydudgang
+              </label>
+              {outputDevs.length === 0 ? (
+                <p className="mt-2 text-[11px] text-amber-800">
+                  Browseren viser ingen separate lydudgange — macOS standard bruges. Vælg headset i macOS Lyd
+                  hvis nødvendigt.
+                </p>
+              ) : (
+                <select
+                  id={`voip-spk-${leadId}`}
+                  value={speakerId}
+                  onChange={(e) => {
+                    const v = e.target.value;
+                    setSpeakerId(v);
+                    setManualHeadsetConfirm(false);
+                    writeSessionDeviceId(VOIP_SESSION_SPK_KEY, v);
+                  }}
+                  className="mt-1 w-full rounded-md border border-emerald-200/80 bg-white px-2 py-2 text-sm text-stone-900 shadow-sm outline-none ring-emerald-400/40 focus:ring-2"
+                >
+                  <option value="">Vælg hovedtelefoner / headset…</option>
+                  {outputDevs.map((d) => (
+                    <option key={d.deviceId} value={d.deviceId}>
+                      {d.label || `Output (${d.deviceId.slice(0, 8)}…)`}
+                    </option>
+                  ))}
+                </select>
+              )}
+            </div>
+          </div>
+        )}
+        {setupError ? (
+          <p className="mt-2 text-xs font-medium text-red-700" role="alert">
+            {setupError}
+          </p>
+        ) : null}
+        {permissionDone && inputDevs.length === 0 ? (
+          <p className="mt-2 text-xs font-medium text-red-700" role="alert">
+            Ingen mikrofon fundet. Tilslut et headset og prøv &quot;Tillad mikrofon&quot; igen.
+          </p>
+        ) : null}
+        {needsSpeakerPick ? (
+          <p className="mt-2 text-xs font-medium text-amber-900" role="status">
+            Vælg lydudgang (headset), så samtalen afspilles dér.
+          </p>
+        ) : null}
+        {verifyError ? (
+          <p className="mt-2 text-xs font-medium text-red-700" role="alert">
+            Mikrofon: {verifyError}
+          </p>
+        ) : null}
+        {permissionDone && inputDevs.length > 0 ? (
+          <label className="mt-3 flex cursor-pointer items-start gap-2 rounded-md border border-stone-200/90 bg-stone-50/80 px-2 py-2 text-[11px] leading-snug text-stone-700">
+            <input
+              type="checkbox"
+              checked={manualHeadsetConfirm}
+              onChange={(e) => setManualHeadsetConfirm(e.target.checked)}
+              className="mt-0.5 h-3.5 w-3.5 shrink-0 rounded border-stone-400 text-emerald-700 focus:ring-emerald-500"
+            />
+            <span>
+              <span className="font-semibold text-stone-800">Ved tvivl:</span> Jeg bekræfter, at jeg bruger
+              headset med mikrofon. Brug dette hvis systemet tager fejl (fx ukendte enhedsnavne).
+            </span>
           </label>
+        ) : null}
+        {headsetBlockReason ? (
+          <p
+            className={`mt-2 text-xs font-medium ${manualHeadsetConfirm ? "text-amber-900" : "text-red-700"}`}
+            role="alert"
+          >
+            {manualHeadsetConfirm
+              ? `Automatisk tjek: ${headsetBlockReason} — manuel bekræftelse er aktiv.`
+              : headsetBlockReason}
+          </p>
+        ) : null}
+        {permissionDone && micVerifyOk && !needsSpeakerPick && inputDevs.length > 0 && !headsetBlockedEffective ? (
+          <p className="mt-2 text-[11px] font-medium text-emerald-800" role="status">
+            Headset/lyd er klar — du kan ringe.
+            {webrtcReady ? " WebRTC er forbundet." : ""}
+          </p>
+        ) : null}
+      </div>
+
+      <div className="mt-3 rounded-xl border border-emerald-100 bg-white/85 px-3 py-3">
+        <label
+          htmlFor={`voip-dial-${leadId}`}
+          className="text-[11px] font-semibold uppercase tracking-wide text-emerald-900/85"
+        >
+          Telefonnummer (opkald)
+        </label>
+        <div className="mt-1 flex flex-wrap items-center gap-3">
           <input
             id={`voip-dial-${leadId}`}
             type="text"
@@ -275,25 +859,39 @@ export function CampaignVoipStrip({ leadId, campaignId, leadPhone, autoStartCall
             value={dialDraft}
             onChange={(e) => setDialDraft(e.target.value)}
             placeholder="Nummer til opkald"
-            className="mt-1 w-full max-w-sm rounded-md border border-emerald-200/80 bg-white px-3 py-2 font-mono text-sm font-medium text-stone-900 shadow-sm outline-none ring-emerald-400/40 focus:ring-2"
+            className="min-w-[12rem] flex-1 rounded-md border border-emerald-200/80 bg-white px-3 py-2 font-mono text-sm font-medium tracking-wide text-stone-900 shadow-sm outline-none ring-emerald-400/40 focus:ring-2"
           />
-          {webrtcReady ? (
-            <p className="mt-1 text-[11px] text-emerald-800">WebRTC klar — lyd via din Mac.</p>
-          ) : null}
-          {detail ? (
-            <p className={`mt-2 text-xs font-medium ${lineStatus === "error" ? "text-red-700" : "text-stone-700"}`} role={lineStatus === "error" ? "alert" : "status"}>
-              {detail}
-            </p>
-          ) : null}
-        </div>
-        <div className="flex shrink-0 items-start pt-5">
+
+          <div
+            className={`inline-flex min-w-[4.5rem] items-center justify-center rounded-md border px-2 py-1 font-mono text-sm font-semibold tabular-nums ${
+              lineStatus === "live"
+                ? "border-emerald-200 bg-emerald-50"
+                : lineStatus === "ringing" || lineStatus === "connecting"
+                  ? "border-amber-200 bg-amber-50"
+                  : "border-stone-200 bg-stone-50"
+            } ${timerTone}`}
+            aria-label="Opkaldstid"
+            title={callStartAt && !callEndAt ? "Varighed i samtalen" : "Sidste samtales varighed"}
+          >
+            {timerLabel}
+          </div>
+
+          <div className="inline-flex items-center gap-3 rounded-md border border-stone-200 bg-white/80 px-2.5 py-1.5">
+            <AudioLevelBar level={outLevel} label="Ud" variant="out" />
+            <AudioLevelBar level={activeCall ? inLevel : 0} label="Ind" variant="in" />
+          </div>
+
           <button
             type="button"
             onClick={onRoundButtonClick}
-            className={`flex h-12 w-12 items-center justify-center rounded-full text-white shadow-md transition ${
+            disabled={!activeCall && !audioSetupReady}
+            title={!activeCall && !audioSetupReady ? "Konfigurer headset og mikrofon først" : undefined}
+            className={`flex h-12 w-12 shrink-0 items-center justify-center rounded-full text-white shadow-md transition ${
               activeCall
                 ? "bg-red-600 hover:bg-red-700"
-                : "bg-emerald-600 hover:bg-emerald-700 disabled:cursor-not-allowed disabled:opacity-60"
+                : canPlaceCall
+                  ? "bg-emerald-600 hover:bg-emerald-700"
+                  : "cursor-not-allowed bg-stone-400"
             }`}
             aria-label={activeCall ? "Læg på" : "Ring op"}
           >
@@ -308,8 +906,16 @@ export function CampaignVoipStrip({ leadId, campaignId, leadPhone, autoStartCall
             )}
           </button>
         </div>
+
+        {detail ? (
+          <p
+            className={`mt-2 text-xs font-medium ${lineStatus === "error" ? "text-red-700" : "text-stone-700"}`}
+            role={lineStatus === "error" ? "alert" : "status"}
+          >
+            {detail}
+          </p>
+        ) : null}
       </div>
     </section>
   );
 }
-
