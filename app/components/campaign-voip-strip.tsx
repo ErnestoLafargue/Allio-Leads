@@ -317,6 +317,14 @@ export function CampaignVoipStrip({ leadId, campaignId, leadPhone, autoStartCall
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [leadId]);
 
+  /** Pre-load Telnyx WebRTC SDK-chunken så snart komponenten mountes,
+   *  så den er klar i memory inden brugeren trykker «Ring op». */
+  useEffect(() => {
+    void import("@telnyx/webrtc").catch(() => {
+      /* dyret håndteres når ensureClientConnected køres */
+    });
+  }, []);
+
   useEffect(() => {
     return () => {
       try {
@@ -411,6 +419,22 @@ export function CampaignVoipStrip({ leadId, campaignId, leadPhone, autoStartCall
   useEffect(() => {
     void setAudioElementSink(remoteAudioRef.current, speakerId);
   }, [speakerId]);
+
+  /**
+   * Pre-warm WebRTC: så snart audio-setup er klar, etabler login + WebSocket
+   * til Telnyx i baggrunden. Når brugeren klikker «Ring op» springer vi direkte
+   * til newCall (ingen token-fetch, SDK-import eller handshake i klik-pathen).
+   * Klienten cleanes op af unmount-effekten.
+   */
+  useEffect(() => {
+    if (!audioSetupReady) return;
+    if (clientRef.current || initPromiseRef.current) return;
+    void ensureClientConnected().catch(() => {
+      /* fejl rapporteres når brugeren faktisk forsøger at ringe */
+    });
+    // ensureClientConnected er stabil per render — vi vil kun re-trigge når audioSetupReady ændres.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [audioSetupReady]);
 
   useEffect(() => {
     if (!micId || !inputDevs.some((d) => d.deviceId === micId)) {
@@ -663,7 +687,8 @@ export function CampaignVoipStrip({ leadId, campaignId, leadPhone, autoStartCall
 
     inFlightRef.current = true;
     setLineStatus("connecting");
-    setDetail("Forbinder WebRTC…");
+    // Hvis klienten allerede er pre-warmet, skip "Forbinder WebRTC…"-flash.
+    setDetail(clientRef.current ? null : "Forbinder WebRTC…");
     setCallStartAt(Date.now());
     setCallEndAt(null);
     try {
