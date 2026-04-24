@@ -2,8 +2,9 @@
 
 import Link from "next/link";
 import { useSession } from "next-auth/react";
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { campaignShowsStartButton, normalizeCampaignDialMode } from "@/lib/dial-mode";
+import { VoipAudioSettingsButton } from "@/app/components/voip-audio-settings-button";
 
 type Campaign = {
   id: string;
@@ -53,9 +54,18 @@ export default function KampagnerPage() {
     void load();
   }, [load]);
 
+  const hasVoipCampaign = useMemo(
+    () =>
+      campaigns.some((c) => campaignShowsStartButton(normalizeCampaignDialMode(c.dialMode))),
+    [campaigns],
+  );
+
   return (
     <div className="space-y-8">
-      <h1 className="text-xl font-semibold text-stone-900">Kampagner</h1>
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <h1 className="text-xl font-semibold text-stone-900">Kampagner</h1>
+        {hasVoipCampaign ? <VoipAudioSettingsButton /> : null}
+      </div>
 
       {loadError && (
         <div className="rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-950">
