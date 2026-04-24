@@ -38,6 +38,7 @@ type TelnyxClient = {
     micId?: string;
     speakerId?: string;
     audio?: MediaTrackConstraints | boolean;
+    localStream?: MediaStream;
   }) => unknown;
   on: (eventName: string, callback: (...args: unknown[]) => void) => TelnyxClient;
   off: (eventName: string, callback?: (...args: unknown[]) => void) => TelnyxClient;
@@ -54,8 +55,19 @@ function normalizeDialDraft(s: string) {
   return s.replace(/\s/g, "").trim();
 }
 
-const LIVE_STATES = new Set(["active", "early", "answering"]);
-const RINGING_STATES = new Set(["new", "requesting", "trying", "ringing", "recovering"]);
+/**
+ * Verto/SIP-call states fra Telnyx WebRTC SDK:
+ *   new / requesting / trying / recovering  → vi er ved at sende INVITE
+ *                                              eller venter på første provisional response.
+ *                                              Modtagerens telefon ringer IKKE endnu.
+ *   ringing / early                          → vi har modtaget 180/183 fra operatøren —
+ *                                              modtagerens telefon ringer faktisk nu.
+ *   answering / active                       → opkaldet er taget, medie flyder.
+ *   hangup / destroy / purge                 → afsluttet.
+ */
+const CONNECTING_STATES = new Set(["new", "requesting", "trying", "recovering"]);
+const ALERTING_STATES = new Set(["ringing", "early"]);
+const LIVE_STATES = new Set(["answering", "active", "held"]);
 const CLOSED_STATES = new Set(["hangup", "destroy", "purge"]);
 
 function stateToken(stateRaw: unknown): string {
@@ -85,7 +97,8 @@ function callStateToLineStatus(stateRaw: unknown): LineStatus | null {
   if (!token) return null;
   if (CLOSED_STATES.has(token)) return "idle";
   if (LIVE_STATES.has(token)) return "live";
-  if (RINGING_STATES.has(token)) return "ringing";
+  if (ALERTING_STATES.has(token)) return "ringing";
+  if (CONNECTING_STATES.has(token)) return "connecting";
   return null;
 }
 
@@ -230,11 +243,11 @@ export function CampaignVoipStrip({ leadId, campaignId, leadPhone, autoStartCall
   const [callEndAt, setCallEndAt] = useState<number | null>(null);
   const [nowTick, setNowTick] = useState(Date.now());
   const [remoteStream, setRemoteStream] = useState<MediaStream | null>(null);
-  const [localStream, setLocalStream] = useState<MediaStream | null>(null);
   /**
-   * Persistent mikrofon-stream til lydniveau-måling NÅR der ikke er opkald.
-   * Under aktivt opkald lukkes denne, og vi læser i stedet Telnyx-callets localStream
-   * for at undgå dobbelt mic-capture (kan give højere latency på Bluetooth-headsets).
+   * Persistent mikrofon-stream — én getUserMedia for hele session.
+   * Bruges både til niveau-måling og som localStream på Telnyx-newCall
+   * (vi sender en klon ind, så SDK'en springer sin egen getUserMedia over).
+   * Klonen kan SDK'en stoppe når opkaldet ender uden at påvirke originalen.
    */
   const [micMonitorStream, setMicMonitorStream] = useState<MediaStream | null>(null);
 
@@ -278,10 +291,7 @@ export function CampaignVoipStrip({ leadId, campaignId, leadPhone, autoStartCall
     lineStatus === "ringing" || lineStatus === "live" || lineStatus === "connecting";
   const canPlaceCall = audioSetupReady && !activeCall;
 
-  // Under opkald: brug callets egen localStream (ingen ekstra getUserMedia-capture).
-  // Ellers: brug den persistente monitor-stream.
-  const outLevelStream = activeCall ? localStream : micMonitorStream;
-  const outLevel = useAudioLevel(outLevelStream);
+  const outLevel = useAudioLevel(micMonitorStream);
   const inLevel = useAudioLevel(activeCall ? remoteStream : null);
 
   useEffect(() => {
@@ -312,7 +322,6 @@ export function CampaignVoipStrip({ leadId, campaignId, leadPhone, autoStartCall
     setCallStartAt(null);
     setCallEndAt(null);
     setRemoteStream(null);
-    setLocalStream(null);
     // Kun nyt lead — ikke når brugeren retter telefonfeltet på leadet
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [leadId]);
@@ -383,12 +392,12 @@ export function CampaignVoipStrip({ leadId, campaignId, leadPhone, autoStartCall
   }, [permissionDone, micId]);
 
   /**
-   * Åbn mikrofon-monitor så niveau-bjælken kan vise udgående lyd UDEN for opkald.
-   * Under aktivt opkald lukkes monitoren — Telnyx ejer mikrofonen, og vi bruger
-   * dens egen localStream til niveau-måling (undgår dobbelt-capture).
+   * Persistent mikrofon-stream — kører hele tiden så længe permission + micId
+   * er sat. Bruges til niveau-måling, og en klon sendes til Telnyx newCall så
+   * SDK'en undgår sin egen getUserMedia (sparer 100-300 ms på opkaldsstart).
    */
   useEffect(() => {
-    if (!permissionDone || !micId || activeCall) {
+    if (!permissionDone || !micId) {
       setMicMonitorStream(null);
       return;
     }
@@ -414,7 +423,7 @@ export function CampaignVoipStrip({ leadId, campaignId, leadPhone, autoStartCall
       if (active) active.getTracks().forEach((t) => t.stop());
       setMicMonitorStream(null);
     };
-  }, [permissionDone, micId, activeCall]);
+  }, [permissionDone, micId]);
 
   useEffect(() => {
     void setAudioElementSink(remoteAudioRef.current, speakerId);
@@ -523,7 +532,6 @@ export function CampaignVoipStrip({ leadId, campaignId, leadPhone, autoStartCall
 
   function clearCallAudioState(finalizeTimer: boolean) {
     setRemoteStream(null);
-    setLocalStream(null);
     if (finalizeTimer) {
       setCallEndAt((prev) => (prev ?? Date.now()));
     }
@@ -532,7 +540,6 @@ export function CampaignVoipStrip({ leadId, campaignId, leadPhone, autoStartCall
   function attachCallStreams(call: TelnyxCall | null) {
     if (!call) return;
     if (call.remoteStream) setRemoteStream(call.remoteStream);
-    if (call.localStream) setLocalStream(call.localStream);
   }
 
   async function ensureClientConnected() {
@@ -701,16 +708,26 @@ export function CampaignVoipStrip({ leadId, campaignId, leadPhone, autoStartCall
         destinationNumber: toE164,
         callerNumber: callerNumberRef.current || undefined,
         remoteElement: remoteAudioId,
-        micId,
       };
       if (speakerId) {
         callOptions.speakerId = speakerId;
+      }
+      // Genbrug pre-warmet mic-stream → SDK'en springer sin getUserMedia over
+      // og medie-pathen er klar med det samme. Klonen ejes af SDK'en (stoppes
+      // når opkaldet ender), originalen lever videre til niveau-måling.
+      if (micMonitorStream) {
+        callOptions.localStream = micMonitorStream.clone();
+      } else {
+        callOptions.micId = micId;
       }
 
       const call = clientRef.current.newCall(callOptions) as TelnyxCall;
       activeCallRef.current = call;
       attachCallStreams(call);
-      setLineStatus("ringing");
+      // Bliv i "connecting" indtil Telnyx fortæller os 180 Ringing er modtaget
+      // fra operatøren. telnyx.notification-handleren opgraderer til "ringing"
+      // når modtagerens telefon faktisk ringer, og videre til "live" ved svar.
+      setLineStatus("connecting");
       setDetail(null);
     } catch (err) {
       setLineStatus("error");
