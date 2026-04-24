@@ -221,6 +221,9 @@ export function CampaignVoipStrip({ leadId, campaignId, leadPhone, autoStartCall
   const [micVerifyOk, setMicVerifyOk] = useState(false);
   const [verifyError, setVerifyError] = useState<string | null>(null);
   const [manualHeadsetConfirm, setManualHeadsetConfirm] = useState(false);
+  const [settingsOpen, setSettingsOpen] = useState(false);
+  const [refreshBusy, setRefreshBusy] = useState(false);
+  const [refreshInfo, setRefreshInfo] = useState<string | null>(null);
 
   const [callStartAt, setCallStartAt] = useState<number | null>(null);
   const [callEndAt, setCallEndAt] = useState<number | null>(null);
@@ -453,6 +456,33 @@ export function CampaignVoipStrip({ leadId, campaignId, leadPhone, autoStartCall
     }
   }
 
+  /** Tving re-enumerate (fx når headset tilsluttes efter permission). */
+  async function refreshDevices() {
+    if (typeof navigator === "undefined" || !navigator.mediaDevices) return;
+    setRefreshBusy(true);
+    setRefreshInfo(null);
+    try {
+      try {
+        const probe = await navigator.mediaDevices.getUserMedia({ audio: true });
+        probe.getTracks().forEach((t) => t.stop());
+      } catch {
+        /* no-op — enumerate kan stadig give deviceIds (uden labels) */
+      }
+      const list = await navigator.mediaDevices.enumerateDevices();
+      setDevices(list);
+      if (!permissionDone) setPermissionDone(true);
+      const inputs = list.filter((d) => d.kind === "audioinput").length;
+      const outputs = list.filter((d) => d.kind === "audiooutput").length;
+      setRefreshInfo(`Fundet ${inputs} mikrofon${inputs === 1 ? "" : "er"} og ${outputs} lydudgang${outputs === 1 ? "" : "e"}.`);
+    } catch (e) {
+      setRefreshInfo(
+        e instanceof Error ? `Kunne ikke genlæse: ${e.message}` : "Kunne ikke genlæse enhedsliste.",
+      );
+    } finally {
+      setRefreshBusy(false);
+    }
+  }
+
   function clearCallAudioState(finalizeTimer: boolean) {
     setRemoteStream(null);
     if (finalizeTimer) {
@@ -668,7 +698,7 @@ export function CampaignVoipStrip({ leadId, campaignId, leadPhone, autoStartCall
     >
       <audio ref={remoteAudioRef} id={remoteAudioId} autoPlay playsInline />
 
-      <header className="flex items-start justify-between gap-3">
+      <header className="flex flex-wrap items-start justify-between gap-3">
         <div className="min-w-0">
           <h3 className="text-xs font-semibold uppercase tracking-[0.12em] text-emerald-900/85">
             VoIP opkald
@@ -677,170 +707,252 @@ export function CampaignVoipStrip({ leadId, campaignId, leadPhone, autoStartCall
             Tale sendes ud via Telnyx; lyd fra modparten afspilles gennem den valgte lydudgang.
           </p>
         </div>
-        <span
-          className={`inline-flex items-center gap-1.5 rounded-full border px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wider ${
-            lineStatus === "live"
-              ? "border-emerald-300 bg-emerald-50 text-emerald-800"
-              : lineStatus === "ringing" || lineStatus === "connecting"
-                ? "border-amber-300 bg-amber-50 text-amber-800"
-                : lineStatus === "error"
-                  ? "border-red-300 bg-red-50 text-red-700"
-                  : "border-stone-300 bg-stone-50 text-stone-600"
-          }`}
-          aria-live="polite"
-        >
+        <div className="flex flex-wrap items-center gap-2">
           <span
-            className={`h-1.5 w-1.5 rounded-full ${
+            className={`inline-flex items-center gap-1.5 rounded-full border px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wider ${
               lineStatus === "live"
-                ? "bg-emerald-500"
+                ? "border-emerald-300 bg-emerald-50 text-emerald-800"
                 : lineStatus === "ringing" || lineStatus === "connecting"
-                  ? "bg-amber-500"
+                  ? "border-amber-300 bg-amber-50 text-amber-800"
                   : lineStatus === "error"
-                    ? "bg-red-500"
-                    : "bg-stone-400"
+                    ? "border-red-300 bg-red-50 text-red-700"
+                    : "border-stone-300 bg-stone-50 text-stone-600"
             }`}
-          />
-          {lineStatus === "live"
-            ? "I samtale"
-            : lineStatus === "ringing"
-              ? "Ringer"
-              : lineStatus === "connecting"
-                ? "Forbinder"
-                : lineStatus === "error"
-                  ? "Fejl"
-                  : "Klar"}
-        </span>
-      </header>
-
-      <div className="mt-3 rounded-xl border border-emerald-100 bg-white/85 px-3 py-3">
-        <h4 className="text-[11px] font-semibold uppercase tracking-wide text-emerald-900/85">
-          Headset før opkald
-        </h4>
-        <p className="mt-0.5 text-[11px] leading-snug text-stone-600">
-          Brug et headset med mikrofon. Du kan ikke ringe fra indbygget Mac-mikrofon/højttalere.
-        </p>
-        {!permissionDone ? (
+            aria-live="polite"
+          >
+            <span
+              className={`h-1.5 w-1.5 rounded-full ${
+                lineStatus === "live"
+                  ? "bg-emerald-500"
+                  : lineStatus === "ringing" || lineStatus === "connecting"
+                    ? "bg-amber-500"
+                    : lineStatus === "error"
+                      ? "bg-red-500"
+                      : "bg-stone-400"
+              }`}
+            />
+            {lineStatus === "live"
+              ? "I samtale"
+              : lineStatus === "ringing"
+                ? "Ringer"
+                : lineStatus === "connecting"
+                  ? "Forbinder"
+                  : lineStatus === "error"
+                    ? "Fejl"
+                    : "Klar"}
+          </span>
           <button
             type="button"
-            onClick={() => void requestDevices()}
-            disabled={setupBusy}
-            className="mt-3 rounded-md bg-emerald-700 px-3 py-2 text-xs font-semibold text-white shadow hover:bg-emerald-800 disabled:opacity-60"
+            onClick={() => setSettingsOpen((v) => !v)}
+            className={`inline-flex items-center gap-1.5 rounded-full border px-2.5 py-1 text-[11px] font-semibold shadow-sm transition ${
+              settingsOpen
+                ? "border-emerald-400 bg-emerald-600 text-white hover:bg-emerald-700"
+                : "border-emerald-200 bg-white text-emerald-800 hover:bg-emerald-50"
+            }`}
+            aria-expanded={settingsOpen}
+            aria-controls={`voip-audio-settings-${leadId}`}
+            title="Åbn lydindstillinger"
           >
-            {setupBusy ? "Åbner mikrofon…" : "Tillad mikrofon og indlæs enheder"}
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className="h-3.5 w-3.5" aria-hidden="true">
+              <circle cx="12" cy="12" r="3" />
+              <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 1 1-4 0v-.09a1.65 1.65 0 0 0-1-1.51 1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 1 1 0-4h.09a1.65 1.65 0 0 0 1.51-1 1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 1 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 1 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z" />
+            </svg>
+            Lydindstillinger
           </button>
-        ) : (
-          <div className="mt-3 grid gap-3 sm:grid-cols-2">
-            <div>
-              <label
-                htmlFor={`voip-mic-${leadId}`}
-                className="text-[11px] font-medium text-emerald-900/90"
-              >
-                Mikrofon
-              </label>
-              <select
-                id={`voip-mic-${leadId}`}
-                value={micId}
-                onChange={(e) => {
-                  const v = e.target.value;
-                  setMicId(v);
-                  setManualHeadsetConfirm(false);
-                  writeSessionDeviceId(VOIP_SESSION_MIC_KEY, v);
-                }}
-                className="mt-1 w-full rounded-md border border-emerald-200/80 bg-white px-2 py-2 text-sm text-stone-900 shadow-sm outline-none ring-emerald-400/40 focus:ring-2"
-              >
-                <option value="">Vælg mikrofon…</option>
-                {inputDevs.map((d) => (
-                  <option key={d.deviceId} value={d.deviceId}>
-                    {d.label || `Mikrofon (${d.deviceId.slice(0, 8)}…)`}
-                  </option>
-                ))}
-              </select>
-            </div>
-            <div>
-              <label
-                htmlFor={`voip-spk-${leadId}`}
-                className="text-[11px] font-medium text-emerald-900/90"
-              >
-                Lydudgang
-              </label>
-              {outputDevs.length === 0 ? (
-                <p className="mt-2 text-[11px] text-amber-800">
-                  Browseren viser ingen separate lydudgange — macOS standard bruges. Vælg headset i macOS Lyd
-                  hvis nødvendigt.
-                </p>
-              ) : (
-                <select
-                  id={`voip-spk-${leadId}`}
-                  value={speakerId}
-                  onChange={(e) => {
-                    const v = e.target.value;
-                    setSpeakerId(v);
-                    setManualHeadsetConfirm(false);
-                    writeSessionDeviceId(VOIP_SESSION_SPK_KEY, v);
-                  }}
-                  className="mt-1 w-full rounded-md border border-emerald-200/80 bg-white px-2 py-2 text-sm text-stone-900 shadow-sm outline-none ring-emerald-400/40 focus:ring-2"
-                >
-                  <option value="">Vælg hovedtelefoner / headset…</option>
-                  {outputDevs.map((d) => (
-                    <option key={d.deviceId} value={d.deviceId}>
-                      {d.label || `Output (${d.deviceId.slice(0, 8)}…)`}
-                    </option>
-                  ))}
-                </select>
-              )}
-            </div>
+        </div>
+      </header>
+
+      <div
+        id={`voip-audio-settings-${leadId}`}
+        className="mt-3 rounded-xl border border-emerald-100 bg-white/85 px-3 py-3"
+      >
+        {!permissionDone ? (
+          <div>
+            <h4 className="text-[11px] font-semibold uppercase tracking-wide text-emerald-900/85">
+              Tillad mikrofon
+            </h4>
+            <p className="mt-0.5 text-[11px] leading-snug text-stone-600">
+              Vi skal have adgang til mikrofonen for at kunne vise dine enheder og sende lyd via Telnyx.
+            </p>
+            <button
+              type="button"
+              onClick={() => void requestDevices()}
+              disabled={setupBusy}
+              className="mt-3 rounded-md bg-emerald-700 px-3 py-2 text-xs font-semibold text-white shadow hover:bg-emerald-800 disabled:opacity-60"
+            >
+              {setupBusy ? "Åbner mikrofon…" : "Tillad mikrofon og indlæs enheder"}
+            </button>
+            {setupError ? (
+              <p className="mt-2 text-xs font-medium text-red-700" role="alert">
+                {setupError}
+              </p>
+            ) : null}
           </div>
+        ) : (
+          <>
+            <div className="flex flex-wrap items-center justify-between gap-2">
+              <div className="min-w-0">
+                <h4 className="text-[11px] font-semibold uppercase tracking-wide text-emerald-900/85">
+                  Lydindstillinger
+                </h4>
+                <p className="mt-0.5 truncate text-[11px] leading-snug text-stone-600">
+                  <span className="font-medium text-stone-800">Mikrofon:</span>{" "}
+                  {micLabel || (micId ? "(valgt)" : "(ikke valgt)")} ·{" "}
+                  <span className="font-medium text-stone-800">Lydudgang:</span>{" "}
+                  {outputDevs.length === 0
+                    ? "systemstandard"
+                    : spkLabel || (speakerId ? "(valgt)" : "(ikke valgt)")}
+                </p>
+              </div>
+              <div className="flex flex-wrap items-center gap-2">
+                <button
+                  type="button"
+                  onClick={() => void refreshDevices()}
+                  disabled={refreshBusy}
+                  className="inline-flex items-center gap-1 rounded-md border border-emerald-200 bg-white px-2.5 py-1 text-[11px] font-semibold text-emerald-800 shadow-sm transition hover:bg-emerald-50 disabled:opacity-60"
+                  title="Genlæs enhedsliste hvis du lige har koblet headset til"
+                >
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className="h-3.5 w-3.5" aria-hidden="true">
+                    <path d="M21 12a9 9 0 0 1-14.85 6.85L3 16" />
+                    <path d="M21 22v-6h-6" />
+                    <path d="M3 12a9 9 0 0 1 14.85-6.85L21 8" />
+                    <path d="M3 2v6h6" />
+                  </svg>
+                  {refreshBusy ? "Genlæser…" : "Opdater enhedsliste"}
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setSettingsOpen((v) => !v)}
+                  className="inline-flex items-center gap-1 rounded-md border border-stone-200 bg-white px-2.5 py-1 text-[11px] font-semibold text-stone-700 shadow-sm transition hover:bg-stone-50"
+                >
+                  {settingsOpen ? "Skjul" : "Vis valg"}
+                </button>
+              </div>
+            </div>
+
+            {settingsOpen ? (
+              <div className="mt-3 grid gap-3 sm:grid-cols-2">
+                <div>
+                  <label
+                    htmlFor={`voip-mic-${leadId}`}
+                    className="text-[11px] font-medium text-emerald-900/90"
+                  >
+                    Mikrofon ({inputDevs.length})
+                  </label>
+                  <select
+                    id={`voip-mic-${leadId}`}
+                    value={micId}
+                    onChange={(e) => {
+                      const v = e.target.value;
+                      setMicId(v);
+                      setManualHeadsetConfirm(false);
+                      writeSessionDeviceId(VOIP_SESSION_MIC_KEY, v);
+                    }}
+                    className="mt-1 w-full rounded-md border border-emerald-200/80 bg-white px-2 py-2 text-sm text-stone-900 shadow-sm outline-none ring-emerald-400/40 focus:ring-2"
+                  >
+                    <option value="">Vælg mikrofon…</option>
+                    {inputDevs.map((d) => (
+                      <option key={d.deviceId} value={d.deviceId}>
+                        {d.label || `Mikrofon (${d.deviceId.slice(0, 8)}…)`}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+                <div>
+                  <label
+                    htmlFor={`voip-spk-${leadId}`}
+                    className="text-[11px] font-medium text-emerald-900/90"
+                  >
+                    Lydudgang ({outputDevs.length})
+                  </label>
+                  {outputDevs.length === 0 ? (
+                    <p className="mt-2 rounded-md border border-amber-200 bg-amber-50 px-2 py-2 text-[11px] text-amber-900">
+                      Browseren viser ingen separate lydudgange. Dette sker ofte i Safari og når
+                      browseren endnu ikke har registreret headsettet — prøv «Opdater enhedsliste»
+                      eller vælg headset som standard i macOS Lyd-indstillinger.
+                    </p>
+                  ) : (
+                    <select
+                      id={`voip-spk-${leadId}`}
+                      value={speakerId}
+                      onChange={(e) => {
+                        const v = e.target.value;
+                        setSpeakerId(v);
+                        setManualHeadsetConfirm(false);
+                        writeSessionDeviceId(VOIP_SESSION_SPK_KEY, v);
+                      }}
+                      className="mt-1 w-full rounded-md border border-emerald-200/80 bg-white px-2 py-2 text-sm text-stone-900 shadow-sm outline-none ring-emerald-400/40 focus:ring-2"
+                    >
+                      <option value="">Vælg hovedtelefoner / headset…</option>
+                      {outputDevs.map((d) => (
+                        <option key={d.deviceId} value={d.deviceId}>
+                          {d.label || `Output (${d.deviceId.slice(0, 8)}…)`}
+                        </option>
+                      ))}
+                    </select>
+                  )}
+                </div>
+                {inputDevs.length > 0 ? (
+                  <label className="sm:col-span-2 flex cursor-pointer items-start gap-2 rounded-md border border-stone-200/90 bg-stone-50/80 px-2 py-2 text-[11px] leading-snug text-stone-700">
+                    <input
+                      type="checkbox"
+                      checked={manualHeadsetConfirm}
+                      onChange={(e) => setManualHeadsetConfirm(e.target.checked)}
+                      className="mt-0.5 h-3.5 w-3.5 shrink-0 rounded border-stone-400 text-emerald-700 focus:ring-emerald-500"
+                    />
+                    <span>
+                      <span className="font-semibold text-stone-800">Ved tvivl:</span> Jeg bekræfter, at jeg
+                      bruger headset med mikrofon. Brug dette hvis systemet tager fejl (fx ukendte
+                      enhedsnavne).
+                    </span>
+                  </label>
+                ) : null}
+              </div>
+            ) : null}
+
+            {refreshInfo ? (
+              <p className="mt-2 text-[11px] font-medium text-stone-700" role="status">
+                {refreshInfo}
+              </p>
+            ) : null}
+            {setupError ? (
+              <p className="mt-2 text-xs font-medium text-red-700" role="alert">
+                {setupError}
+              </p>
+            ) : null}
+            {inputDevs.length === 0 ? (
+              <p className="mt-2 text-xs font-medium text-red-700" role="alert">
+                Ingen mikrofon fundet. Tilslut headset og tryk «Opdater enhedsliste».
+              </p>
+            ) : null}
+            {needsSpeakerPick ? (
+              <p className="mt-2 text-xs font-medium text-amber-900" role="status">
+                Vælg lydudgang (headset), så samtalen afspilles dér.
+              </p>
+            ) : null}
+            {verifyError ? (
+              <p className="mt-2 text-xs font-medium text-red-700" role="alert">
+                Mikrofon: {verifyError}
+              </p>
+            ) : null}
+            {headsetBlockReason ? (
+              <p
+                className={`mt-2 text-xs font-medium ${manualHeadsetConfirm ? "text-amber-900" : "text-red-700"}`}
+                role="alert"
+              >
+                {manualHeadsetConfirm
+                  ? `Automatisk tjek: ${headsetBlockReason} — manuel bekræftelse er aktiv.`
+                  : headsetBlockReason}
+              </p>
+            ) : null}
+            {micVerifyOk && !needsSpeakerPick && inputDevs.length > 0 && !headsetBlockedEffective ? (
+              <p className="mt-2 text-[11px] font-medium text-emerald-800" role="status">
+                Headset/lyd er klar — du kan ringe.
+                {webrtcReady ? " WebRTC er forbundet." : ""}
+              </p>
+            ) : null}
+          </>
         )}
-        {setupError ? (
-          <p className="mt-2 text-xs font-medium text-red-700" role="alert">
-            {setupError}
-          </p>
-        ) : null}
-        {permissionDone && inputDevs.length === 0 ? (
-          <p className="mt-2 text-xs font-medium text-red-700" role="alert">
-            Ingen mikrofon fundet. Tilslut et headset og prøv &quot;Tillad mikrofon&quot; igen.
-          </p>
-        ) : null}
-        {needsSpeakerPick ? (
-          <p className="mt-2 text-xs font-medium text-amber-900" role="status">
-            Vælg lydudgang (headset), så samtalen afspilles dér.
-          </p>
-        ) : null}
-        {verifyError ? (
-          <p className="mt-2 text-xs font-medium text-red-700" role="alert">
-            Mikrofon: {verifyError}
-          </p>
-        ) : null}
-        {permissionDone && inputDevs.length > 0 ? (
-          <label className="mt-3 flex cursor-pointer items-start gap-2 rounded-md border border-stone-200/90 bg-stone-50/80 px-2 py-2 text-[11px] leading-snug text-stone-700">
-            <input
-              type="checkbox"
-              checked={manualHeadsetConfirm}
-              onChange={(e) => setManualHeadsetConfirm(e.target.checked)}
-              className="mt-0.5 h-3.5 w-3.5 shrink-0 rounded border-stone-400 text-emerald-700 focus:ring-emerald-500"
-            />
-            <span>
-              <span className="font-semibold text-stone-800">Ved tvivl:</span> Jeg bekræfter, at jeg bruger
-              headset med mikrofon. Brug dette hvis systemet tager fejl (fx ukendte enhedsnavne).
-            </span>
-          </label>
-        ) : null}
-        {headsetBlockReason ? (
-          <p
-            className={`mt-2 text-xs font-medium ${manualHeadsetConfirm ? "text-amber-900" : "text-red-700"}`}
-            role="alert"
-          >
-            {manualHeadsetConfirm
-              ? `Automatisk tjek: ${headsetBlockReason} — manuel bekræftelse er aktiv.`
-              : headsetBlockReason}
-          </p>
-        ) : null}
-        {permissionDone && micVerifyOk && !needsSpeakerPick && inputDevs.length > 0 && !headsetBlockedEffective ? (
-          <p className="mt-2 text-[11px] font-medium text-emerald-800" role="status">
-            Headset/lyd er klar — du kan ringe.
-            {webrtcReady ? " WebRTC er forbundet." : ""}
-          </p>
-        ) : null}
       </div>
 
       <div className="mt-3 rounded-xl border border-emerald-100 bg-white/85 px-3 py-3">
