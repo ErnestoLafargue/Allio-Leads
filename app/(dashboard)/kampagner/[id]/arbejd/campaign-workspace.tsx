@@ -985,11 +985,20 @@ export function CampaignWorkspace({ campaignId, preferredLeadId, voipSession = f
           {showAutoDialBadge && dialerStats ? (
             <span
               className="inline-flex items-center gap-2 rounded-md border border-stone-200 bg-white/80 px-2.5 py-1 text-xs font-medium text-stone-700"
-              title="Hold-status: hvor mange agenter er klar, ringer eller i samtale, og hvor mange numre der er i luften."
+              title="Hold-status: «klar (VoIP)» er agenter klar til parallel-dispatch. Andre tal viser ringer, samtale og aktive udgående opkald."
               aria-live="polite"
             >
               <span className="text-stone-500">Hold:</span>
-              <span className="text-emerald-700">{dialerStats.ready} klar</span>
+              <span className="text-emerald-700">
+                {dialerStats.readyForDispatch ?? dialerStats.ready} klar
+                {dialerStats.ready > (dialerStats.readyForDispatch ?? dialerStats.ready) ? (
+                  <span className="text-stone-500">
+                    {" "}
+                    (+{dialerStats.ready - (dialerStats.readyForDispatch ?? dialerStats.ready)} uden
+                    VoIP)
+                  </span>
+                ) : null}
+              </span>
               <span className="text-stone-300">·</span>
               <span className="text-amber-700">{dialerStats.ringing} ringer</span>
               <span className="text-stone-300">·</span>
@@ -999,11 +1008,25 @@ export function CampaignWorkspace({ campaignId, preferredLeadId, voipSession = f
             </span>
           ) : null}
           {showAutoDialBadge && sipReady === false ? (
-            <span
-              className="inline-flex items-center gap-1.5 rounded-md border border-amber-300 bg-amber-50 px-2.5 py-1 text-xs font-semibold text-amber-900"
-              title="Din konto har ingen Telnyx Telephony Credential — admin skal provisionere VoIP for dig før parallel dispatch kan ringe dig op."
-            >
-              ⚠ Mangler VoIP-provisionering
+            <span className="inline-flex items-center gap-2">
+              <span
+                className="inline-flex items-center gap-1.5 rounded-md border border-amber-300 bg-amber-50 px-2.5 py-1 text-xs font-semibold text-amber-900"
+                title={
+                  isAdmin
+                    ? "Din konto har ingen Telnyx Telephony Credential. Gå til Administration → Telnyx og vælg «Provisionér» for at aktivere parallel-dispatch."
+                    : "Din konto har ingen Telnyx Telephony Credential — en administrator skal provisionere VoIP for dig under Administration → Telnyx, før parallel dispatch kan ringe dig op."
+                }
+              >
+                ⚠ Mangler VoIP-provisionering
+              </span>
+              {isAdmin ? (
+                <Link
+                  href="/administration/telnyx"
+                  className="text-xs font-semibold text-amber-800 underline decoration-amber-500/50 underline-offset-2 hover:text-amber-950"
+                >
+                  Administration → Telnyx
+                </Link>
+              ) : null}
             </span>
           ) : null}
         </div>

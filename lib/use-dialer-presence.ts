@@ -17,7 +17,10 @@ import { useCallback, useEffect, useRef, useState } from "react";
 export type DialerPresenceStatus = "ready" | "ringing" | "talking" | "wrap_up" | "offline";
 
 export type DialerPresenceStats = {
+  /// Alle agent-sessioner i status "ready" (inkl. uden Telnyx-profil)
   ready: number;
+  /// Klare agenter med både telnyxCredentialId og telnyxSipUsername — dem dispatcheren kan bruge
+  readyForDispatch: number;
   ringing: number;
   talking: number;
   inFlightCalls: number;
@@ -60,6 +63,7 @@ export function useDialerPresence(options: UseDialerPresenceOptions) {
   const [stats, setStats] = useState<DialerPresenceStats | null>(null);
   const [sipReady, setSipReady] = useState<boolean | null>(null);
   const [lastError, setLastError] = useState<string | null>(null);
+  const sipReadyRef = useRef<boolean | null>(null);
 
   // Track senest set assigned-leadId så vi kun kalder onAssignedLead ved ÆNDRING
   const lastAssignedRef = useRef<string | null>(null);
@@ -74,6 +78,9 @@ export function useDialerPresence(options: UseDialerPresenceOptions) {
   useEffect(() => {
     statusRef.current = status;
   }, [status]);
+  useEffect(() => {
+    sipReadyRef.current = sipReady;
+  }, [sipReady]);
 
   const sendHeartbeat = useCallback(async () => {
     if (!campaignId) return;
@@ -93,8 +100,18 @@ export function useDialerPresence(options: UseDialerPresenceOptions) {
         sipReady?: boolean;
         assignedLead?: AssignedLead | null;
       };
-      if (data.presence) setStats(data.presence);
-      if (typeof data.sipReady === "boolean") setSipReady(data.sipReady);
+      if (data.presence) {
+        const p = data.presence;
+        setStats({
+          ...p,
+          readyForDispatch:
+            typeof p.readyForDispatch === "number" ? p.readyForDispatch : p.ready,
+        });
+      }
+      if (typeof data.sipReady === "boolean") {
+        setSipReady(data.sipReady);
+        sipReadyRef.current = data.sipReady;
+      }
       setLastError(null);
 
       const newAssignedId = data.assignedLead?.id ?? null;
@@ -112,6 +129,8 @@ export function useDialerPresence(options: UseDialerPresenceOptions) {
   const triggerDispatch = useCallback(async () => {
     if (!campaignId) return;
     if (statusRef.current !== "ready") return;
+    // Parallel-dispatch kræver per-agent Telephony Credential + SIP-brugernavn i DB
+    if (sipReadyRef.current === false) return;
     try {
       const body: Record<string, unknown> = { campaignId };
       if (typeof dispatchMaxNewCalls === "number") body.maxNewCalls = dispatchMaxNewCalls;

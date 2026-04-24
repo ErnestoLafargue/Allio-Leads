@@ -74,9 +74,13 @@ export async function POST(req: Request) {
 
   // Returnér antal aktive ready agenter + in-flight opkald så klienten kan vise pacing-info
   const cutoff = new Date(Date.now() - PRESENCE_FRESH_WINDOW_MS);
-  const [readyCount, ringingCount, talkingCount, inFlightCalls, mySession] = await Promise.all([
-    prisma.agentSession.count({
+  const [readySessions, ringingCount, talkingCount, inFlightCalls, mySession] = await Promise.all([
+    prisma.agentSession.findMany({
       where: { campaignId, status: "ready", lastHeartbeat: { gte: cutoff } },
+      select: {
+        id: true,
+        user: { select: { telnyxSipUsername: true, telnyxCredentialId: true } },
+      },
     }),
     prisma.agentSession.count({
       where: { campaignId, status: "ringing", lastHeartbeat: { gte: cutoff } },
@@ -102,6 +106,10 @@ export async function POST(req: Request) {
       },
     }),
   ]);
+  const readyCount = readySessions.length;
+  const readyForDispatch = readySessions.filter(
+    (s) => Boolean(s.user.telnyxSipUsername && s.user.telnyxCredentialId),
+  ).length;
 
   // Hvis dispatcheren har tildelt et bridged lead → returnér lead-data så frontend
   // kan loade det. Browser detekterer ændring i `assignedLeadId` og navigerer.
@@ -138,6 +146,7 @@ export async function POST(req: Request) {
     sipReady,
     presence: {
       ready: readyCount,
+      readyForDispatch,
       ringing: ringingCount,
       talking: talkingCount,
       inFlightCalls,
