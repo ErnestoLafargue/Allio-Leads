@@ -361,16 +361,21 @@ export type TelnyxPatchResult =
   | { ok: false; status: number; message: string; telnyx?: unknown };
 
 /**
- * PATCH /v2/credential_connections/{id} - opdaterer fx outbound voice profile.
+ * PATCH /v2/credential_connections/{id} - opdaterer fx outbound voice profile
+ * og anchorsite-override.
  */
 export async function patchTelnyxCredentialConnection(params: {
   apiKey: string;
   connectionId: string;
   outboundVoiceProfileId?: string;
+  anchorsiteOverride?: string;
 }): Promise<TelnyxPatchResult> {
   const body: Record<string, unknown> = {};
   if (params.outboundVoiceProfileId) {
     body.outbound = { outbound_voice_profile_id: params.outboundVoiceProfileId };
+  }
+  if (params.anchorsiteOverride) {
+    body.anchorsite_override = params.anchorsiteOverride;
   }
   if (Object.keys(body).length === 0) {
     return { ok: true, raw: null };
@@ -453,12 +458,13 @@ export async function createTelnyxCredentialConnection(params: {
   const userName =
     sanitize(params.userName || "") || `allio${randomToken(8).toLowerCase()}`;
   const password = params.password?.trim() || randomToken(32);
+  // "Frankfurt, Germany" passer til DK-brug og matcher allio-powerdialer Voice API App.
   const body: Record<string, unknown> = {
     active: true,
     connection_name: safeName,
     user_name: userName,
     password,
-    anchorsite_override: "Latency",
+    anchorsite_override: "Frankfurt, Germany",
   };
   if (params.tag) body.tags = [sanitize(params.tag)];
   if (params.outboundVoiceProfileId) {

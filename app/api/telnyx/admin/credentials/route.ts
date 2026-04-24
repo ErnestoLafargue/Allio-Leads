@@ -170,11 +170,12 @@ export async function POST(req: Request) {
       }
       connection = createdCc.connection;
     } else {
-      // Sørg for at eksisterende CC har outbound voice profile sat — ellers falder opkald på gulvet.
+      // Sørg for at eksisterende CC har outbound voice profile + Frankfurt anchorsite.
       const patchRes = await patchTelnyxCredentialConnection({
         apiKey,
         connectionId: connection.id,
         outboundVoiceProfileId,
+        anchorsiteOverride: "Frankfurt, Germany",
       });
       if (!patchRes.ok) {
         console.warn(
