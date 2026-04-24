@@ -31,6 +31,8 @@ type CreateResponse = {
   credential?: Credential;
   credentialConnectionId?: string;
   credentialConnectionName?: string | null;
+  outboundVoiceProfileId?: string | null;
+  outboundVoiceProfileName?: string | null;
   error?: string;
   code?: string;
   telnyxStatus?: number;
@@ -62,6 +64,7 @@ export function TelnyxCredentialsAdminPanel() {
   const [error, setError] = useState<string | null>(null);
   const [data, setData] = useState<ListResponse | null>(null);
   const [justCreatedId, setJustCreatedId] = useState<string | null>(null);
+  const [lastOutboundProfile, setLastOutboundProfile] = useState<string | null>(null);
   const [copyOkFor, setCopyOkFor] = useState<string | null>(null);
 
   const fetchData = useCallback(async () => {
@@ -104,6 +107,9 @@ export function TelnyxCredentialsAdminPanel() {
         setError(json.error || `Kunne ikke oprette credential (HTTP ${res.status}).`);
       } else {
         setJustCreatedId(json.credential.id);
+        const profileLabel =
+          json.outboundVoiceProfileName || json.outboundVoiceProfileId || null;
+        setLastOutboundProfile(profileLabel);
         await fetchData();
       }
     } catch (err) {
@@ -177,6 +183,12 @@ export function TelnyxCredentialsAdminPanel() {
           </div>
         </div>
 
+        {lastOutboundProfile && (
+          <p className="mt-3 rounded-md bg-emerald-50 px-3 py-2 text-sm text-emerald-800">
+            Credential Connection er nu koblet til Outbound Voice Profile:{" "}
+            <span className="font-mono">{lastOutboundProfile}</span> — browser-opkald kan nu routes ud til PSTN.
+          </p>
+        )}
         {error && (
           <p className="mt-3 rounded-md bg-red-50 px-3 py-2 text-sm text-red-700">{error}</p>
         )}

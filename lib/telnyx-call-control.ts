@@ -280,6 +280,150 @@ export async function listTelnyxCredentialConnections(params: {
   }
 }
 
+export type TelnyxOutboundVoiceProfile = {
+  id: string;
+  name: string | null;
+};
+
+export type TelnyxListOutboundVoiceProfilesResult =
+  | { ok: true; profiles: TelnyxOutboundVoiceProfile[]; raw: unknown }
+  | { ok: false; status: number; message: string; telnyx?: unknown };
+
+/** GET /v2/outbound_voice_profiles - lister alle Outbound Voice Profiles. */
+export async function listTelnyxOutboundVoiceProfiles(params: {
+  apiKey: string;
+}): Promise<TelnyxListOutboundVoiceProfilesResult> {
+  try {
+    const qs = new URLSearchParams();
+    qs.set("page[number]", "1");
+    qs.set("page[size]", "100");
+    const res = await fetch(`${TELNYX_API_BASE}/outbound_voice_profiles?${qs.toString()}`, {
+      method: "GET",
+      headers: {
+        Authorization: `Bearer ${params.apiKey}`,
+        Accept: "application/json",
+      },
+    });
+    const rawText = await res.text().catch(() => "");
+    let json: unknown = null;
+    if (rawText && rawText.trim().startsWith("{")) {
+      try {
+        json = JSON.parse(rawText);
+      } catch {
+        json = null;
+      }
+    }
+    if (!res.ok) {
+      const detail = formatTelnyxError(json);
+      const snippet = rawText.length > 300 ? `${rawText.slice(0, 300)}…` : rawText;
+      return {
+        ok: false,
+        status: res.status,
+        message:
+          detail ||
+          (snippet && !snippet.trim().startsWith("<")
+            ? `Telnyx HTTP ${res.status} — ${snippet.trim()}`
+            : `Telnyx HTTP ${res.status}`),
+        telnyx: json ?? rawText,
+      };
+    }
+    const data =
+      json && typeof json === "object" && "data" in json
+        ? (json as { data: unknown }).data
+        : [];
+    const arr: TelnyxOutboundVoiceProfile[] = [];
+    if (Array.isArray(data)) {
+      for (const item of data) {
+        if (item && typeof item === "object") {
+          const d = item as Record<string, unknown>;
+          const id = typeof d.id === "string" && d.id ? d.id : null;
+          if (!id) continue;
+          const name = typeof d.name === "string" && d.name ? d.name : null;
+          arr.push({ id, name });
+        }
+      }
+    }
+    return { ok: true, profiles: arr, raw: json };
+  } catch (err) {
+    return {
+      ok: false,
+      status: 0,
+      message:
+        err instanceof Error
+          ? err.message
+          : "Ukendt fejl ved list af outbound voice profiles.",
+    };
+  }
+}
+
+export type TelnyxPatchResult =
+  | { ok: true; raw: unknown }
+  | { ok: false; status: number; message: string; telnyx?: unknown };
+
+/**
+ * PATCH /v2/credential_connections/{id} - opdaterer fx outbound voice profile.
+ */
+export async function patchTelnyxCredentialConnection(params: {
+  apiKey: string;
+  connectionId: string;
+  outboundVoiceProfileId?: string;
+}): Promise<TelnyxPatchResult> {
+  const body: Record<string, unknown> = {};
+  if (params.outboundVoiceProfileId) {
+    body.outbound = { outbound_voice_profile_id: params.outboundVoiceProfileId };
+  }
+  if (Object.keys(body).length === 0) {
+    return { ok: true, raw: null };
+  }
+  try {
+    const res = await fetch(
+      `${TELNYX_API_BASE}/credential_connections/${encodeURIComponent(params.connectionId)}`,
+      {
+        method: "PATCH",
+        headers: {
+          Authorization: `Bearer ${params.apiKey}`,
+          "Content-Type": "application/json",
+          Accept: "application/json",
+        },
+        body: JSON.stringify(body),
+      },
+    );
+    const rawText = await res.text().catch(() => "");
+    let json: unknown = null;
+    if (rawText && rawText.trim().startsWith("{")) {
+      try {
+        json = JSON.parse(rawText);
+      } catch {
+        json = null;
+      }
+    }
+    if (!res.ok) {
+      const detail = formatTelnyxError(json);
+      const snippet = rawText.length > 400 ? `${rawText.slice(0, 400)}…` : rawText;
+      return {
+        ok: false,
+        status: res.status,
+        message:
+          detail ||
+          (snippet && !snippet.trim().startsWith("<")
+            ? `Telnyx HTTP ${res.status} — ${snippet.trim()}`
+            : `Telnyx HTTP ${res.status}`),
+        telnyx: json ?? rawText,
+      };
+    }
+    return { ok: true, raw: json };
+  } catch (err) {
+    return {
+      ok: false,
+      status: 0,
+      message:
+        err instanceof Error
+          ? err.message
+          : "Ukendt fejl ved patch af credential connection.",
+    };
+  }
+}
+
 export type TelnyxCreateCredentialConnectionResult =
   | { ok: true; connection: TelnyxCredentialConnection; raw: unknown }
   | { ok: false; status: number; message: string; telnyx?: unknown };
@@ -300,6 +444,7 @@ export async function createTelnyxCredentialConnection(params: {
   userName?: string;
   password?: string;
   tag?: string;
+  outboundVoiceProfileId?: string;
 }): Promise<TelnyxCreateCredentialConnectionResult> {
   // Telnyx kræver at connection_name og user_name kun indeholder bogstaver og tal
   // (ingen bindestreger, mellemrum, punktum eller specialtegn).
@@ -316,6 +461,9 @@ export async function createTelnyxCredentialConnection(params: {
     anchorsite_override: "Latency",
   };
   if (params.tag) body.tags = [sanitize(params.tag)];
+  if (params.outboundVoiceProfileId) {
+    body.outbound = { outbound_voice_profile_id: params.outboundVoiceProfileId };
+  }
 
   try {
     const res = await fetch(`${TELNYX_API_BASE}/credential_connections`, {

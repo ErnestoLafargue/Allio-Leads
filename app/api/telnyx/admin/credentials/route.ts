@@ -7,6 +7,8 @@ import {
   getTelnyxTelephonyCredentialId,
   listTelnyxCredentialConnections,
   listTelnyxCredentials,
+  listTelnyxOutboundVoiceProfiles,
+  patchTelnyxCredentialConnection,
   type TelnyxCredentialConnection,
 } from "@/lib/telnyx-call-control";
 
@@ -91,12 +93,42 @@ export async function POST(req: Request) {
 
   const body = (await req.json().catch(() => null)) as PostBody | null;
 
+  // Trin 0: Find en Outbound Voice Profile så vores Credential Connection har en vej ud til PSTN.
+  const profilesRes = await listTelnyxOutboundVoiceProfiles({ apiKey });
+  let outboundVoiceProfileId: string | null = null;
+  let outboundVoiceProfileName: string | null = null;
+  if (profilesRes.ok && profilesRes.profiles.length > 0) {
+    const first = profilesRes.profiles[0];
+    outboundVoiceProfileId = first.id;
+    outboundVoiceProfileName = first.name;
+  } else if (!profilesRes.ok) {
+    console.error("[telnyx:admin] list outbound voice profiles failed", profilesRes);
+  }
+
+  if (!outboundVoiceProfileId) {
+    return NextResponse.json(
+      {
+        code: "TELNYX_NO_OUTBOUND_VOICE_PROFILE",
+        error:
+          "Din Telnyx-konto har ingen Outbound Voice Profile. Opret én i Telnyx portal under Voice → Outbound Voice Profiles, før du kan lave browser-opkald.",
+      },
+      { status: 400 },
+    );
+  }
+
   // Trin 1: Find eller opret en Credential Connection dedikeret til WebRTC.
   let connection: TelnyxCredentialConnection | null = null;
   const providedConnectionId = body?.credentialConnectionId?.trim();
 
   if (providedConnectionId) {
-    connection = { id: providedConnectionId, name: null, userName: null, active: null, tags: [], createdAt: null };
+    connection = {
+      id: providedConnectionId,
+      name: null,
+      userName: null,
+      active: null,
+      tags: [],
+      createdAt: null,
+    };
   } else {
     const existing = await listTelnyxCredentialConnections({
       apiKey,
@@ -123,6 +155,7 @@ export async function POST(req: Request) {
         apiKey,
         name: ALLIO_WEBRTC_NAME,
         tag: ALLIO_WEBRTC_TAG,
+        outboundVoiceProfileId,
       });
       if (!createdCc.ok) {
         console.error("[telnyx:admin] create credential connection failed", createdCc);
@@ -136,6 +169,19 @@ export async function POST(req: Request) {
         );
       }
       connection = createdCc.connection;
+    } else {
+      // Sørg for at eksisterende CC har outbound voice profile sat — ellers falder opkald på gulvet.
+      const patchRes = await patchTelnyxCredentialConnection({
+        apiKey,
+        connectionId: connection.id,
+        outboundVoiceProfileId,
+      });
+      if (!patchRes.ok) {
+        console.warn(
+          "[telnyx:admin] patch credential connection outbound profile failed",
+          patchRes,
+        );
+      }
     }
   }
 
@@ -176,6 +222,8 @@ export async function POST(req: Request) {
     credential: created.credential,
     credentialConnectionId: connection.id,
     credentialConnectionName: connection.name,
+    outboundVoiceProfileId,
+    outboundVoiceProfileName,
   });
 }
 
