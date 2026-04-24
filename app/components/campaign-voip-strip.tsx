@@ -517,6 +517,12 @@ export function CampaignVoipStrip({ leadId, campaignId, leadPhone, autoStartCall
         code?: string;
         telnyxStatus?: number;
         telephonyCredentialIdHint?: string;
+        credentialStatus?: string | null;
+        credentialExpired?: boolean | null;
+        credentialExpiresAt?: string | null;
+        credentialConnectionId?: string | null;
+        credentialFetchError?: string | null;
+        diagnosticHint?: string | null;
       };
       if (!tokenRes.ok || !tokenJson.loginToken) {
         const base =
@@ -535,6 +541,10 @@ export function CampaignVoipStrip({ leadId, campaignId, leadPhone, autoStartCall
           tokenJson.telephonyCredentialIdHint.trim()
         ) {
           extras.push(`cred ${tokenJson.telephonyCredentialIdHint.trim()}`);
+        }
+        if (tokenJson.credentialExpired === true) extras.push("expired");
+        else if (typeof tokenJson.credentialStatus === "string" && tokenJson.credentialStatus) {
+          extras.push(`status: ${tokenJson.credentialStatus}`);
         }
         const suffix = extras.length ? ` (${extras.join(", ")})` : "";
         throw new Error(`${base}${code}${suffix}`);

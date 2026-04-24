@@ -63,6 +63,73 @@ export type WebRtcTokenResult =
   | { ok: true; token: string; raw: unknown }
   | { ok: false; status: number; message: string; telnyx?: unknown };
 
+export type TelnyxCredentialInfo = {
+  found: boolean;
+  status?: string;
+  expired?: boolean;
+  expiresAt?: string | null;
+  connectionId?: string | null;
+  createdAt?: string | null;
+  updatedAt?: string | null;
+  tag?: string | null;
+  raw?: unknown;
+  fetchError?: string;
+};
+
+/** GET /v2/telephony_credentials/{id} til diagnostik. */
+export async function getTelnyxCredentialInfo(params: {
+  telephonyCredentialId: string;
+  apiKey: string;
+}): Promise<TelnyxCredentialInfo> {
+  try {
+    const res = await fetch(
+      `${TELNYX_API_BASE}/telephony_credentials/${encodeURIComponent(params.telephonyCredentialId)}`,
+      {
+        method: "GET",
+        headers: {
+          Authorization: `Bearer ${params.apiKey}`,
+          Accept: "application/json",
+        },
+      },
+    );
+    const json: unknown = await res.json().catch(() => null);
+    if (!res.ok) {
+      const msg = formatTelnyxError(json) || `Telnyx HTTP ${res.status}`;
+      return { found: false, fetchError: msg, raw: json };
+    }
+    const data =
+      json && typeof json === "object" && "data" in json
+        ? (json as { data: unknown }).data
+        : null;
+    const d = data && typeof data === "object" ? (data as Record<string, unknown>) : null;
+    if (!d) return { found: false, fetchError: "Tomt svar fra Telnyx", raw: json };
+
+    const toStr = (v: unknown): string | null =>
+      typeof v === "string" && v.length > 0 ? v : null;
+    return {
+      found: true,
+      status: toStr(d.status) ?? undefined,
+      expired:
+        typeof d.expired === "boolean"
+          ? d.expired
+          : typeof d.status === "string"
+            ? d.status.toLowerCase() === "expired"
+            : undefined,
+      expiresAt: toStr(d.expires_at),
+      connectionId: toStr(d.connection_id),
+      createdAt: toStr(d.created_at),
+      updatedAt: toStr(d.updated_at),
+      tag: toStr(d.tag),
+      raw: json,
+    };
+  } catch (err) {
+    return {
+      found: false,
+      fetchError: err instanceof Error ? err.message : "Ukendt fejl ved hentning af credential.",
+    };
+  }
+}
+
 export async function createTelnyxWebRtcToken(params: {
   telephonyCredentialId: string;
   apiKey: string;
