@@ -3,7 +3,11 @@ import { requireAdmin } from "@/lib/api-auth";
 import { prisma } from "@/lib/prisma";
 import { LEAD_ACTIVITY_KIND } from "@/lib/lead-activity-kinds";
 import { getCopenhagenMonthBounds } from "@/lib/copenhagen-month-bounds";
-import { fetchTelnyxUsageReport, sumCostFromRows } from "@/lib/telnyx-usage-reports";
+import {
+  fetchTelnyxUsageReport,
+  sumCostFromRows,
+  type TelnyxUsageReportResult,
+} from "@/lib/telnyx-usage-reports";
 import { getTelnyxConnectionId } from "@/lib/telnyx-call-control";
 
 /** Groft vekslingskurs til vejledende DKK (Telnyx fakturerer typisk i USD). */
@@ -145,6 +149,8 @@ export async function GET(req: Request) {
     meta?: unknown;
     message?: string;
     status?: number;
+    /** Når Voice API-filter fejler og vi falder tilbage til hele kontoen */
+    scopeNote?: string;
   }> = [];
 
   let totalTelnyxUsd = 0;
@@ -155,25 +161,36 @@ export async function GET(req: Request) {
     telnyxAllOk = false;
     telnyxFirstError = "Mangler TELNYX_API_KEY.";
   } else {
-    const reports = await Promise.all(
-      TELNYX_PRODUCTS.map((p) => {
-        const extra: Record<string, string> = {};
-        if (p.product === "call-control" && connectionId) {
-          extra["filter[connection_id]"] = connectionId;
-        }
-        return fetchTelnyxUsageReport({
-          apiKey,
-          product: p.product,
-          startDateIso: startIso,
-          endDateIsoExclusive: endIso,
-          metrics: p.metrics,
-          dimensions: p.dimensions,
-          extra: Object.keys(extra).length ? extra : undefined,
+    for (const p of TELNYX_PRODUCTS) {
+      const base = {
+        apiKey,
+        product: p.product,
+        startDateIso: startIso,
+        endDateIsoExclusive: endIso,
+        metrics: p.metrics,
+        dimensions: p.dimensions,
+      };
+
+      let r: TelnyxUsageReportResult;
+      let scopeNote: string | undefined;
+
+      if (p.product === "call-control" && connectionId) {
+        r = await fetchTelnyxUsageReport({
+          ...base,
+          extra: { "filter[connection_id]": connectionId },
         });
-      }),
-    );
-    TELNYX_PRODUCTS.forEach((p, i) => {
-      const r = reports[i];
+        if (!r.ok && [400, 404, 422].includes(r.status)) {
+          const retry = await fetchTelnyxUsageReport({ ...base, extra: undefined });
+          if (retry.ok) {
+            r = retry;
+            scopeNote =
+              "Telnyx accepterede ikke filter på Call Control-id — tallene viser hele kontoens Voice API for perioden.";
+          }
+        }
+      } else {
+        r = await fetchTelnyxUsageReport({ ...base, extra: undefined });
+      }
+
       if (!r.ok) {
         telnyxAllOk = false;
         if (!telnyxFirstError) telnyxFirstError = r.message;
@@ -184,7 +201,7 @@ export async function GET(req: Request) {
           message: r.message,
           status: r.status,
         });
-        return;
+        continue;
       }
       const cost = sumCostFromRows(r.rows);
       totalTelnyxUsd += cost;
@@ -195,8 +212,9 @@ export async function GET(req: Request) {
         costUsd: Math.round(cost * 10000) / 10000,
         rows: r.rows,
         meta: r.meta,
+        scopeNote,
       });
-    });
+    }
   }
 
   const totalUsdRounded = Math.round(totalTelnyxUsd * 10000) / 10000;

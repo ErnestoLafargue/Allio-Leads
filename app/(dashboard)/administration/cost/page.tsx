@@ -13,6 +13,7 @@ type TelnyxSection = {
   rows?: Record<string, unknown>[];
   message?: string;
   status?: number;
+  scopeNote?: string;
 };
 
 type CostPayload = {
@@ -306,6 +307,9 @@ export default function TelnyxCostPage() {
                       </p>
                     )}
                   </div>
+                  {sec.ok && sec.scopeNote ? (
+                    <p className="mt-2 text-xs text-amber-800">{sec.scopeNote}</p>
+                  ) : null}
                   {sec.ok && sec.rows && sec.rows.length > 0 ? (
                     <div className="mt-3 overflow-x-auto rounded-lg border border-stone-200 bg-white">
                       <table className="min-w-full text-left text-xs text-stone-700">
