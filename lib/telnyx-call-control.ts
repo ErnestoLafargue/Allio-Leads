@@ -181,6 +181,205 @@ export async function listTelnyxCredentials(params: {
   }
 }
 
+export type TelnyxCredentialConnection = {
+  id: string;
+  name: string | null;
+  userName: string | null;
+  active: boolean | null;
+  tags: string[];
+  createdAt: string | null;
+};
+
+function normalizeCredentialConnection(
+  d: Record<string, unknown>,
+): TelnyxCredentialConnection | null {
+  const toStr = (v: unknown): string | null =>
+    typeof v === "string" && v.length > 0 ? v : null;
+  const id = toStr(d.id);
+  if (!id) return null;
+  const tagsRaw = Array.isArray(d.tags)
+    ? d.tags.filter((x): x is string => typeof x === "string")
+    : [];
+  return {
+    id,
+    name: toStr(d.connection_name) ?? toStr(d.name),
+    userName: toStr(d.user_name),
+    active: typeof d.active === "boolean" ? d.active : null,
+    tags: tagsRaw,
+    createdAt: toStr(d.created_at),
+  };
+}
+
+export type TelnyxListCredentialConnectionsResult =
+  | { ok: true; connections: TelnyxCredentialConnection[]; raw: unknown }
+  | { ok: false; status: number; message: string; telnyx?: unknown };
+
+/** GET /v2/credential_connections?filter[connection_name]=... */
+export async function listTelnyxCredentialConnections(params: {
+  apiKey: string;
+  nameContains?: string;
+  tag?: string;
+}): Promise<TelnyxListCredentialConnectionsResult> {
+  try {
+    const qs = new URLSearchParams();
+    qs.set("page[number]", "1");
+    qs.set("page[size]", "100");
+    if (params.nameContains) qs.set("filter[connection_name][contains]", params.nameContains);
+    if (params.tag) qs.set("filter[tag]", params.tag);
+    const res = await fetch(`${TELNYX_API_BASE}/credential_connections?${qs.toString()}`, {
+      method: "GET",
+      headers: {
+        Authorization: `Bearer ${params.apiKey}`,
+        Accept: "application/json",
+      },
+    });
+    const rawText = await res.text().catch(() => "");
+    let json: unknown = null;
+    if (rawText && rawText.trim().startsWith("{")) {
+      try {
+        json = JSON.parse(rawText);
+      } catch {
+        json = null;
+      }
+    }
+    if (!res.ok) {
+      const detail = formatTelnyxError(json);
+      const snippet = rawText.length > 300 ? `${rawText.slice(0, 300)}…` : rawText;
+      return {
+        ok: false,
+        status: res.status,
+        message:
+          detail ||
+          (snippet && !snippet.trim().startsWith("<")
+            ? `Telnyx HTTP ${res.status} — ${snippet.trim()}`
+            : `Telnyx HTTP ${res.status}`),
+        telnyx: json ?? rawText,
+      };
+    }
+    const data =
+      json && typeof json === "object" && "data" in json
+        ? (json as { data: unknown }).data
+        : [];
+    const arr: TelnyxCredentialConnection[] = [];
+    if (Array.isArray(data)) {
+      for (const item of data) {
+        if (item && typeof item === "object") {
+          const normalized = normalizeCredentialConnection(item as Record<string, unknown>);
+          if (normalized) arr.push(normalized);
+        }
+      }
+    }
+    return { ok: true, connections: arr, raw: json };
+  } catch (err) {
+    return {
+      ok: false,
+      status: 0,
+      message:
+        err instanceof Error ? err.message : "Ukendt fejl ved list af credential connections.",
+    };
+  }
+}
+
+export type TelnyxCreateCredentialConnectionResult =
+  | { ok: true; connection: TelnyxCredentialConnection; raw: unknown }
+  | { ok: false; status: number; message: string; telnyx?: unknown };
+
+function randomToken(len: number): string {
+  const alphabet = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789";
+  let out = "";
+  for (let i = 0; i < len; i++) {
+    out += alphabet[Math.floor(Math.random() * alphabet.length)];
+  }
+  return out;
+}
+
+/** POST /v2/credential_connections - opretter en Credential Connection til SIP/WebRTC. */
+export async function createTelnyxCredentialConnection(params: {
+  apiKey: string;
+  name: string;
+  userName?: string;
+  password?: string;
+  tag?: string;
+}): Promise<TelnyxCreateCredentialConnectionResult> {
+  const userName = params.userName?.trim() || `allio-${randomToken(8).toLowerCase()}`;
+  const password = params.password?.trim() || randomToken(32);
+  const body: Record<string, unknown> = {
+    active: true,
+    connection_name: params.name,
+    user_name: userName,
+    password,
+    anchorsite_override: "Latency",
+    webhook_event_url: null,
+  };
+  if (params.tag) body.tags = [params.tag];
+
+  try {
+    const res = await fetch(`${TELNYX_API_BASE}/credential_connections`, {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${params.apiKey}`,
+        "Content-Type": "application/json",
+        Accept: "application/json",
+      },
+      body: JSON.stringify(body),
+    });
+    const rawText = await res.text().catch(() => "");
+    let json: unknown = null;
+    if (rawText && rawText.trim().startsWith("{")) {
+      try {
+        json = JSON.parse(rawText);
+      } catch {
+        json = null;
+      }
+    }
+    if (!res.ok) {
+      const detail = formatTelnyxError(json);
+      const snippet = rawText.length > 400 ? `${rawText.slice(0, 400)}…` : rawText;
+      return {
+        ok: false,
+        status: res.status,
+        message:
+          detail ||
+          (snippet && !snippet.trim().startsWith("<")
+            ? `Telnyx HTTP ${res.status} — ${snippet.trim()}`
+            : `Telnyx HTTP ${res.status}`),
+        telnyx: json ?? rawText,
+      };
+    }
+    const data =
+      json && typeof json === "object" && "data" in json
+        ? (json as { data: unknown }).data
+        : null;
+    if (!data || typeof data !== "object") {
+      return {
+        ok: false,
+        status: 502,
+        message: "Telnyx returnerede tomt svar ved oprettelse af credential connection.",
+        telnyx: json,
+      };
+    }
+    const normalized = normalizeCredentialConnection(data as Record<string, unknown>);
+    if (!normalized) {
+      return {
+        ok: false,
+        status: 502,
+        message: "Telnyx returnerede uventet svar — mangler connection id.",
+        telnyx: json,
+      };
+    }
+    return { ok: true, connection: normalized, raw: json };
+  } catch (err) {
+    return {
+      ok: false,
+      status: 0,
+      message:
+        err instanceof Error
+          ? err.message
+          : "Ukendt fejl ved oprettelse af credential connection.",
+    };
+  }
+}
+
 export type TelnyxCreateCredentialResult =
   | { ok: true; credential: TelnyxCredentialSummary; raw: unknown }
   | { ok: false; status: number; message: string; telnyx?: unknown };

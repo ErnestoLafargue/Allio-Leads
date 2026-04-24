@@ -16,7 +16,9 @@ type Credential = {
 type ListResponse = {
   ok?: boolean;
   credentials?: Credential[];
-  connectionId?: string | null;
+  voiceApiApplicationId?: string | null;
+  allioCredentialConnectionId?: string | null;
+  allioCredentialConnectionName?: string | null;
   currentCredentialId?: string | null;
   currentCredentialIdHint?: string | null;
   error?: string;
@@ -27,7 +29,8 @@ type ListResponse = {
 type CreateResponse = {
   ok?: boolean;
   credential?: Credential;
-  connectionId?: string;
+  credentialConnectionId?: string;
+  credentialConnectionName?: string | null;
   error?: string;
   code?: string;
   telnyxStatus?: number;
@@ -121,7 +124,8 @@ export function TelnyxCredentialsAdminPanel() {
   }, []);
 
   const currentId = data?.currentCredentialId ?? null;
-  const connectionId = data?.connectionId ?? null;
+  const voiceApiApplicationId = data?.voiceApiApplicationId ?? null;
+  const allioCredentialConnectionId = data?.allioCredentialConnectionId ?? null;
   const creds = data?.credentials ?? [];
 
   return (
@@ -146,7 +150,7 @@ export function TelnyxCredentialsAdminPanel() {
             <button
               type="button"
               onClick={onCreate}
-              disabled={busy || !connectionId}
+              disabled={busy}
               className="rounded-md bg-emerald-600 px-4 py-2 text-sm font-medium text-white shadow-sm hover:bg-emerald-700 disabled:opacity-60"
             >
               {busy ? "Opretter…" : "Opret ny credential"}
@@ -157,9 +161,15 @@ export function TelnyxCredentialsAdminPanel() {
         <div className="mt-4 grid gap-3 text-sm text-stone-600 sm:grid-cols-2">
           <div>
             <span className="text-stone-500">Voice API Application (TELNYX_CONNECTION_ID):</span>{" "}
-            <span className="font-mono text-stone-800">{connectionId ?? "–"}</span>
+            <span className="font-mono text-stone-800">{voiceApiApplicationId ?? "–"}</span>
           </div>
           <div>
+            <span className="text-stone-500">Credential Connection (til WebRTC):</span>{" "}
+            <span className="font-mono text-stone-800">
+              {allioCredentialConnectionId ?? "oprettes automatisk"}
+            </span>
+          </div>
+          <div className="sm:col-span-2">
             <span className="text-stone-500">Aktiv credential i Vercel:</span>{" "}
             <span className="font-mono text-stone-800">
               {currentId ? currentId : data?.currentCredentialIdHint ?? "–"}
@@ -167,11 +177,6 @@ export function TelnyxCredentialsAdminPanel() {
           </div>
         </div>
 
-        {!connectionId && (
-          <p className="mt-3 rounded-md bg-amber-50 px-3 py-2 text-sm text-amber-800">
-            Mangler <code className="font-mono">TELNYX_CONNECTION_ID</code> i miljøvariabler. Sæt den i Vercel før du kan oprette en ny credential.
-          </p>
-        )}
         {error && (
           <p className="mt-3 rounded-md bg-red-50 px-3 py-2 text-sm text-red-700">{error}</p>
         )}

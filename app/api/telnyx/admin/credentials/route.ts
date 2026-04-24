@@ -1,17 +1,23 @@
 import { NextResponse } from "next/server";
 import { requireAdmin } from "@/lib/api-auth";
 import {
+  createTelnyxCredentialConnection,
   createTelnyxTelephonyCredential,
   getTelnyxConnectionId,
   getTelnyxTelephonyCredentialId,
+  listTelnyxCredentialConnections,
   listTelnyxCredentials,
+  type TelnyxCredentialConnection,
 } from "@/lib/telnyx-call-control";
 
 type PostBody = {
-  connectionId?: string;
+  credentialConnectionId?: string;
   name?: string;
   expiresAt?: string | null;
 };
+
+const ALLIO_WEBRTC_NAME = "allio-leads-webrtc";
+const ALLIO_WEBRTC_TAG = "allio-leads-webrtc";
 
 function configuredCredentialHint(): string | null {
   const id = getTelnyxTelephonyCredentialId();
@@ -31,17 +37,28 @@ export async function GET() {
     );
   }
 
-  const connectionId = getTelnyxConnectionId();
+  const voiceApiApplicationId = getTelnyxConnectionId();
   const currentCredentialId = getTelnyxTelephonyCredentialId();
 
   const list = await listTelnyxCredentials({ apiKey });
+
+  // Find den Credential Connection vi plejer at bruge.
+  const ccList = await listTelnyxCredentialConnections({
+    apiKey,
+    nameContains: ALLIO_WEBRTC_NAME,
+  });
+  const allioConnection = ccList.ok
+    ? ccList.connections.find((c) => c.name === ALLIO_WEBRTC_NAME) ?? ccList.connections[0] ?? null
+    : null;
+
   if (!list.ok) {
     return NextResponse.json(
       {
         code: "TELNYX_LIST_FAILED",
         error: list.message,
         telnyxStatus: list.status,
-        connectionId,
+        voiceApiApplicationId,
+        allioCredentialConnectionId: allioConnection?.id ?? null,
         currentCredentialIdHint: configuredCredentialHint(),
       },
       { status: list.status >= 500 ? 502 : 400 },
@@ -51,7 +68,9 @@ export async function GET() {
   return NextResponse.json({
     ok: true,
     credentials: list.credentials,
-    connectionId,
+    voiceApiApplicationId,
+    allioCredentialConnectionId: allioConnection?.id ?? null,
+    allioCredentialConnectionName: allioConnection?.name ?? null,
     currentCredentialId,
     currentCredentialIdHint: configuredCredentialHint(),
   });
@@ -70,43 +89,82 @@ export async function POST(req: Request) {
   }
 
   const body = (await req.json().catch(() => null)) as PostBody | null;
-  const envConnectionId = getTelnyxConnectionId();
-  const connectionId = body?.connectionId?.trim() || envConnectionId || "";
-  if (!connectionId) {
-    return NextResponse.json(
-      {
-        code: "TELNYX_CONNECTION_ID_MISSING",
-        error:
-          "Mangler TELNYX_CONNECTION_ID (eller TELNYX_APPLICATION_ID). Sæt den i Vercel eller angiv connectionId i kaldet.",
-      },
-      { status: 400 },
-    );
+
+  // Trin 1: Find eller opret en Credential Connection dedikeret til WebRTC.
+  let connection: TelnyxCredentialConnection | null = null;
+  const providedConnectionId = body?.credentialConnectionId?.trim();
+
+  if (providedConnectionId) {
+    connection = { id: providedConnectionId, name: null, userName: null, active: null, tags: [], createdAt: null };
+  } else {
+    const existing = await listTelnyxCredentialConnections({
+      apiKey,
+      nameContains: ALLIO_WEBRTC_NAME,
+    });
+    if (!existing.ok) {
+      console.error("[telnyx:admin] list credential connections failed", existing);
+      return NextResponse.json(
+        {
+          code: "TELNYX_LIST_CC_FAILED",
+          error: `Kunne ikke liste credential connections: ${existing.message}`,
+          telnyxStatus: existing.status,
+        },
+        { status: existing.status >= 500 ? 502 : 400 },
+      );
+    }
+    connection =
+      existing.connections.find((c) => c.name === ALLIO_WEBRTC_NAME) ??
+      existing.connections[0] ??
+      null;
+
+    if (!connection) {
+      const createdCc = await createTelnyxCredentialConnection({
+        apiKey,
+        name: ALLIO_WEBRTC_NAME,
+        tag: ALLIO_WEBRTC_TAG,
+      });
+      if (!createdCc.ok) {
+        console.error("[telnyx:admin] create credential connection failed", createdCc);
+        return NextResponse.json(
+          {
+            code: "TELNYX_CREATE_CC_FAILED",
+            error: `Kunne ikke oprette Credential Connection: ${createdCc.message}`,
+            telnyxStatus: createdCc.status,
+          },
+          { status: createdCc.status >= 500 ? 502 : 400 },
+        );
+      }
+      connection = createdCc.connection;
+    }
   }
 
+  // Trin 2: Opret Telephony Credential linket til Credential Connection.
   const name = body?.name?.trim() || defaultCredentialName();
   const expiresAt =
     typeof body?.expiresAt === "string" && body.expiresAt.trim()
       ? body.expiresAt.trim()
-      : defaultExpiresAtIso();
+      : null;
 
   const created = await createTelnyxTelephonyCredential({
     apiKey,
-    connectionId,
+    connectionId: connection.id,
     name,
-    tag: "allio-leads-webrtc",
+    tag: ALLIO_WEBRTC_TAG,
     expiresAtIso: expiresAt,
   });
   if (!created.ok) {
-    console.error("[telnyx:admin] create credential failed", {
+    console.error("[telnyx:admin] create telephony credential failed", {
       status: created.status,
       message: created.message,
       telnyx: created.telnyx,
+      connectionId: connection.id,
     });
     return NextResponse.json(
       {
         code: "TELNYX_CREATE_CREDENTIAL_FAILED",
         error: created.message,
         telnyxStatus: created.status,
+        credentialConnectionId: connection.id,
       },
       { status: created.status >= 500 ? 502 : 400 },
     );
@@ -115,18 +173,12 @@ export async function POST(req: Request) {
   return NextResponse.json({
     ok: true,
     credential: created.credential,
-    connectionId,
+    credentialConnectionId: connection.id,
+    credentialConnectionName: connection.name,
   });
 }
 
 function defaultCredentialName(): string {
   const stamp = new Date().toISOString().slice(0, 16).replace("T", " ");
   return `Allio Leads WebRTC ${stamp} UTC`;
-}
-
-function defaultExpiresAtIso(): string {
-  // 10 år frem — effektivt "aldrig" for denne app.
-  const d = new Date();
-  d.setUTCFullYear(d.getUTCFullYear() + 10);
-  return d.toISOString();
 }
