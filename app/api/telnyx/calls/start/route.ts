@@ -1,5 +1,4 @@
 import { NextResponse } from "next/server";
-import { Buffer } from "node:buffer";
 import { requireSession } from "@/lib/api-auth";
 import { prisma } from "@/lib/prisma";
 import { releaseExpiredLocksEverywhere, sellerMayEditLead } from "@/lib/lead-lock";
@@ -7,6 +6,7 @@ import { normalizeCampaignDialMode, campaignUsesVoipUi } from "@/lib/dial-mode";
 import { LEAD_ACTIVITY_KIND, maskPhoneForActivity } from "@/lib/lead-activity-kinds";
 import { normalizePhoneToE164ForDial } from "@/lib/phone-e164";
 import { dialTelnyxOutbound, getTelnyxConnectionId, pickTelnyxFromNumber } from "@/lib/telnyx-call-control";
+import { encodeDialerClientState } from "@/lib/dialer-shared";
 
 async function logCallAttempt(leadId: string, userId: string, summary: string) {
   try {
@@ -143,10 +143,23 @@ export async function POST(req: Request) {
     );
   }
 
-  const clientState = Buffer.from(
-    JSON.stringify({ leadId, userId: session.user.id, v: 1 }),
-    "utf8",
-  ).toString("base64");
+  if (!lead.campaignId) {
+    return NextResponse.json(
+      { error: "Lead er ikke tilknyttet en kampagne." },
+      { status: 409 },
+    );
+  }
+
+  // Brug delt clientState-format ("manual") så webhook'en kan korrelere events og
+  // automatisk starte recording når lead besvarer. Inkluderer campaignId så
+  // recording.saved-handler kan finde leadet og tilskrive aktiviteten korrekt agent.
+  const clientState = encodeDialerClientState({
+    v: 1,
+    kind: "manual",
+    campaignId: lead.campaignId,
+    leadId,
+    userId: session.user.id,
+  });
 
   const webhookOverride = process.env.TELNYX_CALL_WEBHOOK_URL?.trim() || undefined;
 

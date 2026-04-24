@@ -67,6 +67,29 @@ Migration `20260425000000_dialer_multi_agent_parallel` introducerer:
 
 Dispatcheren kaldes af klienten ved hver heartbeat (5 sek), men kun når agenten er `ready` og auto-dial ikke er pauset. Dispatcher-kaldet er idempotent og placerer kun nye opkald hvis pacing-budgettet tillader det.
 
+## Optagelser (Call Recording)
+
+Hver bridged samtale optages som mp3 (dual-channel: agent venstre, lead højre). Det giver:
+- Træningsmateriale til sælgerne (spil tilbage, analyser tonefald, pitch).
+- Reference ved disputes og kvalitetssikring.
+
+**Hvornår starter optagelsen?**
+
+| Scenario | Trigger |
+|----------|---------|
+| Power Dialer / Predictive (server-dispatched) | Når AMD-resultatet er `human_residence` / `human_business` / `unknown` (ikke ved machine/fax). Optagelse starter på lead-leggen og fanger automatisk agentens audio når bridge fuldføres. |
+| Click-to-call (WebRTC) | Når `call.answered` modtages med `client_state.kind === "manual"`. Frontenden pre-fetcher clientState fra `/api/telnyx/manual-call/prepare` så Telnyx kender lead/agent-konteksten. |
+| Voicemail / fax | **Aldrig** — `handleAmdMachine` lægger på før optagelse kan starte. |
+
+**Hvor vises optagelserne?**
+
+Når Telnyx fyrer `call.recording.saved` (typisk 2-5 sek efter samtale slutter):
+1. URL'en gemmes i `DialerCallLog.recordingUrl`.
+2. En `LeadActivityEvent` af kind `CALL_RECORDING` oprettes med URL + varighed + agent-navn.
+3. Aktiviteten dukker op i lead-historikken med en HTML5-audio-player (sælgeren kan trykke play direkte i Allio).
+
+Gentagne `recording.saved`-events (Telnyx retry) opdaterer eksisterende aktivitet i stedet for at oprette duplikater (matchet på `telnyxCallLegId`).
+
 ## Voicemail-detektion (AMD)
 
 Hvert udgående opkald fra dispatcheren placeres med `answering_machine_detection: "premium"` og `answering_machine_detection_config` (analysetid, greeting-tærskler). Telnyx svarer med disse webhook-events efter ~1.5–4 sek:

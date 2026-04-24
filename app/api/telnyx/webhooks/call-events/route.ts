@@ -8,6 +8,8 @@ import {
   type TelnyxWebhookEnvelope,
 } from "@/lib/dialer-shared";
 import { handleAmdHuman, handleAmdMachine } from "@/lib/dialer-bridge";
+import { LEAD_ACTIVITY_KIND, maskPhoneForActivity } from "@/lib/lead-activity-kinds";
+import { startTelnyxRecording } from "@/lib/telnyx-call-control";
 
 /**
  * Telnyx Call Control webhook — modtager alle events relateret til opkald
@@ -124,6 +126,28 @@ export async function POST(req: Request) {
           },
           data: { status: "talking" },
         });
+      }
+      // Click-to-call (kind=manual): ingen AMD, men agenten har eksplicit valgt at ringe
+      // → start optagelse straks når lead besvarer. Dispatcher-flow optager separat
+      // i handleAmdHuman efter AMD har bekræftet menneske.
+      if (clientState?.kind === "manual" && clientState.leadId) {
+        const apiKey = process.env.TELNYX_API_KEY?.trim();
+        if (apiKey) {
+          queueMicrotask(() => {
+            startTelnyxRecording({
+              apiKey,
+              callControlId,
+              format: "mp3",
+              channels: "dual",
+            }).then((rec) => {
+              if (!rec.ok) {
+                console.error("[telnyx:webhook] manual record_start fejlede:", rec.message);
+              }
+            }).catch((err) => {
+              console.error("[telnyx:webhook] manual record_start exception:", err);
+            });
+          });
+        }
       }
       break;
     }
@@ -317,10 +341,91 @@ export async function POST(req: Request) {
         (typeof payload.recording_urls?.mp3 === "string" && payload.recording_urls.mp3) ||
         (typeof payload.recording_urls?.wav === "string" && payload.recording_urls.wav) ||
         null;
-      if (url) {
-        await prisma.dialerCallLog.updateMany({
-          where: { callControlId },
-          data: { recordingUrl: url },
+      const durationMillisRaw = (payload as Record<string, unknown>).duration_millis;
+      const durationSeconds =
+        typeof durationMillisRaw === "number"
+          ? Math.max(0, Math.round(durationMillisRaw / 1000))
+          : null;
+
+      if (!url) break;
+
+      // 1) Persistér på DialerCallLog
+      await prisma.dialerCallLog.updateMany({
+        where: { callControlId },
+        data: { recordingUrl: url },
+      });
+
+      // 2) Find leadId + agent fra DialerCallLog (hvis det er et dispatcher-lead-leg)
+      //    eller fra clientState (hvis det er et manual click-to-call lead-leg).
+      const log = await prisma.dialerCallLog.findUnique({
+        where: { callControlId },
+        select: {
+          leadId: true,
+          agentUserId: true,
+          direction: true,
+          toNumber: true,
+        },
+      });
+
+      const leadId = log?.leadId ?? clientState?.leadId ?? null;
+      const agentUserId = log?.agentUserId ?? clientState?.userId ?? null;
+
+      if (!leadId) break;
+
+      // 3) Skriv en CALL_RECORDING-aktivitet så optagelsen bliver afspilbar i UI'et.
+      //    Sæt agent-navnet hvis vi kender det.
+      let agentName: string | null = null;
+      if (agentUserId) {
+        const u = await prisma.user.findUnique({
+          where: { id: agentUserId },
+          select: { name: true },
+        });
+        agentName = u?.name ?? null;
+      }
+
+      const lead = await prisma.lead.findUnique({
+        where: { id: leadId },
+        select: { phone: true },
+      });
+      const masked = lead?.phone ? maskPhoneForActivity(lead.phone) : "";
+      const durationLabel =
+        durationSeconds !== null
+          ? `${Math.floor(durationSeconds / 60)}:${(durationSeconds % 60).toString().padStart(2, "0")}`
+          : null;
+      const summaryParts: string[] = [];
+      if (agentName) summaryParts.push(`${agentName} talte med leadet`);
+      else summaryParts.push("Samtale optaget");
+      if (masked) summaryParts.push(`(${masked})`);
+      if (durationLabel) summaryParts.push(`— varighed ${durationLabel}`);
+      const summary = summaryParts.join(" ");
+
+      // Idempotens: hvis vi allerede har en aktivitet for samme telnyxCallLegId, opdater den
+      // i stedet for at oprette en ny — fx hvis Telnyx retry'er recording.saved.
+      const existingActivity = await prisma.leadActivityEvent.findFirst({
+        where: { leadId, telnyxCallLegId: callControlId },
+        select: { id: true },
+      });
+      if (existingActivity) {
+        await prisma.leadActivityEvent.update({
+          where: { id: existingActivity.id },
+          data: {
+            summary,
+            recordingUrl: url,
+            durationSeconds,
+            userId: agentUserId,
+          },
+        });
+      } else {
+        await prisma.leadActivityEvent.create({
+          data: {
+            leadId,
+            userId: agentUserId,
+            kind: LEAD_ACTIVITY_KIND.CALL_RECORDING,
+            summary,
+            recordingUrl: url,
+            durationSeconds,
+            telnyxCallLegId: callControlId,
+          },
         });
       }
       break;

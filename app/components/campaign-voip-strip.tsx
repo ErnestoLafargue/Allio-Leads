@@ -52,6 +52,10 @@ type TelnyxClient = {
     speakerId?: string;
     audio?: MediaTrackConstraints | boolean;
     localStream?: MediaStream;
+    /// Base64-encoded JSON som Telnyx echoer på alle webhooks for dette opkald.
+    /// Vi bruger det til at korrelere call_control_id → leadId/userId/campaignId,
+    /// så optagelse kan startes og lead-aktivitet kan oprettes automatisk.
+    clientState?: string;
   }) => unknown;
   on: (eventName: string, callback: (...args: unknown[]) => void) => TelnyxClient;
   off: (eventName: string, callback?: (...args: unknown[]) => void) => TelnyxClient;
@@ -222,6 +226,13 @@ export function CampaignVoipStrip({
   const autoKeyRef = useRef<string | null>(null);
   const lastLeadIdRef = useRef<string | null>(null);
   const remoteAudioRef = useRef<HTMLAudioElement | null>(null);
+  /**
+   * Pre-fetched clientState til WebRTC click-to-call. Telnyx echoer denne string på
+   * alle webhooks, så vi kan korrelere call_control_id → leadId og automatisk
+   * starte optagelse + oprette CALL_RECORDING-aktivitet i lead-historikken.
+   * Hentes parallelt med WebRTC pre-warm for nul ekstra latency på klik.
+   */
+  const manualClientStateRef = useRef<string | null>(null);
 
   /**
    * Refs der peger på up-to-date props/state — bruges i langlivede SDK-callbacks
@@ -457,6 +468,38 @@ export function CampaignVoipStrip({
     // ensureClientConnected er stabil per render — vi vil kun re-trigge når audioSetupReady ændres.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [audioSetupReady]);
+
+  /**
+   * Pre-fetch clientState når leadId ændres. clientState pakker {leadId, userId, campaignId}
+   * som Telnyx echoer på alle webhooks for opkaldet. Webhook'en bruger det til at:
+   *   1. starte recording når lead besvarer (kind=manual)
+   *   2. oprette en afspilbar CALL_RECORDING-aktivitet på leadet når optagelsen er klar
+   * Fejl fanges stille — opkald virker stadig, blot uden auto-recording.
+   */
+  useEffect(() => {
+    manualClientStateRef.current = null;
+    if (!leadId) return;
+    let cancelled = false;
+    void (async () => {
+      try {
+        const res = await fetch("/api/telnyx/manual-call/prepare", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ leadId }),
+        });
+        if (!res.ok) return;
+        const data = (await res.json()) as { ok?: boolean; clientState?: string };
+        if (!cancelled && typeof data?.clientState === "string") {
+          manualClientStateRef.current = data.clientState;
+        }
+      } catch {
+        /* opkald skal stadig kunne placeres uden recording-korrelation */
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [leadId]);
 
   /**
    * Ryd ugyldige valg — men kun når enhedslisten faktisk er indlæst.
@@ -765,6 +808,11 @@ export function CampaignVoipStrip({
         callOptions.localStream = micMonitorStream.clone();
       } else {
         callOptions.micId = micId;
+      }
+      // Send clientState så Telnyx kan korrelere webhooks → leadId/userId/campaignId
+      // (auto-start recording, opret CALL_RECORDING-aktivitet i lead-historik).
+      if (manualClientStateRef.current) {
+        callOptions.clientState = manualClientStateRef.current;
       }
 
       const call = clientRef.current.newCall(callOptions) as TelnyxCall;

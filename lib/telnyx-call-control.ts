@@ -1012,3 +1012,65 @@ export async function answerTelnyxCall(params: {
 export function buildTelnyxAgentSipUri(sipUsername: string): string {
   return `sip:${sipUsername}@sip.telnyx.com`;
 }
+
+/**
+ * Start optagelse af et igangværende opkald.
+ *
+ * - `format: "mp3"` for kompakt lydfil egnet til afspilning i browseren.
+ * - `channels: "dual"` lægger hver leg på sin egen kanal (agent = venstre, lead = højre)
+ *   så vi senere kan analysere hvem der talte hvornår — ideelt til træning.
+ * - `play_beep: false` undgår at afspille en beep-tone til parten.
+ *
+ * Telnyx fyrer `call.recording.saved` når optagelsen er klar (typisk få sek efter hangup).
+ * Vi henter URL'en derfra og kobler den til lead-aktiviteten.
+ */
+export async function startTelnyxRecording(params: {
+  apiKey: string;
+  callControlId: string;
+  format?: "mp3" | "wav";
+  channels?: "single" | "dual";
+  /// Brug client_state til at sende kontekst med — fx hvilken agent der talte med leadet.
+  clientState?: string;
+}): Promise<ActionResult> {
+  const body: Record<string, unknown> = {
+    format: params.format ?? "mp3",
+    channels: params.channels ?? "dual",
+    play_beep: false,
+  };
+  if (params.clientState) body.client_state = params.clientState;
+
+  try {
+    const res = await fetch(
+      `${TELNYX_API_BASE}/calls/${encodeURIComponent(params.callControlId)}/actions/record_start`,
+      {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${params.apiKey}`,
+          "Content-Type": "application/json",
+          Accept: "application/json",
+        },
+        body: JSON.stringify(body),
+      },
+    );
+    // 422: optagelse kører allerede / kald lagt på — ikke en fejl for vores formål.
+    if (res.status === 422) {
+      return { ok: true, raw: null };
+    }
+    const json: unknown = await res.json().catch(() => null);
+    if (!res.ok) {
+      return {
+        ok: false,
+        status: res.status,
+        message: formatTelnyxError(json) || `Telnyx HTTP ${res.status}`,
+        telnyx: json,
+      };
+    }
+    return { ok: true, raw: json };
+  } catch (err) {
+    return {
+      ok: false,
+      status: 0,
+      message: err instanceof Error ? err.message : "Ukendt fejl ved start af recording.",
+    };
+  }
+}
