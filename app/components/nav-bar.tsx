@@ -42,6 +42,7 @@ const NAV_GROUPS: NavGroup[] = [
     items: [
       { href: "/import", label: "Opret & Import" },
       { href: "/indstillinger", label: "Indstillinger" },
+      { href: "/administration/telnyx", label: "Telnyx" },
     ],
   },
 ];

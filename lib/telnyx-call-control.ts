@@ -65,6 +65,7 @@ export type WebRtcTokenResult =
 
 export type TelnyxCredentialInfo = {
   found: boolean;
+  id?: string;
   status?: string;
   expired?: boolean;
   expiresAt?: string | null;
@@ -72,9 +73,162 @@ export type TelnyxCredentialInfo = {
   createdAt?: string | null;
   updatedAt?: string | null;
   tag?: string | null;
+  name?: string | null;
   raw?: unknown;
   fetchError?: string;
 };
+
+export type TelnyxCredentialSummary = {
+  id: string;
+  name: string | null;
+  status: string | null;
+  expired: boolean | null;
+  expiresAt: string | null;
+  connectionId: string | null;
+  tag: string | null;
+  createdAt: string | null;
+};
+
+function normalizeCredentialRecord(d: Record<string, unknown>): TelnyxCredentialSummary | null {
+  const toStr = (v: unknown): string | null =>
+    typeof v === "string" && v.length > 0 ? v : null;
+  const id = toStr(d.id);
+  if (!id) return null;
+  const status = toStr(d.status);
+  const expired =
+    typeof d.expired === "boolean"
+      ? d.expired
+      : typeof status === "string"
+        ? status.toLowerCase() === "expired"
+        : null;
+  return {
+    id,
+    name: toStr(d.name) ?? toStr(d.tag),
+    status,
+    expired,
+    expiresAt: toStr(d.expires_at),
+    connectionId: toStr(d.connection_id),
+    tag: toStr(d.tag),
+    createdAt: toStr(d.created_at),
+  };
+}
+
+export type TelnyxListCredentialsResult =
+  | { ok: true; credentials: TelnyxCredentialSummary[]; raw: unknown }
+  | { ok: false; status: number; message: string; telnyx?: unknown };
+
+/** GET /v2/telephony_credentials - lister alle Telephony Credentials på kontoen. */
+export async function listTelnyxCredentials(params: {
+  apiKey: string;
+}): Promise<TelnyxListCredentialsResult> {
+  try {
+    const res = await fetch(`${TELNYX_API_BASE}/telephony_credentials?page[size]=250`, {
+      method: "GET",
+      headers: {
+        Authorization: `Bearer ${params.apiKey}`,
+        Accept: "application/json",
+      },
+    });
+    const json: unknown = await res.json().catch(() => null);
+    if (!res.ok) {
+      return {
+        ok: false,
+        status: res.status,
+        message: formatTelnyxError(json) || `Telnyx HTTP ${res.status}`,
+        telnyx: json,
+      };
+    }
+    const data =
+      json && typeof json === "object" && "data" in json
+        ? (json as { data: unknown }).data
+        : [];
+    const arr: TelnyxCredentialSummary[] = [];
+    if (Array.isArray(data)) {
+      for (const item of data) {
+        if (item && typeof item === "object") {
+          const normalized = normalizeCredentialRecord(item as Record<string, unknown>);
+          if (normalized) arr.push(normalized);
+        }
+      }
+    }
+    return { ok: true, credentials: arr, raw: json };
+  } catch (err) {
+    return {
+      ok: false,
+      status: 0,
+      message: err instanceof Error ? err.message : "Ukendt fejl ved list af credentials.",
+    };
+  }
+}
+
+export type TelnyxCreateCredentialResult =
+  | { ok: true; credential: TelnyxCredentialSummary; raw: unknown }
+  | { ok: false; status: number; message: string; telnyx?: unknown };
+
+/** POST /v2/telephony_credentials - opretter ny Telephony Credential. */
+export async function createTelnyxTelephonyCredential(params: {
+  apiKey: string;
+  connectionId: string;
+  name?: string;
+  tag?: string;
+  expiresAtIso?: string | null;
+}): Promise<TelnyxCreateCredentialResult> {
+  const body: Record<string, unknown> = {
+    connection_id: params.connectionId,
+  };
+  if (params.name) body.name = params.name;
+  if (params.tag) body.tag = params.tag;
+  if (params.expiresAtIso) body.expires_at = params.expiresAtIso;
+
+  try {
+    const res = await fetch(`${TELNYX_API_BASE}/telephony_credentials`, {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${params.apiKey}`,
+        "Content-Type": "application/json",
+        Accept: "application/json",
+      },
+      body: JSON.stringify(body),
+    });
+    const json: unknown = await res.json().catch(() => null);
+    if (!res.ok) {
+      return {
+        ok: false,
+        status: res.status,
+        message: formatTelnyxError(json) || `Telnyx HTTP ${res.status}`,
+        telnyx: json,
+      };
+    }
+    const data =
+      json && typeof json === "object" && "data" in json
+        ? (json as { data: unknown }).data
+        : null;
+    if (!data || typeof data !== "object") {
+      return {
+        ok: false,
+        status: 502,
+        message: "Telnyx returnerede et tomt svar ved oprettelse af credential.",
+        telnyx: json,
+      };
+    }
+    const summary = normalizeCredentialRecord(data as Record<string, unknown>);
+    if (!summary) {
+      return {
+        ok: false,
+        status: 502,
+        message: "Telnyx returnerede uventet svar — mangler credential id.",
+        telnyx: json,
+      };
+    }
+    return { ok: true, credential: summary, raw: json };
+  } catch (err) {
+    return {
+      ok: false,
+      status: 0,
+      message: err instanceof Error ? err.message : "Ukendt fejl ved oprettelse af credential.",
+    };
+  }
+}
 
 /** GET /v2/telephony_credentials/{id} til diagnostik. */
 export async function getTelnyxCredentialInfo(params: {
