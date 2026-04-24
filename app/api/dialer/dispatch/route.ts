@@ -10,7 +10,12 @@ import {
 import { campaignUsesVoipUi, normalizeCampaignDialMode } from "@/lib/dial-mode";
 import { normalizePhoneToE164ForDial } from "@/lib/phone-e164";
 import { encodeDialerClientState, PRESENCE_FRESH_WINDOW_MS, QUEUE_RESERVATION_TTL_MS } from "@/lib/dialer-shared";
-import { DIALER_ABANDON_TARGET, PACING_WINDOW_MS, getTargetPacingRatioAndStats } from "@/lib/dialer-pacing";
+import {
+  DIALER_ABANDON_TARGET,
+  MIN_PACING_SAMPLE_BEFORE_TUNE,
+  PACING_WINDOW_MS,
+  getTargetPacingRatioAndStats,
+} from "@/lib/dialer-pacing";
 
 /**
  * Server-side parallel dialer — placerer N udgående opkald baseret på antal ledige agenter
@@ -54,6 +59,7 @@ async function targetPacingRatio(
   sampleSize: number;
   bridgeCount: number;
   noAgentAbandonCount: number;
+  heldLowSample: boolean;
 }> {
   if (dialMode === "PREDICTIVE") {
     return getTargetPacingRatioAndStats(prisma, { campaignId, dialMode: "PREDICTIVE" });
@@ -65,6 +71,7 @@ async function targetPacingRatio(
       sampleSize: 0,
       bridgeCount: 0,
       noAgentAbandonCount: 0,
+      heldLowSample: false,
     };
   }
   return {
@@ -73,6 +80,27 @@ async function targetPacingRatio(
     sampleSize: 0,
     bridgeCount: 0,
     noAgentAbandonCount: 0,
+    heldLowSample: false,
+  };
+}
+
+function pacingJson(
+  mode: string,
+  pacing: Awaited<ReturnType<typeof targetPacingRatio>>,
+  extras?: { targetTotal?: number },
+) {
+  return {
+    mode,
+    targetAbandonRate: DIALER_ABANDON_TARGET,
+    windowMs: PACING_WINDOW_MS,
+    minSampleBeforeTune: MIN_PACING_SAMPLE_BEFORE_TUNE,
+    ratio: pacing.ratio,
+    abandonRate1h: pacing.abandonRate,
+    sampleSize1h: pacing.sampleSize,
+    bridges1h: pacing.bridgeCount,
+    noAgentAbandons1h: pacing.noAgentAbandonCount,
+    heldLowSample: pacing.heldLowSample,
+    ...(extras?.targetTotal !== undefined ? { targetTotal: extras.targetTotal } : {}),
   };
 }
 
@@ -162,16 +190,7 @@ export async function POST(req: Request) {
       ready: 0,
       inFlight: inFlightCalls,
       reason: "Ingen ledige agenter (provisioneret + ready + frisk heartbeat).",
-      pacing: {
-        mode,
-        targetAbandonRate: DIALER_ABANDON_TARGET,
-        windowMs: PACING_WINDOW_MS,
-        ratio: pacing.ratio,
-        abandonRate1h: pacing.abandonRate,
-        sampleSize1h: pacing.sampleSize,
-        bridges1h: pacing.bridgeCount,
-        noAgentAbandons1h: pacing.noAgentAbandonCount,
-      },
+      pacing: pacingJson(mode, pacing),
     });
   }
 
@@ -183,14 +202,7 @@ export async function POST(req: Request) {
       dispatched: 0,
       attempted: 0,
       reason: `dialMode=${mode} understøtter ikke server-side dispatch`,
-      pacing: {
-        mode,
-        targetAbandonRate: DIALER_ABANDON_TARGET,
-        windowMs: PACING_WINDOW_MS,
-        ratio: pacing.ratio,
-        abandonRate1h: pacing.abandonRate,
-        sampleSize1h: pacing.sampleSize,
-      },
+      pacing: pacingJson(mode, pacing),
     });
   }
   const targetTotal = Math.min(
@@ -209,17 +221,7 @@ export async function POST(req: Request) {
       ready: readyCount,
       inFlight: inFlightCalls,
       reason: `Allerede ${inFlightCalls}/${targetTotal} i luften — ingen nye nu.`,
-      pacing: {
-        mode,
-        targetAbandonRate: DIALER_ABANDON_TARGET,
-        windowMs: PACING_WINDOW_MS,
-        ratio: pacing.ratio,
-        abandonRate1h: pacing.abandonRate,
-        sampleSize1h: pacing.sampleSize,
-        bridges1h: pacing.bridgeCount,
-        noAgentAbandons1h: pacing.noAgentAbandonCount,
-        targetTotal,
-      },
+      pacing: pacingJson(mode, pacing, { targetTotal }),
     });
   }
 
@@ -278,6 +280,7 @@ export async function POST(req: Request) {
       ready: readyCount,
       inFlight: inFlightCalls,
       reason: "Ingen flere ledige leads at dispatche (alle er allerede i kø, låst eller ugyldige numre).",
+      pacing: pacingJson(mode, pacing, { targetTotal }),
     });
   }
 
@@ -380,17 +383,7 @@ export async function POST(req: Request) {
     target: targetTotal,
     dispatchId,
     errors: failures.length > 0 ? failures : undefined,
-    pacing: {
-      mode,
-      targetAbandonRate: DIALER_ABANDON_TARGET,
-      windowMs: PACING_WINDOW_MS,
-      ratio: pacing.ratio,
-      abandonRate1h: pacing.abandonRate,
-      sampleSize1h: pacing.sampleSize,
-      bridges1h: pacing.bridgeCount,
-      noAgentAbandons1h: pacing.noAgentAbandonCount,
-      targetTotal,
-    },
+    pacing: pacingJson(mode, pacing, { targetTotal }),
   });
 }
 

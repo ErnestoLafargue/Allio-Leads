@@ -8,6 +8,7 @@ import {
   countNoAgentAbandonsInWindow,
   DIALER_ABANDON_TARGET,
   getTargetPacingRatioAndStats,
+  MIN_PACING_SAMPLE_BEFORE_TUNE,
   PACING_WINDOW_MS,
 } from "@/lib/dialer-pacing";
 import { normalizeCampaignDialMode } from "@/lib/dial-mode";
@@ -77,6 +78,7 @@ export async function GET(req: Request) {
           sampleSize: 0,
           bridgeCount: bridges1h,
           noAgentAbandonCount: noAgent1h,
+          heldLowSample: false,
         };
 
   return NextResponse.json({
@@ -95,6 +97,8 @@ export async function GET(req: Request) {
       sampleSize1h: pacing.sampleSize,
       bridges1h: pacing.bridgeCount,
       noAgentAbandons1h: pacing.noAgentAbandonCount,
+      minSampleBeforeTune: MIN_PACING_SAMPLE_BEFORE_TUNE,
+      heldLowSample: pacing.heldLowSample,
     },
   });
 }

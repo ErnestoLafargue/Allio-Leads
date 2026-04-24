@@ -68,9 +68,11 @@ Migration `20260425000000_dialer_multi_agent_parallel` introducerer:
 
 | Mode | Pacing-ratio | Forklaring |
 |------|--------------|------------|
-| `POWER_DIALER` | 1.0 | Sekventielt — næste lead placeres først når forrige er afgjort, men én pr. agent samtidigt. |
-| `PREDICTIVE` | 1.0–3.0 (dynamisk) | Justeres mod ~3 % abandon; se `lib/dialer-pacing.ts`. |
+| `POWER_DIALER` | 1.0 | Fast — højst ét udgående lead-leg i luften pr. klar provisioneret agent (mål: ingen over-dial). |
+| `PREDICTIVE` | 1.0–3.0 (dynamisk) | Justeres mod ~3 % abandon; se `lib/dialer-pacing.ts`. Indtil der er mindst **25** afsluttede hændelser (bridge + `no_agent_available`) i det rullende 1h-vindue, holdes ratio på **2.0** (varm op uden voldsomme sving). |
 | `MAX_IN_FLIGHT_PER_CAMPAIGN` | 50 | Hard cap uanset antal agenter (justerbar i `app/api/dialer/dispatch/route.ts`). |
+
+`POST /api/dialer/dispatch` returnerer altid et **`pacing`-objekt** (bl.a. `ratio`, `bridges1h`, `noAgentAbandons1h`, `heldLowSample`, `minSampleBeforeTune`) så klienter og logs kan korrelere beslutningen.
 
 Dispatcheren kaldes af klienten ved hver heartbeat (5 sek), men kun når agenten er `ready` og auto-dial ikke er pauset. Dispatcher-kaldet er idempotent og placerer kun nye opkald hvis pacing-budgettet tillader det.
 

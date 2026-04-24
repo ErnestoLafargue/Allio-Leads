@@ -7,6 +7,8 @@ export const DIALER_ABANDON_TARGET = 0.03;
 const RATIO_MIN = 1.0;
 const RATIO_MAX = 3.0;
 const RATIO_DEFAULT_PREDICTIVE = 2.0;
+/** Mindst dette antal afsluttede hændelser (bridge + no_agent) i vinduet før ratio justeres væk fra default — undgår voldsomme sving de første minutter. */
+export const MIN_PACING_SAMPLE_BEFORE_TUNE = 25;
 /** Rullende vindue for aggregering af success vs. abandon (ms). */
 export const PACING_WINDOW_MS = 60 * 60 * 1000; // 1 time
 
@@ -105,7 +107,15 @@ export function predictivePacingRatioFromRates(params: {
 export async function getTargetPacingRatioAndStats(
   db: DialerPacingDb,
   params: { campaignId: string; dialMode: "PREDICTIVE" | "POWER_DIALER" | string },
-) {
+): Promise<{
+  ratio: number;
+  abandonRate: number | null;
+  sampleSize: number;
+  bridgeCount: number;
+  noAgentAbandonCount: number;
+  /** true når vi endnu ikke har nok data — ratio holdes på default (2.0) */
+  heldLowSample: boolean;
+}> {
   const since = new Date(Date.now() - PACING_WINDOW_MS);
   if (params.dialMode !== "PREDICTIVE") {
     return {
@@ -114,15 +124,34 @@ export async function getTargetPacingRatioAndStats(
       sampleSize: 0,
       bridgeCount: 0,
       noAgentAbandonCount: 0,
+      heldLowSample: false,
     };
   }
   const [bridgeCount, noAgentAbandonCount] = await Promise.all([
     countBridgesInWindow(db, { campaignId: params.campaignId, since }),
     countNoAgentAbandonsInWindow(db, { campaignId: params.campaignId, since }),
   ]);
+  const n = bridgeCount + noAgentAbandonCount;
+  if (n < MIN_PACING_SAMPLE_BEFORE_TUNE) {
+    return {
+      ratio: RATIO_DEFAULT_PREDICTIVE,
+      abandonRate: n > 0 ? noAgentAbandonCount / n : null,
+      sampleSize: n,
+      bridgeCount,
+      noAgentAbandonCount,
+      heldLowSample: true,
+    };
+  }
   const { ratio, abandonRate, sampleSize } = predictivePacingRatioFromRates({
     bridgeCount,
     noAgentAbandonCount,
   });
-  return { ratio, abandonRate, sampleSize, bridgeCount, noAgentAbandonCount };
+  return {
+    ratio,
+    abandonRate,
+    sampleSize,
+    bridgeCount,
+    noAgentAbandonCount,
+    heldLowSample: false,
+  };
 }

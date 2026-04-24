@@ -22,6 +22,8 @@ type MetricsBody = {
     sampleSize1h: number;
     bridges1h: number;
     noAgentAbandons1h: number;
+    minSampleBeforeTune?: number;
+    heldLowSample?: boolean;
   };
 };
 
@@ -151,11 +153,20 @@ export default function DialerMetricsPage() {
             </div>
           </div>
           <div className="border-t border-stone-200 pt-3">
-            <h2 className="text-xs font-semibold uppercase text-stone-500">Pacing (predictive)</h2>
+            <h2 className="text-xs font-semibold uppercase text-stone-500">Pacing</h2>
             <ul className="mt-1 list-inside list-disc">
               <li>Aktiv ratio (opkald pr. klar agent, max 3): {metrics.pacing.ratio.toFixed(2)}</li>
               <li>Observeret abandon 1h: {pct(metrics.pacing.abandonRate1h)} (stikprøve: {metrics.pacing.sampleSize1h})</li>
               <li>Mål-abandon: {pct(metrics.window.targetAbandonRate)}</li>
+              {metrics.campaign.dialMode === "PREDICTIVE" &&
+              typeof metrics.pacing.minSampleBeforeTune === "number" ? (
+                <li>
+                  Predictive tuning:{" "}
+                  {metrics.pacing.heldLowSample
+                    ? `afventer data (bruger default-ratio indtil ≥ ${metrics.pacing.minSampleBeforeTune} bridge+abandon-events i 1h-vinduet).`
+                    : `justerer efter data (≥ ${metrics.pacing.minSampleBeforeTune} events).`}
+                </li>
+              ) : null}
             </ul>
           </div>
         </div>

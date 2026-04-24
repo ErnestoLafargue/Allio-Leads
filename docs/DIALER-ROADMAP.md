@@ -8,10 +8,10 @@ Dette dokument beskriver de **fire dial-modes** Allio Leads understøtter, hvad 
 |---|---|---|
 | **NO_DIAL** | Ingen ring-knap, ingen VoIP-strip. Rene noter/data-kampagner. | `campaignUsesVoipUi() === false` |
 | **CLICK_TO_CALL** | Manuelt klik på grøn knap → WebRTC-opkald. Agent styrer alt. | Browser → Telnyx Telephony Credential → SIP → PSTN |
-| **POWER_DIALER** | Auto-ring straks man åbner næste lead (ingen falsk ventetid). Agent klikker «Gem og næste» → straks næste opkald. | Sekventiel WebRTC. Pause/resume-knap i header. |
-| **PREDICTIVE** | Auto-ring + auto-spring videre på terminale udfald (voicemail, ikke interesseret, ukvalificeret) **og** auto-spring efter 25 sek uden svar (markeres `NOT_HOME`). | Sekventiel WebRTC + auto-advance + 25 s timeout. |
+| **POWER_DIALER** | Auto-ring + server-side parallel dispatch med AMD; pacing fast **1.0** (ét lead i luften pr. klar agent). | WebRTC + `POST /api/dialer/dispatch` + bridge ved human. |
+| **PREDICTIVE** | Som power, men pacing **1.0–3.0** (rullende 1h mod ~3 % no-agent abandon). | Samme stack; se `lib/dialer-pacing.ts`. |
 
-> **Nuværende begrænsning:** Power Dialer og Predictive ringer kun til **ét lead ad gangen pr. agent**. Industristandarderne ringer til 2-3 numre samtidig og bruger AMD til at droppe svaremaskiner. Det er den næste fase.
+> **Leveret (2026-04):** Power/Predictive bruger **server-side parallel udringning** med premium-AMD og bridge til agent via SIP `link_to` (se A–G nederst). Agentens browser-WebRTC-leg registreres i `AgentSession.webRtcCallControlId` til overvågning — selve bridgen sker som før med originate + `link_to`.
 
 ---
 
@@ -187,7 +187,7 @@ Power Dialer: ratio er fast = 1.0 (1 opkald pr. ledig agent ad gangen, men start
 | **C** | `POST /api/dialer/agent/presence` + workspace-heartbeat (`useDialerPresence`) | **Leveret** — tæller `ready`/`ringing`/`talking`, skubber `assignedLead` ved bridge. |
 | **D** | Agent-WebRTC `call_control_id` mod server: `POST /api/dialer/agent/call-control` + polling i `CampaignVoipStrip` (`telnyxIDs.telnyxCallControlId`) | **Leveret** — «altid klar» = registreret SIP + presence; faktisk bridge til agent sker via `link_to` + auto-svar (se `lib/dialer-bridge.ts`). |
 | **E** | Server-side: `dialTelnyxOutbound` m. `answering_machine_detection: "premium"`, `handleAmdHuman` → originate til `sip:agent@…` m. `link_to` | **Leveret** — se `app/api/dialer/dispatch/route.ts`, `lib/dialer-bridge.ts`. |
-| **F** | Parallel dispatch + **pacing m. mål ~3 % abandon** (`lib/dialer-pacing.ts`, rullende 1h-vindue) | **Leveret** — predictive ratio clampes 1.0–3.0; power dialer fast 1.0. |
+| **F** | Parallel dispatch + **pacing m. mål ~3 % abandon** (`lib/dialer-pacing.ts`, rullende 1h-vindue) | **Leveret** — predictive ratio clampes 1.0–3.0; power fast 1.0; ratio holdes på default (2.0) indtil `MIN_PACING_SAMPLE_BEFORE_TUNE` (25) bridge+abandon-events i vinduet for at undgå sving i opstarten. |
 | **G** | Admin: **`/administration/dialer`**, `GET /api/dialer/metrics?campaignId=` | **Leveret** — agenter, in-flight, bridges/abandons/AMD-maskine, pacing-snapshot. |
 
 **Premium-AMD:** Aktiveres **pr. opkald** i API’et (ikke en separat konto-toggler). Fakturering følger Telnyx’ pris for premium AMD / optagelse efter faktisk brug.
