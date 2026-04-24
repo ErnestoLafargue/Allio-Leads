@@ -301,17 +301,21 @@ export async function createTelnyxCredentialConnection(params: {
   password?: string;
   tag?: string;
 }): Promise<TelnyxCreateCredentialConnectionResult> {
-  const userName = params.userName?.trim() || `allio-${randomToken(8).toLowerCase()}`;
+  // Telnyx kræver at connection_name og user_name kun indeholder bogstaver og tal
+  // (ingen bindestreger, mellemrum, punktum eller specialtegn).
+  const sanitize = (s: string) => s.replace(/[^A-Za-z0-9]/g, "");
+  const safeName = sanitize(params.name) || `allioleadswebrtc${randomToken(4)}`;
+  const userName =
+    sanitize(params.userName || "") || `allio${randomToken(8).toLowerCase()}`;
   const password = params.password?.trim() || randomToken(32);
   const body: Record<string, unknown> = {
     active: true,
-    connection_name: params.name,
+    connection_name: safeName,
     user_name: userName,
     password,
     anchorsite_override: "Latency",
-    webhook_event_url: null,
   };
-  if (params.tag) body.tags = [params.tag];
+  if (params.tag) body.tags = [sanitize(params.tag)];
 
   try {
     const res = await fetch(`${TELNYX_API_BASE}/credential_connections`, {

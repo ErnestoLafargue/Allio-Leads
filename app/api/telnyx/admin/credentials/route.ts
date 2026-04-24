@@ -16,8 +16,9 @@ type PostBody = {
   expiresAt?: string | null;
 };
 
-const ALLIO_WEBRTC_NAME = "allio-leads-webrtc";
-const ALLIO_WEBRTC_TAG = "allio-leads-webrtc";
+// Telnyx: connection_name/user_name/tag må kun være bogstaver+tal (ingen bindestreger).
+const ALLIO_WEBRTC_NAME = "allioleadswebrtc";
+const ALLIO_WEBRTC_TAG = "allioleadswebrtc";
 
 function configuredCredentialHint(): string | null {
   const id = getTelnyxTelephonyCredentialId();
