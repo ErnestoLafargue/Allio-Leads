@@ -50,12 +50,24 @@ export async function POST(req: Request) {
       { status: 503 },
     );
   }
-  const telephonyCredentialId = getTelnyxTelephonyCredentialId();
+
+  // Per-agent credential (foretrukket — gør at bridge-flow kan ringe specifikt til denne agent
+  // via sip:USERNAME@sip.telnyx.com). Falder tilbage til den globale env var hvis user'en
+  // endnu ikke er provisioneret — men det betyder at flere agenter deler samme SIP-URI og
+  // dispatcher-bridge vil ikke vide hvem den ringer til.
+  const userRow = await prisma.user.findUnique({
+    where: { id: session.user.id },
+    select: { telnyxCredentialId: true, telnyxSipUsername: true },
+  });
+  const telephonyCredentialId =
+    userRow?.telnyxCredentialId?.trim() || getTelnyxTelephonyCredentialId();
+  const sharedFallback = !userRow?.telnyxCredentialId;
   if (!telephonyCredentialId) {
     return NextResponse.json(
       {
         code: "TELNYX_TELEPHONY_CREDENTIAL_MISSING",
-        error: "Mangler TELNYX_TELEPHONY_CREDENTIAL_ID til browser WebRTC login_token.",
+        error:
+          "Mangler Telnyx Telephony Credential. Bed admin om at provisionere VoIP for din konto via /administration/telnyx, eller sæt TELNYX_TELEPHONY_CREDENTIAL_ID i Vercel.",
       },
       { status: 503 },
     );
@@ -162,5 +174,7 @@ export async function POST(req: Request) {
     loginToken: token.token,
     callerNumber,
     dialMode: mode,
+    sipUsername: userRow?.telnyxSipUsername ?? null,
+    sharedCredential: sharedFallback,
   });
 }

@@ -23,8 +23,13 @@ import {
   campaignUsesVoipUi,
   normalizeCampaignDialMode,
 } from "@/lib/dial-mode";
-import { CampaignVoipStrip } from "@/app/components/campaign-voip-strip";
+import { CampaignVoipStrip, type LineStatus } from "@/app/components/campaign-voip-strip";
 import type { ActivityItem } from "@/app/components/lead-activity-panel";
+import {
+  useDialerPresence,
+  type AssignedLead,
+  type DialerPresenceStatus,
+} from "@/lib/use-dialer-presence";
 
 type Lead = {
   id: string;
@@ -337,6 +342,49 @@ export function CampaignWorkspace({ campaignId, preferredLeadId, voipSession = f
       /* no-op */
     }
   }, [autoDialPaused]);
+
+  // VoIP-strip linje-status (bruges til at rapportere agentens dialer-presence)
+  const [voipLineStatus, setVoipLineStatus] = useState<LineStatus>("idle");
+
+  /**
+   * Mapper voip-strip's lokale lineStatus + auto-dial-pause til server-side dialer-status:
+   * - autoDialPaused → offline (server skal ikke ringe os op)
+   * - voipLineStatus=ringing/connecting → ringing (vi venter på et opkald)
+   * - voipLineStatus=live → talking (vi er i samtale)
+   * - voipLineStatus=idle → ready (vi er klar til at modtage et bridge)
+   * - andet → offline
+   */
+  const isAutoDialModeForPresence =
+    campaignDialMode === "POWER_DIALER" || campaignDialMode === "PREDICTIVE";
+  const presenceStatus: DialerPresenceStatus = !isAutoDialModeForPresence
+    ? "offline"
+    : autoDialPaused
+      ? "offline"
+      : voipLineStatus === "live"
+        ? "talking"
+        : voipLineStatus === "ringing" || voipLineStatus === "connecting"
+          ? "ringing"
+          : voipLineStatus === "idle"
+            ? "ready"
+            : "offline";
+
+  const handleAssignedLead = useCallback((lead: AssignedLead) => {
+    // Server har bridged et nyt lead til denne agent → naviger til lead'et hvis vi
+    // ikke allerede er på det. Bruges af parallel-dispatcher.
+    if (typeof window === "undefined") return;
+    const targetUrl = `/kampagner/${campaignId}/arbejd?leadId=${encodeURIComponent(lead.id)}&voipSession=1`;
+    if (!window.location.pathname.endsWith("/arbejd") || activeLeadRef.current?.id !== lead.id) {
+      window.location.assign(targetUrl);
+    }
+  }, [campaignId]);
+
+  const { stats: dialerStats, sipReady } = useDialerPresence({
+    campaignId: isAutoDialModeForPresence ? campaignId : null,
+    status: presenceStatus,
+    intervalMs: 5000,
+    onAssignedLead: handleAssignedLead,
+    enableDispatch: isAutoDialModeForPresence && !autoDialPaused,
+  });
 
   useEffect(() => {
     if (!activeLead) return;
@@ -934,6 +982,30 @@ export function CampaignWorkspace({ campaignId, preferredLeadId, voipSession = f
               {autoDialPaused ? "Genoptag auto-opkald" : "Pause auto-opkald"}
             </button>
           ) : null}
+          {showAutoDialBadge && dialerStats ? (
+            <span
+              className="inline-flex items-center gap-2 rounded-md border border-stone-200 bg-white/80 px-2.5 py-1 text-xs font-medium text-stone-700"
+              title="Hold-status: hvor mange agenter er klar, ringer eller i samtale, og hvor mange numre der er i luften."
+              aria-live="polite"
+            >
+              <span className="text-stone-500">Hold:</span>
+              <span className="text-emerald-700">{dialerStats.ready} klar</span>
+              <span className="text-stone-300">·</span>
+              <span className="text-amber-700">{dialerStats.ringing} ringer</span>
+              <span className="text-stone-300">·</span>
+              <span className="text-violet-700">{dialerStats.talking} taler</span>
+              <span className="text-stone-300">·</span>
+              <span className="text-stone-700">{dialerStats.inFlightCalls} i luften</span>
+            </span>
+          ) : null}
+          {showAutoDialBadge && sipReady === false ? (
+            <span
+              className="inline-flex items-center gap-1.5 rounded-md border border-amber-300 bg-amber-50 px-2.5 py-1 text-xs font-semibold text-amber-900"
+              title="Din konto har ingen Telnyx Telephony Credential — admin skal provisionere VoIP for dig før parallel dispatch kan ringe dig op."
+            >
+              ⚠ Mangler VoIP-provisionering
+            </span>
+          ) : null}
         </div>
         <p className="mt-1 text-xs text-stone-600">
           Dette lead er <strong>låst til dig</strong>, så længe du har denne side åben — kolleger kan ikke åbne
@@ -1097,6 +1169,7 @@ export function CampaignWorkspace({ campaignId, preferredLeadId, voipSession = f
             queueMicrotask(() => void onNextRef.current(undefined, undefined, "NOT_HOME"));
           }}
           unansweredTimeoutMs={25_000}
+          onLineStatusChange={setVoipLineStatus}
         />
       )}
 

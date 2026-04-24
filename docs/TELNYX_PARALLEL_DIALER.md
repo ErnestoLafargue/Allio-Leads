@@ -1,0 +1,88 @@
+# Parallel Power Dialer / Predictive — Telnyx-konfiguration
+
+Dette dokument beskriver hvordan parallel-dialer'en (3-10+ agenter samtidigt med 9-30 numre i luften) er sat op, og hvad der skal være på plads i Telnyx-portalen for at det virker i produktion.
+
+## Arkitektur i én sætning
+
+> Server-side dispatcher placerer parallelle udgående opkald med AMD; når AMD detekterer et menneske, originate'r serveren et nyt opkald til en ledig agents personlige SIP-URI med `link_to`, hvorefter Telnyx auto-bridger samtalen.
+
+```
+Lead-numre  ──(parallel dial m. AMD)──►  Telnyx  ──webhooks──►  Allio-server
+                                            │
+                                            │ (AMD = human)
+                                            ▼
+                                  reservér ledig agent
+                                            │
+                                            ▼
+        Allio-server  ──(originate sip:agentX@sip.telnyx.com  +  link_to)──►  Telnyx
+                                            │
+                                            ▼
+                              Telnyx bridger lead ↔ agent automatisk
+```
+
+## Krav i Telnyx-portalen
+
+1. **Voice API (Call Control) Application**
+   - Genfindes som `TELNYX_CONNECTION_ID` i Vercel.
+   - **Webhook URL**: `https://<din-domain>/api/telnyx/webhooks/call-events`
+   - **Failover URL**: kan sættes til samme endpoint (idempotent håndtering).
+   - **API version**: API v2.
+
+2. **Outbound Voice Profile**
+   - Mindst én skal eksistere — bruges automatisk ved per-agent provisioning så agenternes SIP-konti kan udgå til PSTN ved bridge.
+
+3. **Numre tildelt Voice API Application**
+   - Alle numre i `TELNYX_FROM_NUMBERS` skal være tilknyttet ovennævnte Call Control Application (ikke en SIP Connection).
+
+4. **Per-agent Telephony Credentials** *(automatisk via admin-panelet)*
+   - Hver bruger med rolle `SELLER` eller `ADMIN` skal have sin egen credential.
+   - Provisioneres med ét klik fra `/administration/telnyx` → "Provisionér alle manglende".
+
+## Vercel-miljøvariabler
+
+| Variabel | Beskrivelse |
+|----------|-------------|
+| `TELNYX_API_KEY` | Telnyx Bearer-token. |
+| `TELNYX_CONNECTION_ID` | Voice API Application id (Call Control). |
+| `TELNYX_TELEPHONY_CREDENTIAL_ID` | **Fallback** for agenter der ikke er per-agent provisioneret endnu. Når alle er provisioneret kan dette fjernes. |
+| `TELNYX_FROM_NUMBER` *eller* `TELNYX_FROM_NUMBERS` | Afsender-nummer(re) i E.164. Komma-separeret hvis flere. |
+| `TELNYX_CALL_WEBHOOK_URL` *(valgfri)* | Override af webhook URL — bruges kun hvis Call Control Application ikke har en korrekt URL sat. |
+
+## Databasen
+
+Migration `20260425000000_dialer_multi_agent_parallel` introducerer:
+
+- **`User.telnyxCredentialId` / `telnyxSipUsername`** — per-agent identitet.
+- **`AgentSession`** — agentens live status (`ready`/`ringing`/`talking`/`wrap_up`/`offline`) pr. kampagne.
+- **`DialerCallLog`** — én række pr. opkalds-leg, opdateres af webhook'en.
+- **`DialerQueueItem`** — soft-lock på leads under dispatch så samme lead ikke ringes op af to dispatchere.
+
+## Dispatcher-pacing
+
+| Mode | Pacing-ratio | Forklaring |
+|------|--------------|------------|
+| `POWER_DIALER` | 1.0 | Sekventielt — næste lead placeres først når forrige er afgjort, men én pr. agent samtidigt. |
+| `PREDICTIVE` | 3.0 | 3 numre pr. ledig agent — typisk svarer 1-2 ikke, så dispatcheren rammer ca. 1:1. |
+| `MAX_IN_FLIGHT_PER_CAMPAIGN` | 50 | Hard cap uanset antal agenter (justerbar i `app/api/dialer/dispatch/route.ts`). |
+
+Dispatcheren kaldes af klienten ved hver heartbeat (5 sek), men kun når agenten er `ready` og auto-dial ikke er pauset. Dispatcher-kaldet er idempotent og placerer kun nye opkald hvis pacing-budgettet tillader det.
+
+## Fejlsikring
+
+- **Idempotente webhooks** — `DialerCallLog.rawEventsJson` gemmer event-id'er; duplikater skippes.
+- **Soft-lock TTL** — `DialerQueueItem.expiresAt` (90 sek) ryddes op af `DELETE /api/dialer/dispatch` (kan kaldes fra cron).
+- **No-agent fallback** — hvis intet ledigt slot kan findes når AMD detekterer human, hangup'es lead-opkaldet og logges som `no_agent_available`.
+- **Hangup-cleanup** — agent-session frigøres uanset hvilken leg der dør først.
+
+## Workflow for opstart af en ny agent
+
+1. Admin opretter brugeren i Allio.
+2. Admin går til `/administration/telnyx` → klikker "Provisionér alle manglende".
+3. Brugeren logger ind, åbner en kampagne via "Start" → workspace sender heartbeats med status `ready`.
+4. Når 3+ agenter er `ready` på samme kampagne → dispatcheren begynder at placere parallelle opkald.
+
+## Skalering til 10+ agenter
+
+- Pacing-ratio kan øges (fx 3.5 for større hold).
+- `MAX_IN_FLIGHT_PER_CAMPAIGN` kan øges til 100+ hvis Telnyx-kontoen er godkendt til større parallelitet.
+- Tilføj flere afsender-numre i `TELNYX_FROM_NUMBERS` for at undgå at samme nummer ringer 30+ leads samtidigt.

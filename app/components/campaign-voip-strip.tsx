@@ -31,9 +31,14 @@ type Props = {
   onUnansweredTimeout?: () => void;
   /** Antal millisekunder før Predictive-modus giver op og kalder `onUnansweredTimeout`. */
   unansweredTimeoutMs?: number;
+  /**
+   * Kaldes hver gang strip'ens lineStatus skifter — workspace kan derved rapportere
+   * agentens status til server-side dispatcher (ready/ringing/talking).
+   */
+  onLineStatusChange?: (status: LineStatus) => void;
 };
 
-type LineStatus = "idle" | "connecting" | "ringing" | "live" | "error";
+export type LineStatus = "idle" | "connecting" | "ringing" | "live" | "error";
 
 type TelnyxClient = {
   remoteElement?: string;
@@ -54,7 +59,11 @@ type TelnyxClient = {
 
 type TelnyxCall = {
   state?: unknown;
+  /// Hvor opkaldet kommer fra: outbound = vi ringede ud, inbound = vi modtog opkald (bridge fra dispatcher)
+  direction?: "outbound" | "inbound";
+  options?: { destinationNumber?: string; remoteCallerName?: string };
   hangup?: () => Promise<void> | void;
+  answer?: (options?: { audio?: MediaTrackConstraints | boolean; video?: boolean }) => Promise<void> | void;
   localStream?: MediaStream;
   remoteStream?: MediaStream;
 };
@@ -166,8 +175,16 @@ export function CampaignVoipStrip({
   autoStartCall,
   onUnansweredTimeout,
   unansweredTimeoutMs = 25_000,
+  onLineStatusChange,
 }: Props) {
   const [lineStatus, setLineStatus] = useState<LineStatus>("idle");
+
+  // Notér ændringer i lineStatus til parent (bruges af dialer-presence-hook)
+  const onLineStatusRef = useRef(onLineStatusChange);
+  onLineStatusRef.current = onLineStatusChange;
+  useEffect(() => {
+    onLineStatusRef.current?.(lineStatus);
+  }, [lineStatus]);
   const [detail, setDetail] = useState<string | null>(null);
   const [dialDraft, setDialDraft] = useState(() => (leadPhone || "").trim());
   const [webrtcReady, setWebrtcReady] = useState(false);
@@ -206,6 +223,17 @@ export function CampaignVoipStrip({
   const lastLeadIdRef = useRef<string | null>(null);
   const remoteAudioRef = useRef<HTMLAudioElement | null>(null);
 
+  /**
+   * Refs der peger på up-to-date props/state — bruges i langlivede SDK-callbacks
+   * (telnyx.notification) hvor vi ellers ville fange initial-værdier fra closure.
+   */
+  const autoStartCallRef = useRef(autoStartCall);
+  autoStartCallRef.current = autoStartCall;
+  const dialModeRef = useRef(dialMode);
+  dialModeRef.current = dialMode;
+  const micIdRef = useRef("");
+  const audioSetupReadyRef = useRef(false);
+
   const remoteAudioId = `voip-remote-audio-${leadId}`;
 
   const inputDevs = useMemo(() => devices.filter((d) => d.kind === "audioinput"), [devices]);
@@ -232,6 +260,12 @@ export function CampaignVoipStrip({
     micVerifyOk &&
     !headsetBlockedEffective &&
     inputDevs.length > 0;
+
+  // Synk refs så telnyx.notification-handleren altid ser nyeste værdier
+  useEffect(() => {
+    micIdRef.current = micId;
+    audioSetupReadyRef.current = audioSetupReady;
+  }, [micId, audioSetupReady]);
 
   const activeCall =
     lineStatus === "ringing" || lineStatus === "live" || lineStatus === "connecting";
@@ -629,6 +663,20 @@ export function CampaignVoipStrip({
           const maybeCall =
             payload.call && typeof payload.call === "object" ? (payload.call as TelnyxCall) : null;
           if (!maybeCall) return;
+
+          // Detektér INDKOMMENDE bridge fra server-side dispatcher.
+          // Hvis dialMode er auto-dial og autoStartCall er aktiv (= ikke pause),
+          // svarer vi automatisk så samtalen flyder uden agent-input.
+          const isInbound = maybeCall.direction === "inbound";
+          const previouslyNoCall = activeCallRef.current == null || activeCallRef.current === maybeCall;
+          const shouldAutoAnswer =
+            isInbound &&
+            previouslyNoCall &&
+            (dialModeRef.current === "POWER_DIALER" || dialModeRef.current === "PREDICTIVE") &&
+            autoStartCallRef.current &&
+            audioSetupReadyRef.current &&
+            typeof maybeCall.answer === "function";
+
           activeCallRef.current = maybeCall;
           attachCallStreams(maybeCall);
           const mapped = callStateToLineStatus(maybeCall.state);
@@ -637,6 +685,22 @@ export function CampaignVoipStrip({
             if (mapped === "idle") {
               activeCallRef.current = null;
               clearCallAudioState(true);
+            }
+          }
+
+          if (shouldAutoAnswer) {
+            try {
+              const answerArg = micIdRef.current
+                ? { audio: { deviceId: { exact: micIdRef.current } } as MediaTrackConstraints }
+                : undefined;
+              const r = maybeCall.answer?.(answerArg);
+              if (r && typeof (r as Promise<void>).then === "function") {
+                (r as Promise<void>).catch((err) => {
+                  console.error("[voip] auto-answer fejlede:", err);
+                });
+              }
+            } catch (err) {
+              console.error("[voip] auto-answer kald-fejl:", err);
             }
           }
         };

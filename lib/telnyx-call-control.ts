@@ -739,6 +739,23 @@ export async function createTelnyxWebRtcToken(params: {
   };
 }
 
+/**
+ * Konfiguration til AMD (Answering Machine Detection) — premium-feature på Telnyx.
+ * Faktureres pr. minut når aktiv. "premium" er den hurtigste/mest præcise variant og
+ * giver et `call.machine.detection.ended` event efter ~1500-3500 ms med result=human|machine.
+ */
+export type AmdMode = "off" | "premium" | "regular";
+
+export type AmdConfig = {
+  mode?: AmdMode;
+  /// Maks tid (ms) AMD må analysere (default 3500)
+  totalAnalysisTimeMs?: number;
+  /// Hvor lang tid (ms) der ventes på stilhed efter greeting før AMD afslutter (default 800)
+  afterGreetingSilenceMs?: number;
+  /// Hvor langt et menneske-greeting forventes maks at være (default 3500)
+  greetingTotalAnalysisTimeMs?: number;
+};
+
 export async function dialTelnyxOutbound(params: {
   connectionId: string;
   from: string;
@@ -746,6 +763,15 @@ export async function dialTelnyxOutbound(params: {
   apiKey: string;
   clientState?: string;
   webhookUrl?: string;
+  /// AMD-konfig. Aktivér med `mode: "premium"` for at få call.machine.detection.ended events.
+  amd?: AmdConfig;
+  /// Maks ringe-tid (sek) før Telnyx selv hangup'er. Default Telnyx er 60 sek.
+  timeoutSecs?: number;
+  /// Hvor længe der må gå før det første call.answered/call.hangup event (sek). Default 30.
+  timeLimitSecs?: number;
+  /// Hvis true: link dette opkald til en eksisterende call (originate-and-bridge mønster).
+  /// Telnyx svarer 200, kører AMD/answer i baggrunden, og bridger automatisk når begge legs er live.
+  linkTo?: string;
 }): Promise<DialResult> {
   const payload: Record<string, unknown> = {
     connection_id: params.connectionId,
@@ -754,6 +780,27 @@ export async function dialTelnyxOutbound(params: {
   };
   if (params.clientState) payload.client_state = params.clientState;
   if (params.webhookUrl) payload.webhook_url = params.webhookUrl;
+  if (params.linkTo) payload.link_to = params.linkTo;
+  if (typeof params.timeoutSecs === "number") payload.timeout_secs = params.timeoutSecs;
+  if (typeof params.timeLimitSecs === "number") payload.time_limit_secs = params.timeLimitSecs;
+
+  const amdMode: AmdMode = params.amd?.mode ?? "off";
+  if (amdMode !== "off") {
+    payload.answering_machine_detection = amdMode;
+    const cfg: Record<string, unknown> = {};
+    if (typeof params.amd?.totalAnalysisTimeMs === "number") {
+      cfg.total_analysis_time_millis = params.amd.totalAnalysisTimeMs;
+    }
+    if (typeof params.amd?.afterGreetingSilenceMs === "number") {
+      cfg.after_greeting_silence_millis = params.amd.afterGreetingSilenceMs;
+    }
+    if (typeof params.amd?.greetingTotalAnalysisTimeMs === "number") {
+      cfg.greeting_total_analysis_time_millis = params.amd.greetingTotalAnalysisTimeMs;
+    }
+    if (Object.keys(cfg).length > 0) {
+      payload.answering_machine_detection_config = cfg;
+    }
+  }
 
   const res = await fetch(`${TELNYX_API_BASE}/calls`, {
     method: "POST",
@@ -794,4 +841,159 @@ export async function dialTelnyxOutbound(params: {
     typeof sessRaw === "string" ? sessRaw : typeof sessRaw === "number" ? String(sessRaw) : undefined;
 
   return { ok: true, callControlId, callSessionId, raw: json };
+}
+
+export type ActionResult =
+  | { ok: true; raw: unknown }
+  | { ok: false; status: number; message: string; telnyx?: unknown };
+
+/**
+ * Bridge to igangværende call_control_id'er sammen. Begge legs skal være "answered".
+ * Telnyx blander audio'en så de to parter taler sammen.
+ *
+ * Brug: bridgeTelnyxCalls({ apiKey, fromCallControlId: leadCallId, toCallControlId: agentCallId })
+ */
+export async function bridgeTelnyxCalls(params: {
+  apiKey: string;
+  fromCallControlId: string;
+  toCallControlId: string;
+  /// Hvis sat: park leg'en automatisk når den anden lægger på (i stedet for at hangup begge).
+  /// "self" = denne leg parkes, "opposite" = den anden parkes, "both" = begge parkes.
+  parkAfterUnbridge?: "self" | "opposite" | "both";
+}): Promise<ActionResult> {
+  const body: Record<string, unknown> = {
+    call_control_id: params.toCallControlId,
+  };
+  if (params.parkAfterUnbridge) body.park_after_unbridge = params.parkAfterUnbridge;
+
+  try {
+    const res = await fetch(
+      `${TELNYX_API_BASE}/calls/${encodeURIComponent(params.fromCallControlId)}/actions/bridge`,
+      {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${params.apiKey}`,
+          "Content-Type": "application/json",
+          Accept: "application/json",
+        },
+        body: JSON.stringify(body),
+      },
+    );
+    const json: unknown = await res.json().catch(() => null);
+    if (!res.ok) {
+      return {
+        ok: false,
+        status: res.status,
+        message: formatTelnyxError(json) || `Telnyx HTTP ${res.status}`,
+        telnyx: json,
+      };
+    }
+    return { ok: true, raw: json };
+  } catch (err) {
+    return {
+      ok: false,
+      status: 0,
+      message: err instanceof Error ? err.message : "Ukendt fejl ved bridge.",
+    };
+  }
+}
+
+/**
+ * Hangup et aktivt opkald. Bruges fx når AMD detekterer voicemail og vi vil afbryde.
+ */
+export async function hangupTelnyxCall(params: {
+  apiKey: string;
+  callControlId: string;
+  clientState?: string;
+}): Promise<ActionResult> {
+  const body: Record<string, unknown> = {};
+  if (params.clientState) body.client_state = params.clientState;
+
+  try {
+    const res = await fetch(
+      `${TELNYX_API_BASE}/calls/${encodeURIComponent(params.callControlId)}/actions/hangup`,
+      {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${params.apiKey}`,
+          "Content-Type": "application/json",
+          Accept: "application/json",
+        },
+        body: JSON.stringify(body),
+      },
+    );
+    if (res.status === 422) {
+      // Allerede lagt på — ikke en fejl for vores formål
+      return { ok: true, raw: null };
+    }
+    const json: unknown = await res.json().catch(() => null);
+    if (!res.ok) {
+      return {
+        ok: false,
+        status: res.status,
+        message: formatTelnyxError(json) || `Telnyx HTTP ${res.status}`,
+        telnyx: json,
+      };
+    }
+    return { ok: true, raw: json };
+  } catch (err) {
+    return {
+      ok: false,
+      status: 0,
+      message: err instanceof Error ? err.message : "Ukendt fejl ved hangup.",
+    };
+  }
+}
+
+/**
+ * Svar et indkommende opkald på Telnyx call control siden (svarer typisk programmatisk
+ * fra webhook efter call.initiated på inbound). Sjældent brugt fra Allio direkte —
+ * agenter besvarer via deres WebRTC-klient.
+ */
+export async function answerTelnyxCall(params: {
+  apiKey: string;
+  callControlId: string;
+  clientState?: string;
+}): Promise<ActionResult> {
+  const body: Record<string, unknown> = {};
+  if (params.clientState) body.client_state = params.clientState;
+
+  try {
+    const res = await fetch(
+      `${TELNYX_API_BASE}/calls/${encodeURIComponent(params.callControlId)}/actions/answer`,
+      {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${params.apiKey}`,
+          "Content-Type": "application/json",
+          Accept: "application/json",
+        },
+        body: JSON.stringify(body),
+      },
+    );
+    const json: unknown = await res.json().catch(() => null);
+    if (!res.ok) {
+      return {
+        ok: false,
+        status: res.status,
+        message: formatTelnyxError(json) || `Telnyx HTTP ${res.status}`,
+        telnyx: json,
+      };
+    }
+    return { ok: true, raw: json };
+  } catch (err) {
+    return {
+      ok: false,
+      status: 0,
+      message: err instanceof Error ? err.message : "Ukendt fejl ved answer.",
+    };
+  }
+}
+
+/**
+ * Bygger SIP-URI for en Telnyx Telephony Credential / Credential Connection username.
+ * Telnyx ringer denne URI op via deres SIP-edge → agentens WebRTC-klient (hvis registreret).
+ */
+export function buildTelnyxAgentSipUri(sipUsername: string): string {
+  return `sip:${sipUsername}@sip.telnyx.com`;
 }

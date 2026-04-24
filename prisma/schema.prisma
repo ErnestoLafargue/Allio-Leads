@@ -10,26 +10,35 @@ datasource db {
 }
 
 model User {
-  id           String @id @default(cuid())
-  username     String @unique
+  id           String   @id @default(cuid())
+  username     String   @unique
   name         String
   passwordHash String
   /// ADMIN eller SELLER
-  role         String @default("SELLER")
+  role         String   @default("SELLER")
   createdAt    DateTime @default(now())
   updatedAt    DateTime @updatedAt
 
-  bookedMeetings Lead[] @relation("LeadBookedBy")
+  /// Per-agent Telnyx Telephony Credential ID (UUID). Bruges til unik SIP-URI under bridge.
+  /// Oprettes via admin-panelet — krævet for at agenten kan modtage bridges fra dispatcher.
+  telnyxCredentialId String? @unique
+  /// SIP-username knyttet til ovennævnte credential — server bruger sip:{username}@sip.telnyx.com som transfer-target
+  telnyxSipUsername  String? @unique
+
+  bookedMeetings        Lead[]              @relation("LeadBookedBy")
   /// Aktivt lead-lås under opkald/kampagne (timeouts ryddes i appen)
-  lockedLeads    Lead[] @relation("LeadLockedBy")
+  lockedLeads           Lead[]              @relation("LeadLockedBy")
   /// Leads med planlagt genopkald reserveret til denne sælger
-  callbackReservedLeads Lead[] @relation("LeadCallbackReservedBy")
+  callbackReservedLeads Lead[]              @relation("LeadCallbackReservedBy")
   /// Bruger der oprettede tilbagekaldet (kan være anderledes end tildelt)
-  callbackCreatedLeads Lead[] @relation("LeadCallbackCreatedBy")
-  outcomeLogs    LeadOutcomeLog[]
-  visitHistory   LeadVisitHistory[]
-  loginDays      UserLoginDay[]
-  leadActivityEvents LeadActivityEvent[]
+  callbackCreatedLeads  Lead[]              @relation("LeadCallbackCreatedBy")
+  outcomeLogs           LeadOutcomeLog[]
+  visitHistory          LeadVisitHistory[]
+  loginDays             UserLoginDay[]
+  leadActivityEvents    LeadActivityEvent[]
+
+  agentSessions  AgentSession[]
+  dialerCallLogs DialerCallLog[]
 }
 
 /// Én række pr. bruger pr. kalenderdag (København) ved vellykket login.
@@ -47,23 +56,27 @@ model UserLoginDay {
 }
 
 model Campaign {
-  id          String   @id @default(cuid())
-  name        String
+  id                         String   @id @default(cuid())
+  name                       String
   /// JSON: { extensions: { companyName?: [{ key, label }], ... } }
-  fieldConfig String   @default("{}")
+  fieldConfig                String   @default("{}")
   /// true = alle leads i kampagne; false = skjul hvor customFields.reklamebeskyttet (case-ins.) er «ja»
-  includeProtectedBusinesses Boolean @default(false)
+  includeProtectedBusinesses Boolean  @default(false)
   /// Systemkampagner (mødeflow m.m.) — visse typer kan ikke slettes.
-  isSystemCampaign   Boolean @default(false)
+  isSystemCampaign           Boolean  @default(false)
   /// upcoming_meetings | rebooking | active_customers | direct_booking | null
-  systemCampaignType String?
+  systemCampaignType         String?
   /// NO_DIAL | CLICK_TO_CALL | POWER_DIALER | PREDICTIVE — styrer Telnyx VOIP / opkaldsflow
-  dialMode    String   @default("NO_DIAL")
-  createdAt   DateTime @default(now())
-  updatedAt   DateTime @updatedAt
+  dialMode                   String   @default("NO_DIAL")
+  createdAt                  DateTime @default(now())
+  updatedAt                  DateTime @updatedAt
 
-  leads Lead[]
+  leads        Lead[]
   visitHistory LeadVisitHistory[]
+
+  agentSessions    AgentSession[]
+  dialerCallLogs   DialerCallLog[]
+  dialerQueueItems DialerQueueItem[]
 }
 
 model Lead {
@@ -71,15 +84,15 @@ model Lead {
   campaignId String?
   campaign   Campaign? @relation(fields: [campaignId], references: [id], onDelete: SetNull)
 
-  companyName String
-  phone       String
-  email       String @default("")
-  cvr         String @default("")
-  address     String @default("")
-  postalCode  String @default("")
-  city        String @default("")
-  industry    String @default("")
-  notes       String @default("")
+  companyName  String
+  phone        String
+  email        String @default("")
+  cvr          String @default("")
+  address      String @default("")
+  postalCode   String @default("")
+  city         String @default("")
+  industry     String @default("")
+  notes        String @default("")
   /// JSON object string -> Record<string, string> for kampagnespecifikke felter
   customFields String @default("{}")
 
@@ -89,7 +102,7 @@ model Lead {
   /// Sættes når status bliver VOICEMAIL — bruges til auto-tilbage til NEW efter 2 timer
   voicemailMarkedAt DateTime?
   /// Sættes når status bliver NOT_HOME — bruges til auto-tilbage til NEW efter 6 timer
-  notHomeMarkedAt DateTime?
+  notHomeMarkedAt   DateTime?
 
   meetingBookedAt     DateTime?
   meetingScheduledFor DateTime?
@@ -97,19 +110,19 @@ model Lead {
   bookedByUser        User?     @relation("LeadBookedBy", fields: [bookedByUserId], references: [id])
 
   /// Kontaktperson til booket møde (sælgeren udfylder ved møde-booking)
-  meetingContactName            String @default("")
-  meetingContactEmail           String @default("")
-  meetingContactPhonePrivate    String @default("")
+  meetingContactName         String @default("")
+  meetingContactEmail        String @default("")
+  meetingContactPhonePrivate String @default("")
 
   /// PENDING | HELD | CANCELLED — kun relevant når status = MEETING_BOOKED (admin sætter udfald)
-  meetingOutcomeStatus     String @default("PENDING")
+  meetingOutcomeStatus        String  @default("PENDING")
   /// YYYY-MM-DD (Europe/Copenhagen) for den dag mødet blev booket — gruppering til provisions-bonus
-  meetingCommissionDayKey String @default("")
+  meetingCommissionDayKey     String  @default("")
   /// true hvis mødet første gang blev booket fra genbooking-kampagnen — fast 100 kr, ikke bonustrappe
   bookedFromRebookingCampaign Boolean @default(false)
 
   /// Import eller manuel oprettelse — bruges til sortering «senest tilføjet»
-  importedAt DateTime @default(now())
+  importedAt    DateTime  @default(now())
   /// Seneste tidspunkt et egentligt udfald blev ændret (ikke callback-planlægning)
   lastOutcomeAt DateTime?
 
@@ -117,26 +130,29 @@ model Lead {
   lockedByUserId String?
   lockedAt       DateTime?
   lockExpiresAt  DateTime?
-  lockedByUser   User? @relation("LeadLockedBy", fields: [lockedByUserId], references: [id], onDelete: SetNull)
+  lockedByUser   User?     @relation("LeadLockedBy", fields: [lockedByUserId], references: [id], onDelete: SetNull)
 
   /// Planlagt genopkald — lead reserveret til én sælger indtil tidspunktet (eller ændret status)
   callbackScheduledFor     DateTime?
   callbackReservedByUserId String?
-  callbackReservedByUser   User? @relation("LeadCallbackReservedBy", fields: [callbackReservedByUserId], references: [id], onDelete: SetNull)
+  callbackReservedByUser   User?     @relation("LeadCallbackReservedBy", fields: [callbackReservedByUserId], references: [id], onDelete: SetNull)
   /// PENDING | COMPLETED | CANCELLED — kun aktiv plan vises når PENDING
-  callbackStatus           String @default("PENDING")
-  callbackNote             String @default("")
+  callbackStatus           String    @default("PENDING")
+  callbackNote             String    @default("")
   callbackCreatedByUserId  String?
-  callbackCreatedByUser    User? @relation("LeadCallbackCreatedBy", fields: [callbackCreatedByUserId], references: [id], onDelete: SetNull)
+  callbackCreatedByUser    User?     @relation("LeadCallbackCreatedBy", fields: [callbackCreatedByUserId], references: [id], onDelete: SetNull)
   /// Første gang den tildelte åbner/reserverer leadet efter planlagt tilbagekald (bruges til genudlevering i kø).
   callbackSeenByAssigneeAt DateTime?
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
-  outcomeLogs LeadOutcomeLog[]
-  visitHistory LeadVisitHistory[]
+  outcomeLogs    LeadOutcomeLog[]
+  visitHistory   LeadVisitHistory[]
   activityEvents LeadActivityEvent[]
+
+  dialerCallLogs  DialerCallLog[]
+  dialerQueueItem DialerQueueItem?
 
   @@index([lockExpiresAt])
   @@index([lockedByUserId])
@@ -154,7 +170,7 @@ model LeadOutcomeLog {
   status    String
   createdAt DateTime @default(now())
 
-  lead Lead @relation(fields: [leadId], references: [id], onDelete: Cascade)
+  lead Lead  @relation(fields: [leadId], references: [id], onDelete: Cascade)
   user User? @relation(fields: [userId], references: [id], onDelete: SetNull)
 
   @@index([userId, createdAt])
@@ -163,18 +179,18 @@ model LeadOutcomeLog {
 
 /// Ét log pr. gang en bruger åbner / reserverer et lead i arbejdskøen.
 model LeadVisitHistory {
-  id        String   @id @default(cuid())
-  leadId     String
-  userId     String
-  campaignId String?
-  companyName String
+  id            String   @id @default(cuid())
+  leadId        String
+  userId        String
+  campaignId    String?
+  companyName   String
   statusAtVisit String
   /// YYYY-MM-DD (Europe/Copenhagen) for hurtig filtrering i historik
-  dayKey    String
-  visitedAt DateTime @default(now())
+  dayKey        String
+  visitedAt     DateTime @default(now())
 
-  lead     Lead @relation(fields: [leadId], references: [id], onDelete: Cascade)
-  user     User @relation(fields: [userId], references: [id], onDelete: Cascade)
+  lead     Lead      @relation(fields: [leadId], references: [id], onDelete: Cascade)
+  user     User      @relation(fields: [userId], references: [id], onDelete: Cascade)
   campaign Campaign? @relation(fields: [campaignId], references: [id], onDelete: SetNull)
 
   @@index([userId, visitedAt])
@@ -197,8 +213,105 @@ model LeadActivityEvent {
   telnyxCallLegId String?
   createdAt       DateTime @default(now())
 
-  lead Lead @relation(fields: [leadId], references: [id], onDelete: Cascade)
+  lead Lead  @relation(fields: [leadId], references: [id], onDelete: Cascade)
   user User? @relation(fields: [userId], references: [id], onDelete: SetNull)
 
   @@index([leadId, createdAt])
+}
+
+/// Aktiv agent-session i en kampagne. Bruges af dispatcher til at finde ledige agenter
+/// der kan modtage et bridged opkald. Heartbeat opdaterer lastHeartbeat hvert 5-10 sek;
+/// sessioner uden heartbeat i mere end 30 sek anses som offline (filtreres i query).
+model AgentSession {
+  id                        String   @id @default(cuid())
+  userId                    String
+  campaignId                String
+  /// "ready" | "ringing" | "talking" | "wrap_up" | "offline"
+  /// - ready: agent er online og klar til at modtage et bridge
+  /// - ringing: server har ringet ud til agentens SIP-URI, venter på svar
+  /// - talking: agent er i samtale (lineStatus=live i browseren)
+  /// - wrap_up: agent registrerer udfald, bør ikke få nye bridges endnu
+  /// - offline: heartbeat er udløbet eller agent er logget ud
+  status                    String   @default("offline")
+  /// Telnyx call_control_id for det aktuelle bridged opkald (lead-leg). Sættes når et bridge sker.
+  currentLeadCallControlId  String?
+  /// Telnyx call_control_id for agentens egen WebRTC-leg (efter originate-and-bridge).
+  /// Bruges til hangup når agent skal forlade samtalen.
+  currentAgentCallControlId String?
+  /// Lead-id der er bridged til agenten lige nu.
+  currentLeadId             String?
+  lastHeartbeat             DateTime @updatedAt
+  createdAt                 DateTime @default(now())
+
+  user     User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  campaign Campaign @relation(fields: [campaignId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, campaignId])
+  @@index([campaignId, status, lastHeartbeat])
+  @@index([userId, lastHeartbeat])
+}
+
+/// Per-opkald log fra Telnyx. Skrives af webhook'en. Bruges af dispatcher til at vide
+/// hvilke opkald der er i flight, og af bridge-flow til at finde tilhørende lead/agent.
+model DialerCallLog {
+  id             String    @id @default(cuid())
+  campaignId     String
+  leadId         String?
+  /// Bruger-ID som forventes at modtage et bridge — sættes når dispatcher reserverer slot.
+  agentUserId    String?
+  /// Unik nøgle pr. opkalds-leg i Telnyx
+  callControlId  String    @unique
+  /// Telnyx call_session_id (samler flere legs under én "session")
+  callSessionId  String?
+  /// "outbound-lead" | "outbound-agent" | "inbound" | "agent-leg"
+  direction      String
+  /// Senest sete state: "initiated" | "ringing" | "answered" | "machine" | "human" | "hangup" | "bridged" | "failed"
+  state          String    @default("initiated")
+  /// "human" | "machine" | "unknown" | "fax" | null (før AMD er færdig)
+  amdResult      String?
+  /// Når denne leg er bridged til en anden — gemmer den anden legs call_control_id
+  bridgeTargetId String?
+  /// E.164 — fra-nummer (vores) og til-nummer (lead eller agent SIP)
+  fromNumber     String?
+  toNumber       String?
+  startedAt      DateTime  @default(now())
+  answeredAt     DateTime?
+  bridgedAt      DateTime?
+  endedAt        DateTime?
+  hangupCause    String?
+  hangupSource   String?
+  recordingUrl   String?
+  /// JSON-array (string) af de seneste N webhook-payloads — debugging
+  rawEventsJson  String?
+
+  campaign Campaign @relation(fields: [campaignId], references: [id], onDelete: Cascade)
+  lead     Lead?    @relation(fields: [leadId], references: [id], onDelete: SetNull)
+  agent    User?    @relation(fields: [agentUserId], references: [id], onDelete: SetNull)
+
+  @@index([campaignId, startedAt])
+  @@index([leadId])
+  @@index([agentUserId, startedAt])
+  @@index([state, startedAt])
+}
+
+/// Reservation af leads i dispatcherens kø — sikrer at samme lead ikke dispatches to gange
+/// inden for et kort vindue (fx 60 sek). Frigøres ved hangup eller manuel cleanup.
+model DialerQueueItem {
+  id                  String   @id @default(cuid())
+  campaignId          String
+  leadId              String   @unique
+  reservedAt          DateTime @default(now())
+  /// Frigøres automatisk efter dette tidspunkt hvis ingen webhook er modtaget
+  expiresAt           DateTime
+  attempts            Int      @default(0)
+  /// "human" | "machine" | "no-answer" | "failed" | null (under aktivt opkald)
+  lastResult          String?
+  /// call_control_id for det opkald der reserverede dette lead
+  activeCallControlId String?
+
+  campaign Campaign @relation(fields: [campaignId], references: [id], onDelete: Cascade)
+  lead     Lead     @relation(fields: [leadId], references: [id], onDelete: Cascade)
+
+  @@index([campaignId, reservedAt])
+  @@index([expiresAt])
 }
