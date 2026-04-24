@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
+import { LeadRecordingPlayer } from "@/app/components/lead-recording-player";
 
 export type ActivityItem = {
   kind: "visit" | "note" | "call" | "call_attempt" | "outcome" | "callback_schedule";
@@ -90,9 +91,12 @@ export function LeadActivityPanel({ leadId, reloadToken = 0 }: Props) {
                 </p>
               )}
               {row.kind === "call" && row.recordingUrl ? (
-                <audio controls className="mt-2 h-8 w-full max-w-md" src={row.recordingUrl}>
-                  <track kind="captions" />
-                </audio>
+                <LeadRecordingPlayer
+                  key={row.recordingUrl}
+                  src={row.recordingUrl}
+                  durationSecondsHint={row.durationSeconds}
+                  variant="default"
+                />
               ) : null}
               {row.kind === "call" && !row.recordingUrl ? (
                 <p className="mt-1 text-xs text-stone-500">Optagelse ikke tilgængelig endnu.</p>

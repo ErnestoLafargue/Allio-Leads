@@ -25,6 +25,7 @@ import {
 } from "@/lib/dial-mode";
 import { CampaignVoipStrip, type LineStatus } from "@/app/components/campaign-voip-strip";
 import type { ActivityItem } from "@/app/components/lead-activity-panel";
+import { LeadRecordingPlayer } from "@/app/components/lead-recording-player";
 import {
   useDialerPresence,
   type AssignedLead,
@@ -1129,9 +1130,12 @@ export function CampaignWorkspace({ campaignId, preferredLeadId, voipSession = f
                         </p>
                       )}
                       {row.kind === "call" && row.recordingUrl ? (
-                        <audio controls className="mt-2 h-8 w-full max-w-md" src={row.recordingUrl}>
-                          <track kind="captions" />
-                        </audio>
+                        <LeadRecordingPlayer
+                          key={row.recordingUrl}
+                          src={row.recordingUrl}
+                          durationSecondsHint={row.durationSeconds}
+                          variant="adminInline"
+                        />
                       ) : null}
                       {row.kind === "call" && !row.recordingUrl ? (
                         <p className="mt-1 text-xs text-blue-800/70">Ingen optagelse tilknyttet endnu.</p>

@@ -1,4 +1,4 @@
-import { NextResponse } from "next/server";
+import { NextResponse, after } from "next/server";
 import { prisma } from "@/lib/prisma";
 import {
   appendRawEvent,
@@ -10,6 +10,7 @@ import {
 import { handleAmdHuman, handleAmdMachine } from "@/lib/dialer-bridge";
 import { LEAD_ACTIVITY_KIND, maskPhoneForActivity } from "@/lib/lead-activity-kinds";
 import { startTelnyxRecording } from "@/lib/telnyx-call-control";
+import { persistTelnyxRecordingToAllio } from "@/lib/telnyx-recording-storage";
 
 /**
  * Telnyx Call Control webhook — modtager alle events relateret til opkald
@@ -337,10 +338,11 @@ export async function POST(req: Request) {
       break;
     }
     case "call.recording.saved": {
-      const url =
+      const telnyxRecordingUrl =
         (typeof payload.recording_urls?.mp3 === "string" && payload.recording_urls.mp3) ||
         (typeof payload.recording_urls?.wav === "string" && payload.recording_urls.wav) ||
         null;
+      const url = telnyxRecordingUrl;
       const durationMillisRaw = (payload as Record<string, unknown>).duration_millis;
       const durationSeconds =
         typeof durationMillisRaw === "number"
@@ -426,6 +428,33 @@ export async function POST(req: Request) {
             durationSeconds,
             telnyxCallLegId: callControlId,
           },
+        });
+      }
+
+      // Kopiér optagelsen til Vercel Blob i baggrunden og opdatér URL når den er klar,
+      // så afspilning ikke afhænger af udløbende Telnyx-download-links.
+      if (telnyxRecordingUrl) {
+        after(() => {
+          void (async () => {
+            try {
+              const { playbackUrl, storedOnAllio } = await persistTelnyxRecordingToAllio({
+                telnyxMp3Url: telnyxRecordingUrl,
+                leadId,
+                callControlId,
+              });
+              if (!storedOnAllio || playbackUrl === telnyxRecordingUrl) return;
+              await prisma.leadActivityEvent.updateMany({
+                where: { leadId, telnyxCallLegId: callControlId },
+                data: { recordingUrl: playbackUrl },
+              });
+              await prisma.dialerCallLog.updateMany({
+                where: { callControlId },
+                data: { recordingUrl: playbackUrl },
+              });
+            } catch (err) {
+              console.error("[call-events] recording blob persist (after):", err);
+            }
+          })();
         });
       }
       break;
