@@ -569,8 +569,20 @@ export function CampaignVoipStrip({ leadId, campaignId, leadPhone, autoStartCall
       callerNumberRef.current = (tokenJson.callerNumber || "").trim();
 
       const mod = await import("@telnyx/webrtc");
-      const TelnyxRTC = mod.TelnyxRTC as new (options: { login_token?: string }) => TelnyxClient;
-      const client = new TelnyxRTC({ login_token: tokenJson.loginToken });
+      const TelnyxRTC = mod.TelnyxRTC as new (options: {
+        login_token?: string;
+        region?: string;
+        prefetchIceCandidates?: boolean;
+        trickleIce?: boolean;
+      }) => TelnyxClient;
+      // region:"eu" → SDK forbinder til wss://rtc-eu.telnyx.com (lavere latency fra DK).
+      // prefetchIceCandidates + trickleIce → hurtigere medie-setup ved opkaldsstart.
+      const client = new TelnyxRTC({
+        login_token: tokenJson.loginToken,
+        region: "eu",
+        prefetchIceCandidates: true,
+        trickleIce: true,
+      });
       client.remoteElement = remoteAudioId;
 
       await new Promise<void>((resolve, reject) => {
