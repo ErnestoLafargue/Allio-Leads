@@ -85,14 +85,33 @@ export async function POST(req: Request) {
 
     const hints: string[] = [];
     let hint: string | null = null;
+    const uuidLike = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(
+      telephonyCredentialId,
+    );
+    if (!uuidLike) {
+      hints.push(
+        `Credential-id ser ikke ud som et UUID (længde ${telephonyCredentialId.length}). Tjek TELNYX_TELEPHONY_CREDENTIAL_ID i Vercel.`,
+      );
+    }
     if (!info.found) {
-      if (info.fetchError && /404|not.?found|ikke.?fundet/i.test(info.fetchError)) {
+      const fe = info.fetchError || "ukendt";
+      if (/404|not.?found|ikke.?fundet/i.test(fe)) {
         hint =
-          "Credential-id findes ikke på Telnyx-kontoen. Sæt TELNYX_TELEPHONY_CREDENTIAL_ID til et gyldigt Telephony Credential id.";
+          "Credential-id findes ikke på Telnyx-kontoen. Tjek at TELNYX_TELEPHONY_CREDENTIAL_ID og TELNYX_API_KEY hører til samme Telnyx-konto.";
+      } else if (/401|unauth/i.test(fe)) {
+        hint =
+          "Telnyx 401: TELNYX_API_KEY er ugyldig eller udløbet. Opret en ny V2 API-nøgle i Telnyx portal og opdater Vercel.";
+      } else if (/403|forbidden/i.test(fe)) {
+        hint =
+          "Telnyx 403: API-nøglen har ikke adgang til credential'et (ofte forkert konto/org).";
+      } else if (/400/i.test(fe)) {
+        hint =
+          "Telnyx 400 på GET af credential: id-formatet er ugyldigt, eller credential'et hører til en anden konto.";
       } else {
-        hint = "Kunne ikke hente credential fra Telnyx (tjek API-nøgle og credential-id).";
+        hint = `Kunne ikke hente credential fra Telnyx: ${fe}`;
       }
       hints.push(hint);
+      hints.push(`GET-fejl: ${fe}`);
     } else {
       if (info.expired === true) {
         hint =
