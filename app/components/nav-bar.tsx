@@ -44,6 +44,7 @@ const NAV_GROUPS: NavGroup[] = [
       { href: "/indstillinger", label: "Indstillinger" },
       { href: "/administration/telnyx", label: "Telnyx" },
       { href: "/administration/dialer", label: "Dialer" },
+      { href: "/administration/cost", label: "Cost" },
     ],
   },
 ];
