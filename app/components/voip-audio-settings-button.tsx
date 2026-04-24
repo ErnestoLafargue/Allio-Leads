@@ -1,33 +1,34 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState } from "react";
+import { useAudioLevel } from "@/lib/use-audio-level";
 import {
   ensureMicPermissionAndEnumerate,
   headsetSetupBlockedReason,
   labelForDeviceId,
-  readSessionDeviceId,
+  readStoredDeviceId,
   verifyMicDevice,
-  VOIP_SESSION_MIC_KEY,
-  VOIP_SESSION_SPK_KEY,
-  writeSessionDeviceId,
+  VOIP_STORED_MIC_KEY,
+  VOIP_STORED_SPK_KEY,
+  writeStoredDeviceId,
 } from "@/lib/voip-audio-devices";
 
 const MANUAL_CONFIRM_KEY = "allio-voip-manual-headset-confirm";
 
 function readManualConfirm(): boolean {
-  if (typeof sessionStorage === "undefined") return false;
+  if (typeof window === "undefined") return false;
   try {
-    return sessionStorage.getItem(MANUAL_CONFIRM_KEY) === "1";
+    return window.localStorage.getItem(MANUAL_CONFIRM_KEY) === "1";
   } catch {
     return false;
   }
 }
 
 function writeManualConfirm(v: boolean) {
-  if (typeof sessionStorage === "undefined") return;
+  if (typeof window === "undefined") return;
   try {
-    if (v) sessionStorage.setItem(MANUAL_CONFIRM_KEY, "1");
-    else sessionStorage.removeItem(MANUAL_CONFIRM_KEY);
+    if (v) window.localStorage.setItem(MANUAL_CONFIRM_KEY, "1");
+    else window.localStorage.removeItem(MANUAL_CONFIRM_KEY);
   } catch {
     /* no-op */
   }
@@ -56,8 +57,12 @@ export function VoipAudioSettingsButton({ className }: Props) {
   const [micVerifyOk, setMicVerifyOk] = useState(false);
   const [verifyError, setVerifyError] = useState<string | null>(null);
   const [manualHeadsetConfirm, setManualHeadsetConfirmState] = useState(false);
+  /** Aktiv stream til live mic-niveau-bar i popoveren — kun mens panelet er åbent. */
+  const [testStream, setTestStream] = useState<MediaStream | null>(null);
+  const [testStreamError, setTestStreamError] = useState<string | null>(null);
 
   const wrapperRef = useRef<HTMLDivElement | null>(null);
+  const micLevel = useAudioLevel(testStream);
 
   const inputDevs = useMemo(() => devices.filter((d) => d.kind === "audioinput"), [devices]);
   const outputDevs = useMemo(() => devices.filter((d) => d.kind === "audiooutput"), [devices]);
@@ -98,8 +103,8 @@ export function VoipAudioSettingsButton({ className }: Props) {
 
   /** Læs gemte valg ved mount + lyt til devicechange. */
   useEffect(() => {
-    const storedMic = readSessionDeviceId(VOIP_SESSION_MIC_KEY);
-    const storedSpk = readSessionDeviceId(VOIP_SESSION_SPK_KEY);
+    const storedMic = readStoredDeviceId(VOIP_STORED_MIC_KEY);
+    const storedSpk = readStoredDeviceId(VOIP_STORED_SPK_KEY);
     setMicId(storedMic);
     setSpeakerId(storedSpk);
     setManualHeadsetConfirmState(readManualConfirm());
@@ -158,21 +163,27 @@ export function VoipAudioSettingsButton({ className }: Props) {
     };
   }, [permissionDone, micId]);
 
-  /** Ryd ugyldige valg når enhedsliste ændres. */
+  /**
+   * Ryd ugyldige valg — men kun når enhedslisten faktisk er indlæst.
+   * Ellers risikerer vi at slette agentens gemte headset i den korte
+   * periode mellem mount og enumerateDevices().
+   */
   useEffect(() => {
-    if (micId && !inputDevs.some((d) => d.deviceId === micId)) {
+    if (!permissionDone) return;
+    if (inputDevs.length === 0 && outputDevs.length === 0) return;
+    if (micId && inputDevs.length > 0 && !inputDevs.some((d) => d.deviceId === micId)) {
       setMicId("");
-      writeSessionDeviceId(VOIP_SESSION_MIC_KEY, "");
+      writeStoredDeviceId(VOIP_STORED_MIC_KEY, "");
       setManualHeadsetConfirmState(false);
       writeManualConfirm(false);
     }
-    if (speakerId && !outputDevs.some((d) => d.deviceId === speakerId)) {
+    if (speakerId && outputDevs.length > 0 && !outputDevs.some((d) => d.deviceId === speakerId)) {
       setSpeakerId("");
-      writeSessionDeviceId(VOIP_SESSION_SPK_KEY, "");
+      writeStoredDeviceId(VOIP_STORED_SPK_KEY, "");
       setManualHeadsetConfirmState(false);
       writeManualConfirm(false);
     }
-  }, [inputDevs, outputDevs, micId, speakerId]);
+  }, [permissionDone, inputDevs, outputDevs, micId, speakerId]);
 
   /** Luk panel ved klik udenfor. */
   useEffect(() => {
@@ -184,6 +195,49 @@ export function VoipAudioSettingsButton({ className }: Props) {
     window.addEventListener("mousedown", onDown);
     return () => window.removeEventListener("mousedown", onDown);
   }, [open]);
+
+  /**
+   * Live mikrofon-test: når popoveren er åben og en mikrofon er valgt + verificeret,
+   * åbner vi en kortvarig stream som niveau-bjælken aflæser. Stream'en lukkes igen
+   * når panelet lukkes eller mikrofonen skiftes.
+   */
+  useEffect(() => {
+    if (!open || !permissionDone || !micId || !micVerifyOk) {
+      setTestStream(null);
+      return;
+    }
+    let cancelled = false;
+    let stream: MediaStream | null = null;
+    setTestStreamError(null);
+    void (async () => {
+      try {
+        stream = await navigator.mediaDevices.getUserMedia({
+          audio: {
+            deviceId: { exact: micId },
+            echoCancellation: true,
+            noiseSuppression: true,
+            autoGainControl: true,
+          },
+        });
+        if (cancelled) {
+          stream.getTracks().forEach((t) => t.stop());
+          return;
+        }
+        setTestStream(stream);
+      } catch (e) {
+        if (cancelled) return;
+        setTestStream(null);
+        setTestStreamError(
+          e instanceof Error ? e.message : "Kunne ikke åbne mikrofonen til test.",
+        );
+      }
+    })();
+    return () => {
+      cancelled = true;
+      setTestStream(null);
+      stream?.getTracks().forEach((t) => t.stop());
+    };
+  }, [open, permissionDone, micId, micVerifyOk]);
 
   async function requestDevices() {
     if (typeof navigator === "undefined" || !navigator.mediaDevices?.getUserMedia) {
@@ -197,8 +251,8 @@ export function VoipAudioSettingsButton({ className }: Props) {
       setDevices(list);
       setPermissionDone(true);
 
-      const storedMic = readSessionDeviceId(VOIP_SESSION_MIC_KEY);
-      const storedSpk = readSessionDeviceId(VOIP_SESSION_SPK_KEY);
+      const storedMic = readStoredDeviceId(VOIP_STORED_MIC_KEY);
+      const storedSpk = readStoredDeviceId(VOIP_STORED_SPK_KEY);
       const inputs = list.filter((d) => d.kind === "audioinput");
       const outputs = list.filter((d) => d.kind === "audiooutput");
 
@@ -207,7 +261,7 @@ export function VoipAudioSettingsButton({ className }: Props) {
       } else if (inputs.length === 1) {
         const only = inputs[0].deviceId;
         setMicId(only);
-        writeSessionDeviceId(VOIP_SESSION_MIC_KEY, only);
+        writeStoredDeviceId(VOIP_STORED_MIC_KEY, only);
       }
 
       if (storedSpk && outputs.some((o) => o.deviceId === storedSpk)) {
@@ -215,7 +269,7 @@ export function VoipAudioSettingsButton({ className }: Props) {
       } else if (outputs.length === 1) {
         const only = outputs[0].deviceId;
         setSpeakerId(only);
-        writeSessionDeviceId(VOIP_SESSION_SPK_KEY, only);
+        writeStoredDeviceId(VOIP_STORED_SPK_KEY, only);
       }
     } catch (e) {
       setSetupError(
@@ -389,7 +443,7 @@ export function VoipAudioSettingsButton({ className }: Props) {
                       const v = e.target.value;
                       setMicId(v);
                       setManualHeadsetConfirm(false);
-                      writeSessionDeviceId(VOIP_SESSION_MIC_KEY, v);
+                      writeStoredDeviceId(VOIP_STORED_MIC_KEY, v);
                     }}
                     className="mt-1 w-full rounded-md border border-emerald-200/80 bg-white px-2 py-2 text-sm text-stone-900 shadow-sm outline-none ring-emerald-400/40 focus:ring-2"
                   >
@@ -400,6 +454,68 @@ export function VoipAudioSettingsButton({ className }: Props) {
                       </option>
                     ))}
                   </select>
+
+                  {micId ? (
+                    <div className="mt-2">
+                      <div className="flex items-center justify-between gap-2">
+                        <span className="text-[10px] font-semibold uppercase tracking-wider text-stone-500">
+                          Test din mikrofon
+                        </span>
+                        <span
+                          className={`text-[10px] font-semibold ${
+                            testStream
+                              ? micLevel > 0.05
+                                ? "text-emerald-700"
+                                : "text-stone-500"
+                              : testStreamError
+                                ? "text-red-700"
+                                : "text-stone-500"
+                          }`}
+                          aria-live="polite"
+                        >
+                          {testStream
+                            ? micLevel > 0.05
+                              ? "Lyd modtages"
+                              : "Sig noget…"
+                            : testStreamError
+                              ? "Fejl"
+                              : "Starter…"}
+                        </span>
+                      </div>
+                      <div
+                        className="relative mt-1 h-3 w-full overflow-hidden rounded-full bg-stone-200"
+                        role="meter"
+                        aria-label={`Mikrofon-niveau: ${(micLevel * 100).toFixed(0)}%`}
+                        aria-valuemin={0}
+                        aria-valuemax={100}
+                        aria-valuenow={Math.round(micLevel * 100)}
+                      >
+                        <div
+                          className={`h-full rounded-full transition-[width] duration-75 ease-out ${
+                            micLevel >= 0.85
+                              ? "bg-red-500"
+                              : micLevel >= 0.55
+                                ? "bg-emerald-500"
+                                : micLevel >= 0.12
+                                  ? "bg-emerald-400"
+                                  : "bg-stone-400"
+                          }`}
+                          style={{ width: `${Math.max(2, Math.min(100, micLevel * 100))}%` }}
+                        />
+                        <div className="pointer-events-none absolute inset-y-0 left-[55%] w-px bg-white/60" />
+                        <div className="pointer-events-none absolute inset-y-0 left-[85%] w-px bg-white/60" />
+                      </div>
+                      {testStreamError ? (
+                        <p className="mt-1 text-[10px] font-medium text-red-700" role="alert">
+                          {testStreamError}
+                        </p>
+                      ) : (
+                        <p className="mt-1 text-[10px] text-stone-600">
+                          Tal i headsetet — bjælken skal slå udsving når du snakker.
+                        </p>
+                      )}
+                    </div>
+                  ) : null}
                 </div>
                 <div>
                   <label
@@ -421,7 +537,7 @@ export function VoipAudioSettingsButton({ className }: Props) {
                         const v = e.target.value;
                         setSpeakerId(v);
                         setManualHeadsetConfirm(false);
-                        writeSessionDeviceId(VOIP_SESSION_SPK_KEY, v);
+                        writeStoredDeviceId(VOIP_STORED_SPK_KEY, v);
                       }}
                       className="mt-1 w-full rounded-md border border-emerald-200/80 bg-white px-2 py-2 text-sm text-stone-900 shadow-sm outline-none ring-emerald-400/40 focus:ring-2"
                     >
@@ -487,8 +603,9 @@ export function VoipAudioSettingsButton({ className }: Props) {
               ) : null}
 
               <p className="mt-3 rounded-md bg-emerald-50/80 px-2 py-2 text-[11px] leading-snug text-emerald-900">
-                Valgte enheder gemmes for denne session. De er klar med det samme når du starter
-                Power Dialer på en kampagne.
+                Valgte enheder huskes på tværs af sessioner — du skal ikke vælge igen ved
+                kampagneskift eller næste login. Hvis browseren ikke kan finde dit headset,
+                ryddes valget automatisk.
               </p>
             </>
           )}

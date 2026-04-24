@@ -3,16 +3,17 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import type { CampaignDialMode } from "@/lib/dial-mode";
 import { normalizePhoneToE164ForDial } from "@/lib/phone-e164";
+import { useAudioLevel } from "@/lib/use-audio-level";
 import {
   ensureMicPermissionAndEnumerate,
   headsetSetupBlockedReason,
   labelForDeviceId,
-  readSessionDeviceId,
+  readStoredDeviceId,
   setAudioElementSink,
   verifyMicDevice,
-  VOIP_SESSION_MIC_KEY,
-  VOIP_SESSION_SPK_KEY,
-  writeSessionDeviceId,
+  VOIP_STORED_MIC_KEY,
+  VOIP_STORED_SPK_KEY,
+  writeStoredDeviceId,
 } from "@/lib/voip-audio-devices";
 
 type Props = {
@@ -116,76 +117,6 @@ function formatCallDuration(totalSeconds: number): string {
     .padStart(2, "0");
   const ss = (s % 60).toString().padStart(2, "0");
   return `${mm}:${ss}`;
-}
-
-/** Web Audio niveau-måler: 0..1 baseret på RMS. */
-function useAudioLevel(stream: MediaStream | null): number {
-  const [level, setLevel] = useState(0);
-  useEffect(() => {
-    if (!stream || stream.getAudioTracks().length === 0) {
-      setLevel(0);
-      return;
-    }
-    const AC =
-      typeof window !== "undefined" &&
-      ((window as unknown as { AudioContext?: typeof AudioContext }).AudioContext ??
-        (window as unknown as { webkitAudioContext?: typeof AudioContext }).webkitAudioContext);
-    if (!AC) return;
-    const ctx = new AC();
-    let raf = 0;
-    let source: MediaStreamAudioSourceNode | null = null;
-    let analyser: AnalyserNode | null = null;
-    try {
-      source = ctx.createMediaStreamSource(stream);
-      analyser = ctx.createAnalyser();
-      analyser.fftSize = 512;
-      analyser.smoothingTimeConstant = 0.6;
-      source.connect(analyser);
-    } catch {
-      try {
-        ctx.close();
-      } catch {
-        /* no-op */
-      }
-      return;
-    }
-    const buffer = new Uint8Array(analyser.fftSize);
-    const tick = () => {
-      if (!analyser) return;
-      analyser.getByteTimeDomainData(buffer);
-      let sum = 0;
-      for (let i = 0; i < buffer.length; i++) {
-        const v = (buffer[i] - 128) / 128;
-        sum += v * v;
-      }
-      const rms = Math.sqrt(sum / buffer.length);
-      // Lidt kompression så normal samtale fylder bjælken pænt
-      const scaled = Math.min(1, rms * 3.2);
-      setLevel(scaled);
-      raf = requestAnimationFrame(tick);
-    };
-    raf = requestAnimationFrame(tick);
-    return () => {
-      cancelAnimationFrame(raf);
-      try {
-        source?.disconnect();
-      } catch {
-        /* no-op */
-      }
-      try {
-        analyser?.disconnect();
-      } catch {
-        /* no-op */
-      }
-      try {
-        void ctx.close();
-      } catch {
-        /* no-op */
-      }
-      setLevel(0);
-    };
-  }, [stream]);
-  return level;
 }
 
 function AudioLevelBar({
@@ -349,6 +280,39 @@ export function CampaignVoipStrip({
     });
   }, []);
 
+  /**
+   * Auto-init: når brugeren allerede har givet mikrofon-tilladelse (typisk via
+   * «Lydindstillinger»-knappen på /kampagner-forsiden) genbruger vi det valg
+   * uden at agenten skal klikke «Tillad mikrofon» igen inde i strippen.
+   */
+  useEffect(() => {
+    let cancelled = false;
+    const storedMic = readStoredDeviceId(VOIP_STORED_MIC_KEY);
+    const storedSpk = readStoredDeviceId(VOIP_STORED_SPK_KEY);
+    if (storedMic) setMicId(storedMic);
+    if (storedSpk) setSpeakerId(storedSpk);
+
+    void (async () => {
+      try {
+        const status = await navigator.permissions
+          ?.query?.({ name: "microphone" as PermissionName })
+          .catch(() => null);
+        if (cancelled) return;
+        if (status?.state === "granted") {
+          const list = await navigator.mediaDevices.enumerateDevices();
+          if (cancelled) return;
+          setDevices(list);
+          setPermissionDone(true);
+        }
+      } catch {
+        /* no-op — bruger kan trykke «Tillad mikrofon» */
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
   useEffect(() => {
     return () => {
       try {
@@ -460,22 +424,25 @@ export function CampaignVoipStrip({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [audioSetupReady]);
 
+  /**
+   * Ryd ugyldige valg — men kun når enhedslisten faktisk er indlæst.
+   * Ellers kan vi komme til at slette agentens gemte headset i den korte
+   * periode mellem mount og enumerateDevices().
+   */
   useEffect(() => {
-    if (!micId || !inputDevs.some((d) => d.deviceId === micId)) {
-      if (micId) {
-        setMicId("");
-        setManualHeadsetConfirm(false);
-        writeSessionDeviceId(VOIP_SESSION_MIC_KEY, "");
-      }
+    if (!permissionDone) return;
+    if (inputDevs.length === 0 && outputDevs.length === 0) return;
+    if (micId && inputDevs.length > 0 && !inputDevs.some((d) => d.deviceId === micId)) {
+      setMicId("");
+      setManualHeadsetConfirm(false);
+      writeStoredDeviceId(VOIP_STORED_MIC_KEY, "");
     }
-    if (!speakerId || !outputDevs.some((d) => d.deviceId === speakerId)) {
-      if (speakerId) {
-        setSpeakerId("");
-        setManualHeadsetConfirm(false);
-        writeSessionDeviceId(VOIP_SESSION_SPK_KEY, "");
-      }
+    if (speakerId && outputDevs.length > 0 && !outputDevs.some((d) => d.deviceId === speakerId)) {
+      setSpeakerId("");
+      setManualHeadsetConfirm(false);
+      writeStoredDeviceId(VOIP_STORED_SPK_KEY, "");
     }
-  }, [inputDevs, outputDevs, micId, speakerId]);
+  }, [permissionDone, inputDevs, outputDevs, micId, speakerId]);
 
   async function requestDevices() {
     if (typeof navigator === "undefined" || !navigator.mediaDevices?.getUserMedia) {
@@ -489,8 +456,8 @@ export function CampaignVoipStrip({
       setDevices(list);
       setPermissionDone(true);
 
-      const storedMic = readSessionDeviceId(VOIP_SESSION_MIC_KEY);
-      const storedSpk = readSessionDeviceId(VOIP_SESSION_SPK_KEY);
+      const storedMic = readStoredDeviceId(VOIP_STORED_MIC_KEY);
+      const storedSpk = readStoredDeviceId(VOIP_STORED_SPK_KEY);
       const inputs = list.filter((d) => d.kind === "audioinput");
       const outputs = list.filter((d) => d.kind === "audiooutput");
 
@@ -499,7 +466,7 @@ export function CampaignVoipStrip({
       } else if (inputs.length === 1) {
         const only = inputs[0].deviceId;
         setMicId(only);
-        writeSessionDeviceId(VOIP_SESSION_MIC_KEY, only);
+        writeStoredDeviceId(VOIP_STORED_MIC_KEY, only);
       }
 
       if (storedSpk && outputs.some((o) => o.deviceId === storedSpk)) {
@@ -507,7 +474,7 @@ export function CampaignVoipStrip({
       } else if (outputs.length === 1) {
         const only = outputs[0].deviceId;
         setSpeakerId(only);
-        writeSessionDeviceId(VOIP_SESSION_SPK_KEY, only);
+        writeStoredDeviceId(VOIP_STORED_SPK_KEY, only);
       }
     } catch (e) {
       setSetupError(
@@ -944,7 +911,7 @@ export function CampaignVoipStrip({
                       const v = e.target.value;
                       setMicId(v);
                       setManualHeadsetConfirm(false);
-                      writeSessionDeviceId(VOIP_SESSION_MIC_KEY, v);
+                      writeStoredDeviceId(VOIP_STORED_MIC_KEY, v);
                     }}
                     className="mt-1 w-full rounded-md border border-emerald-200/80 bg-white px-2 py-2 text-sm text-stone-900 shadow-sm outline-none ring-emerald-400/40 focus:ring-2"
                   >
@@ -976,7 +943,7 @@ export function CampaignVoipStrip({
                         const v = e.target.value;
                         setSpeakerId(v);
                         setManualHeadsetConfirm(false);
-                        writeSessionDeviceId(VOIP_SESSION_SPK_KEY, v);
+                        writeStoredDeviceId(VOIP_STORED_SPK_KEY, v);
                       }}
                       className="mt-1 w-full rounded-md border border-emerald-200/80 bg-white px-2 py-2 text-sm text-stone-900 shadow-sm outline-none ring-emerald-400/40 focus:ring-2"
                     >

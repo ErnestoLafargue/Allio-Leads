@@ -1,26 +1,71 @@
-/** Session keys — kun denne browserfane, så sælgere ikke deler ved et uheld. */
-export const VOIP_SESSION_MIC_KEY = "allio-voip-mic-device-id";
-export const VOIP_SESSION_SPK_KEY = "allio-voip-speaker-device-id";
+/**
+ * Persistente headset-valg — lagres i localStorage så agenten ikke skal vælge
+ * mikrofon/lydudgang igen ved hvert kampagneskifte eller browserstart.
+ *
+ * Hvis browseren senere ikke kan finde den gemte enhed (afkoblet headset),
+ * ryddes valget automatisk i komponenterne der bruger disse helpers.
+ */
+export const VOIP_STORED_MIC_KEY = "allio-voip-mic-device-id";
+export const VOIP_STORED_SPK_KEY = "allio-voip-speaker-device-id";
 
-export function readSessionDeviceId(key: string): string {
-  if (typeof sessionStorage === "undefined") return "";
+/** @deprecated Brug `VOIP_STORED_MIC_KEY` — bibeholdt for bagudkompatibilitet. */
+export const VOIP_SESSION_MIC_KEY = VOIP_STORED_MIC_KEY;
+/** @deprecated Brug `VOIP_STORED_SPK_KEY` — bibeholdt for bagudkompatibilitet. */
+export const VOIP_SESSION_SPK_KEY = VOIP_STORED_SPK_KEY;
+
+function getStorage(): Storage | null {
+  if (typeof window === "undefined") return null;
   try {
-    const v = sessionStorage.getItem(key);
+    return window.localStorage;
+  } catch {
+    return null;
+  }
+}
+
+/** Migrér tidligere sessionStorage-valg til localStorage (kører engang pr. browser). */
+function migrateFromSessionStorageOnce(key: string): void {
+  if (typeof window === "undefined") return;
+  try {
+    const ls = window.localStorage;
+    if (ls.getItem(key)) return;
+    const ss = window.sessionStorage;
+    const old = ss.getItem(key);
+    if (old) {
+      ls.setItem(key, old);
+      ss.removeItem(key);
+    }
+  } catch {
+    /* no-op */
+  }
+}
+
+export function readStoredDeviceId(key: string): string {
+  migrateFromSessionStorageOnce(key);
+  const storage = getStorage();
+  if (!storage) return "";
+  try {
+    const v = storage.getItem(key);
     return typeof v === "string" ? v.trim() : "";
   } catch {
     return "";
   }
 }
 
-export function writeSessionDeviceId(key: string, deviceId: string) {
-  if (typeof sessionStorage === "undefined") return;
+export function writeStoredDeviceId(key: string, deviceId: string): void {
+  const storage = getStorage();
+  if (!storage) return;
   try {
-    if (deviceId) sessionStorage.setItem(key, deviceId);
-    else sessionStorage.removeItem(key);
+    if (deviceId) storage.setItem(key, deviceId);
+    else storage.removeItem(key);
   } catch {
     /* no-op */
   }
 }
+
+/** @deprecated Brug `readStoredDeviceId`. */
+export const readSessionDeviceId = readStoredDeviceId;
+/** @deprecated Brug `writeStoredDeviceId`. */
+export const writeSessionDeviceId = writeStoredDeviceId;
 
 /** Efter tilladelse: hent liste med læsbare labels. */
 export async function ensureMicPermissionAndEnumerate(): Promise<MediaDeviceInfo[]> {
