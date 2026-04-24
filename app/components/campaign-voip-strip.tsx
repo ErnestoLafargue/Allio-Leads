@@ -23,6 +23,13 @@ type Props = {
   dialMode: CampaignDialMode;
   /** Predictive + power (efter connect): start opkald automatisk ved nyt lead */
   autoStartCall: boolean;
+  /**
+   * Predictive-mode: kaldes hvis modtageren ikke tager telefonen indenfor `unansweredTimeoutMs`.
+   * Workspace bruger typisk dette til at gå videre til næste lead automatisk.
+   */
+  onUnansweredTimeout?: () => void;
+  /** Antal millisekunder før Predictive-modus giver op og kalder `onUnansweredTimeout`. */
+  unansweredTimeoutMs?: number;
 };
 
 type LineStatus = "idle" | "connecting" | "ringing" | "live" | "error";
@@ -220,7 +227,15 @@ function AudioLevelBar({
   );
 }
 
-export function CampaignVoipStrip({ leadId, campaignId, leadPhone, autoStartCall }: Props) {
+export function CampaignVoipStrip({
+  leadId,
+  campaignId,
+  leadPhone,
+  dialMode,
+  autoStartCall,
+  onUnansweredTimeout,
+  unansweredTimeoutMs = 25_000,
+}: Props) {
   const [lineStatus, setLineStatus] = useState<LineStatus>("idle");
   const [detail, setDetail] = useState<string | null>(null);
   const [dialDraft, setDialDraft] = useState(() => (leadPhone || "").trim());
@@ -773,6 +788,27 @@ export function CampaignVoipStrip({ leadId, campaignId, leadPhone, autoStartCall
     void startCall();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [leadId, dialDraft, autoStartCall, audioSetupReady]);
+
+  /**
+   * Predictive-mode: hvis vi har ringet i for lang tid (modtageren tager den ikke),
+   * lægger vi automatisk på og signalerer workspace om at hente næste lead.
+   * Power Dialer er bevidst manuel — agenten styrer selv hvornår der gås videre.
+   */
+  useEffect(() => {
+    if (dialMode !== "PREDICTIVE") return;
+    if (!onUnansweredTimeout) return;
+    if (!autoStartCall) return;
+    if (lineStatus !== "ringing" && lineStatus !== "connecting") return;
+    if (unansweredTimeoutMs <= 0) return;
+    /* useEffect rydder timeren straks lineStatus skifter til "live"/"idle"/"error",
+     * så når callbacket fyrer er vi stadig i "ringing"/"connecting". */
+    const timer = window.setTimeout(() => {
+      void hangUp();
+      onUnansweredTimeout();
+    }, unansweredTimeoutMs);
+    return () => window.clearTimeout(timer);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [dialMode, lineStatus, autoStartCall, leadId, unansweredTimeoutMs]);
 
   const timerLabel = formatCallDuration(shownSeconds);
   const timerTone =

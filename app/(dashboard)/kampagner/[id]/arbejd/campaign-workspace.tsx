@@ -87,8 +87,16 @@ export function CampaignWorkspace({ campaignId, preferredLeadId, voipSession = f
   const isAdmin = session?.user?.role === "ADMIN";
   const [campaignName, setCampaignName] = useState("");
   const [campaignDialMode, setCampaignDialMode] = useState<CampaignDialMode>("NO_DIAL");
-  const [powerDialPhase, setPowerDialPhase] = useState<"dialing" | "connected">("connected");
   const [campaignSystemType, setCampaignSystemType] = useState<string | null>(null);
+  /** Auto-dial pause-toggle (sessionStorage). Når true: agenten styrer selv hver opringning. */
+  const [autoDialPaused, setAutoDialPaused] = useState<boolean>(() => {
+    if (typeof sessionStorage === "undefined") return false;
+    try {
+      return sessionStorage.getItem("allio-voip-auto-paused") === "1";
+    } catch {
+      return false;
+    }
+  });
   const [fieldConfigJson, setFieldConfigJson] = useState("{}");
   const [campaignLeadCount, setCampaignLeadCount] = useState<number | null>(null);
   const [activeLead, setActiveLead] = useState<Lead | null>(null);
@@ -315,26 +323,20 @@ export function CampaignWorkspace({ campaignId, preferredLeadId, voipSession = f
     };
   }, [pulseAllLeadLocks]);
 
-  /** Kun automatisk opkald / power-dial demo — manuel VoIP er altid tilgængelig ved VoIP-kampagne. */
+  /** Auto-opkald aktiveres kun når brugeren kom ind via «Start» (voipSession=1) og
+   *  ikke direktelinker til ét bestemt lead. Manuel VoIP virker altid på VoIP-kampagner. */
   const voipAutoDialAllowed = Boolean(voipSession) && !preferredLeadId?.trim();
 
+  /** Persistér pause-staten på tværs af leads i samme browserfane. */
   useEffect(() => {
-    if (!voipAutoDialAllowed) {
-      setPowerDialPhase("connected");
-      return;
+    if (typeof sessionStorage === "undefined") return;
+    try {
+      if (autoDialPaused) sessionStorage.setItem("allio-voip-auto-paused", "1");
+      else sessionStorage.removeItem("allio-voip-auto-paused");
+    } catch {
+      /* no-op */
     }
-    if (campaignDialMode !== "POWER_DIALER") {
-      setPowerDialPhase("connected");
-      return;
-    }
-    if (!activeLead?.id) {
-      setPowerDialPhase("connected");
-      return;
-    }
-    setPowerDialPhase("dialing");
-    const t = window.setTimeout(() => setPowerDialPhase("connected"), 2200);
-    return () => window.clearTimeout(t);
-  }, [activeLead?.id, campaignDialMode, voipAutoDialAllowed]);
+  }, [autoDialPaused]);
 
   useEffect(() => {
     if (!activeLead) return;
@@ -851,16 +853,10 @@ export function CampaignWorkspace({ campaignId, preferredLeadId, voipSession = f
   }
 
   const current = activeLead!;
-  const showPowerDialWaiting =
-    voipAutoDialAllowed &&
-    campaignDialMode === "POWER_DIALER" &&
-    powerDialPhase === "dialing" &&
-    Boolean(activeLead);
-  const voipAutoStart =
-    voipAutoDialAllowed &&
-    (campaignDialMode === "PREDICTIVE" ||
-      (campaignDialMode === "POWER_DIALER" && powerDialPhase === "connected"));
-  const showVoipStrip = campaignUsesVoipUi(campaignDialMode) && !showPowerDialWaiting;
+  const isAutoDialMode = campaignDialMode === "POWER_DIALER" || campaignDialMode === "PREDICTIVE";
+  const voipAutoStart = voipAutoDialAllowed && isAutoDialMode && !autoDialPaused;
+  const showVoipStrip = campaignUsesVoipUi(campaignDialMode);
+  const showAutoDialBadge = voipAutoDialAllowed && isAutoDialMode;
 
   const showOriginalCancelledMeetingInfo =
     campaignSystemType === "rebooking" &&
@@ -890,33 +886,55 @@ export function CampaignWorkspace({ campaignId, preferredLeadId, voipSession = f
 
   return (
     <div className="relative flex min-h-[calc(100dvh-5.5rem)] flex-col gap-4 pb-4">
-      {showPowerDialWaiting && (
-        <div
-          className="fixed inset-0 z-50 flex items-center justify-center bg-stone-950/45 p-4 backdrop-blur-[2px]"
-          role="dialog"
-          aria-modal="true"
-          aria-labelledby="power-dial-wait-title"
-        >
-          <div className="w-full max-w-md rounded-2xl border border-stone-200 bg-white p-8 text-center shadow-2xl">
-            <div className="mx-auto mb-4 h-12 w-12 animate-spin rounded-full border-2 border-emerald-600 border-t-transparent" />
-            <h2 id="power-dial-wait-title" className="text-lg font-semibold text-stone-900">
-              Ringer til leads…
-            </h2>
-            <p className="mt-2 text-sm text-stone-600">
-              Telnyx Power Dialer ringer til flere numre parallelt. Når en person tager, vises leadet, og du kan tale
-              videre som ved Click to call.
-            </p>
-            <p className="mt-3 text-xs text-stone-500">
-              (Demo: venteskærm — kobl jeres Call Control + AMD på for rigtig parallel kø.)
-            </p>
-          </div>
-        </div>
-      )}
       <div className="shrink-0">
         <Link href="/kampagner" className="text-sm text-stone-500 hover:text-stone-800">
           ← Kampagner
         </Link>
-        <h1 className="mt-2 text-xl font-semibold text-stone-900">{campaignName}</h1>
+        <div className="mt-2 flex flex-wrap items-center gap-3">
+          <h1 className="text-xl font-semibold text-stone-900">{campaignName}</h1>
+          {showAutoDialBadge ? (
+            <span
+              className={`inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-xs font-semibold ${
+                autoDialPaused
+                  ? "bg-amber-100 text-amber-900"
+                  : campaignDialMode === "PREDICTIVE"
+                    ? "bg-violet-100 text-violet-900"
+                    : "bg-emerald-100 text-emerald-900"
+              }`}
+              aria-live="polite"
+            >
+              <span
+                className={`h-1.5 w-1.5 rounded-full ${
+                  autoDialPaused
+                    ? "bg-amber-600"
+                    : campaignDialMode === "PREDICTIVE"
+                      ? "bg-violet-600 motion-safe:animate-pulse"
+                      : "bg-emerald-600 motion-safe:animate-pulse"
+                }`}
+                aria-hidden="true"
+              />
+              {autoDialPaused
+                ? "Auto-opkald sat på pause"
+                : campaignDialMode === "PREDICTIVE"
+                  ? "Predictive aktiv"
+                  : "Power Dialer aktiv"}
+            </span>
+          ) : null}
+          {showAutoDialBadge ? (
+            <button
+              type="button"
+              onClick={() => setAutoDialPaused((p) => !p)}
+              className={`inline-flex items-center rounded-md border px-2.5 py-1 text-xs font-semibold shadow-sm transition ${
+                autoDialPaused
+                  ? "border-emerald-700 bg-emerald-700 text-white hover:bg-emerald-800"
+                  : "border-stone-300 bg-white text-stone-800 hover:border-stone-400 hover:bg-stone-50"
+              }`}
+              aria-pressed={autoDialPaused}
+            >
+              {autoDialPaused ? "Genoptag auto-opkald" : "Pause auto-opkald"}
+            </button>
+          ) : null}
+        </div>
         <p className="mt-1 text-xs text-stone-600">
           Dette lead er <strong>låst til dig</strong>, så længe du har denne side åben — kolleger kan ikke åbne
           eller reservere det samme nummer samtidig. Når du går videre eller lukker fanen, frigives låset. Mens du
@@ -1074,6 +1092,11 @@ export function CampaignWorkspace({ campaignId, preferredLeadId, voipSession = f
           leadPhone={current.phone}
           dialMode={campaignDialMode}
           autoStartCall={voipAutoStart}
+          onUnansweredTimeout={() => {
+            setStatus("NOT_HOME");
+            queueMicrotask(() => void onNextRef.current(undefined, undefined, "NOT_HOME"));
+          }}
+          unansweredTimeoutMs={25_000}
         />
       )}
 
