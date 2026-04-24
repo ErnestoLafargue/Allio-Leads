@@ -122,20 +122,40 @@ export async function listTelnyxCredentials(params: {
   apiKey: string;
 }): Promise<TelnyxListCredentialsResult> {
   try {
-    const res = await fetch(`${TELNYX_API_BASE}/telephony_credentials?page[size]=250`, {
+    // Bemærk: Telnyx' JSON:API pagination kræver både page[number] og page[size]
+    // hvis man bruger dem, og brackets skal være URL-encoded for at undgå HTTP 422
+    // hos visse proxies. Vi bruger URLSearchParams for korrekt encoding.
+    const qs = new URLSearchParams();
+    qs.set("page[number]", "1");
+    qs.set("page[size]", "100");
+    const res = await fetch(`${TELNYX_API_BASE}/telephony_credentials?${qs.toString()}`, {
       method: "GET",
       headers: {
         Authorization: `Bearer ${params.apiKey}`,
         Accept: "application/json",
       },
     });
-    const json: unknown = await res.json().catch(() => null);
+    const rawText = await res.text().catch(() => "");
+    let json: unknown = null;
+    if (rawText && rawText.trim().startsWith("{")) {
+      try {
+        json = JSON.parse(rawText);
+      } catch {
+        json = null;
+      }
+    }
     if (!res.ok) {
+      const detail = formatTelnyxError(json);
+      const snippet = rawText.length > 300 ? `${rawText.slice(0, 300)}…` : rawText;
       return {
         ok: false,
         status: res.status,
-        message: formatTelnyxError(json) || `Telnyx HTTP ${res.status}`,
-        telnyx: json,
+        message:
+          detail ||
+          (snippet && !snippet.trim().startsWith("<")
+            ? `Telnyx HTTP ${res.status} — ${snippet.trim()}`
+            : `Telnyx HTTP ${res.status}`),
+        telnyx: json ?? rawText,
       };
     }
     const data =
