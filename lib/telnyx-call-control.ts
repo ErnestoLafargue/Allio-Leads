@@ -740,11 +740,26 @@ export async function createTelnyxWebRtcToken(params: {
 }
 
 /**
- * Konfiguration til AMD (Answering Machine Detection) — premium-feature på Telnyx.
- * Faktureres pr. minut når aktiv. "premium" er den hurtigste/mest præcise variant og
- * giver et `call.machine.detection.ended` event efter ~1500-3500 ms med result=human|machine.
+ * Konfiguration til AMD (Answering Machine Detection) på Telnyx Call Control.
+ * Faktureres pr. minut når aktiv.
+ *
+ * - "premium" → mest præcis. Fyrer `call.machine.premium.detection.ended` med
+ *   result ∈ {human_residence, human_business, machine, silence, fax_detected, not_sure}.
+ *   Anbefales til Predictive Dialer hvor vi vil minimere abandons.
+ * - "detect"  → standard AMD. Fyrer `call.machine.detection.ended` med
+ *   result ∈ {human, machine, not_sure}. Hurtigere, billigere, mindre præcis.
+ * - "detect_beep" / "detect_words" / "greeting_end" → varianter der venter på
+ *   greeting/beep. Bruges hvis vi vil afspille en besked til voicemail.
+ *
+ * Vores dispatcher bruger "premium" som default for bedst kvalitet.
  */
-export type AmdMode = "off" | "premium" | "regular";
+export type AmdMode =
+  | "off"
+  | "premium"
+  | "detect"
+  | "detect_beep"
+  | "detect_words"
+  | "greeting_end";
 
 export type AmdConfig = {
   mode?: AmdMode;

@@ -18,7 +18,7 @@ import { encodeDialerClientState, PRESENCE_FRESH_WINDOW_MS, QUEUE_RESERVATION_TT
  * POST {
  *   campaignId: string,
  *   maxNewCalls?: number,   // override af pacing-beregning (default: auto)
- *   amd?: "premium" | "regular" | "off"  // default "premium"
+ *   amd?: "premium" | "detect" | "off"  // default "premium" (Telnyx-feltværdier)
  * }
  *
  * Returnerer:
@@ -67,8 +67,8 @@ export async function POST(req: Request) {
     typeof body?.maxNewCalls === "number" && body.maxNewCalls > 0
       ? Math.min(Math.floor(body.maxNewCalls), 20)
       : null;
-  const amdMode: "premium" | "regular" | "off" =
-    body?.amd === "off" || body?.amd === "regular" ? body.amd : "premium";
+  const amdMode: "premium" | "detect" | "off" =
+    body?.amd === "off" || body?.amd === "detect" ? body.amd : "premium";
 
   if (!campaignId) {
     return NextResponse.json({ error: "campaignId er påkrævet" }, { status: 400 });
@@ -274,9 +274,13 @@ export async function POST(req: Request) {
   for (const r of dialResults) {
     if (r.ok) {
       successes.push(r);
+      // Race-beskyttelse: webhook kan have oprettet DialerCallLog før vi når hertil
+      // (Telnyx svarer med call_control_id, vi opretter log, men AMD kan fyre i mellemtiden).
+      // Brug upsert så vi aldrig fejler på unique-constraint og altid sikrer agent/queue-data.
       await prisma.$transaction([
-        prisma.dialerCallLog.create({
-          data: {
+        prisma.dialerCallLog.upsert({
+          where: { callControlId: r.callControlId },
+          create: {
             campaignId,
             leadId: r.leadId,
             callControlId: r.callControlId,
@@ -286,13 +290,20 @@ export async function POST(req: Request) {
             fromNumber: r.from,
             toNumber: r.to,
           },
+          update: {
+            campaignId,
+            leadId: r.leadId,
+            callSessionId: r.callSessionId ?? null,
+            direction: "outbound-lead",
+            fromNumber: r.from,
+            toNumber: r.to,
+          },
         }),
         prisma.dialerQueueItem.update({
           where: { leadId: r.leadId },
           data: { activeCallControlId: r.callControlId, attempts: { increment: 1 } },
         }),
       ]).catch((err) => {
-        // Skulle ikke ske, men beskyt webhook'en mod manglende rækker
         console.error("[dispatch] persist call log/queue failed", err);
       });
     } else {

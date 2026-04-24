@@ -67,11 +67,28 @@ Migration `20260425000000_dialer_multi_agent_parallel` introducerer:
 
 Dispatcheren kaldes af klienten ved hver heartbeat (5 sek), men kun når agenten er `ready` og auto-dial ikke er pauset. Dispatcher-kaldet er idempotent og placerer kun nye opkald hvis pacing-budgettet tillader det.
 
+## Voicemail-detektion (AMD)
+
+Hvert udgående opkald fra dispatcheren placeres med `answering_machine_detection: "premium"` og `answering_machine_detection_config` (analysetid, greeting-tærskler). Telnyx svarer med disse webhook-events efter ~1.5–4 sek:
+
+| Event | Resultater | Vores handling |
+|-------|------------|----------------|
+| `call.machine.premium.detection.ended` | `human_residence`, `human_business` | Reservér ledig agent → originate til agentens SIP-URI med `link_to` → Telnyx auto-bridger. |
+| `call.machine.premium.detection.ended` | `machine`, `fax_detected` | **Hangup straks** + marker lead som `VOICEMAIL` i databasen. **Aldrig sendt til en agent.** |
+| `call.machine.premium.detection.ended` | `silence`, `not_sure` | Bridge alligevel — agenten beslutter (false negatives koster maks 1-2 sek; false positives mister leads). |
+| `call.machine.premium.greeting.ended` | `beep_detected`, `no_beep_detected` | Behandles som `machine` — opkaldet hangup'es. |
+| `call.machine.detection.ended` (standard AMD) | `human` / `machine` / `not_sure` | Samme mapping som premium. Bruges hvis dispatcher kaldes med `amd: "detect"`. |
+
+**Garanti**: en agent får aldrig en bridged samtale med en voicemail. AMD kører serverside før noget bridge-flow startes; først ved AMD-result `human*` (eller usikker) reserveres en agent.
+
+Hvis AMD svigter (event mistes, Telnyx-fejl): `timeoutSecs: 25` på lead-leggen sikrer at Telnyx selv hangup'er ubesvarede opkald, og webhook'ens `call.hangup`-handler frigør reservationer.
+
 ## Fejlsikring
 
 - **Idempotente webhooks** — `DialerCallLog.rawEventsJson` gemmer event-id'er; duplikater skippes.
 - **Soft-lock TTL** — `DialerQueueItem.expiresAt` (90 sek) ryddes op af `DELETE /api/dialer/dispatch` (kan kaldes fra cron).
 - **No-agent fallback** — hvis intet ledigt slot kan findes når AMD detekterer human, hangup'es lead-opkaldet og logges som `no_agent_available`.
+- **Lead-gone fallback** — hvis lead-leggen er lagt på før AMD-result kan handles, springer vi agent-reservation over.
 - **Hangup-cleanup** — agent-session frigøres uanset hvilken leg der dør først.
 
 ## Workflow for opstart af en ny agent

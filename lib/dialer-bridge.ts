@@ -145,7 +145,22 @@ export async function handleAmdHuman(params: {
   leadId: string;
   leadCallControlId: string;
   webhookUrl?: string;
-}): Promise<{ status: "bridged"; agentUserId: string } | { status: "no-agent" } | { status: "failed"; message: string }> {
+}): Promise<
+  | { status: "bridged"; agentUserId: string }
+  | { status: "no-agent" }
+  | { status: "lead-gone" }
+  | { status: "failed"; message: string }
+> {
+  // Safety: lead-leggen kan være lagt på i mellemtiden (race mellem AMD-result og hangup).
+  // Tjek call-loggen før vi reserverer en agent.
+  const leadLog = await prisma.dialerCallLog.findUnique({
+    where: { callControlId: params.leadCallControlId },
+    select: { state: true, endedAt: true },
+  });
+  if (!leadLog || leadLog.endedAt || leadLog.state === "hangup" || leadLog.state === "failed") {
+    return { status: "lead-gone" };
+  }
+
   const reserved = await reserveReadyAgent({ campaignId: params.campaignId });
   if (!reserved) {
     // Ingen ledig agent → drop opkaldet (abandon)
