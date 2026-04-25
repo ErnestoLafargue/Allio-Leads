@@ -6,6 +6,7 @@ import { getCopenhagenMonthBounds } from "@/lib/copenhagen-month-bounds";
 import {
   fetchTelnyxUsageReport,
   sumCostFromRows,
+  sumSecondsMetricFromRows,
   type TelnyxUsageReportResult,
 } from "@/lib/telnyx-usage-reports";
 import { getTelnyxConnectionId } from "@/lib/telnyx-call-control";
@@ -48,6 +49,54 @@ const TELNYX_PRODUCTS: Array<{
     dimensions: "date",
   },
 ];
+
+async function fetchCallControlUsageReport(args: {
+  apiKey: string;
+  startDateIso: string;
+  endDateIsoExclusive: string;
+  metrics: string;
+  dimensions?: string;
+  connectionId: string | null;
+}): Promise<{ r: TelnyxUsageReportResult; scopeNote?: string }> {
+  const base = {
+    apiKey: args.apiKey,
+    product: "call-control" as const,
+    startDateIso: args.startDateIso,
+    endDateIsoExclusive: args.endDateIsoExclusive,
+    metrics: args.metrics,
+    dimensions: args.dimensions,
+  };
+
+  if (!args.connectionId) {
+    const r = await fetchTelnyxUsageReport({ ...base, extra: undefined });
+    return { r };
+  }
+
+  const filterOrder: Array<{ extra: Record<string, string> }> = [
+    { extra: { "filter[call_control_application_id]": args.connectionId } },
+    { extra: { "filter[connection_id]": args.connectionId } },
+  ];
+
+  for (const f of filterOrder) {
+    const r = await fetchTelnyxUsageReport({ ...base, extra: f.extra });
+    if (r.ok) {
+      return { r };
+    }
+    if (![400, 404, 422].includes(r.status)) {
+      return { r };
+    }
+  }
+
+  const unscoped = await fetchTelnyxUsageReport({ ...base, extra: undefined });
+  if (unscoped.ok) {
+    return {
+      r: unscoped,
+      scopeNote:
+        "Telnyx accepterede ikke filter på Call Control / app-id — tallene viser hele kontoens Voice API for perioden.",
+    };
+  }
+  return { r: unscoped };
+}
 
 export async function GET(req: Request) {
   const { response } = await requireAdmin();
@@ -175,39 +224,43 @@ export async function GET(req: Request) {
   let totalTelnyxUsd = 0;
   let telnyxAllOk = true;
   let telnyxFirstError: string | null = null;
+  let telnyxReportedWebrtcCallSec = 0;
 
   if (!apiKey) {
     telnyxAllOk = false;
     telnyxFirstError = "Mangler TELNYX_API_KEY.";
   } else {
-    for (const p of TELNYX_PRODUCTS) {
-      const base = {
-        apiKey,
-        product: p.product,
-        startDateIso: startIso,
-        endDateIsoExclusive: endIso,
-        metrics: p.metrics,
-        dimensions: p.dimensions,
-      };
+    const settled = await Promise.all(
+      TELNYX_PRODUCTS.map(async (p) => {
+        const base = {
+          apiKey,
+          product: p.product,
+          startDateIso: startIso,
+          endDateIsoExclusive: endIso,
+          metrics: p.metrics,
+          dimensions: p.dimensions,
+        };
 
-      let r: TelnyxUsageReportResult;
-      let scopeNote: string | undefined;
-
-      if (p.product === "call-control" && connectionId) {
-        r = await fetchTelnyxUsageReport({
-          ...base,
-          extra: { "filter[connection_id]": connectionId },
-        });
-        if (!r.ok && [400, 404, 422].includes(r.status)) {
-          const retry = await fetchTelnyxUsageReport({ ...base, extra: undefined });
-          if (retry.ok) {
-            r = retry;
-            scopeNote =
-              "Telnyx accepterede ikke filter på Call Control-id — tallene viser hele kontoens Voice API for perioden.";
-          }
+        if (p.product === "call-control") {
+          const { r, scopeNote } = await fetchCallControlUsageReport({
+            apiKey,
+            startDateIso: startIso,
+            endDateIsoExclusive: endIso,
+            metrics: p.metrics,
+            dimensions: p.dimensions,
+            connectionId,
+          });
+          return { p, r, scopeNote };
         }
-      } else {
-        r = await fetchTelnyxUsageReport({ ...base, extra: undefined });
+
+        const r = await fetchTelnyxUsageReport({ ...base, extra: undefined });
+        return { p, r, scopeNote: undefined as string | undefined };
+      }),
+    );
+
+    for (const { p, r, scopeNote } of settled) {
+      if (p.product === "webrtc" && r.ok) {
+        telnyxReportedWebrtcCallSec = sumSecondsMetricFromRows(r.rows, ["call_sec"]);
       }
 
       if (!r.ok) {
@@ -260,6 +313,8 @@ export async function GET(req: Request) {
       savedRecordingActivities: recordingActivities,
       approximateBillableMinutesOutboundLead: Math.round(billableMinutes * 10) / 10,
       uniqueCliNumbersUsed: uniqueFromNumbers,
+      /** Når Allio-logs mangler: sekunder som Telnyx rapporterer for produktet `webrtc` (≈ minutter/60) */
+      telnyxReportedWebrtcCallSec: Math.round(telnyxReportedWebrtcCallSec * 10) / 10,
     },
     meetings: { bookedInMonth: meetingsBooked },
     telnyx: {
@@ -277,3 +332,5 @@ export async function GET(req: Request) {
 }
 
 export const runtime = "nodejs";
+/** Telnyx kan kræve mange sider (op til 4 produkter); undgå 10s default-timeout på Vercel. */
+export const maxDuration = 60;

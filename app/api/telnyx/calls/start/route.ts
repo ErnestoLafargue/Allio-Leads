@@ -8,6 +8,7 @@ import { normalizePhoneToE164ForDial } from "@/lib/phone-e164";
 import { dialTelnyxOutbound, getTelnyxConnectionId, pickTelnyxFromNumber } from "@/lib/telnyx-call-control";
 import { encodeDialerClientState } from "@/lib/dialer-shared";
 import { assertLeadMatchesActiveCampaignQueueOr403 } from "@/lib/active-campaign-queue";
+import { isGlobalLeadPageVoipContext, parseVoipApiContext, VOIP_API_CONTEXT } from "@/lib/voip-api-context";
 
 async function logCallAttempt(leadId: string, userId: string, summary: string) {
   try {
@@ -31,6 +32,7 @@ export async function POST(req: Request) {
   const toNumber = typeof body?.toNumber === "string" ? body.toNumber.trim() : "";
   const campaignIdFromBody =
     typeof body?.campaignId === "string" ? body.campaignId.trim() : "";
+  const voipApiContext = parseVoipApiContext(body);
   if (!leadId) {
     return NextResponse.json({ error: "leadId er påkrævet" }, { status: 400 });
   }
@@ -66,16 +68,18 @@ export async function POST(req: Request) {
 
   const masked = maskPhoneForActivity(toE164);
   const mode = normalizeCampaignDialMode(lead.campaign?.dialMode);
-  if (!campaignUsesVoipUi(mode)) {
-    await logCallAttempt(
-      leadId,
-      session.user.id,
-      `Opkald til ${masked} ikke startet — kampagnen bruger ikke VoIP.`,
-    );
-    return NextResponse.json(
-      { error: "Kampagnen er ikke sat til et opkalds-mode (VoIP)." },
-      { status: 409 },
-    );
+  if (voipApiContext !== VOIP_API_CONTEXT.GLOBAL_LEAD_PAGE) {
+    if (!campaignUsesVoipUi(mode)) {
+      await logCallAttempt(
+        leadId,
+        session.user.id,
+        `Opkald til ${masked} ikke startet — kampagnen bruger ikke VoIP.`,
+      );
+      return NextResponse.json(
+        { error: "Kampagnen er ikke sat til et opkalds-mode (VoIP)." },
+        { status: 409 },
+      );
+    }
   }
 
   if (!sellerMayEditLead(session.user.role, session.user.id, lead)) {
@@ -90,10 +94,12 @@ export async function POST(req: Request) {
     );
   }
 
-  const queueGuard = await assertLeadMatchesActiveCampaignQueueOr403(prisma, leadId);
-  if (!queueGuard.ok) {
-    await logCallAttempt(leadId, session.user.id, `Opkald blokeret — ${queueGuard.error}`);
-    return NextResponse.json({ error: queueGuard.error }, { status: 403 });
+  if (!isGlobalLeadPageVoipContext(voipApiContext)) {
+    const queueGuard = await assertLeadMatchesActiveCampaignQueueOr403(prisma, leadId);
+    if (!queueGuard.ok) {
+      await logCallAttempt(leadId, session.user.id, `Opkald blokeret — ${queueGuard.error}`);
+      return NextResponse.json({ error: queueGuard.error }, { status: 403 });
+    }
   }
 
   const apiKey = process.env.TELNYX_API_KEY?.trim();

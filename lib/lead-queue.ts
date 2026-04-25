@@ -1,5 +1,6 @@
 import type { LeadStatus } from "./lead-status";
 import { isLeadStatus } from "./lead-status";
+import type { CampaignDialMode } from "./dial-mode";
 import {
   MEETING_OUTCOME_REBOOK,
   normalizeMeetingOutcomeStatus,
@@ -53,6 +54,36 @@ export function isLeadInRebookingDialerPool(row: {
     return normalizeMeetingOutcomeStatus(row.meetingOutcomeStatus ?? "") === MEETING_OUTCOME_REBOOK;
   }
   return false;
+}
+
+/**
+ * Rækker vist i kampagne-tabellen under Power / Predictive skal følge **samme pulje** som
+ * `reserve-next` (kun «Ny» uden hængende callback-metadata), ellers ender voicemail / ikke hjemme
+ * m.m. i sorteringskøen og ser ud som næste at ringe til — selv om serveren kun reserverer NEW.
+ * Genbooking-kampagnen bruger rebooking-dialer-puljen.
+ */
+export function isLeadInPowerPredictiveCampaignTable(
+  l: {
+    status: string;
+    meetingOutcomeStatus?: string | null;
+    callbackScheduledFor?: string | null;
+    callbackReservedByUserId?: string | null;
+  },
+  dialMode: CampaignDialMode | null | undefined,
+  systemCampaignType: string | null | undefined,
+): boolean {
+  if (dialMode !== "PREDICTIVE" && dialMode !== "POWER_DIALER") return true;
+  const sct = systemCampaignType?.trim() || null;
+  if (sct === "rebooking") {
+    return isLeadInRebookingDialerPool({
+      status: l.status,
+      meetingOutcomeStatus: l.meetingOutcomeStatus ?? null,
+    });
+  }
+  if (l.status !== "NEW") return false;
+  if (l.callbackReservedByUserId) return false;
+  if (l.callbackScheduledFor) return false;
+  return true;
 }
 
 type QueueOrderFields = {

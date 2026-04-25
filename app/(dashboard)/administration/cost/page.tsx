@@ -35,6 +35,8 @@ type CostPayload = {
     savedRecordingActivities: number;
     approximateBillableMinutesOutboundLead: number;
     uniqueCliNumbersUsed: number;
+    /** Telnyx `webrtc` usage — sekunder, til sammenligning når DialerCallLog minutter = 0 */
+    telnyxReportedWebrtcCallSec?: number;
   };
   meetings: { bookedInMonth: number };
   telnyx: {
@@ -107,17 +109,35 @@ export default function TelnyxCostPage() {
           ? `?year=${encodeURIComponent(String(y))}&month=${encodeURIComponent(String(m))}`
           : "";
       const res = await fetch(`/api/admin/telnyx-cost${qs}`);
-      const json = (await res.json()) as CostPayload & { error?: string };
-      if (!res.ok) {
-        setError(typeof json.error === "string" ? json.error : "Kunne ikke hente data.");
+      const text = await res.text();
+      let body: (CostPayload & { error?: string }) | null = null;
+      try {
+        body = text ? (JSON.parse(text) as CostPayload & { error?: string }) : null;
+      } catch {
+        setError(
+          res.status === 504
+            ? "Serveren nåede ikke at færdiggøre (ofte Telnyx-rapporten). Prøv igen om et øjeblik."
+            : "Ugyldigt svar fra serveren. Prøv igen, eller tjek at deployment kører.",
+        );
         setData(null);
         return;
       }
-      setData(json);
-      setYear(json.period.year);
-      setMonth(json.period.month);
+      if (!body) {
+        setError("Kunne ikke hente data.");
+        setData(null);
+        return;
+      }
+      if (!res.ok) {
+        setError(typeof body.error === "string" ? body.error : "Kunne ikke hente data.");
+        setData(null);
+        return;
+      }
+      setData(body);
+      setYear(body.period.year);
+      setMonth(body.period.month);
       setLastUpdatedAt(new Date());
-    } catch {
+    } catch (err) {
+      console.error("[cost] load failed", err);
       setError("Netværksfejl.");
       setData(null);
     } finally {
@@ -251,6 +271,16 @@ export default function TelnyxCostPage() {
                 {data.allio.approximateBillableMinutesOutboundLead}
               </p>
               <p className="mt-1 text-sm text-stone-600">Summen af (slut − start) pr. udgående lead‑leg</p>
+              {(data.allio.telnyxReportedWebrtcCallSec ?? 0) > 0 ? (
+                <p className="mt-2 text-xs leading-snug text-stone-500">
+                  Telnyx (WebRTC, rapporteret): ca.{" "}
+                  <strong>
+                    {Math.round(((data.allio.telnyxReportedWebrtcCallSec ?? 0) / 60) * 10) / 10} min
+                  </strong>{" "}
+                  (talk‑time) — sammenlign hvis tallet til venstre er 0, typisk pga. WebRTC uden fuld
+                  DialerCallLog.
+                </p>
+              ) : null}
             </div>
           </section>
 
@@ -259,7 +289,9 @@ export default function TelnyxCostPage() {
             <p className="mt-1 text-sm text-stone-600">
               Tællere fra <code className="rounded bg-stone-100 px-1 text-xs">DialerCallLog</code> og{" "}
               <code className="rounded bg-stone-100 px-1 text-xs">LeadActivityEvent</code> i perioden{" "}
-              <strong>{data.period.label}</strong>.
+              <strong>{data.period.label}</strong>. WebRTC klik-til-kald får nu et <code>CALL_ATTEMPT</code> (ligesom
+              Call Control) i aktivitet, så &quot;Opkald forsøg&quot; følger faktisk brug. Dispatch-/bridge-legs
+              tælles fortsat i <code className="rounded bg-stone-100 px-1 text-xs">DialerCallLog</code>.
             </p>
             <dl className="mt-6 grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
               <div className="rounded-lg bg-stone-50 px-4 py-3">

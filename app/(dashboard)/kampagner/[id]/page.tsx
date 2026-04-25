@@ -501,6 +501,8 @@ export default function RedigerKampagnePage() {
             campaignId={id}
             showSearchField
             leadDetailSearchSuffix={`?fromCampaign=${encodeURIComponent(id)}`}
+            dialMode={dialMode}
+            systemCampaignType={campaignMeta?.systemCampaignType ?? null}
           />
         </div>
       </section>

@@ -69,6 +69,36 @@ export function sumCostFromRows(rows: TelnyxUsageRow[]): number {
   return Math.round(t * 10000) / 10000;
 }
 
+const NUMERIC_SEC_KEYS = ["call_sec", "billed_sec", "billedCallSec", "billed_call_sec"] as const;
+
+function rowNumber(row: TelnyxUsageRow, key: string): number {
+  const v = row[key];
+  if (typeof v === "number" && Number.isFinite(v)) return v;
+  if (typeof v === "string") {
+    const n = Number(v);
+    return Number.isFinite(n) ? n : 0;
+  }
+  return 0;
+}
+
+/**
+ * Lægger sammen et metrisk felt (typisk `call_sec` / `billed_sec`) over alle rækker
+ * (alle sider er allerede flattet i `rows`).
+ */
+export function sumSecondsMetricFromRows(rows: TelnyxUsageRow[], preferredKeys: string[] = []): number {
+  const keys = [...preferredKeys, ...NUMERIC_SEC_KEYS];
+  let t = 0;
+  for (const r of rows) {
+    for (const k of keys) {
+      if (k in r) {
+        t += rowNumber(r, k);
+        break;
+      }
+    }
+  }
+  return Math.round(t * 10) / 10;
+}
+
 /**
  * Telnyx Usage Reports (kræver API-nøgle med adgang til reporting).
  * Henter alle sider (`page[number]`) så total cost matcher Telnyx-portalen.

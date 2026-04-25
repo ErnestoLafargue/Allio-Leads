@@ -16,6 +16,7 @@ import {
   writeStoredDeviceId,
 } from "@/lib/voip-audio-devices";
 import { describeVoipCallFailureForUi, describeVoipStartupFailure } from "@/lib/voip-call-messages";
+import { type VoipApiContext, VOIP_API_CONTEXT } from "@/lib/voip-api-context";
 
 type Props = {
   leadId: string;
@@ -43,6 +44,12 @@ type Props = {
   onHangupSignalHandled?: () => void;
   /** Når en VoIP fejl logges i aktivitet, så kampagnekøen kan hente tidslinje igen. */
   onVoipFailureLogged?: () => void;
+  /**
+   * `campaign_arbejd` = følg `dialMode` / `autoStartCall` (predictive, power, …).
+   * `global_lead_page` = lead åbnet fra /leads, møder, tilbagekald m.m. — tvinger manuel
+   * click-to-call, ingen auto-opkald (ignorerer kampagnens dial mode for adfærd).
+   */
+  voipApiContext?: VoipApiContext;
 };
 
 export type LineStatus = "idle" | "connecting" | "ringing" | "live" | "error";
@@ -196,7 +203,11 @@ export function CampaignVoipStrip({
   hangupSignal = 0,
   onHangupSignalHandled,
   onVoipFailureLogged,
+  voipApiContext = VOIP_API_CONTEXT.CAMPAIGN_ARBEJD,
 }: Props) {
+  const isGlobalVoip = voipApiContext === VOIP_API_CONTEXT.GLOBAL_LEAD_PAGE;
+  const effectiveDialMode: CampaignDialMode = isGlobalVoip ? "CLICK_TO_CALL" : dialMode;
+  const effectiveAutoStart = isGlobalVoip ? false : autoStartCall;
   const [lineStatus, setLineStatus] = useState<LineStatus>("idle");
 
   // Notér ændringer i lineStatus til parent (bruges af dialer-presence-hook)
@@ -227,7 +238,8 @@ export function CampaignVoipStrip({
 
   const [callStartAt, setCallStartAt] = useState<number | null>(null);
   const [callEndAt, setCallEndAt] = useState<number | null>(null);
-  const [nowTick, setNowTick] = useState(Date.now());
+  /** Tvinger re-render så uret opdaterer; faktisk varighed bruger Date.now() + callStartAt, ikke en akkumuleret tick. */
+  const [callDurationTick, setCallDurationTick] = useState(0);
   const [remoteStream, setRemoteStream] = useState<MediaStream | null>(null);
   /**
    * Persistent mikrofon-stream — én getUserMedia for hele session.
@@ -258,10 +270,10 @@ export function CampaignVoipStrip({
    * Refs der peger på up-to-date props/state — bruges i langlivede SDK-callbacks
    * (telnyx.notification) hvor vi ellers ville fange initial-værdier fra closure.
    */
-  const autoStartCallRef = useRef(autoStartCall);
-  autoStartCallRef.current = autoStartCall;
-  const dialModeRef = useRef(dialMode);
-  dialModeRef.current = dialMode;
+  const autoStartCallRef = useRef(effectiveAutoStart);
+  autoStartCallRef.current = effectiveAutoStart;
+  const dialModeRef = useRef(effectiveDialMode);
+  dialModeRef.current = effectiveDialMode;
   const micIdRef = useRef("");
   const audioSetupReadyRef = useRef(false);
 
@@ -355,22 +367,40 @@ export function CampaignVoipStrip({
   const outLevel = useAudioLevel(micMonitorStream);
   const inLevel = useAudioLevel(activeCall ? remoteStream : null);
 
+  // Under aktivt opkald: lægger Date.now() - start ind i beregningen, så uret følger
+  // væguret uanset om setInterval sænkes i baggrund eller springer. Tick er kun
+  // der for at få re-renders (1/s).
   useEffect(() => {
     if (!callStartAt) return;
-    const end = callEndAt;
-    if (end) {
-      setNowTick(end);
-      return;
-    }
-    const id = window.setInterval(() => setNowTick(Date.now()), 500);
+    if (callEndAt) return;
+    const id = window.setInterval(() => {
+      setCallDurationTick((n) => n + 1);
+    }, 1000);
     return () => window.clearInterval(id);
   }, [callStartAt, callEndAt]);
 
-  const shownSeconds = useMemo(() => {
-    if (!callStartAt) return 0;
-    const end = callEndAt ?? nowTick;
-    return Math.max(0, (end - callStartAt) / 1000);
-  }, [callStartAt, callEndAt, nowTick]);
+  // Synk når brugeren vender tilbage til fanen (timere kan være kraftigt throttlet i baggrunden).
+  useEffect(() => {
+    if (!callStartAt) return;
+    if (callEndAt) return;
+    const onVis = () => {
+      if (document.visibilityState === "visible") {
+        setCallDurationTick((n) => n + 1);
+      }
+    };
+    document.addEventListener("visibilitychange", onVis);
+    return () => document.removeEventListener("visibilitychange", onVis);
+  }, [callStartAt, callEndAt]);
+
+  // `callDurationTick` udløser 1 re-render/sek. under kald. Varighed = Date.now()−start
+  // så uret følger væguret (før brugte vi et frosset "now"-snapshot der kunne hænge).
+  void callDurationTick;
+  const shownSeconds: number =
+    !callStartAt
+      ? 0
+      : callEndAt
+        ? Math.max(0, (callEndAt - callStartAt) / 1000)
+        : Math.max(0, (Date.now() - callStartAt) / 1000);
 
   useEffect(() => {
     if (lastLeadIdRef.current === leadId) return;
@@ -559,7 +589,7 @@ export function CampaignVoipStrip({
         const res = await fetch("/api/telnyx/manual-call/prepare", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ leadId }),
+          body: JSON.stringify({ leadId, voipApiContext }),
         });
         if (!res.ok) return;
         const data = (await res.json()) as { ok?: boolean; clientState?: string };
@@ -573,13 +603,14 @@ export function CampaignVoipStrip({
     return () => {
       cancelled = true;
     };
-  }, [leadId]);
+  }, [leadId, voipApiContext]);
 
   /**
    * Registrér Telnyx call_control_id for det aktive WebRTC-opkald på AgentSession.
    * Bruges af admin-metrics og fremtidig optimering af bridge; rydes ved idle.
    */
   useEffect(() => {
+    if (isGlobalVoip) return;
     if (!campaignId) return;
 
     if (lineStatus === "idle" || lineStatus === "error") {
@@ -613,9 +644,10 @@ export function CampaignVoipStrip({
     return () => {
       window.clearInterval(interval);
     };
-  }, [lineStatus, campaignId]);
+  }, [isGlobalVoip, lineStatus, campaignId]);
 
   useEffect(() => {
+    if (isGlobalVoip) return;
     return () => {
       if (!campaignId) return;
       void fetch("/api/dialer/agent/call-control", {
@@ -625,7 +657,7 @@ export function CampaignVoipStrip({
         credentials: "include",
       }).catch(() => {});
     };
-  }, [campaignId]);
+  }, [isGlobalVoip, campaignId]);
 
   /**
    * Ryd ugyldige valg — men kun når enhedslisten faktisk er indlæst.
@@ -738,7 +770,7 @@ export function CampaignVoipStrip({
       const tokenRes = await fetch("/api/telnyx/webrtc/token", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ leadId, campaignId }),
+        body: JSON.stringify({ leadId, campaignId, voipApiContext }),
       });
       const tokenJson = (await tokenRes.json().catch(() => ({}))) as {
         ok?: boolean;
@@ -969,6 +1001,14 @@ export function CampaignVoipStrip({
       const call = clientRef.current.newCall(callOptions) as TelnyxCall;
       activeCallRef.current = call;
       attachCallStreams(call);
+      void fetch("/api/telnyx/webrtc/log-attempt", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ leadId, toE164, voipApiContext }),
+        credentials: "same-origin",
+      }).catch(() => {
+        /* Cost/aktivitet — må ikke forstyrre opkald */
+      });
       // Bliv i "connecting" indtil Telnyx fortæller os 180 Ringing er modtaget
       // fra operatøren. telnyx.notification-handleren opgraderer til "ringing"
       // når modtagerens telefon faktisk ringer, og videre til "live" ved svar.
@@ -1024,8 +1064,8 @@ export function CampaignVoipStrip({
   }, [hangupSignal, onHangupSignalHandled]);
 
   useEffect(() => {
-    const key = `${leadId}|${normalizeDialDraft(dialDraft)}|${autoStartCall}`;
-    if (!autoStartCall) {
+    const key = `${leadId}|${normalizeDialDraft(dialDraft)}|${effectiveAutoStart}`;
+    if (!effectiveAutoStart) {
       autoKeyRef.current = null;
       return;
     }
@@ -1035,7 +1075,7 @@ export function CampaignVoipStrip({
     autoKeyRef.current = key;
     void startCall();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [leadId, dialDraft, autoStartCall, audioSetupReady]);
+  }, [leadId, dialDraft, effectiveAutoStart, audioSetupReady]);
 
   /**
    * Predictive-mode: hvis vi har ringet i for lang tid (modtageren tager den ikke),
@@ -1043,9 +1083,9 @@ export function CampaignVoipStrip({
    * Power Dialer er bevidst manuel — agenten styrer selv hvornår der gås videre.
    */
   useEffect(() => {
-    if (dialMode !== "PREDICTIVE") return;
+    if (effectiveDialMode !== "PREDICTIVE") return;
     if (!onUnansweredTimeout) return;
-    if (!autoStartCall) return;
+    if (!effectiveAutoStart) return;
     if (lineStatus !== "ringing" && lineStatus !== "connecting") return;
     if (unansweredTimeoutMs <= 0) return;
     /* useEffect rydder timeren straks lineStatus skifter til "live"/"idle"/"error",
@@ -1056,7 +1096,7 @@ export function CampaignVoipStrip({
     }, unansweredTimeoutMs);
     return () => window.clearTimeout(timer);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [dialMode, lineStatus, autoStartCall, leadId, unansweredTimeoutMs]);
+  }, [effectiveDialMode, lineStatus, effectiveAutoStart, leadId, unansweredTimeoutMs]);
 
   const timerLabel = formatCallDuration(shownSeconds);
   const timerTone =

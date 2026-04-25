@@ -3,6 +3,7 @@ import { requireSession } from "@/lib/api-auth";
 import { prisma } from "@/lib/prisma";
 import { releaseExpiredLocksEverywhere, sellerMayEditLead } from "@/lib/lead-lock";
 import { campaignUsesVoipUi, normalizeCampaignDialMode } from "@/lib/dial-mode";
+import { isGlobalLeadPageVoipContext, parseVoipApiContext, VOIP_API_CONTEXT } from "@/lib/voip-api-context";
 import {
   createTelnyxWebRtcToken,
   getTelnyxCredentialInfo,
@@ -18,6 +19,7 @@ export async function POST(req: Request) {
   const body = await req.json().catch(() => null);
   const leadId = typeof body?.leadId === "string" ? body.leadId.trim() : "";
   const campaignIdFromBody = typeof body?.campaignId === "string" ? body.campaignId.trim() : "";
+  const voipApiContext = parseVoipApiContext(body);
   if (!leadId) {
     return NextResponse.json({ error: "leadId er påkrævet" }, { status: 400 });
   }
@@ -36,8 +38,15 @@ export async function POST(req: Request) {
     return NextResponse.json({ error: "Lead hører ikke til den angivne kampagne." }, { status: 403 });
   }
 
+  if (isGlobalLeadPageVoipContext(voipApiContext) && !lead.campaignId) {
+    return NextResponse.json(
+      { error: "Leadet skal være tilknyttet en kampagne for at bruge VoIP (webhooks/aktivitet)." },
+      { status: 409 },
+    );
+  }
+
   const mode = normalizeCampaignDialMode(lead.campaign?.dialMode);
-  if (!campaignUsesVoipUi(mode)) {
+  if (voipApiContext !== VOIP_API_CONTEXT.GLOBAL_LEAD_PAGE && !campaignUsesVoipUi(mode)) {
     return NextResponse.json({ error: "Kampagnen er ikke sat til et opkalds-mode (VoIP)." }, { status: 409 });
   }
   if (!sellerMayEditLead(session.user.role, session.user.id, lead)) {

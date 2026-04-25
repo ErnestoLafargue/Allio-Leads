@@ -24,6 +24,8 @@ import {
 import { defaultCampaignFieldConfigJson } from "@/lib/campaign-fields";
 import { isValidCVR } from "@/lib/cvr-import";
 import { LeadActivityPanel } from "@/app/components/lead-activity-panel";
+import { CampaignVoipStrip } from "@/app/components/campaign-voip-strip";
+import { VOIP_API_CONTEXT } from "@/lib/voip-api-context";
 
 type Lead = {
   id: string;
@@ -749,6 +751,22 @@ function LeadDetailInner() {
               </>
             }
           />
+
+          {lead.campaignId ? (
+            <CampaignVoipStrip
+              leadId={lead.id}
+              campaignId={lead.campaignId}
+              leadPhone={phone}
+              dialMode="CLICK_TO_CALL"
+              autoStartCall={false}
+              voipApiContext={VOIP_API_CONTEXT.GLOBAL_LEAD_PAGE}
+              onVoipFailureLogged={() => setActivityReloadToken((t) => t + 1)}
+            />
+          ) : (
+            <p className="shrink-0 text-xs text-stone-500">
+              VoIP kræver at leadet er knyttet til en kampagne (optagelse og aktivitet følger kampagnekonteksten).
+            </p>
+          )}
 
           {error && <p className="shrink-0 text-sm text-red-600">{error}</p>}
 

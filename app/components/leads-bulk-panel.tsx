@@ -26,6 +26,8 @@ import {
   parseActiveCampaignQueueView,
   type ActiveCampaignQueueViewV1,
 } from "@/lib/active-campaign-queue";
+import { isLeadInPowerPredictiveCampaignTable } from "@/lib/lead-queue";
+import type { CampaignDialMode } from "@/lib/dial-mode";
 
 type CampaignLeadViewPrefs = {
   filterMeetingStart: boolean;
@@ -108,6 +110,9 @@ type LeadRow = {
   lockedAt?: string | null;
   lockExpiresAt?: string | null;
   lockedByUser?: { id: string; name: string; username: string } | null;
+  meetingOutcomeStatus?: string | null;
+  callbackScheduledFor?: string | null;
+  callbackReservedByUserId?: string | null;
 };
 
 type DynamicFieldKind = "text" | "number" | "date";
@@ -262,6 +267,9 @@ type LeadsBulkPanelProps = {
   leadDetailSearchSuffix?: string;
   /** Vis udvidede filtre (dato + status). */
   showFilters?: boolean;
+  /** Når PREDICTIVE / POWER: tabellen indsnævres til samme «Ny»-pulje som reserve-next (undgår voicemail/ikke hjemme i *køvisning*). */
+  dialMode?: CampaignDialMode;
+  systemCampaignType?: string | null;
 };
 
 export function LeadsBulkPanel({
@@ -272,6 +280,8 @@ export function LeadsBulkPanel({
   showCampaignColumn = false,
   leadDetailSearchSuffix = "",
   showFilters = true,
+  dialMode = "NO_DIAL",
+  systemCampaignType = null,
 }: LeadsBulkPanelProps) {
   const { data: session } = useSession();
   const myUserId = session?.user?.id;
@@ -638,6 +648,21 @@ export function LeadsBulkPanel({
       }
     }
 
+    if (campaignId && (dialMode === "PREDICTIVE" || dialMode === "POWER_DIALER")) {
+      out = out.filter((l) =>
+        isLeadInPowerPredictiveCampaignTable(
+          {
+            status: l.status,
+            meetingOutcomeStatus: l.meetingOutcomeStatus ?? null,
+            callbackScheduledFor: l.callbackScheduledFor ?? null,
+            callbackReservedByUserId: l.callbackReservedByUserId ?? null,
+          },
+          dialMode,
+          systemCampaignType,
+        ),
+      );
+    }
+
     if (selectedDynamicField) {
       const dirMul = dynamicSortDir === "asc" ? 1 : -1;
       return [...out].sort((a, b) => {
@@ -686,6 +711,8 @@ export function LeadsBulkPanel({
     meetingStartTo,
     selectedCampaignIndustries,
     serverQueueNarrowing,
+    dialMode,
+    systemCampaignType,
   ]);
 
   const middleColumnLabel = selectedDynamicField?.label ?? "Adresse";
@@ -1197,6 +1224,14 @@ export function LeadsBulkPanel({
       )}
 
       {error && <p className="text-sm text-red-600">{error}</p>}
+
+      {campaignId && (dialMode === "PREDICTIVE" || dialMode === "POWER_DIALER") && (
+        <p className="mb-2 text-xs text-stone-600" role="note">
+          Power/Predictive: listen viser kun træf med udfald «Ny»
+          {systemCampaignType === "rebooking" ? " (i genbook-kampagnen gælder særskilt møde-pulje)" : ""} — samme som
+          når du reserverer næste lead, så voicemail / ikke hjemme ikke ligger i *køvisning*.
+        </p>
+      )}
 
       <div className={tableContainerClass}>
         <table className="w-full min-w-[640px] text-left text-sm">
