@@ -1,6 +1,7 @@
 import { normalizeCVR } from "@/lib/cvr-import";
 
-const VIRK_ENDPOINT = "http://distribution.virk.dk/cvr-permanent/virksomhed/_search";
+const VIRK_ENDPOINT =
+  process.env.VIRK_API_URL?.trim() || "https://distribution.virk.dk/cvr-permanent/virksomhed/_search";
 
 type RoleKind = "stifter" | "direktor" | "fuldtAnsvarligPerson";
 

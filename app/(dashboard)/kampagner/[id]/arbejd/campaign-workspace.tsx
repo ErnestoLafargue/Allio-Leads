@@ -346,6 +346,7 @@ export function CampaignWorkspace({ campaignId, preferredLeadId, voipSession = f
 
   // VoIP-strip linje-status (bruges til at rapportere agentens dialer-presence)
   const [voipLineStatus, setVoipLineStatus] = useState<LineStatus>("idle");
+  const [voipHangupSignal, setVoipHangupSignal] = useState(0);
 
   /**
    * Mapper voip-strip's lokale lineStatus + auto-dial-pause til server-side dialer-status:
@@ -525,6 +526,7 @@ export function CampaignWorkspace({ campaignId, preferredLeadId, voipSession = f
     predictiveOutcome?: LeadStatus,
   ) {
     if (!activeLead) return;
+    requestCallHangupBeforeAdvance();
 
     /** Mødebooking: vent på bekræftet gem — ingen optimistisk navigation (data integritet). */
     if (status === "MEETING_BOOKED" && predictiveOutcome === undefined) {
@@ -748,6 +750,14 @@ export function CampaignWorkspace({ campaignId, preferredLeadId, voipSession = f
 
   const onNextRef = useRef(onNext);
   onNextRef.current = onNext;
+
+  function requestCallHangupBeforeAdvance() {
+    const hasActiveCall =
+      voipLineStatus === "live" || voipLineStatus === "ringing" || voipLineStatus === "connecting";
+    if (!showVoipStrip || !hasActiveCall) return;
+    // Ikke blokér Gem og næste: signalér hangup og gå straks videre i køen.
+    setVoipHangupSignal((n) => n + 1);
+  }
 
   const handleOutcomeStatusChange = useCallback(
     (next: LeadStatus) => {
@@ -1197,6 +1207,7 @@ export function CampaignWorkspace({ campaignId, preferredLeadId, voipSession = f
           }}
           unansweredTimeoutMs={25_000}
           onLineStatusChange={setVoipLineStatus}
+          hangupSignal={voipHangupSignal}
         />
       )}
 

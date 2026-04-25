@@ -89,6 +89,7 @@ export default function TelnyxCostPage() {
   const [error, setError] = useState<string | null>(null);
   const [year, setYear] = useState<number | "">("");
   const [month, setMonth] = useState<number | "">("");
+  const [lastUpdatedAt, setLastUpdatedAt] = useState<Date | null>(null);
 
   useEffect(() => {
     if (status === "loading") return;
@@ -115,6 +116,7 @@ export default function TelnyxCostPage() {
       setData(json);
       setYear(json.period.year);
       setMonth(json.period.month);
+      setLastUpdatedAt(new Date());
     } catch {
       setError("Netværksfejl.");
       setData(null);
@@ -127,6 +129,17 @@ export default function TelnyxCostPage() {
     if (status !== "authenticated" || session?.user.role !== "ADMIN") return;
     void load();
   }, [status, session?.user.role, load]);
+
+  // Auto-opdater alle cost-tal hvert 20. minut.
+  useEffect(() => {
+    if (status !== "authenticated" || session?.user.role !== "ADMIN") return;
+    const id = window.setInterval(() => {
+      const y = typeof year === "number" ? year : undefined;
+      const m = typeof month === "number" ? month : undefined;
+      void load(y, m);
+    }, 20 * 60 * 1000);
+    return () => window.clearInterval(id);
+  }, [status, session?.user.role, year, month, load]);
 
   const onApplyMonth = () => {
     if (typeof year === "number" && typeof month === "number") void load(year, month);
@@ -183,6 +196,12 @@ export default function TelnyxCostPage() {
           >
             Telnyx Mission Control →
           </Link>
+          {lastUpdatedAt ? (
+            <p className="text-xs text-violet-200/90">
+              Sidst opdateret:{" "}
+              {lastUpdatedAt.toLocaleTimeString("da-DK", { hour: "2-digit", minute: "2-digit" })}
+            </p>
+          ) : null}
         </div>
       </header>
 

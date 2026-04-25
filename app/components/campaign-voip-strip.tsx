@@ -36,6 +36,10 @@ type Props = {
    * agentens status til server-side dispatcher (ready/ringing/talking).
    */
   onLineStatusChange?: (status: LineStatus) => void;
+  /** Øges af parent når et aktivt opkald skal afsluttes programmatisk (fx Gem og næste). */
+  hangupSignal?: number;
+  /** Kaldes når `hangupSignal` er håndteret (uanset om der var aktivt opkald). */
+  onHangupSignalHandled?: () => void;
 };
 
 export type LineStatus = "idle" | "connecting" | "ringing" | "live" | "error";
@@ -182,6 +186,8 @@ export function CampaignVoipStrip({
   onUnansweredTimeout,
   unansweredTimeoutMs = 25_000,
   onLineStatusChange,
+  hangupSignal = 0,
+  onHangupSignalHandled,
 }: Props) {
   const [lineStatus, setLineStatus] = useState<LineStatus>("idle");
 
@@ -227,6 +233,7 @@ export function CampaignVoipStrip({
   const inFlightRef = useRef(false);
   const autoKeyRef = useRef<string | null>(null);
   const lastLeadIdRef = useRef<string | null>(null);
+  const hangupSignalRef = useRef(hangupSignal);
   const remoteAudioRef = useRef<HTMLAudioElement | null>(null);
   /**
    * Pre-fetched clientState til WebRTC click-to-call. Telnyx echoer denne string på
@@ -907,6 +914,21 @@ export function CampaignVoipStrip({
     }
     void startCall();
   }
+
+  useEffect(() => {
+    if (hangupSignal === hangupSignalRef.current) return;
+    hangupSignalRef.current = hangupSignal;
+    if (activeCallRef.current) {
+      void (async () => {
+        await hangUp();
+        onHangupSignalHandled?.();
+      })();
+      return;
+    }
+    onHangupSignalHandled?.();
+    // we intentionally track only signal/callback; active call state is read from ref
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [hangupSignal, onHangupSignalHandled]);
 
   useEffect(() => {
     const key = `${leadId}|${normalizeDialDraft(dialDraft)}|${autoStartCall}`;
