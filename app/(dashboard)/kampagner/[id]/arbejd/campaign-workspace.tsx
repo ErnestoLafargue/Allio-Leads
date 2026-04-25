@@ -107,6 +107,9 @@ export function CampaignWorkspace({ campaignId, preferredLeadId, voipSession = f
   const [campaignLeadCount, setCampaignLeadCount] = useState<number | null>(null);
   const [activeLead, setActiveLead] = useState<Lead | null>(null);
   const activeLeadRef = useRef<Lead | null>(null);
+  const [prefetchedLead, setPrefetchedLead] = useState<Lead | null>(null);
+  const prefetchedLeadRef = useRef<Lead | null>(null);
+  const prefetchInFlightRef = useRef(false);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   /** Fejl ved baggrundsgem af forrige lead (blokér ikke næste lead). */
@@ -160,6 +163,10 @@ export function CampaignWorkspace({ campaignId, preferredLeadId, voipSession = f
   }, [activeLead]);
 
   useEffect(() => {
+    prefetchedLeadRef.current = prefetchedLead;
+  }, [prefetchedLead]);
+
+  useEffect(() => {
     setMailSuccess(null);
     setMailError(null);
     setActivityOpen(false);
@@ -171,6 +178,8 @@ export function CampaignWorkspace({ campaignId, preferredLeadId, voipSession = f
     return () => {
       const id = activeLeadRef.current?.id;
       if (id) void releaseLockHttp(id);
+      const prefetchedId = prefetchedLeadRef.current?.id;
+      if (prefetchedId && prefetchedId !== id) void releaseLockHttp(prefetchedId);
       for (const [leadId, body] of pendingPatchBodiesRef.current.entries()) {
         void fetch(`/api/leads/${leadId}`, {
           method: "PATCH",
@@ -296,9 +305,23 @@ export function CampaignWorkspace({ campaignId, preferredLeadId, voipSession = f
     };
   }, [campaignId, preferredLeadId]);
 
+  useEffect(() => {
+    if (!activeLead?.id) {
+      const prevId = prefetchedLeadRef.current?.id ?? null;
+      if (prevId) void releaseLockHttp(prevId);
+      setPrefetchedLead(null);
+      return;
+    }
+    if (prefetchedLeadRef.current?.id) return;
+    void prefetchNextLead(activeLead.id);
+    // prefetch kun ved lead-skift; cache håndteres via ref
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activeLead?.id, campaignId]);
+
   const pulseAllLeadLocks = useCallback(() => {
     const ids = new Set<string>();
     if (activeLeadRef.current?.id) ids.add(activeLeadRef.current.id);
+    if (prefetchedLeadRef.current?.id) ids.add(prefetchedLeadRef.current.id);
     for (const id of backgroundLockLeadIdsRef.current) ids.add(id);
     for (const id of ids) {
       void fetch(`/api/leads/${id}/lock`, { method: "PATCH" }).catch(() => {});
@@ -520,6 +543,31 @@ export function CampaignWorkspace({ campaignId, preferredLeadId, voipSession = f
     }
   }
 
+  async function prefetchNextLead(excludeLeadId: string) {
+    if (prefetchInFlightRef.current) return;
+    prefetchInFlightRef.current = true;
+    try {
+      const res = await fetch(`/api/campaigns/${campaignId}/reserve-next`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: buildReserveNextRequestBody(campaignId, { excludeLeadId }),
+      });
+      if (!res.ok) return;
+      const json = (await res.json()) as { lead: Lead | null };
+      const next = json.lead ?? null;
+      const prevId = prefetchedLeadRef.current?.id ?? null;
+      const activeId = activeLeadRef.current?.id ?? null;
+      if (prevId && prevId !== next?.id && prevId !== activeId) {
+        void releaseLockHttp(prevId);
+      }
+      setPrefetchedLead(next);
+    } catch {
+      /* prefetch-fejl må ikke blokere arbejdsflow */
+    } finally {
+      prefetchInFlightRef.current = false;
+    }
+  }
+
   async function onNext(
     meetingScheduledForISO?: string,
     adminSkipBookingOverlap?: boolean,
@@ -581,17 +629,25 @@ export function CampaignWorkspace({ campaignId, preferredLeadId, voipSession = f
     setError(null);
     setBackgroundSyncError(null);
 
-    const rRes = await fetch(`/api/campaigns/${campaignId}/reserve-next`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: buildReserveNextRequestBody(campaignId, { excludeLeadId: currentId }),
-    });
-    if (!rRes.ok) {
-      const j = await rRes.json().catch(() => ({}));
-      setError(typeof j.error === "string" ? j.error : "Kunne ikke hente næste lead.");
-      return;
+    let rj: { lead: Lead | null };
+    if (prefetchedLeadRef.current) {
+      const buffered = prefetchedLeadRef.current;
+      setPrefetchedLead(null);
+      rj = { lead: buffered };
+      void prefetchNextLead(buffered.id);
+    } else {
+      const rRes = await fetch(`/api/campaigns/${campaignId}/reserve-next`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: buildReserveNextRequestBody(campaignId, { excludeLeadId: currentId }),
+      });
+      if (!rRes.ok) {
+        const j = await rRes.json().catch(() => ({}));
+        setError(typeof j.error === "string" ? j.error : "Kunne ikke hente næste lead.");
+        return;
+      }
+      rj = (await rRes.json()) as { lead: Lead | null };
     }
-    const rj = (await rRes.json()) as { lead: Lead | null };
 
     if (!rj.lead) {
       setSaving(true);
