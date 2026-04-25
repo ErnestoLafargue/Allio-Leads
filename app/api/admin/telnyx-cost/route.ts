@@ -13,6 +13,10 @@ import { getTelnyxConnectionId } from "@/lib/telnyx-call-control";
 /** Groft vekslingskurs til vejledende DKK (Telnyx fakturerer typisk i USD). */
 const USD_TO_DKK_APPROX = 6.9;
 
+/**
+ * Telnyx Usage Reports kræver produkt-specifikke metrics/dimensions.
+ * @see fejl 10002/10003 fra api.telnyx.com/v2/usage_reports
+ */
 const TELNYX_PRODUCTS: Array<{
   product: string;
   label: string;
@@ -25,9 +29,24 @@ const TELNYX_PRODUCTS: Array<{
     metrics: "cost,attempted,connected,call_sec",
     dimensions: "direction",
   },
-  { product: "amd", label: "Answering Machine Detection", metrics: "cost,count" },
-  { product: "recording", label: "Call recording", metrics: "cost,count" },
-  { product: "webrtc", label: "WebRTC", metrics: "cost,call_sec" },
+  {
+    product: "amd",
+    label: "Answering Machine Detection",
+    metrics: "cost,invocations",
+    dimensions: "date",
+  },
+  {
+    product: "recording",
+    label: "Call recording",
+    metrics: "cost,call_sec,attempted,connected,billed_sec",
+    dimensions: "date",
+  },
+  {
+    product: "webrtc",
+    label: "WebRTC",
+    metrics: "cost,call_sec",
+    dimensions: "date",
+  },
 ];
 
 export async function GET(req: Request) {
