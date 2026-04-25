@@ -89,8 +89,14 @@ export type TelnyxWebhookPayload = {
 
 export function pickCallControlId(p: TelnyxWebhookPayload | undefined): string | null {
   if (!p) return null;
-  const v = p.call_control_id;
-  return typeof v === "string" && v.length > 0 ? v : null;
+  // Nogle Telnyx-events (bl.a. visse recording/hangup varianter) kan returnere
+  // call_leg_id uden et udfyldt call_control_id. Vi bruger derfor begge felter
+  // som korrelationsnøgle mod DialerCallLog.callControlId.
+  const callControlId = p.call_control_id;
+  if (typeof callControlId === "string" && callControlId.length > 0) return callControlId;
+  const callLegId = p.call_leg_id;
+  if (typeof callLegId === "string" && callLegId.length > 0) return callLegId;
+  return null;
 }
 
 export function appendRawEvent(
