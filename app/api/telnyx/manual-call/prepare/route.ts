@@ -3,6 +3,7 @@ import { requireSession } from "@/lib/api-auth";
 import { prisma } from "@/lib/prisma";
 import { encodeDialerClientState } from "@/lib/dialer-shared";
 import { sellerMayEditLead } from "@/lib/lead-lock";
+import { assertLeadMatchesActiveCampaignQueueOr403 } from "@/lib/active-campaign-queue";
 
 /**
  * POST /api/telnyx/manual-call/prepare
@@ -54,6 +55,14 @@ export async function POST(req: Request) {
   if (!sellerMayEditLead(session.user.role, session.user.id, lead)) {
     return NextResponse.json(
       { error: "Leadet er låst af en anden bruger." },
+      { status: 403 },
+    );
+  }
+
+  const guard = await assertLeadMatchesActiveCampaignQueueOr403(prisma, leadId);
+  if (!guard.ok) {
+    return NextResponse.json(
+      { error: guard.error },
       { status: 403 },
     );
   }

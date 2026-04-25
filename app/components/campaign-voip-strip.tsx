@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { CampaignDialMode } from "@/lib/dial-mode";
 import { normalizePhoneToE164ForDial } from "@/lib/phone-e164";
 import { useAudioLevel } from "@/lib/use-audio-level";
@@ -15,6 +15,7 @@ import {
   VOIP_STORED_SPK_KEY,
   writeStoredDeviceId,
 } from "@/lib/voip-audio-devices";
+import { describeVoipCallFailureForUi, describeVoipStartupFailure } from "@/lib/voip-call-messages";
 
 type Props = {
   leadId: string;
@@ -40,6 +41,8 @@ type Props = {
   hangupSignal?: number;
   /** Kaldes når `hangupSignal` er håndteret (uanset om der var aktivt opkald). */
   onHangupSignalHandled?: () => void;
+  /** Når en VoIP fejl logges i aktivitet, så kampagnekøen kan hente tidslinje igen. */
+  onVoipFailureLogged?: () => void;
 };
 
 export type LineStatus = "idle" | "connecting" | "ringing" | "live" | "error";
@@ -72,6 +75,10 @@ type TelnyxCall = {
   options?: { destinationNumber?: string; remoteCallerName?: string };
   /** Telnyx server-side call leg — sættes når opkallet er forbundet (Call Control). */
   telnyxIDs?: { telnyxCallControlId?: string; telnyxSessionId?: string; telnyxLegId?: string };
+  cause?: string;
+  causeCode?: number;
+  sipReason?: string;
+  sipCode?: number;
   hangup?: () => Promise<void> | void;
   answer?: (options?: { audio?: MediaTrackConstraints | boolean; video?: boolean }) => Promise<void> | void;
   localStream?: MediaStream;
@@ -188,6 +195,7 @@ export function CampaignVoipStrip({
   onLineStatusChange,
   hangupSignal = 0,
   onHangupSignalHandled,
+  onVoipFailureLogged,
 }: Props) {
   const [lineStatus, setLineStatus] = useState<LineStatus>("idle");
 
@@ -198,8 +206,11 @@ export function CampaignVoipStrip({
     onLineStatusRef.current?.(lineStatus);
   }, [lineStatus]);
   const [detail, setDetail] = useState<string | null>(null);
+  const [voipToast, setVoipToast] = useState<string | null>(null);
+  const [voipToastFading, setVoipToastFading] = useState(false);
+  const endCallInitiatedByUsRef = useRef(false);
+  const callHadConnectedRef = useRef(false);
   const [dialDraft, setDialDraft] = useState(() => (leadPhone || "").trim());
-  const [webrtcReady, setWebrtcReady] = useState(false);
 
   const [devices, setDevices] = useState<MediaDeviceInfo[]>([]);
   const [permissionDone, setPermissionDone] = useState(false);
@@ -255,6 +266,56 @@ export function CampaignVoipStrip({
   const audioSetupReadyRef = useRef(false);
 
   const remoteAudioId = `voip-remote-audio-${leadId}`;
+
+  const pushVoipToast = useCallback((text: string) => {
+    setVoipToastFading(false);
+    setVoipToast(text);
+  }, []);
+
+  const logVoipFailureToServer = useCallback(
+    async (userText: string, technical: string) => {
+      try {
+        const res = await fetch(`/api/leads/${encodeURIComponent(leadId)}/log-voip-failure`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ userMessage: userText, technical }),
+        });
+        if (res.ok) {
+          onVoipFailureLogged?.();
+        }
+      } catch {
+        /* logging må ikke blokkere opkald igen */
+      }
+    },
+    [leadId, onVoipFailureLogged],
+  );
+
+  const reportVoipFailure = useCallback(
+    (userText: string, technical: string) => {
+      pushVoipToast(userText);
+      void logVoipFailureToServer(userText, technical);
+    },
+    [logVoipFailureToServer, pushVoipToast],
+  );
+  const reportVoipFailureRef = useRef(reportVoipFailure);
+  reportVoipFailureRef.current = reportVoipFailure;
+
+  useEffect(() => {
+    if (!voipToast) {
+      setVoipToastFading(false);
+      return;
+    }
+    setVoipToastFading(false);
+    const tFade = window.setTimeout(() => setVoipToastFading(true), 2200);
+    const tClear = window.setTimeout(() => {
+      setVoipToast(null);
+      setVoipToastFading(false);
+    }, 2800);
+    return () => {
+      clearTimeout(tFade);
+      clearTimeout(tClear);
+    };
+  }, [voipToast]);
 
   const inputDevs = useMemo(() => devices.filter((d) => d.kind === "audioinput"), [devices]);
   const outputDevs = useMemo(() => devices.filter((d) => d.kind === "audiooutput"), [devices]);
@@ -317,6 +378,10 @@ export function CampaignVoipStrip({
     setDialDraft((leadPhone || "").trim());
     setLineStatus("idle");
     setDetail(null);
+    setVoipToast(null);
+    setVoipToastFading(false);
+    endCallInitiatedByUsRef.current = false;
+    callHadConnectedRef.current = false;
     autoKeyRef.current = null;
     setManualHeadsetConfirm(false);
     setCallStartAt(null);
@@ -748,7 +813,6 @@ export function CampaignVoipStrip({
           if (done) return;
           done = true;
           window.clearTimeout(timeout);
-          setWebrtcReady(true);
           setDetail(null);
           resolve();
         };
@@ -768,6 +832,29 @@ export function CampaignVoipStrip({
             payload.call && typeof payload.call === "object" ? (payload.call as TelnyxCall) : null;
           if (!maybeCall) return;
 
+          const stateT = stateToken(maybeCall.state);
+          if (CLOSED_STATES.has(stateT)) {
+            const initiatedByUs = endCallInitiatedByUsRef.current;
+            endCallInitiatedByUsRef.current = false;
+            const hadLive = callHadConnectedRef.current;
+            callHadConnectedRef.current = false;
+            const sipCode = Number((maybeCall as TelnyxCall).sipCode) || 0;
+            const cause = String((maybeCall as TelnyxCall).cause ?? "");
+            const sipReason = String((maybeCall as TelnyxCall).sipReason ?? "");
+            activeCallRef.current = null;
+            clearCallAudioState(true);
+            setLineStatus("idle");
+            setDetail(null);
+            setCallEndAt(Date.now());
+            if (!initiatedByUs) {
+              const desc = describeVoipCallFailureForUi({ hadLive, sipCode, cause, sipReason });
+              if (desc) {
+                reportVoipFailureRef.current(desc.userText, desc.technical);
+              }
+            }
+            return;
+          }
+
           // Detektér INDKOMMENDE bridge fra server-side dispatcher.
           // Hvis dialMode er auto-dial og autoStartCall er aktiv (= ikke pause),
           // svarer vi automatisk så samtalen flyder uden agent-input.
@@ -785,11 +872,10 @@ export function CampaignVoipStrip({
           attachCallStreams(maybeCall);
           const mapped = callStateToLineStatus(maybeCall.state);
           if (mapped) {
-            setLineStatus(mapped);
-            if (mapped === "idle") {
-              activeCallRef.current = null;
-              clearCallAudioState(true);
+            if (mapped === "live") {
+              callHadConnectedRef.current = true;
             }
+            setLineStatus(mapped);
           }
 
           if (shouldAutoAnswer) {
@@ -827,8 +913,9 @@ export function CampaignVoipStrip({
 
   async function startCall() {
     if (!audioSetupReady) {
-      setLineStatus("error");
-      setDetail(
+      setLineStatus("idle");
+      setDetail(null);
+      pushVoipToast(
         "Tilslut headset med mikrofon, tillad mikrofon, og vælg rigtige enheder før du ringer.",
       );
       return;
@@ -837,12 +924,15 @@ export function CampaignVoipStrip({
     const raw = normalizeDialDraft(dialDraft);
     const toE164 = normalizePhoneToE164ForDial(raw);
     if (!toE164) {
-      setLineStatus("error");
-      setDetail("Indtast et gyldigt nummer (E.164 eller 8 danske cifre).");
+      setLineStatus("idle");
+      setDetail(null);
+      reportVoipFailure("Ugyldigt telefonnummer", "client: invalid E.164 / 8 digits");
       return;
     }
 
     inFlightRef.current = true;
+    endCallInitiatedByUsRef.current = false;
+    callHadConnectedRef.current = false;
     setLineStatus("connecting");
     // Hvis klienten allerede er pre-warmet, skip "Forbinder WebRTC…"-flash.
     setDetail(clientRef.current ? null : "Forbinder WebRTC…");
@@ -885,8 +975,10 @@ export function CampaignVoipStrip({
       setLineStatus("connecting");
       setDetail(null);
     } catch (err) {
-      setLineStatus("error");
-      setDetail(err instanceof Error ? err.message : "Kunne ikke starte WebRTC-opkald.");
+      const d = describeVoipStartupFailure(err);
+      setLineStatus("idle");
+      setDetail(null);
+      reportVoipFailure(d.userText, d.technical);
       setCallEndAt(Date.now());
       clearCallAudioState(false);
     } finally {
@@ -895,6 +987,7 @@ export function CampaignVoipStrip({
   }
 
   async function hangUp() {
+    endCallInitiatedByUsRef.current = true;
     try {
       await activeCallRef.current?.hangup?.();
     } catch {
@@ -1201,6 +1294,17 @@ export function CampaignVoipStrip({
       ) : null}
 
       <div className="mt-3 rounded-xl border border-emerald-100 bg-white/85 px-3 py-3">
+        {voipToast ? (
+          <div
+            className={`mb-2 rounded-lg border border-amber-200/90 bg-amber-50/95 px-3 py-2 text-center text-xs font-medium text-amber-950 shadow-sm transition-opacity duration-500 ${
+              voipToastFading ? "opacity-0" : "opacity-100"
+            }`}
+            role="status"
+            aria-live="polite"
+          >
+            {voipToast}
+          </div>
+        ) : null}
         <label
           htmlFor={`voip-dial-${leadId}`}
           className="text-[11px] font-semibold uppercase tracking-wide text-emerald-900/85"

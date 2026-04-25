@@ -16,6 +16,10 @@ import {
   PACING_WINDOW_MS,
   getTargetPacingRatioAndStats,
 } from "@/lib/dialer-pacing";
+import { getActiveCampaignLeads } from "@/lib/active-campaign-queue";
+import { sortLeadsForCampaignCallQueue } from "@/lib/lead-queue";
+import { getLeadIdsWithOutcomeLogToday } from "@/lib/lead-outcome-today";
+import { filterLeadsByCampaignProtectedSetting } from "@/lib/reklamebeskyttet-filter";
 
 /**
  * Server-side parallel dialer — placerer N udgående opkald baseret på antal ledige agenter
@@ -129,7 +133,13 @@ export async function POST(req: Request) {
 
   const campaign = await prisma.campaign.findUnique({
     where: { id: campaignId },
-    select: { id: true, dialMode: true },
+    select: {
+      id: true,
+      dialMode: true,
+      fieldConfig: true,
+      activeQueueFilter: true,
+      includeProtectedBusinesses: true,
+    },
   });
   if (!campaign) {
     return NextResponse.json({ error: "Kampagne findes ikke" }, { status: 404 });
@@ -235,7 +245,7 @@ export async function POST(req: Request) {
     })
   ).map((q) => q.leadId);
 
-  const candidates = await prisma.lead.findMany({
+  const candidatesRaw = await prisma.lead.findMany({
     where: {
       campaignId,
       status: "NEW",
@@ -244,10 +254,62 @@ export async function POST(req: Request) {
       // Ikke planlagt callback for andre brugere
       callbackReservedByUserId: null,
     },
-    select: { id: true, phone: true, companyName: true },
+    select: {
+      id: true,
+      phone: true,
+      companyName: true,
+      industry: true,
+      customFields: true,
+      meetingScheduledFor: true,
+      importedAt: true,
+      lastOutcomeAt: true,
+    },
     orderBy: [{ importedAt: "asc" }],
-    take: newCallsNeeded * 2, // hent ekstra i tilfælde af ugyldige numre
+    take: Math.min(500, Math.max(newCallsNeeded * 25, 50)),
   });
+
+  const fieldConfigJson = typeof campaign.fieldConfig === "string" ? campaign.fieldConfig : "{}";
+  const viewRaw = typeof campaign.activeQueueFilter === "string" ? campaign.activeQueueFilter : "{}";
+  let pool = getActiveCampaignLeads(
+    candidatesRaw.map((r) => ({
+      id: r.id,
+      industry: r.industry ?? "",
+      customFields: r.customFields,
+      meetingScheduledFor: r.meetingScheduledFor,
+    })),
+    fieldConfigJson,
+    viewRaw,
+  );
+  const idSet = new Set(pool.map((p) => p.id));
+  pool = filterLeadsByCampaignProtectedSetting(
+    candidatesRaw.filter((r) => idSet.has(r.id)),
+    campaign.includeProtectedBusinesses,
+  ).map((r) => ({
+    id: r.id,
+    industry: r.industry ?? "",
+    customFields: r.customFields,
+    meetingScheduledFor: r.meetingScheduledFor,
+  }));
+  // Samme sortering som kampagnekøen (undgå kun «ældst importeret»-orden).
+  const outcomeToday = await getLeadIdsWithOutcomeLogToday(pool.map((p) => p.id));
+  const byId = new Map(candidatesRaw.map((r) => [r.id, r]));
+  const queueOrdered = sortLeadsForCampaignCallQueue(
+    pool.map((p) => {
+      const r = byId.get(p.id);
+      return {
+        id: p.id,
+        status: "NEW" as const,
+        hasOutcomeLogToday: outcomeToday.has(p.id),
+        importedAt:
+          r?.importedAt instanceof Date ? r.importedAt.toISOString() : String(r?.importedAt ?? ""),
+        lastOutcomeAt:
+          r?.lastOutcomeAt instanceof Date ? r.lastOutcomeAt.toISOString() : undefined,
+      };
+    }),
+  );
+  const candidates = queueOrdered
+    .map((row) => byId.get(row.id))
+    .filter((r): r is NonNullable<typeof r> => Boolean(r));
 
   // 5) Reservér leads i DialerQueueItem (atomisk for at undgå race med samtidige dispatches)
   const expiresAt = new Date(Date.now() + QUEUE_RESERVATION_TTL_MS);

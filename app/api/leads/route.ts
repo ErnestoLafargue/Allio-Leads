@@ -10,6 +10,11 @@ import { releaseExpiredLocksEverywhere } from "@/lib/lead-lock";
 import { getLeadIdsWithOutcomeLogToday } from "@/lib/lead-outcome-today";
 import { copenhagenDayBoundsUtc, copenhagenDayBoundsUtcFromDayKey } from "@/lib/copenhagen-day";
 import { isLeadStatus } from "@/lib/lead-status";
+import {
+  getActiveCampaignLeads,
+  hasActiveQueueViewConstraints,
+  parseActiveCampaignQueueView,
+} from "@/lib/active-campaign-queue";
 
 export async function GET(req: Request) {
   const { session, response } = await requireSession();
@@ -28,6 +33,8 @@ export async function GET(req: Request) {
   const meetingStartTo = searchParams.get("meetingStartTo")?.trim() ?? "";
   const statusFilter = searchParams.get("status")?.trim().toUpperCase() ?? "";
   const excludeNotInterested = searchParams.get("excludeNotInterested") === "1";
+  const skipActiveQueueFilter =
+    session.user.role === "ADMIN" && searchParams.get("skipActiveQueueFilter") === "1";
 
   try {
     await applyLeadCooldownResets();
@@ -56,13 +63,17 @@ export async function GET(req: Request) {
     }
 
     let includeProtectedBusinesses = false;
+    let campaignFieldConfig = "{}";
+    let campaignActiveQueue: string | null = null;
     if (campaignId) {
       const camp = await prisma.campaign.findUnique({
         where: { id: campaignId },
-        select: { includeProtectedBusinesses: true },
+        select: { includeProtectedBusinesses: true, fieldConfig: true, activeQueueFilter: true },
       });
       if (camp) {
         includeProtectedBusinesses = camp.includeProtectedBusinesses;
+        campaignFieldConfig = typeof camp.fieldConfig === "string" ? camp.fieldConfig : "{}";
+        campaignActiveQueue = typeof camp.activeQueueFilter === "string" ? camp.activeQueueFilter : null;
       }
     }
 
@@ -149,6 +160,22 @@ export async function GET(req: Request) {
       ? filterLeadsByCampaignProtectedSetting(leads, includeProtectedBusinesses)
       : leads;
 
+    if (
+      campaignId &&
+      !skipActiveQueueFilter &&
+      hasActiveQueueViewConstraints(parseActiveCampaignQueueView(campaignActiveQueue))
+    ) {
+      const mapped = out.map((l) => ({
+        id: l.id,
+        industry: l.industry ?? "",
+        customFields: l.customFields,
+        meetingScheduledFor: l.meetingScheduledFor,
+      }));
+      const narrowed = getActiveCampaignLeads(mapped, campaignFieldConfig, campaignActiveQueue);
+      const allow = new Set(narrowed.map((r) => r.id));
+      out = out.filter((l) => allow.has(l.id));
+    }
+
     if (session.user.role !== "ADMIN") {
       const uid = session.user.id;
       out = out.filter(
@@ -189,7 +216,7 @@ export async function GET(req: Request) {
 }
 
 export async function POST(req: Request) {
-  const { session, response } = await requireSession();
+  const { response } = await requireSession();
   if (response) return response;
 
   const body = await req.json().catch(() => null);

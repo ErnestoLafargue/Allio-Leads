@@ -7,6 +7,7 @@ import { LEAD_ACTIVITY_KIND, maskPhoneForActivity } from "@/lib/lead-activity-ki
 import { normalizePhoneToE164ForDial } from "@/lib/phone-e164";
 import { dialTelnyxOutbound, getTelnyxConnectionId, pickTelnyxFromNumber } from "@/lib/telnyx-call-control";
 import { encodeDialerClientState } from "@/lib/dialer-shared";
+import { assertLeadMatchesActiveCampaignQueueOr403 } from "@/lib/active-campaign-queue";
 
 async function logCallAttempt(leadId: string, userId: string, summary: string) {
   try {
@@ -87,6 +88,12 @@ export async function POST(req: Request) {
       { error: "Leadet er låst af en anden bruger — du kan ikke starte opkald." },
       { status: 409 },
     );
+  }
+
+  const queueGuard = await assertLeadMatchesActiveCampaignQueueOr403(prisma, leadId);
+  if (!queueGuard.ok) {
+    await logCallAttempt(leadId, session.user.id, `Opkald blokeret — ${queueGuard.error}`);
+    return NextResponse.json({ error: queueGuard.error }, { status: 403 });
   }
 
   const apiKey = process.env.TELNYX_API_KEY?.trim();

@@ -157,6 +157,7 @@ export function CampaignWorkspace({ campaignId, preferredLeadId, voipSession = f
   const [activityItems, setActivityItems] = useState<ActivityItem[]>([]);
   const [activityLoading, setActivityLoading] = useState(false);
   const [activityError, setActivityError] = useState<string | null>(null);
+  const [voipActivityTick, setVoipActivityTick] = useState(0);
 
   useEffect(() => {
     activeLeadRef.current = activeLead;
@@ -175,12 +176,15 @@ export function CampaignWorkspace({ campaignId, preferredLeadId, voipSession = f
   backgroundLockLeadIdsRef.current = backgroundLockLeadIds;
 
   useEffect(() => {
+    const pendingPatchBodies = pendingPatchBodiesRef;
     return () => {
       const id = activeLeadRef.current?.id;
       if (id) void releaseLockHttp(id);
       const prefetchedId = prefetchedLeadRef.current?.id;
       if (prefetchedId && prefetchedId !== id) void releaseLockHttp(prefetchedId);
-      for (const [leadId, body] of pendingPatchBodiesRef.current.entries()) {
+      const bodyMap = pendingPatchBodies.current;
+      const pendingPatches = new Map(bodyMap);
+      for (const [leadId, body] of pendingPatches) {
         void fetch(`/api/leads/${leadId}`, {
           method: "PATCH",
           keepalive: true,
@@ -189,7 +193,7 @@ export function CampaignWorkspace({ campaignId, preferredLeadId, voipSession = f
         }).catch(() => {});
         void releaseLockHttp(leadId);
       }
-      pendingPatchBodiesRef.current.clear();
+      bodyMap.clear();
     };
   }, [campaignId]);
 
@@ -445,7 +449,7 @@ export function CampaignWorkspace({ campaignId, preferredLeadId, voipSession = f
     return () => {
       cancelled = true;
     };
-  }, [isAdmin, activityOpen, activeLead?.id]);
+  }, [isAdmin, activityOpen, activeLead?.id, voipActivityTick]);
 
   useEffect(() => {
     if (status !== "MEETING_BOOKED") setMeetingContactErrors({});
@@ -1264,6 +1268,7 @@ export function CampaignWorkspace({ campaignId, preferredLeadId, voipSession = f
           unansweredTimeoutMs={25_000}
           onLineStatusChange={setVoipLineStatus}
           hangupSignal={voipHangupSignal}
+          onVoipFailureLogged={() => setVoipActivityTick((n) => n + 1)}
         />
       )}
 

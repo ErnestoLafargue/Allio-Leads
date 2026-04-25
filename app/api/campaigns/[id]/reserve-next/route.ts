@@ -12,6 +12,11 @@ import {
   parseWorkspaceStartDateFilterFromRequestBody,
 } from "@/lib/workspace-start-date-filter";
 import { copenhagenDayKey } from "@/lib/copenhagen-day";
+import {
+  getActiveCampaignLeads,
+  hasActiveQueueViewConstraints,
+  parseActiveCampaignQueueView,
+} from "@/lib/active-campaign-queue";
 
 type Params = { params: Promise<{ id: string }> };
 
@@ -60,6 +65,7 @@ export async function POST(req: Request, { params }: Params) {
         includeProtectedBusinesses: true,
         systemCampaignType: true,
         fieldConfig: true,
+        activeQueueFilter: true,
       },
     });
     if (!campaign) {
@@ -154,19 +160,28 @@ export async function POST(req: Request, { params }: Params) {
         lastOutcomeAt: true,
         customFields: true,
         meetingScheduledFor: true,
+        industry: true,
       },
     });
 
     const fieldConfigJson = typeof campaign.fieldConfig === "string" ? campaign.fieldConfig : "{}";
-    const afterStartDate = filterLeadsByWorkspaceStartDate(
-      rawQueue.map((r) => ({
-        ...r,
-        customFields: r.customFields,
-        meetingScheduledFor: r.meetingScheduledFor,
-      })),
-      fieldConfigJson,
-      workspaceStartFilter,
+    const serverView = parseActiveCampaignQueueView(
+      typeof campaign.activeQueueFilter === "string" ? campaign.activeQueueFilter : "{}",
     );
+    const useServerView = hasActiveQueueViewConstraints(serverView);
+    const mapped = rawQueue.map((r) => ({
+      id: r.id,
+      industry: r.industry,
+      customFields: r.customFields,
+      meetingScheduledFor: r.meetingScheduledFor,
+      status: r.status,
+      meetingOutcomeStatus: r.meetingOutcomeStatus,
+      importedAt: r.importedAt,
+      lastOutcomeAt: r.lastOutcomeAt,
+    }));
+    const afterStartDate = useServerView
+      ? getActiveCampaignLeads(mapped, fieldConfigJson, campaign.activeQueueFilter)
+      : filterLeadsByWorkspaceStartDate(mapped, fieldConfigJson, workspaceStartFilter);
 
     const filtered =
       campaign.systemCampaignType === "rebooking"

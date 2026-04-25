@@ -20,6 +20,12 @@ import {
   readWorkspaceStartDateFilter,
   writeWorkspaceStartDateFilter,
 } from "@/lib/workspace-start-date-filter";
+import {
+  EMPTY_ACTIVE_CAMPAIGN_QUEUE_VIEW,
+  hasActiveQueueViewConstraints,
+  parseActiveCampaignQueueView,
+  type ActiveCampaignQueueViewV1,
+} from "@/lib/active-campaign-queue";
 
 type CampaignLeadViewPrefs = {
   filterMeetingStart: boolean;
@@ -309,7 +315,10 @@ export function LeadsBulkPanel({
   const [dynamicDateInvert, setDynamicDateInvert] = useState(false);
   const [campaignFieldConfigRaw, setCampaignFieldConfigRaw] = useState<string>("");
   const [prefsSavedMessage, setPrefsSavedMessage] = useState("");
-  const [prefsHydrated, setPrefsHydrated] = useState(false);
+  /** false indtil kampagnekø-view er læst fra /api/campaigns (når der er et campaignId). */
+  const [prefsHydrated, setPrefsHydrated] = useState(!campaignId);
+  /** Når kampagneview er gemt på serveren, filtrerer /api/leads; clienten duplikerer ikke de samme regler. */
+  const [serverQueueNarrowing, setServerQueueNarrowing] = useState(false);
 
   const startDateExtensionField = useMemo(() => {
     if (!campaignId || !campaignFieldConfigRaw.trim()) return null;
@@ -317,75 +326,115 @@ export function LeadsBulkPanel({
   }, [campaignId, campaignFieldConfigRaw]);
 
   useEffect(() => {
-    setSelected(new Set());
-    setSortKey(null);
-    setSortDir("desc");
     if (!campaignId) {
-      setFilterMeetingStart(false);
-      setMeetingStartFrom("");
-      setMeetingStartTo("");
-      setCampaignFilterMode("startdate");
-      setCampaignIndustryOptions([]);
-      setSelectedCampaignIndustries([]);
-      setDynamicSortFieldId("");
-      setDynamicSortDir("asc");
-      setDynamicFromDate("");
-      setDynamicToDate("");
-      setDynamicDateInvert(false);
-      setPrefsSavedMessage("");
-      setPrefsHydrated(false);
-      return;
-    }
-    const prefs = readCampaignLeadViewPrefs(campaignId);
-    if (prefs) {
-      setFilterMeetingStart(prefs.filterMeetingStart);
-      setCampaignFilterMode(prefs.campaignFilterMode);
-      setMeetingStartFrom(prefs.meetingStartFrom);
-      setMeetingStartTo(prefs.meetingStartTo);
-      setSelectedCampaignIndustries(prefs.selectedCampaignIndustries);
-      setDynamicSortFieldId(prefs.dynamicSortFieldId);
-      setDynamicSortDir(prefs.dynamicSortDir);
-      setDynamicFromDate(prefs.dynamicFromDate);
-      setDynamicToDate(prefs.dynamicToDate);
-      setDynamicDateInvert(prefs.dynamicDateInvert);
-    } else {
-      const stored = readWorkspaceStartDateFilter(campaignId);
-      if (stored) {
-        setFilterMeetingStart(stored.enabled);
-        setMeetingStartFrom(stored.from);
-        setMeetingStartTo(stored.to);
-      } else {
+      const id = window.setTimeout(() => {
+        setSelected(new Set());
+        setSortKey(null);
+        setSortDir("desc");
         setFilterMeetingStart(false);
         setMeetingStartFrom("");
         setMeetingStartTo("");
-      }
-      setCampaignFilterMode("startdate");
-      setSelectedCampaignIndustries([]);
-      setDynamicSortFieldId("");
-      setDynamicSortDir("asc");
-      setDynamicFromDate("");
-      setDynamicToDate("");
-      setDynamicDateInvert(false);
+        setCampaignFilterMode("startdate");
+        setCampaignIndustryOptions([]);
+        setSelectedCampaignIndustries([]);
+        setDynamicSortFieldId("");
+        setDynamicSortDir("asc");
+        setDynamicFromDate("");
+        setDynamicToDate("");
+        setDynamicDateInvert(false);
+        setPrefsSavedMessage("");
+        setServerQueueNarrowing(false);
+        setCampaignFieldConfigRaw("");
+        setPrefsHydrated(true);
+      }, 0);
+      return () => clearTimeout(id);
     }
-    setPrefsSavedMessage("");
-    setPrefsHydrated(true);
+    let cancelled = false;
+    void (async () => {
+      setSelected(new Set());
+      setSortKey(null);
+      setSortDir("desc");
+      setPrefsHydrated(false);
+      const res = await fetch(`/api/campaigns/${encodeURIComponent(campaignId)}`);
+      if (!res.ok || cancelled) {
+        if (!cancelled) setPrefsHydrated(true);
+        return;
+      }
+      const j = (await res.json().catch(() => ({}))) as {
+        fieldConfig?: string;
+        activeQueueFilter?: string;
+      };
+      if (cancelled) return;
+      setCampaignFieldConfigRaw(typeof j.fieldConfig === "string" ? j.fieldConfig : "");
+      const rawView = typeof j.activeQueueFilter === "string" ? j.activeQueueFilter : "{}";
+      const view = parseActiveCampaignQueueView(rawView);
+      if (hasActiveQueueViewConstraints(view)) {
+        setServerQueueNarrowing(true);
+        setFilterMeetingStart(view.filterMeetingStart);
+        setCampaignFilterMode(view.campaignFilterMode);
+        setMeetingStartFrom(view.meetingStartFrom);
+        setMeetingStartTo(view.meetingStartTo);
+        setSelectedCampaignIndustries(view.selectedCampaignIndustries);
+        setDynamicSortFieldId(view.dynamicSortFieldId);
+        setDynamicSortDir(view.dynamicSortDir);
+        setDynamicFromDate(view.dynamicFromDate);
+        setDynamicToDate(view.dynamicToDate);
+        setDynamicDateInvert(view.dynamicDateInvert);
+        writeWorkspaceStartDateFilter(campaignId, {
+          enabled: view.filterMeetingStart && view.campaignFilterMode === "startdate",
+          from: view.meetingStartFrom,
+          to: view.meetingStartTo,
+        });
+      } else {
+        setServerQueueNarrowing(false);
+        const prefs = readCampaignLeadViewPrefs(campaignId);
+        if (prefs) {
+          setFilterMeetingStart(prefs.filterMeetingStart);
+          setCampaignFilterMode(prefs.campaignFilterMode);
+          setMeetingStartFrom(prefs.meetingStartFrom);
+          setMeetingStartTo(prefs.meetingStartTo);
+          setSelectedCampaignIndustries(prefs.selectedCampaignIndustries);
+          setDynamicSortFieldId(prefs.dynamicSortFieldId);
+          setDynamicSortDir(prefs.dynamicSortDir);
+          setDynamicFromDate(prefs.dynamicFromDate);
+          setDynamicToDate(prefs.dynamicToDate);
+          setDynamicDateInvert(prefs.dynamicDateInvert);
+        } else {
+          const stored = readWorkspaceStartDateFilter(campaignId);
+          if (stored) {
+            setFilterMeetingStart(stored.enabled);
+            setMeetingStartFrom(stored.from);
+            setMeetingStartTo(stored.to);
+          } else {
+            setFilterMeetingStart(false);
+            setMeetingStartFrom("");
+            setMeetingStartTo("");
+          }
+          setCampaignFilterMode("startdate");
+          setSelectedCampaignIndustries([]);
+          setDynamicSortFieldId("");
+          setDynamicSortDir("asc");
+          setDynamicFromDate("");
+          setDynamicToDate("");
+          setDynamicDateInvert(false);
+        }
+      }
+      setPrefsSavedMessage("");
+      setPrefsHydrated(true);
+    })();
+    return () => {
+      cancelled = true;
+    };
   }, [campaignId]);
 
   useEffect(() => {
     if (!campaignId) return;
     let cancelled = false;
     void (async () => {
-      const res = await fetch(`/api/leads?campaignId=${encodeURIComponent(campaignId)}`);
+      const res = await fetch(`/api/campaigns/${encodeURIComponent(campaignId)}/industries`);
       if (!res.ok || cancelled) return;
-      const rows = (await res.json().catch(() => [])) as LeadRow[];
-      if (!Array.isArray(rows)) return;
-      const unique = Array.from(
-        new Set(
-          rows
-            .map((r) => r.industry?.trim() ?? "")
-            .filter((v) => v.length > 0),
-        ),
-      ).sort((a, b) => a.localeCompare(b, "da", { sensitivity: "base" }));
+      const j = (await res.json().catch(() => ({}))) as { industries?: string[] };
+      const unique = Array.isArray(j.industries) ? j.industries : [];
       if (!cancelled) {
         setCampaignIndustryOptions(unique);
         setSelectedCampaignIndustries((prev) => prev.filter((p) => unique.includes(p)));
@@ -398,6 +447,7 @@ export function LeadsBulkPanel({
 
   /** Ved genbesøg med gemt filter: sæt sortering til startdato-felt (samme som når man slår filteret til). */
   useEffect(() => {
+    if (serverQueueNarrowing) return;
     if (
       !campaignId ||
       !filterMeetingStart ||
@@ -406,43 +456,21 @@ export function LeadsBulkPanel({
     ) {
       return;
     }
-    setDynamicSortFieldId(`custom:${startDateExtensionField.key}`);
-    setDynamicSortDir("asc");
-  }, [campaignId, filterMeetingStart, campaignFilterMode, startDateExtensionField]);
-
-  useEffect(() => {
-    if (!campaignId || !prefsHydrated) return;
-    writeCampaignLeadViewPrefs(campaignId, {
-      filterMeetingStart,
-      campaignFilterMode,
-      meetingStartFrom,
-      meetingStartTo,
-      selectedCampaignIndustries,
-      dynamicSortFieldId,
-      dynamicSortDir,
-      dynamicFromDate,
-      dynamicToDate,
-      dynamicDateInvert,
-    });
-  }, [
-    campaignId,
-    prefsHydrated,
-    filterMeetingStart,
-    campaignFilterMode,
-    meetingStartFrom,
-    meetingStartTo,
-    selectedCampaignIndustries,
-    dynamicSortFieldId,
-    dynamicSortDir,
-    dynamicFromDate,
-    dynamicToDate,
-    dynamicDateInvert,
-  ]);
+    const t = window.setTimeout(() => {
+      setDynamicSortFieldId(`custom:${startDateExtensionField.key}`);
+      setDynamicSortDir("asc");
+    }, 0);
+    return () => clearTimeout(t);
+  }, [campaignId, filterMeetingStart, campaignFilterMode, startDateExtensionField, serverQueueNarrowing]);
 
   useEffect(() => {
     let cancelled = false;
     const delay = q.trim() ? 300 : 0;
     const t = setTimeout(async () => {
+      if (campaignId && !prefsHydrated) {
+        setLoading(true);
+        return;
+      }
       setLoading(true);
       setError(null);
       const qs = new URLSearchParams();
@@ -451,8 +479,14 @@ export function LeadsBulkPanel({
       if (addedToday) qs.set("addedToday", "1");
       if (!addedToday && fromDate) qs.set("fromDate", fromDate);
       if (!addedToday && toDate) qs.set("toDate", toDate);
-      /** Kun planlagt møde i DB — når kampagnen har feltet «Start dato», filtreres i browser på customFields. */
-      if (campaignId && filterMeetingStart && campaignFilterMode === "startdate" && !startDateExtensionField) {
+      /** Kun når køen ikke allerede filtreres server-side via gemt kampagneview. */
+      if (
+        campaignId &&
+        !serverQueueNarrowing &&
+        filterMeetingStart &&
+        campaignFilterMode === "startdate" &&
+        !startDateExtensionField
+      ) {
         qs.set("filterByMeetingStart", "1");
         if (meetingStartFrom) qs.set("meetingStartFrom", meetingStartFrom);
         if (meetingStartTo) qs.set("meetingStartTo", meetingStartTo);
@@ -500,26 +534,9 @@ export function LeadsBulkPanel({
     statusFilter,
     excludeNotInterested,
     startDateExtensionField,
+    serverQueueNarrowing,
+    prefsHydrated,
   ]);
-
-  useEffect(() => {
-    if (!campaignId) {
-      setCampaignFieldConfigRaw("");
-      return;
-    }
-    let cancelled = false;
-    void (async () => {
-      const res = await fetch(`/api/campaigns/${campaignId}`);
-      if (!res.ok || cancelled) return;
-      const j = (await res.json().catch(() => ({}))) as { fieldConfig?: string };
-      if (!cancelled) {
-        setCampaignFieldConfigRaw(typeof j.fieldConfig === "string" ? j.fieldConfig : "");
-      }
-    })();
-    return () => {
-      cancelled = true;
-    };
-  }, [campaignId]);
 
   const dynamicSortFields = useMemo((): DynamicSortField[] => {
     const base: DynamicSortField[] = [
@@ -572,51 +589,53 @@ export function LeadsBulkPanel({
 
     let out = leads;
 
-    if (
-      campaignId &&
-      filterMeetingStart &&
-      campaignFilterMode === "startdate" &&
-      startDateExtensionField &&
-      (meetingStartFrom || meetingStartTo)
-    ) {
-      out = out.filter((l) => {
-        const raw = parseCustomFields(l.customFields ?? "")[startDateExtensionField.key] ?? "";
-        const ms = parseDateStringLoose(raw);
-        if (ms == null) return false;
-        const key = localDayKeyFromMs(ms);
-        if (meetingStartFrom && key < meetingStartFrom) return false;
-        if (meetingStartTo && key > meetingStartTo) return false;
-        return true;
-      });
-    }
-
-    if (campaignId && filterMeetingStart && campaignFilterMode === "industry") {
-      if (selectedCampaignIndustries.length === 0) {
-        out = [];
-      } else {
-        const selected = new Set(selectedCampaignIndustries.map((v) => v.toLocaleLowerCase("da")));
+    if (!serverQueueNarrowing) {
+      if (
+        campaignId &&
+        filterMeetingStart &&
+        campaignFilterMode === "startdate" &&
+        startDateExtensionField &&
+        (meetingStartFrom || meetingStartTo)
+      ) {
         out = out.filter((l) => {
-          const normalized = (l.industry ?? "").trim().toLocaleLowerCase("da");
-          return normalized.length > 0 && selected.has(normalized);
+          const raw = parseCustomFields(l.customFields ?? "")[startDateExtensionField.key] ?? "";
+          const ms = parseDateStringLoose(raw);
+          if (ms == null) return false;
+          const key = localDayKeyFromMs(ms);
+          if (meetingStartFrom && key < meetingStartFrom) return false;
+          if (meetingStartTo && key > meetingStartTo) return false;
+          return true;
         });
       }
-    }
 
-    if (selectedDynamicField && selectedDynamicField.kind === "date" && (dynamicFromDate || dynamicToDate)) {
-      out = out.filter((l) => {
-        const t = timestampForSort(getDynamicValue(l, selectedDynamicField.id));
-        if (!Number.isFinite(t)) return dynamicDateInvert;
-        let inRange = true;
-        if (dynamicFromDate) {
-          const from = new Date(`${dynamicFromDate}T00:00:00`).getTime();
-          if (Number.isFinite(from) && t < from) inRange = false;
+      if (campaignId && filterMeetingStart && campaignFilterMode === "industry") {
+        if (selectedCampaignIndustries.length === 0) {
+          out = [];
+        } else {
+          const indSelected = new Set(selectedCampaignIndustries.map((v) => v.toLocaleLowerCase("da")));
+          out = out.filter((l) => {
+            const normalized = (l.industry ?? "").trim().toLocaleLowerCase("da");
+            return normalized.length > 0 && indSelected.has(normalized);
+          });
         }
-        if (dynamicToDate) {
-          const to = new Date(`${dynamicToDate}T23:59:59.999`).getTime();
-          if (Number.isFinite(to) && t > to) inRange = false;
-        }
-        return dynamicDateInvert ? !inRange : inRange;
-      });
+      }
+
+      if (selectedDynamicField && selectedDynamicField.kind === "date" && (dynamicFromDate || dynamicToDate)) {
+        out = out.filter((l) => {
+          const t = timestampForSort(getDynamicValue(l, selectedDynamicField.id));
+          if (!Number.isFinite(t)) return dynamicDateInvert;
+          let inRange = true;
+          if (dynamicFromDate) {
+            const from = new Date(`${dynamicFromDate}T00:00:00`).getTime();
+            if (Number.isFinite(from) && t < from) inRange = false;
+          }
+          if (dynamicToDate) {
+            const to = new Date(`${dynamicToDate}T23:59:59.999`).getTime();
+            if (Number.isFinite(to) && t > to) inRange = false;
+          }
+          return dynamicDateInvert ? !inRange : inRange;
+        });
+      }
     }
 
     if (selectedDynamicField) {
@@ -666,6 +685,7 @@ export function LeadsBulkPanel({
     meetingStartFrom,
     meetingStartTo,
     selectedCampaignIndustries,
+    serverQueueNarrowing,
   ]);
 
   const middleColumnLabel = selectedDynamicField?.label ?? "Adresse";
@@ -1058,7 +1078,8 @@ export function LeadsBulkPanel({
             type="button"
             onClick={() => {
               if (!campaignId) return;
-              writeCampaignLeadViewPrefs(campaignId, {
+              const body: ActiveCampaignQueueViewV1 = {
+                version: 1,
                 filterMeetingStart,
                 campaignFilterMode,
                 meetingStartFrom,
@@ -1069,8 +1090,44 @@ export function LeadsBulkPanel({
                 dynamicFromDate,
                 dynamicToDate,
                 dynamicDateInvert,
-              });
-              setPrefsSavedMessage("Gemte filter/sortering for denne kampagne.");
+              };
+              void (async () => {
+                const res = await fetch(
+                  `/api/campaigns/${encodeURIComponent(campaignId)}/active-queue-view`,
+                  {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify(body),
+                  },
+                );
+                if (res.ok) {
+                  setServerQueueNarrowing(hasActiveQueueViewConstraints(body));
+                  writeCampaignLeadViewPrefs(campaignId, {
+                    filterMeetingStart: body.filterMeetingStart,
+                    campaignFilterMode: body.campaignFilterMode,
+                    meetingStartFrom: body.meetingStartFrom,
+                    meetingStartTo: body.meetingStartTo,
+                    selectedCampaignIndustries: body.selectedCampaignIndustries,
+                    dynamicSortFieldId: body.dynamicSortFieldId,
+                    dynamicSortDir: body.dynamicSortDir,
+                    dynamicFromDate: body.dynamicFromDate,
+                    dynamicToDate: body.dynamicToDate,
+                    dynamicDateInvert: body.dynamicDateInvert,
+                  });
+                  writeWorkspaceStartDateFilter(campaignId, {
+                    enabled: filterMeetingStart && campaignFilterMode === "startdate",
+                    from: meetingStartFrom,
+                    to: meetingStartTo,
+                  });
+                  setPrefsSavedMessage("Gemte filter/sortering på kampagnekøen (gælder alle brugere).");
+                  setRefreshNonce((n) => n + 1);
+                } else {
+                  const j = await res.json().catch(() => ({}));
+                  setPrefsSavedMessage(
+                    typeof j.error === "string" ? j.error : "Kunne ikke gemme kampagnekøen.",
+                  );
+                }
+              })();
             }}
             className="rounded-md border border-stone-200 bg-white px-3 py-1.5 text-xs font-medium text-stone-700 hover:bg-stone-50"
           >
@@ -1082,25 +1139,59 @@ export function LeadsBulkPanel({
               setAddedToday(false);
               setFromDate("");
               setToDate("");
-              setFilterMeetingStart(false);
-              setCampaignFilterMode("startdate");
-              setMeetingStartFrom("");
-              setMeetingStartTo("");
-              setSelectedCampaignIndustries([]);
-              if (campaignId) clearWorkspaceStartDateFilter(campaignId);
-              if (campaignId) clearCampaignLeadViewPrefs(campaignId);
-              setStatusFilter("ANY");
-              setExcludeNotInterested(false);
-              setDynamicSortFieldId("");
-              setDynamicFromDate("");
-              setDynamicToDate("");
-              setDynamicDateInvert(false);
-              setPrefsSavedMessage("");
+              if (!campaignId) {
+                setFilterMeetingStart(false);
+                setCampaignFilterMode("startdate");
+                setMeetingStartFrom("");
+                setMeetingStartTo("");
+                setSelectedCampaignIndustries([]);
+                setStatusFilter("ANY");
+                setExcludeNotInterested(false);
+                setDynamicSortFieldId("");
+                setDynamicFromDate("");
+                setDynamicToDate("");
+                setDynamicDateInvert(false);
+                setPrefsSavedMessage("");
+                return;
+              }
+              void (async () => {
+                const res = await fetch(
+                  `/api/campaigns/${encodeURIComponent(campaignId)}/active-queue-view`,
+                  {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify(EMPTY_ACTIVE_CAMPAIGN_QUEUE_VIEW),
+                  },
+                );
+                if (res.ok) {
+                  setServerQueueNarrowing(false);
+                  clearWorkspaceStartDateFilter(campaignId);
+                  clearCampaignLeadViewPrefs(campaignId);
+                  setStatusFilter("ANY");
+                  setExcludeNotInterested(false);
+                  setFilterMeetingStart(false);
+                  setCampaignFilterMode("startdate");
+                  setMeetingStartFrom("");
+                  setMeetingStartTo("");
+                  setSelectedCampaignIndustries([]);
+                  setDynamicSortFieldId("");
+                  setDynamicFromDate("");
+                  setDynamicToDate("");
+                  setDynamicDateInvert(false);
+                  setPrefsSavedMessage("Nulstillet — hele kampagnekøen er igen synlig.");
+                  setRefreshNonce((n) => n + 1);
+                }
+              })();
             }}
             className="rounded-md border border-stone-200 bg-white px-3 py-1.5 text-xs font-medium text-stone-700 hover:bg-stone-50"
           >
             Nulstil filtre
           </button>
+          {serverQueueNarrowing && (
+            <p className="text-xs text-amber-900/90">
+              Kø, dialer (power/predictive) og visning følger det gemte filter, indtil du nulstiller.
+            </p>
+          )}
           {prefsSavedMessage && <p className="text-xs text-emerald-700">{prefsSavedMessage}</p>}
         </div>
       )}

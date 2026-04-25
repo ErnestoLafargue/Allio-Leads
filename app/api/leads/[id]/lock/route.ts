@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { requireSession, requireAdmin } from "@/lib/api-auth";
 import { releaseExpiredLocksEverywhere, refreshLeadLock, releaseLeadLock, tryAcquireLeadLock } from "@/lib/lead-lock";
+import { assertLeadMatchesActiveCampaignQueueOr403 } from "@/lib/active-campaign-queue";
 
 type Params = { params: Promise<{ id: string }> };
 
@@ -25,6 +26,11 @@ export async function POST(_req: Request, { params }: Params) {
       },
     });
     if (!existing) return NextResponse.json({ error: "Ikke fundet" }, { status: 404 });
+
+    const queueGuard = await assertLeadMatchesActiveCampaignQueueOr403(prisma, id);
+    if (!queueGuard.ok) {
+      return NextResponse.json({ error: queueGuard.error }, { status: 403 });
+    }
 
     const ok = await tryAcquireLeadLock(prisma, id, userId);
     if (!ok) {

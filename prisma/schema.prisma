@@ -60,6 +60,8 @@ model Campaign {
   name                       String
   /// JSON: { extensions: { companyName?: [{ key, label }], ... } }
   fieldConfig                String   @default("{}")
+  /// JSON: gemt kø-/kampagneview (filter + sortering) — bruges server-side for kø, lister og dialer
+  activeQueueFilter          String   @default("{}")
   /// true = alle leads i kampagne; false = skjul hvor customFields.reklamebeskyttet (case-ins.) er «ja»
   includeProtectedBusinesses Boolean  @default(false)
   /// Systemkampagner (mødeflow m.m.) — visse typer kan ikke slettes.

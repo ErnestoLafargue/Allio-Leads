@@ -22,6 +22,7 @@ export async function GET(_req: Request, { params }: Params) {
       id: true,
       name: true,
       fieldConfig: true,
+      activeQueueFilter: true,
       includeProtectedBusinesses: true,
       isSystemCampaign: true,
       systemCampaignType: true,
