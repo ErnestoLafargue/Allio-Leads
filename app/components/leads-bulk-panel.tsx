@@ -21,6 +21,65 @@ import {
   writeWorkspaceStartDateFilter,
 } from "@/lib/workspace-start-date-filter";
 
+type CampaignLeadViewPrefs = {
+  filterMeetingStart: boolean;
+  campaignFilterMode: "startdate" | "industry";
+  meetingStartFrom: string;
+  meetingStartTo: string;
+  selectedCampaignIndustries: string[];
+  dynamicSortFieldId: string;
+  dynamicSortDir: "asc" | "desc";
+  dynamicFromDate: string;
+  dynamicToDate: string;
+  dynamicDateInvert: boolean;
+};
+
+function campaignLeadViewPrefsStorageKey(campaignId: string): string {
+  return `kampagne-layout-filter-sortering:${campaignId}`;
+}
+
+function readCampaignLeadViewPrefs(campaignId: string): CampaignLeadViewPrefs | null {
+  if (typeof window === "undefined") return null;
+  try {
+    const raw = localStorage.getItem(campaignLeadViewPrefsStorageKey(campaignId));
+    if (!raw) return null;
+    const parsed = JSON.parse(raw) as Partial<CampaignLeadViewPrefs>;
+    if (!parsed || typeof parsed !== "object") return null;
+    return {
+      filterMeetingStart: parsed.filterMeetingStart === true,
+      campaignFilterMode: parsed.campaignFilterMode === "industry" ? "industry" : "startdate",
+      meetingStartFrom: typeof parsed.meetingStartFrom === "string" ? parsed.meetingStartFrom : "",
+      meetingStartTo: typeof parsed.meetingStartTo === "string" ? parsed.meetingStartTo : "",
+      selectedCampaignIndustries: Array.isArray(parsed.selectedCampaignIndustries)
+        ? parsed.selectedCampaignIndustries.filter((v): v is string => typeof v === "string")
+        : [],
+      dynamicSortFieldId: typeof parsed.dynamicSortFieldId === "string" ? parsed.dynamicSortFieldId : "",
+      dynamicSortDir: parsed.dynamicSortDir === "desc" ? "desc" : "asc",
+      dynamicFromDate: typeof parsed.dynamicFromDate === "string" ? parsed.dynamicFromDate : "",
+      dynamicToDate: typeof parsed.dynamicToDate === "string" ? parsed.dynamicToDate : "",
+      dynamicDateInvert: parsed.dynamicDateInvert === true,
+    };
+  } catch {
+    return null;
+  }
+}
+
+function writeCampaignLeadViewPrefs(campaignId: string, prefs: CampaignLeadViewPrefs): void {
+  try {
+    localStorage.setItem(campaignLeadViewPrefsStorageKey(campaignId), JSON.stringify(prefs));
+  } catch {
+    /* ignore */
+  }
+}
+
+function clearCampaignLeadViewPrefs(campaignId: string): void {
+  try {
+    localStorage.removeItem(campaignLeadViewPrefsStorageKey(campaignId));
+  } catch {
+    /* ignore */
+  }
+}
+
 type LeadRow = {
   id: string;
   companyName: string;
@@ -249,6 +308,7 @@ export function LeadsBulkPanel({
   const [dynamicToDate, setDynamicToDate] = useState("");
   const [dynamicDateInvert, setDynamicDateInvert] = useState(false);
   const [campaignFieldConfigRaw, setCampaignFieldConfigRaw] = useState<string>("");
+  const [prefsSavedMessage, setPrefsSavedMessage] = useState("");
 
   const startDateExtensionField = useMemo(() => {
     if (!campaignId || !campaignFieldConfigRaw.trim()) return null;
@@ -266,18 +326,46 @@ export function LeadsBulkPanel({
       setCampaignFilterMode("startdate");
       setCampaignIndustryOptions([]);
       setSelectedCampaignIndustries([]);
+      setDynamicSortFieldId("");
+      setDynamicSortDir("asc");
+      setDynamicFromDate("");
+      setDynamicToDate("");
+      setDynamicDateInvert(false);
+      setPrefsSavedMessage("");
       return;
     }
-    const stored = readWorkspaceStartDateFilter(campaignId);
-    if (stored) {
-      setFilterMeetingStart(stored.enabled);
-      setMeetingStartFrom(stored.from);
-      setMeetingStartTo(stored.to);
+    const prefs = readCampaignLeadViewPrefs(campaignId);
+    if (prefs) {
+      setFilterMeetingStart(prefs.filterMeetingStart);
+      setCampaignFilterMode(prefs.campaignFilterMode);
+      setMeetingStartFrom(prefs.meetingStartFrom);
+      setMeetingStartTo(prefs.meetingStartTo);
+      setSelectedCampaignIndustries(prefs.selectedCampaignIndustries);
+      setDynamicSortFieldId(prefs.dynamicSortFieldId);
+      setDynamicSortDir(prefs.dynamicSortDir);
+      setDynamicFromDate(prefs.dynamicFromDate);
+      setDynamicToDate(prefs.dynamicToDate);
+      setDynamicDateInvert(prefs.dynamicDateInvert);
     } else {
-      setFilterMeetingStart(false);
-      setMeetingStartFrom("");
-      setMeetingStartTo("");
+      const stored = readWorkspaceStartDateFilter(campaignId);
+      if (stored) {
+        setFilterMeetingStart(stored.enabled);
+        setMeetingStartFrom(stored.from);
+        setMeetingStartTo(stored.to);
+      } else {
+        setFilterMeetingStart(false);
+        setMeetingStartFrom("");
+        setMeetingStartTo("");
+      }
+      setCampaignFilterMode("startdate");
+      setSelectedCampaignIndustries([]);
+      setDynamicSortFieldId("");
+      setDynamicSortDir("asc");
+      setDynamicFromDate("");
+      setDynamicToDate("");
+      setDynamicDateInvert(false);
     }
+    setPrefsSavedMessage("");
   }, [campaignId]);
 
   useEffect(() => {
@@ -930,6 +1018,28 @@ export function LeadsBulkPanel({
           <button
             type="button"
             onClick={() => {
+              if (!campaignId) return;
+              writeCampaignLeadViewPrefs(campaignId, {
+                filterMeetingStart,
+                campaignFilterMode,
+                meetingStartFrom,
+                meetingStartTo,
+                selectedCampaignIndustries,
+                dynamicSortFieldId,
+                dynamicSortDir,
+                dynamicFromDate,
+                dynamicToDate,
+                dynamicDateInvert,
+              });
+              setPrefsSavedMessage("Gemte filter/sortering for denne kampagne.");
+            }}
+            className="rounded-md border border-stone-200 bg-white px-3 py-1.5 text-xs font-medium text-stone-700 hover:bg-stone-50"
+          >
+            Gem filter/sortering
+          </button>
+          <button
+            type="button"
+            onClick={() => {
               setAddedToday(false);
               setFromDate("");
               setToDate("");
@@ -939,17 +1049,20 @@ export function LeadsBulkPanel({
               setMeetingStartTo("");
               setSelectedCampaignIndustries([]);
               if (campaignId) clearWorkspaceStartDateFilter(campaignId);
+              if (campaignId) clearCampaignLeadViewPrefs(campaignId);
               setStatusFilter("ANY");
               setExcludeNotInterested(false);
               setDynamicSortFieldId("");
               setDynamicFromDate("");
               setDynamicToDate("");
               setDynamicDateInvert(false);
+              setPrefsSavedMessage("");
             }}
             className="rounded-md border border-stone-200 bg-white px-3 py-1.5 text-xs font-medium text-stone-700 hover:bg-stone-50"
           >
             Nulstil filtre
           </button>
+          {prefsSavedMessage && <p className="text-xs text-emerald-700">{prefsSavedMessage}</p>}
         </div>
       )}
 
