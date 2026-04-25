@@ -309,6 +309,7 @@ export function LeadsBulkPanel({
   const [dynamicDateInvert, setDynamicDateInvert] = useState(false);
   const [campaignFieldConfigRaw, setCampaignFieldConfigRaw] = useState<string>("");
   const [prefsSavedMessage, setPrefsSavedMessage] = useState("");
+  const [prefsHydrated, setPrefsHydrated] = useState(false);
 
   const startDateExtensionField = useMemo(() => {
     if (!campaignId || !campaignFieldConfigRaw.trim()) return null;
@@ -332,6 +333,7 @@ export function LeadsBulkPanel({
       setDynamicToDate("");
       setDynamicDateInvert(false);
       setPrefsSavedMessage("");
+      setPrefsHydrated(false);
       return;
     }
     const prefs = readCampaignLeadViewPrefs(campaignId);
@@ -366,6 +368,7 @@ export function LeadsBulkPanel({
       setDynamicDateInvert(false);
     }
     setPrefsSavedMessage("");
+    setPrefsHydrated(true);
   }, [campaignId]);
 
   useEffect(() => {
@@ -395,10 +398,46 @@ export function LeadsBulkPanel({
 
   /** Ved genbesøg med gemt filter: sæt sortering til startdato-felt (samme som når man slår filteret til). */
   useEffect(() => {
-    if (!campaignId || !filterMeetingStart || !startDateExtensionField) return;
+    if (
+      !campaignId ||
+      !filterMeetingStart ||
+      campaignFilterMode !== "startdate" ||
+      !startDateExtensionField
+    ) {
+      return;
+    }
     setDynamicSortFieldId(`custom:${startDateExtensionField.key}`);
     setDynamicSortDir("asc");
-  }, [campaignId, filterMeetingStart, startDateExtensionField]);
+  }, [campaignId, filterMeetingStart, campaignFilterMode, startDateExtensionField]);
+
+  useEffect(() => {
+    if (!campaignId || !prefsHydrated) return;
+    writeCampaignLeadViewPrefs(campaignId, {
+      filterMeetingStart,
+      campaignFilterMode,
+      meetingStartFrom,
+      meetingStartTo,
+      selectedCampaignIndustries,
+      dynamicSortFieldId,
+      dynamicSortDir,
+      dynamicFromDate,
+      dynamicToDate,
+      dynamicDateInvert,
+    });
+  }, [
+    campaignId,
+    prefsHydrated,
+    filterMeetingStart,
+    campaignFilterMode,
+    meetingStartFrom,
+    meetingStartTo,
+    selectedCampaignIndustries,
+    dynamicSortFieldId,
+    dynamicSortDir,
+    dynamicFromDate,
+    dynamicToDate,
+    dynamicDateInvert,
+  ]);
 
   useEffect(() => {
     let cancelled = false;
