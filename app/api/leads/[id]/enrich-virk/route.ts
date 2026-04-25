@@ -7,14 +7,9 @@ import { canAccessBookedMeetingNotes } from "@/lib/lead-meeting-access";
 import { canAccessCallbackLead } from "@/lib/lead-callback-access";
 import { sellerMayEditLead } from "@/lib/lead-lock";
 import { normalizeCVR } from "@/lib/cvr-import";
+import { parseFieldConfig, resolveFixedPersonFieldKeys } from "@/lib/campaign-fields";
 
 type Params = { params: Promise<{ id: string }> };
-
-const FIXED_KEYS = {
-  stifter: "stifter",
-  direktor: "direktor",
-  fuldtAnsvarligPerson: "fuldt_ansvarlig_person",
-} as const;
 
 export async function POST(req: Request, { params }: Params) {
   const { session, response } = await requireSession();
@@ -69,23 +64,24 @@ export async function POST(req: Request, { params }: Params) {
   }
 
   const custom = parseCustomFields(lead.customFields);
+  const personFieldKeys = resolveFixedPersonFieldKeys(parseFieldConfig(lead.campaign?.fieldConfig ?? "{}"));
   const updates: Record<string, string> = {};
   const missingFieldKeys: string[] = [];
 
-  const stifterEmpty = !(custom[FIXED_KEYS.stifter] ?? "").trim();
-  const direktorEmpty = !(custom[FIXED_KEYS.direktor] ?? "").trim();
-  const fadEmpty = !(custom[FIXED_KEYS.fuldtAnsvarligPerson] ?? "").trim();
+  const stifterEmpty = !(custom[personFieldKeys.stifter] ?? "").trim();
+  const direktorEmpty = !(custom[personFieldKeys.direktor] ?? "").trim();
+  const fadEmpty = !(custom[personFieldKeys.fuldtAnsvarligPerson] ?? "").trim();
 
-  if (mapped.stifter && stifterEmpty) updates[FIXED_KEYS.stifter] = mapped.stifter;
-  else if (stifterEmpty) missingFieldKeys.push(FIXED_KEYS.stifter);
+  if (mapped.stifter && stifterEmpty) updates[personFieldKeys.stifter] = mapped.stifter;
+  else if (stifterEmpty) missingFieldKeys.push(personFieldKeys.stifter);
 
-  if (mapped.direktor && direktorEmpty) updates[FIXED_KEYS.direktor] = mapped.direktor;
-  else if (direktorEmpty) missingFieldKeys.push(FIXED_KEYS.direktor);
+  if (mapped.direktor && direktorEmpty) updates[personFieldKeys.direktor] = mapped.direktor;
+  else if (direktorEmpty) missingFieldKeys.push(personFieldKeys.direktor);
 
   if (mapped.fuldtAnsvarligPerson && fadEmpty) {
-    updates[FIXED_KEYS.fuldtAnsvarligPerson] = mapped.fuldtAnsvarligPerson;
+    updates[personFieldKeys.fuldtAnsvarligPerson] = mapped.fuldtAnsvarligPerson;
   } else if (fadEmpty) {
-    missingFieldKeys.push(FIXED_KEYS.fuldtAnsvarligPerson);
+    missingFieldKeys.push(personFieldKeys.fuldtAnsvarligPerson);
   }
 
   if (Object.keys(updates).length === 0) {

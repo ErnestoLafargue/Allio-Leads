@@ -167,8 +167,12 @@ export async function fetchVirkCompanyByCvr(rawCvr: string): Promise<unknown> {
   if (!auth) throw new Error("VIRK API credentials mangler i server-miljø");
 
   const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), 12_000);
+  // Berig-knappen må føles responsiv i arbejdsflowet.
+  // Hold kaldet kort og fail fast, så UI ikke hænger i 10-15 sekunder.
+  const timeoutMs = Number(process.env.VIRK_TIMEOUT_MS || 2200);
+  const timer = setTimeout(() => controller.abort(), Number.isFinite(timeoutMs) ? timeoutMs : 2200);
   try {
+    const t0 = Date.now();
     const res = await fetch(VIRK_ENDPOINT, {
       method: "POST",
       headers: {
@@ -176,6 +180,15 @@ export async function fetchVirkCompanyByCvr(rawCvr: string): Promise<unknown> {
         Authorization: `Basic ${auth}`,
       },
       body: JSON.stringify({
+        size: 1,
+        track_total_hits: false,
+        _source: [
+          "Vrvirksomhed.deltagerRelation",
+          "deltagerRelation",
+          "virksomhedsdeltager",
+          "deltager",
+          "rolle",
+        ],
         query: {
           bool: {
             must: [{ term: { "Vrvirksomhed.cvrNummer": cvr } }],
@@ -191,13 +204,14 @@ export async function fetchVirkCompanyByCvr(rawCvr: string): Promise<unknown> {
     }
     const json = await res.json();
     if (process.env.NODE_ENV !== "production") {
+      const elapsed = Date.now() - t0;
       const hits = Number(
         (json as { hits?: { total?: { value?: number } | number } })?.hits?.total &&
           typeof (json as { hits?: { total?: { value?: number } | number } }).hits?.total === "object"
           ? ((json as { hits?: { total?: { value?: number } } }).hits?.total?.value ?? 0)
           : ((json as { hits?: { total?: number } }).hits?.total ?? 0),
       );
-      console.info(`[VIRK] lookup ok for CVR ${cvr}. hits=${hits}`);
+      console.info(`[VIRK] lookup ok for CVR ${cvr}. hits=${hits}. elapsed_ms=${elapsed}`);
     }
     return json;
   } finally {
