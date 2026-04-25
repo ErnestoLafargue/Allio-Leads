@@ -98,6 +98,8 @@ export default function ImportPage() {
   const [includeExistingCvrs, setIncludeExistingCvrs] = useState(false);
   const [allowMissingCvr, setAllowMissingCvr] = useState(false);
   const [allowMissingCompanyName, setAllowMissingCompanyName] = useState(false);
+  const [showAllInCampaignLoading, setShowAllInCampaignLoading] = useState(false);
+  const [showAllInCampaignError, setShowAllInCampaignError] = useState<string | null>(null);
   /** Nulstiller fil-input når import er færdig, så «forsiden» er tydelig */
   const [fileInputKey, setFileInputKey] = useState(0);
 
@@ -269,6 +271,7 @@ export default function ImportPage() {
     setImportProgressPercent(0);
     setImportProgressProcessedRows(0);
     setImportProgressTotalRows(0);
+    setShowAllInCampaignError(null);
     const fd = new FormData();
     fd.append("file", file);
     fd.append("campaignId", campaignId);
@@ -353,6 +356,27 @@ export default function ImportPage() {
     setMapping({});
     setFile(null);
     setFileInputKey((k) => k + 1);
+  }
+
+  async function showAllLeadsInCampaign() {
+    if (!campaignId) return;
+    setShowAllInCampaignError(null);
+    setShowAllInCampaignLoading(true);
+    try {
+      const patch = await fetch(`/api/campaigns/${campaignId}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ includeProtectedBusinesses: true }),
+      });
+      if (!patch.ok) {
+        const j = await patch.json().catch(() => ({}));
+        throw new Error(typeof j.error === "string" ? j.error : "Kunne ikke opdatere kampagnen");
+      }
+      router.push(`/kampagner/${encodeURIComponent(campaignId)}`);
+    } catch (e) {
+      setShowAllInCampaignError(e instanceof Error ? e.message : "Kunne ikke opdatere kampagnen");
+      setShowAllInCampaignLoading(false);
+    }
   }
 
   return (
@@ -461,6 +485,24 @@ export default function ImportPage() {
             >
               Skjul denne besked
             </button>
+            <div className="flex flex-wrap items-center gap-2">
+              <button
+                type="button"
+                onClick={() => void showAllLeadsInCampaign()}
+                disabled={showAllInCampaignLoading || !campaignId}
+                className="rounded-md border border-emerald-300 bg-white px-3 py-1.5 text-sm font-medium text-emerald-900 hover:bg-emerald-100 disabled:opacity-60"
+              >
+                {showAllInCampaignLoading
+                  ? "Aktiverer vis alle…"
+                  : "Vis alle i kampagnen (inkl. reklamebeskyttede)"}
+              </button>
+              <p className="text-xs text-emerald-900/80">
+                Slår automatisk «Medtag reklamebeskyttede» til på kampagnen.
+              </p>
+            </div>
+            {showAllInCampaignError && (
+              <p className="text-sm text-red-700">{showAllInCampaignError}</p>
+            )}
           </div>
         )}
 
