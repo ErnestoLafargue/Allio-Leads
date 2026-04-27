@@ -23,7 +23,7 @@ import {
 } from "@/lib/meeting-outcome";
 import { defaultCampaignFieldConfigJson } from "@/lib/campaign-fields";
 import { isValidCVR } from "@/lib/cvr-import";
-import { LeadActivityPanel } from "@/app/components/lead-activity-panel";
+import { LeadActivityDrawer } from "@/app/components/lead-activity-drawer";
 import { CampaignVoipStrip } from "@/app/components/campaign-voip-strip";
 import { VOIP_API_CONTEXT } from "@/lib/voip-api-context";
 
@@ -109,6 +109,7 @@ function LeadDetailInner() {
   const [callbackDialogOpen, setCallbackDialogOpen] = useState(false);
   const [callbackSubmitError, setCallbackSubmitError] = useState<string | null>(null);
   const [activityReloadToken, setActivityReloadToken] = useState(0);
+  const [activityOpen, setActivityOpen] = useState(false);
   const [mailDialogOpen, setMailDialogOpen] = useState(false);
   const [mailSending, setMailSending] = useState(false);
   const [mailError, setMailError] = useState<string | null>(null);
@@ -742,6 +743,27 @@ function LeadDetailInner() {
                   </p>
                 ) : null}
                 <button
+                  type="button"
+                  onClick={() => setActivityOpen(true)}
+                  className="inline-flex items-center gap-2 rounded-xl border border-stone-200 bg-white px-4 py-3 text-sm font-semibold text-stone-700 shadow-sm transition hover:border-stone-300 hover:bg-stone-50"
+                >
+                  <svg
+                    width="16"
+                    height="16"
+                    viewBox="0 0 24 24"
+                    fill="none"
+                    stroke="currentColor"
+                    strokeWidth="2"
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                    aria-hidden
+                  >
+                    <circle cx="12" cy="12" r="10" />
+                    <polyline points="12 6 12 12 16 14" />
+                  </svg>
+                  Aktivitet
+                </button>
+                <button
                   type="submit"
                   disabled={saving || (editLockBlocked && !isAdmin)}
                   className="rounded-xl bg-stone-900 px-6 py-3 text-sm font-semibold text-white shadow-md transition hover:bg-stone-800 disabled:opacity-60"
@@ -888,9 +910,15 @@ function LeadDetailInner() {
             </div>
           )}
 
-          <LeadActivityPanel leadId={lead.id} reloadToken={activityReloadToken} />
         </fieldset>
       </form>
+
+      <LeadActivityDrawer
+        leadId={lead.id}
+        isOpen={activityOpen}
+        onClose={() => setActivityOpen(false)}
+        reloadToken={activityReloadToken}
+      />
 
       <CallbackScheduleDialog
         open={callbackDialogOpen}
