@@ -9,6 +9,7 @@ import {
   MEETING_OUTCOME_SALE,
 } from "@/lib/meeting-outcome";
 import { COMMISSION_REBOOKING_FLAT_KR, rateKrPerHeldMeeting } from "@/lib/commission";
+import { DashboardTabs } from "@/app/components/dashboard-tabs";
 
 type LeadRow = {
   id: string;
@@ -98,11 +99,21 @@ export default function MineSalgPage() {
   }, []);
 
   if (loading) {
-    return <div className="text-center text-stone-500">Henter…</div>;
+    return (
+      <div className="space-y-6">
+        <DashboardTabs />
+        <div className="text-center text-stone-500">Henter…</div>
+      </div>
+    );
   }
 
   if (error || !data) {
-    return <p className="text-sm text-red-600">{error ?? "Ingen data"}</p>;
+    return (
+      <div className="space-y-6">
+        <DashboardTabs />
+        <p className="text-sm text-red-600">{error ?? "Ingen data"}</p>
+      </div>
+    );
   }
 
   const {
@@ -115,6 +126,7 @@ export default function MineSalgPage() {
 
   return (
     <div className="space-y-8">
+      <DashboardTabs />
       <div>
         <h1 className="text-xl font-semibold text-stone-900">Mine Salg</h1>
         <p className="mt-1 text-sm text-stone-600">

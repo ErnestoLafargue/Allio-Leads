@@ -4,6 +4,7 @@ import { requireSession, requireAdmin } from "@/lib/api-auth";
 import { defaultCampaignFieldConfigJson } from "@/lib/campaign-fields";
 import { sortCampaignsForDisplay } from "@/lib/campaign-list-sort";
 import { workableCampaignLeadsWhere } from "@/lib/campaign-workable-leads";
+import { PRESENCE_FRESH_WINDOW_MS } from "@/lib/dialer-shared";
 
 /** Sælgere: alle kampagner undtagen «Aktive kunder». Almindelige kampagner har typisk systemCampaignType = null — `NOT (kolonne = …)` udelukker NULL i SQL, så vi skal eksplicit inkludere null. */
 function campaignWhereForRole(role: string | undefined) {
@@ -44,7 +45,59 @@ export async function GET() {
 
     const campaigns = sortCampaignsForDisplay(rows);
 
-    return NextResponse.json(campaigns);
+    /// Optælling af agenter online + mine genopkald pr. kampagne i parallel — best-effort.
+    /// Hvis databasen mangler kolonnerne, falder vi tilbage til 0.
+    const userId = session!.user.id;
+    const presenceCutoff = new Date(Date.now() - PRESENCE_FRESH_WINDOW_MS);
+    const ids = campaigns.map((c) => c.id);
+
+    const [agentRows, callbackRows] = await Promise.all([
+      ids.length === 0
+        ? Promise.resolve<{ campaignId: string; _count: { _all: number } }[]>([])
+        : prisma.agentSession
+            .groupBy({
+              by: ["campaignId"],
+              where: {
+                campaignId: { in: ids },
+                status: { in: ["ready", "ringing", "talking", "wrap_up"] },
+                lastHeartbeat: { gte: presenceCutoff },
+              },
+              _count: { _all: true },
+            })
+            .catch(() => []),
+      ids.length === 0
+        ? Promise.resolve<{ campaignId: string | null; _count: { _all: number } }[]>([])
+        : prisma.lead
+            .groupBy({
+              by: ["campaignId"],
+              where: {
+                campaignId: { in: ids },
+                callbackReservedByUserId: userId,
+                callbackStatus: "PENDING",
+              },
+              _count: { _all: true },
+            })
+            .catch(() => []),
+    ]);
+
+    const agentsByCampaign = new Map<string, number>();
+    for (const r of agentRows) {
+      agentsByCampaign.set(r.campaignId, r._count._all);
+    }
+    const callbacksByCampaign = new Map<string, number>();
+    for (const r of callbackRows) {
+      if (typeof r.campaignId === "string") {
+        callbacksByCampaign.set(r.campaignId, r._count._all);
+      }
+    }
+
+    const enriched = campaigns.map((c) => ({
+      ...c,
+      agentsOnline: agentsByCampaign.get(c.id) ?? 0,
+      myCallbacks: callbacksByCampaign.get(c.id) ?? 0,
+    }));
+
+    return NextResponse.json(enriched);
   } catch (e) {
     const msg = e instanceof Error ? e.message : String(e);
     const migrationHint =

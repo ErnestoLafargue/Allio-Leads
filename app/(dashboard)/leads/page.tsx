@@ -3,12 +3,14 @@
 import Link from "next/link";
 import { useState } from "react";
 import { LeadsBulkPanel } from "@/app/components/leads-bulk-panel";
+import { DashboardTabs } from "@/app/components/dashboard-tabs";
 
 export default function LeadsPage() {
   const [q, setQ] = useState("");
 
   return (
     <div className="space-y-6">
+      <DashboardTabs />
       <div className="flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between">
         <div>
           <h1 className="text-xl font-semibold text-stone-900">Leads</h1>

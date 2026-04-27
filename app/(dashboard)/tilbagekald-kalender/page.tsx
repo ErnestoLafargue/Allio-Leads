@@ -4,6 +4,7 @@ import Link from "next/link";
 import { Fragment, useCallback, useEffect, useMemo, useState } from "react";
 import { useSession } from "next-auth/react";
 import { formatCallbackDa, isCallbackOverdue } from "@/lib/callback-datetime";
+import { DashboardTabs } from "@/app/components/dashboard-tabs";
 
 type CallbackLead = {
   id: string;
@@ -174,11 +175,17 @@ export default function TilbagekaldKalenderPage() {
   }, [items]);
 
   if (authStatus === "loading") {
-    return <div className="py-12 text-center text-stone-500">Henter…</div>;
+    return (
+      <div className="space-y-6">
+        <DashboardTabs />
+        <div className="py-12 text-center text-stone-500">Henter…</div>
+      </div>
+    );
   }
 
   return (
     <div className="mx-auto max-w-6xl space-y-6 pb-10">
+      <DashboardTabs />
       <div className="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
         <div>
           <h1 className="text-xl font-semibold text-stone-900">Tilbagekald & Kalender</h1>

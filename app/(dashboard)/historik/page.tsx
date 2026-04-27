@@ -5,6 +5,7 @@ import { useSession } from "next-auth/react";
 import { useEffect, useState } from "react";
 import { LEAD_STATUS_LABELS, type LeadStatus } from "@/lib/lead-status";
 import { copenhagenDayKey } from "@/lib/copenhagen-day";
+import { DashboardTabs } from "@/app/components/dashboard-tabs";
 
 type UserOption = { id: string; name: string; username: string; role: string };
 
@@ -100,6 +101,7 @@ export default function HistorikPage() {
 
   return (
     <div className="space-y-6">
+      <DashboardTabs />
       <div className="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
         <div>
           <h1 className="text-xl font-semibold text-stone-900">Historik</h1>
