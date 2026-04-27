@@ -4,6 +4,7 @@ import { useSession } from "next-auth/react";
 import { useRouter } from "next/navigation";
 import { useEffect } from "react";
 import { TelnyxCredentialsAdminPanel } from "@/app/components/telnyx-credentials-admin-panel";
+import { TelnyxRecordingsBackfillPanel } from "@/app/components/telnyx-recordings-backfill-panel";
 
 export default function TelnyxAdminPage() {
   const { data: session, status } = useSession();
@@ -34,6 +35,17 @@ export default function TelnyxAdminPage() {
       </div>
 
       <TelnyxCredentialsAdminPanel />
+
+      <div>
+        <h2 className="text-lg font-semibold text-stone-900">Tidligere optagelser</h2>
+        <p className="mt-1 text-sm text-stone-600">
+          Hent eksisterende optagelser fra Telnyx ind i Allio så de bliver afspilbare under
+          «Aktivitet» på det rigtige lead. Lyden gemmes i Vercel Blob og henvises fra Neon
+          (LeadActivityEvent.recordingUrl).
+        </p>
+      </div>
+
+      <TelnyxRecordingsBackfillPanel />
     </div>
   );
 }
