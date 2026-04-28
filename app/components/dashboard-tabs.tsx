@@ -13,7 +13,6 @@ const TABS: Tab[] = [
   },
   { href: "/tilbagekald-kalender", label: "Tilbagekald" },
   { href: "/historik", label: "Historik" },
-  { href: "/leads", label: "Leads" },
   { href: "/mine-salg", label: "Mine salg" },
 ];
 
