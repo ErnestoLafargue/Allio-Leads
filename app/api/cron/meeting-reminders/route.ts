@@ -12,15 +12,22 @@ export async function GET(req: Request) {
 
   const url = new URL(req.url);
   const force = url.searchParams.get("force") === "1";
-  const hour = Number(
-    new Intl.DateTimeFormat("en-GB", {
-      timeZone: "Europe/Copenhagen",
-      hour: "2-digit",
-      hour12: false,
-    }).format(new Date()),
-  );
-  if (!force && hour !== 19) {
-    return NextResponse.json({ ok: true, skipped: true, reason: "Outside 19:00 Europe/Copenhagen window." });
+  const [hourStr, minuteStr] = new Intl.DateTimeFormat("en-GB", {
+    timeZone: "Europe/Copenhagen",
+    hour: "2-digit",
+    minute: "2-digit",
+    hour12: false,
+  })
+    .format(new Date())
+    .split(":");
+  const hour = Number(hourStr ?? "0");
+  const minute = Number(minuteStr ?? "0");
+  if (!force && (hour !== 18 || minute !== 45)) {
+    return NextResponse.json({
+      ok: true,
+      skipped: true,
+      reason: "Outside 18:45 Europe/Copenhagen window.",
+    });
   }
 
   try {
