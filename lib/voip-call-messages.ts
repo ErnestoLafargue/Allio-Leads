@@ -14,6 +14,8 @@ const REJECT = new Set([603, 606]);
 const CAUSE_BUSY = /busy|user\s*busy/i;
 const CAUSE_NO_ANSWER = /no\s*answer|timeout|unavailable|time-out/i;
 const CAUSE_NETWORK = /network|ice|pc\s*error|disconnected|connection/i;
+const CAUSE_NORMAL_END =
+  /normal[\s_-]*clearing|normal call clearing|call completed|completed elsewhere|answered elsewhere/i;
 
 export type VoipCallFailureMeta = {
   hadLive: boolean;
@@ -35,6 +37,8 @@ export function describeVoipCallFailureForUi(meta: VoipCallFailureMeta): {
   technical: string;
 } | null {
   const { hadLive, sipCode, cause, sipReason } = meta;
+  const causeNorm = nonEmpty(cause)?.toLowerCase() ?? "";
+  const reasonNorm = nonEmpty(sipReason)?.toLowerCase() ?? "";
   const technical = [
     `sipCode=${Number.isFinite(sipCode) ? sipCode : "?"}`,
     cause ? `cause=${cause}` : null,
@@ -42,6 +46,17 @@ export function describeVoipCallFailureForUi(meta: VoipCallFailureMeta): {
   ]
     .filter(Boolean)
     .join(" ");
+
+  // Nogle carriers/Telnyx returnerer NORMAL_CLEARING selv når "live"-state ikke nåede
+  // frontenden. Det er en normal afslutning og skal ikke vises som fejl-toast.
+  if (
+    CAUSE_NORMAL_END.test(causeNorm) ||
+    CAUSE_NORMAL_END.test(reasonNorm) ||
+    sipCode === 200 ||
+    sipCode === 202
+  ) {
+    return null;
+  }
 
   if (hadLive) {
     if (NETWORK.has(sipCode) || (sipCode >= 500 && sipCode < 600)) {
