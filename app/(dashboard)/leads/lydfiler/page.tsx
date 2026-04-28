@@ -19,10 +19,11 @@ type Row = {
     phone: string;
     status: string;
     statusLabel: string;
+    campaign: { id: string; name: string } | null;
   };
 };
 
-type SortKey = "time" | "company" | "status" | "agent";
+type SortKey = "time" | "company" | "status" | "campaign" | "agent";
 
 export default function LydfilerPage() {
   const [qDraft, setQDraft] = useState("");
@@ -176,19 +177,28 @@ export default function LydfilerPage() {
                   Agent{sortHint("agent")}
                 </button>
               </th>
+              <th className="px-3 py-2">
+                <button
+                  type="button"
+                  onClick={() => toggleSort("campaign")}
+                  className="font-semibold text-stone-700 hover:text-stone-900"
+                >
+                  Kampagne{sortHint("campaign")}
+                </button>
+              </th>
               <th className="px-3 py-2">Optagelse</th>
             </tr>
           </thead>
           <tbody>
             {loading && !data ? (
               <tr>
-                <td colSpan={5} className="px-3 py-8 text-center text-stone-500">
+                <td colSpan={6} className="px-3 py-8 text-center text-stone-500">
                   Henter…
                 </td>
               </tr>
             ) : !data?.items.length ? (
               <tr>
-                <td colSpan={5} className="px-3 py-8 text-center text-stone-500">
+                <td colSpan={6} className="px-3 py-8 text-center text-stone-500">
                   Ingen lydfiler fundet med de valgte filtre.
                 </td>
               </tr>
@@ -216,16 +226,40 @@ export default function LydfilerPage() {
                     </span>
                   </td>
                   <td className="px-3 py-3 text-stone-700">{r.agent?.name ?? "—"}</td>
-                  <td className="min-w-[220px] px-3 py-3">
-                    {r.recordingUrl ? (
-                      <LeadRecordingPlayer
-                        src={r.recordingUrl}
-                        durationSecondsHint={r.durationSeconds}
-                        variant="adminInline"
-                      />
+                  <td className="max-w-[200px] px-3 py-3 text-stone-700">
+                    {r.lead.campaign ? (
+                      <Link
+                        href={`/kampagner/${encodeURIComponent(r.lead.campaign.id)}/arbejd`}
+                        className="line-clamp-2 text-emerald-800 hover:underline"
+                      >
+                        {r.lead.campaign.name}
+                      </Link>
                     ) : (
-                      <span className="text-xs text-stone-400">—</span>
+                      "—"
                     )}
+                  </td>
+                  <td className="min-w-[220px] px-3 py-3">
+                    <div className="flex flex-col gap-2 sm:flex-row sm:items-start sm:gap-3">
+                      {r.recordingUrl ? (
+                        <>
+                          <div className="min-w-0 flex-1">
+                            <LeadRecordingPlayer
+                              src={r.recordingUrl}
+                              durationSecondsHint={r.durationSeconds}
+                              variant="adminInline"
+                            />
+                          </div>
+                          <a
+                            href={`/api/leads/call-recordings/${encodeURIComponent(r.id)}/download`}
+                            className="inline-flex shrink-0 items-center justify-center rounded-md border border-stone-300 bg-white px-2.5 py-1.5 text-xs font-medium text-stone-800 shadow-sm hover:bg-stone-50"
+                          >
+                            Download
+                          </a>
+                        </>
+                      ) : (
+                        <span className="text-xs text-stone-400">—</span>
+                      )}
+                    </div>
                   </td>
                 </tr>
               ))

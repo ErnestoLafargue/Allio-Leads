@@ -73,6 +73,7 @@ export async function GET(req: Request) {
     | { createdAt: "asc" | "desc" }
     | { lead: { companyName: "asc" | "desc" } }
     | { lead: { status: "asc" | "desc" } }
+    | { lead: { campaign: { name: "asc" | "desc" } } }
     | { user: { name: "asc" | "desc" } };
   switch (sort) {
     case "company":
@@ -80,6 +81,9 @@ export async function GET(req: Request) {
       break;
     case "status":
       orderBy = { lead: { status: dir } };
+      break;
+    case "campaign":
+      orderBy = { lead: { campaign: { name: dir } } };
       break;
     case "agent":
       orderBy = { user: { name: dir } };
@@ -108,6 +112,7 @@ export async function GET(req: Request) {
               companyName: true,
               phone: true,
               status: true,
+              campaign: { select: { id: true, name: true } },
             },
           },
           user: { select: { id: true, name: true } },
@@ -131,6 +136,7 @@ export async function GET(req: Request) {
           phone: r.lead.phone,
           status: r.lead.status,
           statusLabel,
+          campaign: r.lead.campaign ? { id: r.lead.campaign.id, name: r.lead.campaign.name } : null,
         },
       };
     });
