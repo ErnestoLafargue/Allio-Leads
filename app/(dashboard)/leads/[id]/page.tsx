@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { useParams, useRouter, useSearchParams } from "next/navigation";
-import { Suspense, useEffect, useRef, useState } from "react";
+import { Suspense, useCallback, useEffect, useRef, useState } from "react";
 import { useSession } from "next-auth/react";
 import { LEAD_STATUSES, type LeadStatus } from "@/lib/lead-status";
 import { isQueueEligibleStatus, sortLeadsForQueue } from "@/lib/lead-queue";
@@ -26,6 +26,7 @@ import { isValidCVR } from "@/lib/cvr-import";
 import { LeadActivityDrawer } from "@/app/components/lead-activity-drawer";
 import { CampaignVoipStrip } from "@/app/components/campaign-voip-strip";
 import { VOIP_API_CONTEXT } from "@/lib/voip-api-context";
+import { useActivityRecordingPoll } from "@/lib/use-activity-recording-poll";
 
 type Lead = {
   id: string;
@@ -110,6 +111,18 @@ function LeadDetailInner() {
   const [callbackSubmitError, setCallbackSubmitError] = useState<string | null>(null);
   const [activityReloadToken, setActivityReloadToken] = useState(0);
   const [activityOpen, setActivityOpen] = useState(false);
+  const bumpActivityReload = useCallback(() => setActivityReloadToken((t) => t + 1), []);
+  const schedulePollAfterCall = useActivityRecordingPoll({
+    isDrawerOpen: activityOpen,
+    bumpReload: bumpActivityReload,
+  });
+  const activityOpenPrevRef = useRef(false);
+  useEffect(() => {
+    if (activityOpen && !activityOpenPrevRef.current) {
+      bumpActivityReload();
+    }
+    activityOpenPrevRef.current = activityOpen;
+  }, [activityOpen, bumpActivityReload]);
   const [mailDialogOpen, setMailDialogOpen] = useState(false);
   const [mailSending, setMailSending] = useState(false);
   const [mailError, setMailError] = useState<string | null>(null);
@@ -782,7 +795,8 @@ function LeadDetailInner() {
               dialMode="CLICK_TO_CALL"
               autoStartCall={false}
               voipApiContext={VOIP_API_CONTEXT.GLOBAL_LEAD_PAGE}
-              onVoipFailureLogged={() => setActivityReloadToken((t) => t + 1)}
+              onVoipFailureLogged={bumpActivityReload}
+              onCallEndedForActivity={schedulePollAfterCall}
             />
           ) : (
             <p className="shrink-0 text-xs text-stone-500">

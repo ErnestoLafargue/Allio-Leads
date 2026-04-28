@@ -30,6 +30,7 @@ import {
   type AssignedLead,
   type DialerPresenceStatus,
 } from "@/lib/use-dialer-presence";
+import { useActivityRecordingPoll } from "@/lib/use-activity-recording-poll";
 
 type Lead = {
   id: string;
@@ -154,6 +155,18 @@ export function CampaignWorkspace({ campaignId, preferredLeadId, voipSession = f
   const [virkNoDataToken, setVirkNoDataToken] = useState(0);
   const [activityOpen, setActivityOpen] = useState(false);
   const [voipActivityTick, setVoipActivityTick] = useState(0);
+  const bumpVoipActivity = useCallback(() => setVoipActivityTick((n) => n + 1), []);
+  const schedulePollAfterCall = useActivityRecordingPoll({
+    isDrawerOpen: activityOpen,
+    bumpReload: bumpVoipActivity,
+  });
+  const activityOpenPrevRef = useRef(false);
+  useEffect(() => {
+    if (activityOpen && !activityOpenPrevRef.current) {
+      bumpVoipActivity();
+    }
+    activityOpenPrevRef.current = activityOpen;
+  }, [activityOpen, bumpVoipActivity]);
 
   useEffect(() => {
     activeLeadRef.current = activeLead;
@@ -1192,7 +1205,8 @@ export function CampaignWorkspace({ campaignId, preferredLeadId, voipSession = f
           unansweredTimeoutMs={25_000}
           onLineStatusChange={setVoipLineStatus}
           hangupSignal={voipHangupSignal}
-          onVoipFailureLogged={() => setVoipActivityTick((n) => n + 1)}
+          onVoipFailureLogged={bumpVoipActivity}
+          onCallEndedForActivity={schedulePollAfterCall}
         />
       )}
 

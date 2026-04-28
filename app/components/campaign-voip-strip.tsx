@@ -44,6 +44,8 @@ type Props = {
   onHangupSignalHandled?: () => void;
   /** Når en VoIP fejl logges i aktivitet, så kampagnekøen kan hente tidslinje igen. */
   onVoipFailureLogged?: () => void;
+  /** Når et opkald afsluttes (normalt eller fejl) — bruges til at polle efter `CALL_RECORDING` i aktivitet. */
+  onCallEndedForActivity?: () => void;
   /**
    * `campaign_arbejd` = følg `dialMode` / `autoStartCall` (predictive, power, …).
    * `global_lead_page` = lead åbnet fra /leads, møder, tilbagekald m.m. — tvinger manuel
@@ -203,6 +205,7 @@ export function CampaignVoipStrip({
   hangupSignal = 0,
   onHangupSignalHandled,
   onVoipFailureLogged,
+  onCallEndedForActivity,
   voipApiContext = VOIP_API_CONTEXT.CAMPAIGN_ARBEJD,
 }: Props) {
   const isGlobalVoip = voipApiContext === VOIP_API_CONTEXT.GLOBAL_LEAD_PAGE;
@@ -311,6 +314,9 @@ export function CampaignVoipStrip({
   );
   const reportVoipFailureRef = useRef(reportVoipFailure);
   reportVoipFailureRef.current = reportVoipFailure;
+
+  const onCallEndedForActivityRef = useRef(onCallEndedForActivity);
+  onCallEndedForActivityRef.current = onCallEndedForActivity;
 
   useEffect(() => {
     if (!voipToast) {
@@ -878,6 +884,7 @@ export function CampaignVoipStrip({
             setLineStatus("idle");
             setDetail(null);
             setCallEndAt(Date.now());
+            queueMicrotask(() => onCallEndedForActivityRef.current?.());
             if (!initiatedByUs) {
               const desc = describeVoipCallFailureForUi({ hadLive, sipCode, cause, sipReason });
               if (desc) {
@@ -1038,6 +1045,8 @@ export function CampaignVoipStrip({
     setDetail(null);
     inFlightRef.current = false;
     clearCallAudioState(true);
+    setCallEndAt(Date.now());
+    queueMicrotask(() => onCallEndedForActivityRef.current?.());
   }
 
   function onRoundButtonClick() {

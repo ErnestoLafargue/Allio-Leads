@@ -1,3 +1,5 @@
+import { normalizePhoneToE164ForDial } from "@/lib/phone-e164";
+
 export const LEAD_ACTIVITY_KIND = {
   NOTE_UPDATE: "NOTE_UPDATE",
   /** Afspilningsbar optagelse fra Telnyx el.l. */
@@ -20,9 +22,20 @@ export const LEAD_ACTIVITY_KIND = {
 
 export type LeadActivityKind = (typeof LEAD_ACTIVITY_KIND)[keyof typeof LEAD_ACTIVITY_KIND];
 
-/** Kort maskering af nummer i aktivitetsliste */
-export function maskPhoneForActivity(raw: string): string {
-  const d = raw.replace(/\D/g, "");
-  if (d.length <= 4) return "••••";
-  return `•••• ${d.slice(-4)}`;
+/**
+ * Læsbart telefonnummer i aktivitetstekster.
+ * Bruges kun bag login, hvor brugeren allerede har adgang til leadets telefonfelt.
+ */
+export function formatPhoneForActivitySummary(raw: string): string {
+  const e164 = normalizePhoneToE164ForDial(raw);
+  if (!e164) {
+    const t = raw.trim();
+    return t || "ukendt nummer";
+  }
+  const d = e164.replace(/\D/g, "");
+  if (d.startsWith("45") && d.length === 10) {
+    const rest = d.slice(2);
+    return `+45 ${rest.slice(0, 2)} ${rest.slice(2, 4)} ${rest.slice(4, 6)} ${rest.slice(6, 8)}`;
+  }
+  return e164;
 }

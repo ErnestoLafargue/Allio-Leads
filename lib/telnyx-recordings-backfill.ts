@@ -11,8 +11,13 @@
  */
 import { prisma } from "@/lib/prisma";
 import { decodeDialerClientState } from "@/lib/dialer-shared";
-import { LEAD_ACTIVITY_KIND, maskPhoneForActivity } from "@/lib/lead-activity-kinds";
+import { LEAD_ACTIVITY_KIND, formatPhoneForActivitySummary } from "@/lib/lead-activity-kinds";
 import { persistTelnyxRecordingToAllio } from "@/lib/telnyx-recording-storage";
+import {
+  normalizePhoneToE164ForDial,
+  phoneDigitsForMatch,
+  phoneStoredVariantsForQuery,
+} from "@/lib/phone-e164";
 
 const TELNYX_API_BASE = "https://api.telnyx.com/v2";
 
@@ -243,22 +248,27 @@ async function findLeadIdForRecording(rec: TelnyxRecording): Promise<{
     }
   }
 
-  // Sidste forsøg — match på telefonnummer (kun hvis præcis ét lead bærer det),
-  // men kun hvis Telnyx gav os "to". Dette kan ramme forkert hvis det samme
-  // nummer findes flere steder; vi accepterer derfor kun unikke matches.
-  const candidates = [rec.toNumber, rec.fromNumber]
-    .map((n) => (typeof n === "string" ? n.replace(/\s|-/g, "").trim() : null))
-    .filter((n): n is string => Boolean(n && n.length >= 6));
-  for (const phone of candidates) {
+  // Sidste forsøg — match på telefon (Telnyx E.164 vs. lead.phone med/uden +45).
+  // Kun når præcis ét lead matcher efter normalisering.
+  const seenDigits = new Set<string>();
+  for (const raw of [rec.toNumber, rec.fromNumber]) {
+    const digits = phoneDigitsForMatch(raw);
+    if (!digits || seenDigits.has(digits)) continue;
+    seenDigits.add(digits);
+    const variants = phoneStoredVariantsForQuery(digits);
     const matches = await prisma.lead.findMany({
-      where: { phone },
-      select: { id: true, campaignId: true },
-      take: 2,
+      where: { phone: { in: variants } },
+      select: { id: true, campaignId: true, phone: true },
+      take: 12,
     });
-    if (matches.length === 1) {
+    const exact = matches.filter((m) => {
+      const ld = normalizePhoneToE164ForDial(m.phone)?.replace(/\D/g, "") ?? "";
+      return ld === digits;
+    });
+    if (exact.length === 1) {
       return {
-        leadId: matches[0]!.id,
-        campaignId: matches[0]!.campaignId ?? null,
+        leadId: exact[0]!.id,
+        campaignId: exact[0]!.campaignId ?? null,
         agentUserId: null,
         source: "phone_match",
       };
@@ -268,16 +278,25 @@ async function findLeadIdForRecording(rec: TelnyxRecording): Promise<{
   return { leadId: null, campaignId: null, agentUserId: null, source: "none" };
 }
 
+type LocatedLead = Awaited<ReturnType<typeof findLeadIdForRecording>>;
+
 async function processOneRecording(
   rec: TelnyxRecording,
-  options: { dryRun: boolean; copyToBlob: boolean },
+  options: {
+    dryRun: boolean;
+    copyToBlob: boolean;
+    /** default true — sæt false når forælderen allerede tæller scanned (fx per-lead backfill). */
+    countScanned?: boolean;
+    /** Hvis sat, springer vi ekstra findLeadIdForRecording-lookup over. */
+    located?: LocatedLead;
+  },
   stats: BackfillStats,
 ): Promise<void> {
-  stats.scanned += 1;
+  if (options.countScanned !== false) stats.scanned += 1;
 
-  const located = await findLeadIdForRecording(rec);
+  const located = options.located ?? (await findLeadIdForRecording(rec));
   if (!located.leadId) {
-    stats.uncoupled += 1;
+    if (!options.located) stats.uncoupled += 1;
     return;
   }
   stats.matched += 1;
@@ -297,7 +316,7 @@ async function processOneRecording(
     where: { id: located.leadId },
     select: { phone: true },
   });
-  const masked = lead?.phone ? maskPhoneForActivity(lead.phone) : "";
+  const phoneLabel = lead?.phone ? formatPhoneForActivitySummary(lead.phone) : "";
   const durationLabel =
     durationSeconds !== null
       ? `${Math.floor(durationSeconds / 60)}:${(durationSeconds % 60).toString().padStart(2, "0")}`
@@ -316,7 +335,7 @@ async function processOneRecording(
   const summaryParts: string[] = [];
   if (agentName) summaryParts.push(`${agentName} talte med leadet`);
   else summaryParts.push("Samtale optaget (backfill)");
-  if (masked) summaryParts.push(`(${masked})`);
+  if (phoneLabel) summaryParts.push(`(${phoneLabel})`);
   if (durationLabel) summaryParts.push(`— varighed ${durationLabel}`);
   const summary = summaryParts.join(" ");
 
@@ -458,6 +477,80 @@ export async function runRecordingsBackfill(params: {
     }
 
     // Stop når siden var ufuldstændig (sidste side) eller tom.
+    if (list.recordings.length < pageSize) {
+      return {
+        ok: true,
+        result: { stats, nextPage: null, pagesProcessed, totalPages: lastTotalPages },
+      };
+    }
+    page += 1;
+  }
+
+  return {
+    ok: true,
+    result: { stats, nextPage: page, pagesProcessed, totalPages: lastTotalPages },
+  };
+}
+
+/**
+ * Som `runRecordingsBackfill`, men kun optagelser der kan knyttes til ét bestemt lead.
+ * Bruges fra lead-detalje så historiske Telnyx-optagelser kan vises uden admin.
+ */
+export async function runRecordingsBackfillForLead(params: {
+  apiKey: string;
+  leadId: string;
+  startPage?: number;
+  pageSize?: number;
+  maxPages?: number;
+  fromIso?: string | null;
+  toIso?: string | null;
+  dryRun?: boolean;
+  copyToBlob?: boolean;
+}): Promise<{ ok: true; result: BackfillRunResult } | { ok: false; status: number; message: string }> {
+  const stats = emptyStats();
+  const pageSize = params.pageSize ?? 100;
+  const maxPages = Math.max(1, Math.min(10, params.maxPages ?? 3));
+  let page = Math.max(1, params.startPage ?? 1);
+  let pagesProcessed = 0;
+  let lastTotalPages: number | null = null;
+
+  for (let i = 0; i < maxPages; i++) {
+    const list = await listTelnyxRecordings({
+      apiKey: params.apiKey,
+      pageNumber: page,
+      pageSize,
+      fromIso: params.fromIso ?? null,
+      toIso: params.toIso ?? null,
+    });
+    if (!list.ok) {
+      return { ok: false, status: list.status || 502, message: list.message };
+    }
+    pagesProcessed += 1;
+    lastTotalPages = list.page.totalPages ?? lastTotalPages;
+
+    for (const rec of list.recordings) {
+      stats.scanned += 1;
+      try {
+        const located = await findLeadIdForRecording(rec);
+        if (!located.leadId || located.leadId !== params.leadId) continue;
+        await processOneRecording(
+          rec,
+          {
+            dryRun: Boolean(params.dryRun),
+            copyToBlob: params.copyToBlob !== false,
+            countScanned: false,
+            located,
+          },
+          stats,
+        );
+      } catch (err) {
+        stats.errors.push({
+          recordingId: rec.id,
+          message: err instanceof Error ? err.message : String(err),
+        });
+      }
+    }
+
     if (list.recordings.length < pageSize) {
       return {
         ok: true,

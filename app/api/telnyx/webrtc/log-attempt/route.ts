@@ -3,7 +3,7 @@ import { requireSession } from "@/lib/api-auth";
 import { prisma } from "@/lib/prisma";
 import { releaseExpiredLocksEverywhere, sellerMayEditLead } from "@/lib/lead-lock";
 import { normalizeCampaignDialMode, campaignUsesVoipUi } from "@/lib/dial-mode";
-import { LEAD_ACTIVITY_KIND, maskPhoneForActivity } from "@/lib/lead-activity-kinds";
+import { LEAD_ACTIVITY_KIND, formatPhoneForActivitySummary } from "@/lib/lead-activity-kinds";
 import { normalizePhoneToE164ForDial } from "@/lib/phone-e164";
 import { assertLeadMatchesActiveCampaignQueueOr403 } from "@/lib/active-campaign-queue";
 import { isGlobalLeadPageVoipContext, parseVoipApiContext, VOIP_API_CONTEXT } from "@/lib/voip-api-context";
@@ -52,8 +52,8 @@ export async function POST(req: Request) {
   }
 
   const e164 = toE164 ? normalizePhoneToE164ForDial(toE164) : null;
-  const masked = e164 ? maskPhoneForActivity(e164) : "ukendt nummer";
-  const summary = `WebRTC: opkald startet til ${masked}`;
+  const phoneLabel = e164 ? formatPhoneForActivitySummary(e164) : "ukendt nummer";
+  const summary = `WebRTC: opkald startet til ${phoneLabel}`;
 
   try {
     await prisma.leadActivityEvent.create({

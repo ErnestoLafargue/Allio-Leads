@@ -8,7 +8,7 @@ import {
   type TelnyxWebhookEnvelope,
 } from "@/lib/dialer-shared";
 import { handleAmdHuman, handleAmdMachine } from "@/lib/dialer-bridge";
-import { LEAD_ACTIVITY_KIND, maskPhoneForActivity } from "@/lib/lead-activity-kinds";
+import { LEAD_ACTIVITY_KIND, formatPhoneForActivitySummary } from "@/lib/lead-activity-kinds";
 import { startTelnyxRecording } from "@/lib/telnyx-call-control";
 import { persistTelnyxRecordingToAllio } from "@/lib/telnyx-recording-storage";
 
@@ -389,7 +389,7 @@ export async function POST(req: Request) {
         where: { id: leadId },
         select: { phone: true },
       });
-      const masked = lead?.phone ? maskPhoneForActivity(lead.phone) : "";
+      const phoneLabel = lead?.phone ? formatPhoneForActivitySummary(lead.phone) : "";
       const durationLabel =
         durationSeconds !== null
           ? `${Math.floor(durationSeconds / 60)}:${(durationSeconds % 60).toString().padStart(2, "0")}`
@@ -397,7 +397,7 @@ export async function POST(req: Request) {
       const summaryParts: string[] = [];
       if (agentName) summaryParts.push(`${agentName} talte med leadet`);
       else summaryParts.push("Samtale optaget");
-      if (masked) summaryParts.push(`(${masked})`);
+      if (phoneLabel) summaryParts.push(`(${phoneLabel})`);
       if (durationLabel) summaryParts.push(`— varighed ${durationLabel}`);
       const summary = summaryParts.join(" ");
 

@@ -183,6 +183,8 @@ export function LeadActivityDrawer({
   const [items, setItems] = useState<DrawerActivityItem[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [syncBusy, setSyncBusy] = useState(false);
+  const [syncHint, setSyncHint] = useState<string | null>(null);
 
   const load = useCallback(async () => {
     if (!leadId) return;
@@ -206,6 +208,39 @@ export function LeadActivityDrawer({
     if (!isOpen) return;
     void load();
   }, [isOpen, load, reloadToken]);
+
+  /// Én stille Telnyx-synk pr. lead pr. browser-session — henter ældre optagelser der aldrig fik webhook.
+  useEffect(() => {
+    if (!isOpen || !leadId) return;
+    setSyncHint(null);
+    try {
+      const syncKey = `allio-telnyx-sync:${leadId}`;
+      if (typeof sessionStorage !== "undefined" && sessionStorage.getItem(syncKey)) return;
+      if (typeof sessionStorage !== "undefined") sessionStorage.setItem(syncKey, "1");
+      void (async () => {
+        try {
+          const res = await fetch(`/api/leads/${encodeURIComponent(leadId)}/sync-telnyx-recordings`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ maxPages: 2, daysBack: 120 }),
+          });
+          const j = (await res.json().catch(() => ({}))) as {
+            ok?: boolean;
+            stats?: { created?: number; updated?: number };
+          };
+          if (res.ok && j.ok) {
+            const c = Number(j.stats?.created ?? 0);
+            const u = Number(j.stats?.updated ?? 0);
+            if (c + u > 0) void load();
+          }
+        } catch {
+          /* ignore */
+        }
+      })();
+    } catch {
+      /* sessionStorage utilgængelig (private mode) */
+    }
+  }, [isOpen, leadId, load]);
 
   /// Esc lukker drawer.
   useEffect(() => {
@@ -501,15 +536,60 @@ export function LeadActivityDrawer({
         </div>
 
         {/* Footer */}
-        <div className="shrink-0 border-t border-stone-100 bg-white px-5 py-2.5 text-[11px] text-stone-500">
-          <button
-            type="button"
-            onClick={() => void load()}
-            disabled={loading}
-            className="font-medium text-stone-600 underline-offset-2 hover:text-stone-900 hover:underline disabled:opacity-50"
-          >
-            {loading ? "Opdaterer…" : "Opdater listen"}
-          </button>
+        <div className="shrink-0 space-y-1.5 border-t border-stone-100 bg-white px-5 py-2.5 text-[11px] text-stone-500">
+          <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
+            <button
+              type="button"
+              onClick={() => void load()}
+              disabled={loading}
+              className="font-medium text-stone-600 underline-offset-2 hover:text-stone-900 hover:underline disabled:opacity-50"
+            >
+              {loading ? "Opdaterer…" : "Opdater listen"}
+            </button>
+            <button
+              type="button"
+              disabled={loading || syncBusy}
+              onClick={() => {
+                setSyncHint(null);
+                setSyncBusy(true);
+                void (async () => {
+                  try {
+                    const res = await fetch(
+                      `/api/leads/${encodeURIComponent(leadId)}/sync-telnyx-recordings`,
+                      {
+                        method: "POST",
+                        headers: { "Content-Type": "application/json" },
+                        body: JSON.stringify({ maxPages: 10, daysBack: 365 }),
+                      },
+                    );
+                    const j = (await res.json().catch(() => ({}))) as {
+                      ok?: boolean;
+                      error?: string;
+                      stats?: { created?: number; updated?: number };
+                    };
+                    if (!res.ok || !j.ok) {
+                      setSyncHint(typeof j.error === "string" ? j.error : "Kunne ikke synkronisere.");
+                      return;
+                    }
+                    const c = Number(j.stats?.created ?? 0);
+                    const u = Number(j.stats?.updated ?? 0);
+                    setSyncHint(
+                      c + u > 0
+                        ? `Hentet ${c} nye og ${u} opdaterede optagelser fra Telnyx.`
+                        : "Ingen nye Telnyx-optagelser matchede dette lead.",
+                    );
+                    void load();
+                  } finally {
+                    setSyncBusy(false);
+                  }
+                })();
+              }}
+              className="font-medium text-emerald-800 underline-offset-2 hover:text-emerald-950 hover:underline disabled:opacity-50"
+            >
+              {syncBusy ? "Synkroniserer med Telnyx…" : "Hent manglende optagelser fra Telnyx"}
+            </button>
+          </div>
+          {syncHint ? <p className="text-[11px] text-stone-600">{syncHint}</p> : null}
         </div>
       </aside>
     </>

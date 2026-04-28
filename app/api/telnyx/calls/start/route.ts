@@ -3,7 +3,7 @@ import { requireSession } from "@/lib/api-auth";
 import { prisma } from "@/lib/prisma";
 import { releaseExpiredLocksEverywhere, sellerMayEditLead } from "@/lib/lead-lock";
 import { normalizeCampaignDialMode, campaignUsesVoipUi } from "@/lib/dial-mode";
-import { LEAD_ACTIVITY_KIND, maskPhoneForActivity } from "@/lib/lead-activity-kinds";
+import { LEAD_ACTIVITY_KIND, formatPhoneForActivitySummary } from "@/lib/lead-activity-kinds";
 import { normalizePhoneToE164ForDial } from "@/lib/phone-e164";
 import { dialTelnyxOutbound, getTelnyxConnectionId, pickTelnyxFromNumber } from "@/lib/telnyx-call-control";
 import { encodeDialerClientState } from "@/lib/dialer-shared";
@@ -66,14 +66,14 @@ export async function POST(req: Request) {
     );
   }
 
-  const masked = maskPhoneForActivity(toE164);
+  const phoneLabel = formatPhoneForActivitySummary(toE164);
   const mode = normalizeCampaignDialMode(lead.campaign?.dialMode);
   if (voipApiContext !== VOIP_API_CONTEXT.GLOBAL_LEAD_PAGE) {
     if (!campaignUsesVoipUi(mode)) {
       await logCallAttempt(
         leadId,
         session.user.id,
-        `Opkald til ${masked} ikke startet — kampagnen bruger ikke VoIP.`,
+        `Opkald til ${phoneLabel} ikke startet — kampagnen bruger ikke VoIP.`,
       );
       return NextResponse.json(
         { error: "Kampagnen er ikke sat til et opkalds-mode (VoIP)." },
@@ -86,7 +86,7 @@ export async function POST(req: Request) {
     await logCallAttempt(
       leadId,
       session.user.id,
-      `Opkald til ${masked} ikke startet — leadet er låst af en anden bruger.`,
+      `Opkald til ${phoneLabel} ikke startet — leadet er låst af en anden bruger.`,
     );
     return NextResponse.json(
       { error: "Leadet er låst af en anden bruger — du kan ikke starte opkald." },
@@ -107,7 +107,7 @@ export async function POST(req: Request) {
     await logCallAttempt(
       leadId,
       session.user.id,
-      `Opkald til ${masked} ikke startet — Telnyx er ikke konfigureret.`,
+      `Opkald til ${phoneLabel} ikke startet — Telnyx er ikke konfigureret.`,
     );
     return NextResponse.json(
       {
@@ -125,7 +125,7 @@ export async function POST(req: Request) {
     await logCallAttempt(
       leadId,
       session.user.id,
-      `Opkald til ${masked} ikke startet — mangler TELNYX_CONNECTION_ID.`,
+      `Opkald til ${phoneLabel} ikke startet — mangler TELNYX_CONNECTION_ID.`,
     );
     return NextResponse.json(
       {
@@ -143,7 +143,7 @@ export async function POST(req: Request) {
     await logCallAttempt(
       leadId,
       session.user.id,
-      `Opkald til ${masked} ikke startet — mangler afsender-nummer (FROM).`,
+      `Opkald til ${phoneLabel} ikke startet — mangler afsender-nummer (FROM).`,
     );
     return NextResponse.json(
       {
@@ -190,7 +190,7 @@ export async function POST(req: Request) {
     await logCallAttempt(
       leadId,
       session.user.id,
-      `Opkald til ${masked} ikke startet — ${logStatus}: ${dial.message}`,
+      `Opkald til ${phoneLabel} ikke startet — ${logStatus}: ${dial.message}`,
     );
     const status = dial.status === 422 || dial.status === 400 ? 400 : dial.status >= 500 ? 502 : 400;
     return NextResponse.json(
@@ -207,7 +207,7 @@ export async function POST(req: Request) {
   await logCallAttempt(
     leadId,
     session.user.id,
-    `Opkald startet til ${masked} (Telnyx ${dial.callControlId}).`,
+    `Opkald startet til ${phoneLabel} (Telnyx ${dial.callControlId}).`,
   );
 
   return NextResponse.json({
