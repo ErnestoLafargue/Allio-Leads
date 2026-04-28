@@ -27,18 +27,19 @@ model User {
   /// SIP-username knyttet til ovennævnte credential — server bruger sip:{username}@sip.telnyx.com som transfer-target
   telnyxSipUsername  String? @unique
 
-  bookedMeetings        Lead[]              @relation("LeadBookedBy")
-  assignedMeetings      Lead[]              @relation("LeadMeetingAssignedTo")
+  bookedMeetings            Lead[]                    @relation("LeadBookedBy")
+  assignedMeetings          Lead[]                    @relation("LeadMeetingAssignedTo")
   /// Aktivt lead-lås under opkald/kampagne (timeouts ryddes i appen)
-  lockedLeads           Lead[]              @relation("LeadLockedBy")
+  lockedLeads               Lead[]                    @relation("LeadLockedBy")
   /// Leads med planlagt genopkald reserveret til denne sælger
-  callbackReservedLeads Lead[]              @relation("LeadCallbackReservedBy")
+  callbackReservedLeads     Lead[]                    @relation("LeadCallbackReservedBy")
   /// Bruger der oprettede tilbagekaldet (kan være anderledes end tildelt)
-  callbackCreatedLeads  Lead[]              @relation("LeadCallbackCreatedBy")
-  outcomeLogs           LeadOutcomeLog[]
-  visitHistory          LeadVisitHistory[]
-  loginDays             UserLoginDay[]
-  leadActivityEvents    LeadActivityEvent[]
+  callbackCreatedLeads      Lead[]                    @relation("LeadCallbackCreatedBy")
+  outcomeLogs               LeadOutcomeLog[]
+  visitHistory              LeadVisitHistory[]
+  loginDays                 UserLoginDay[]
+  leadActivityEvents        LeadActivityEvent[]
+  meetingReminderDispatches MeetingReminderDispatch[]
 
   agentSessions  AgentSession[]
   dialerCallLogs DialerCallLog[]
@@ -170,14 +171,14 @@ model Lead {
 
 /// Idempotens-log for daglig SMS-reminder pr. bruger.
 model MeetingReminderDispatch {
-  id            String   @id @default(cuid())
+  id             String   @id @default(cuid())
   /// YYYY-MM-DD i Europe/Copenhagen for den dag reminderen vedrører (morgendagens dato).
   reminderDayKey String
-  userId        String
-  meetingCount  Int
-  phone         String
-  smsText       String
-  sentAt        DateTime @default(now())
+  userId         String
+  meetingCount   Int
+  phone          String
+  smsText        String
+  sentAt         DateTime @default(now())
 
   user User @relation(fields: [userId], references: [id], onDelete: Cascade)
 
