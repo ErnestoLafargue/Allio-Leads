@@ -12,6 +12,10 @@ export const LEAD_ACTIVITY_KIND = {
   LEAD_DETAIL_OPEN: "LEAD_DETAIL_OPEN",
   /** Admin har ændret mødeudfald (afholdt, salg, …) */
   MEETING_OUTCOME_SET: "MEETING_OUTCOME_SET",
+  /** Møde er tildelt/omfordelt til ansvarlig bruger */
+  MEETING_ASSIGNEE_SET: "MEETING_ASSIGNEE_SET",
+  /** System sendte SMS reminder for kommende møde */
+  MEETING_REMINDER_SMS: "MEETING_REMINDER_SMS",
 } as const;
 
 export type LeadActivityKind = (typeof LEAD_ACTIVITY_KIND)[keyof typeof LEAD_ACTIVITY_KIND];

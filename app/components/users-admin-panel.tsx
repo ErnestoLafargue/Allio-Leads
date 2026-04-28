@@ -16,6 +16,7 @@ export function UsersAdminPanel() {
   const [username, setUsername] = useState("");
   const [name, setName] = useState("");
   const [password, setPassword] = useState("");
+  const [phone, setPhone] = useState("");
   const [role, setRole] = useState<"SELLER" | "ADMIN">("SELLER");
   const [creating, setCreating] = useState(false);
 
@@ -51,7 +52,7 @@ export function UsersAdminPanel() {
     const res = await fetch("/api/users", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ username, name, password, role }),
+      body: JSON.stringify({ username, name, password, role, phone }),
     });
     setCreating(false);
     if (!res.ok) {
@@ -64,6 +65,7 @@ export function UsersAdminPanel() {
     setUsername("");
     setName("");
     setPassword("");
+    setPhone("");
     setRole("SELLER");
   }
 
@@ -116,6 +118,16 @@ export function UsersAdminPanel() {
           />
         </div>
         <div>
+          <label className="block text-sm text-stone-700">Telefonnummer (valgfri)</label>
+          <input
+            value={phone}
+            onChange={(e) => setPhone(e.target.value)}
+            autoComplete="tel"
+            placeholder="+45 12 34 56 78"
+            className="mt-1 w-full rounded-md border border-stone-200 px-3 py-2 text-stone-900 shadow-sm outline-none ring-stone-400 focus:ring-2"
+          />
+        </div>
+        <div>
           <label className="block text-sm text-stone-700">Rolle</label>
           <select
             value={role}
@@ -142,6 +154,7 @@ export function UsersAdminPanel() {
             <tr>
               <th className="px-4 py-3 font-medium">Brugernavn</th>
               <th className="px-4 py-3 font-medium">Navn</th>
+              <th className="px-4 py-3 font-medium">Telefon</th>
               <th className="px-4 py-3 font-medium">Rolle</th>
               <th className="px-4 py-3 font-medium">Oprettet</th>
               {isAdmin ? (

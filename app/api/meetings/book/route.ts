@@ -8,6 +8,7 @@ import { copenhagenDayKey } from "@/lib/copenhagen-day";
 import { MEETING_OUTCOME_PENDING } from "@/lib/meeting-outcome";
 import { shouldLogOutcomeForLeaderboard } from "@/lib/lead-outcome-log";
 import { findLeadBookingOverlapInDb } from "@/lib/booking/overlap-db";
+import { requireDefaultMeetingAssigneeId } from "@/lib/meeting-assignee";
 
 export async function POST(req: Request) {
   const { session, response } = await requireSession();
@@ -71,6 +72,7 @@ export async function POST(req: Request) {
 
   const campaignId = await ensureSystemCampaignId("upcoming_meetings");
   const meetingBookedAt = new Date();
+  const assignedUserId = await requireDefaultMeetingAssigneeId();
 
   try {
     const lead = await prisma.$transaction(async (tx) => {
@@ -96,6 +98,7 @@ export async function POST(req: Request) {
           meetingContactPhonePrivate,
           meetingOutcomeStatus: MEETING_OUTCOME_PENDING,
           meetingCommissionDayKey: copenhagenDayKey(meetingBookedAt),
+          assignedUserId,
           lastOutcomeAt: meetingBookedAt,
         }),
         include: {

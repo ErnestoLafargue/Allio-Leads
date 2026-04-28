@@ -15,6 +15,7 @@ import {
   hasActiveQueueViewConstraints,
   parseActiveCampaignQueueView,
 } from "@/lib/active-campaign-queue";
+import { requireDefaultMeetingAssigneeId } from "@/lib/meeting-assignee";
 
 export async function GET(req: Request) {
   const { session, response } = await requireSession();
@@ -276,6 +277,9 @@ export async function POST(req: Request) {
     }
   }
 
+  const defaultAssigneeId =
+    status === "MEETING_BOOKED" ? await requireDefaultMeetingAssigneeId() : null;
+
   const lead = await prisma.lead.create({
     data: pickLeadCreateData({
       campaignId,
@@ -295,6 +299,7 @@ export async function POST(req: Request) {
       status,
       meetingScheduledFor,
       meetingBookedAt: status === "MEETING_BOOKED" ? new Date() : null,
+      assignedUserId: defaultAssigneeId,
       lastOutcomeAt: status === "NEW" ? null : new Date(),
     }),
   });

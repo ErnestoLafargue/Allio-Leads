@@ -13,6 +13,8 @@ model User {
   id           String   @id @default(cuid())
   username     String   @unique
   name         String
+  /// Personligt mobilnummer til SMS-reminders (E.164 anbefalet)
+  phone        String?
   passwordHash String
   /// ADMIN eller SELLER
   role         String   @default("SELLER")
@@ -26,6 +28,7 @@ model User {
   telnyxSipUsername  String? @unique
 
   bookedMeetings        Lead[]              @relation("LeadBookedBy")
+  assignedMeetings      Lead[]              @relation("LeadMeetingAssignedTo")
   /// Aktivt lead-lås under opkald/kampagne (timeouts ryddes i appen)
   lockedLeads           Lead[]              @relation("LeadLockedBy")
   /// Leads med planlagt genopkald reserveret til denne sælger
@@ -110,6 +113,8 @@ model Lead {
   meetingScheduledFor DateTime?
   bookedByUserId      String?
   bookedByUser        User?     @relation("LeadBookedBy", fields: [bookedByUserId], references: [id])
+  assignedUserId      String?
+  assignedUser        User?     @relation("LeadMeetingAssignedTo", fields: [assignedUserId], references: [id], onDelete: SetNull)
 
   /// Kontaktperson til booket møde (sælgeren udfylder ved møde-booking)
   meetingContactName         String @default("")
@@ -159,7 +164,25 @@ model Lead {
   @@index([lockExpiresAt])
   @@index([lockedByUserId])
   @@index([campaignId, callbackReservedByUserId, callbackScheduledFor])
+  @@index([assignedUserId, meetingScheduledFor])
   @@index([lastOutcomeAt])
+}
+
+/// Idempotens-log for daglig SMS-reminder pr. bruger.
+model MeetingReminderDispatch {
+  id            String   @id @default(cuid())
+  /// YYYY-MM-DD i Europe/Copenhagen for den dag reminderen vedrører (morgendagens dato).
+  reminderDayKey String
+  userId        String
+  meetingCount  Int
+  phone         String
+  smsText       String
+  sentAt        DateTime @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([reminderDayKey, userId])
+  @@index([sentAt])
 }
 
 /// Ét log for hver tællende sælgerhandling (udfald) til daglig leaderboard.

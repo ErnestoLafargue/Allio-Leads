@@ -1,19 +1,16 @@
 import { NextResponse } from "next/server";
-import { prisma } from "@/lib/prisma";
 import { requireSession } from "@/lib/api-auth";
+import { getMeetings, type MeetingsType } from "@/lib/meetings";
 
-export async function GET() {
+export async function GET(req: Request) {
   const { response } = await requireSession();
   if (response) return response;
 
-  const meetings = await prisma.lead.findMany({
-    where: { status: "MEETING_BOOKED" },
-    orderBy: { meetingScheduledFor: "asc" },
-    include: {
-      bookedByUser: { select: { id: true, name: true, username: true } },
-      campaign: { select: { id: true, name: true } },
-    },
-  });
+  const { searchParams } = new URL(req.url);
+  const rawType = searchParams.get("type")?.trim().toLowerCase() ?? "all";
+  const type: MeetingsType = rawType === "upcoming" || rawType === "past" || rawType === "all" ? rawType : "all";
+
+  const meetings = await getMeetings(type);
 
   return NextResponse.json(meetings);
 }

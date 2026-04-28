@@ -157,11 +157,15 @@ const SIDEBAR_SECTIONS: SidebarSection[] = [
     icon: ScoreboardIcon,
   },
   {
-    kind: "link",
+    kind: "group",
     id: "meetings",
-    href: "/meetings",
     label: "Møder",
     icon: MeetingsIcon,
+    items: [
+      { href: "/meetings/new", label: "Nyt møde" },
+      { href: "/meetings/upcoming", label: "Kommende møder" },
+      { href: "/meetings/past", label: "Tidligere møder" },
+    ],
   },
   {
     kind: "group",
@@ -190,6 +194,7 @@ export function AppSidebar({
   const pathname = usePathname();
   const [hovered, setHovered] = useState(false);
   const [adminOpen, setAdminOpen] = useState(false);
+  const [meetingsOpen, setMeetingsOpen] = useState(false);
   const [mobileOpen, setMobileOpen] = useState(false);
 
   const isAdmin = role === "ADMIN";
@@ -207,9 +212,12 @@ export function AppSidebar({
     () =>
       visibleSections
         .filter((s): s is Extract<SidebarSection, { kind: "group" }> => s.kind === "group")
+        .filter((g) => g.id === "admin")
         .some((g) => g.items.some((it) => linkActive(it.href))),
     [visibleSections, linkActive],
   );
+
+  const meetingsActive = useMemo(() => linkActive("/meetings"), [linkActive]);
 
   useEffect(() => {
     if (!mobileOpen) return;
@@ -292,12 +300,21 @@ export function AppSidebar({
                   );
                 }
                 const Icon = s.icon;
-                const open = adminOpen || adminActive;
+                const isAdminGroup = s.id === "admin";
+                const isMeetingsGroup = s.id === "meetings";
+                const open = isAdminGroup
+                  ? adminOpen || adminActive
+                  : isMeetingsGroup
+                    ? meetingsOpen || meetingsActive
+                    : false;
                 return (
                   <div key={s.id}>
                     <button
                       type="button"
-                      onClick={() => setAdminOpen((v) => !v)}
+                      onClick={() => {
+                        if (isAdminGroup) setAdminOpen((v) => !v);
+                        if (isMeetingsGroup) setMeetingsOpen((v) => !v);
+                      }}
                       aria-expanded={open}
                       className={[
                         baseRowClass,
@@ -368,12 +385,14 @@ export function AppSidebar({
         onMouseLeave={() => {
           setHovered(false);
           if (!adminActive) setAdminOpen(false);
+          if (!meetingsActive) setMeetingsOpen(false);
         }}
         onFocus={() => setHovered(true)}
         onBlur={(e) => {
           if (!e.currentTarget.contains(e.relatedTarget as Node)) {
             setHovered(false);
             if (!adminActive) setAdminOpen(false);
+            if (!meetingsActive) setMeetingsOpen(false);
           }
         }}
         aria-label="Hovednavigation"
@@ -441,15 +460,24 @@ export function AppSidebar({
               );
             }
             const Icon = s.icon;
-            const open = expanded && (adminOpen || adminActive);
-            const groupHighlighted = adminActive;
+            const isAdminGroup = s.id === "admin";
+            const isMeetingsGroup = s.id === "meetings";
+            const groupHighlighted = isAdminGroup ? adminActive : isMeetingsGroup ? meetingsActive : false;
+            const open = expanded
+              ? isAdminGroup
+                ? adminOpen || adminActive
+                : isMeetingsGroup
+                  ? meetingsOpen || meetingsActive
+                  : false
+              : false;
             return (
               <div key={s.id} className="flex flex-col">
                 <button
                   type="button"
                   onClick={() => {
                     if (!expanded) return;
-                    setAdminOpen((v) => !v);
+                    if (isAdminGroup) setAdminOpen((v) => !v);
+                    if (isMeetingsGroup) setMeetingsOpen((v) => !v);
                   }}
                   aria-expanded={open}
                   title={!expanded ? s.label : undefined}

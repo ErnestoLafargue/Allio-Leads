@@ -6,6 +6,7 @@ export type EditableUser = {
   id: string;
   username: string;
   name: string;
+  phone: string | null;
   role: string;
   createdAt: string;
 };
@@ -65,6 +66,7 @@ export function EditUserModal({
   const [username, setUsername] = useState("");
   const [name, setName] = useState("");
   const [role, setRole] = useState<"ADMIN" | "SELLER">("SELLER");
+  const [phone, setPhone] = useState("");
   const [password, setPassword] = useState("");
   const [saving, setSaving] = useState(false);
   const [deleting, setDeleting] = useState(false);
@@ -76,11 +78,12 @@ export function EditUserModal({
       setUsername(user.username);
       setName(user.name);
       setRole(user.role === "ADMIN" ? "ADMIN" : "SELLER");
+      setPhone(user.phone ?? "");
       setPassword("");
       setError(null);
       setDeleteConfirm(false);
     }
-  }, [open, user?.id, user?.username, user?.name, user?.role]);
+  }, [open, user?.id, user?.username, user?.name, user?.phone, user?.role]);
 
   if (!open || !user) return null;
 
@@ -95,6 +98,7 @@ export function EditUserModal({
       username: username.trim().toLowerCase(),
       name: name.trim(),
       role,
+      phone: phone.trim(),
     };
     const pw = password.trim();
     if (pw) {
@@ -207,6 +211,19 @@ export function EditUserModal({
                     <option value="SELLER">Sælger</option>
                     <option value="ADMIN">Administrator</option>
                   </select>
+                </div>
+                <div>
+                  <label htmlFor="edit-phone" className="block text-sm font-medium text-stone-700">
+                    Telefonnummer (valgfri)
+                  </label>
+                  <input
+                    id="edit-phone"
+                    autoComplete="tel"
+                    value={phone}
+                    onChange={(e) => setPhone(e.target.value)}
+                    placeholder="+45 12 34 56 78"
+                    className="mt-1.5 w-full rounded-lg border border-stone-200 px-3 py-2 text-sm text-stone-900 shadow-sm outline-none ring-stone-400 focus:ring-2"
+                  />
                 </div>
               </div>
             </section>
