@@ -1114,25 +1114,6 @@ export function CampaignWorkspace({ campaignId, preferredLeadId, voipSession = f
             {mailSuccess}
           </div>
         )}
-        {campaignUsesVoipUi(campaignDialMode) && !voipAutoDialAllowed ? (
-          <div className="mt-3 rounded-lg border border-sky-200/90 bg-sky-50/80 px-3 py-2 text-xs leading-relaxed text-sky-950">
-            <span className="font-medium text-sky-900">Manuelt opkald:</span> Brug feltet «Telefonnummer
-            (opkald)» længere nede.{" "}
-            <span className="font-medium text-sky-900">Automatisk udringning</span> (predictive / power dial) er kun
-            aktiv, når du åbner køen via <strong>Start</strong> på oversigten —{" "}
-            <Link href="/kampagner" className="font-semibold text-sky-900 underline-offset-2 hover:underline">
-              Kampagner
-            </Link>{" "}
-            eller{" "}
-            <Link
-              href={`/kampagner/${encodeURIComponent(campaignId)}/arbejd?voipSession=1`}
-              className="font-semibold text-sky-900 underline-offset-2 hover:underline"
-            >
-              åbn med Start her
-            </Link>
-            .
-          </div>
-        ) : null}
       </div>
 
       <LeadOutcomeStrip
@@ -1181,11 +1162,6 @@ export function CampaignWorkspace({ campaignId, preferredLeadId, voipSession = f
               </svg>
               Aktivitet
             </button>
-            {status === "NEW" && showNextForMeeting ? (
-              <p className="max-w-[14rem] text-right text-xs text-stone-500">
-                Gemmer noter og går til næste lead uden at ændre udfald.
-              </p>
-            ) : null}
             {renderNextButton()}
           </>
         }
