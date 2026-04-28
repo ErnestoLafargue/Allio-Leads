@@ -220,9 +220,7 @@ export function LeadActivityDrawer({
   const filtered = useMemo(() => {
     if (activeTab === "timeline") return items;
     if (activeTab === "notes") return items.filter((i) => i.kind === "note");
-    if (activeTab === "calls") {
-      return items.filter((i) => i.kind === "call" || i.kind === "call_attempt");
-    }
+    if (activeTab === "calls") return items.filter((i) => i.kind === "call");
     return [];
   }, [items, activeTab]);
 
@@ -250,7 +248,7 @@ export function LeadActivityDrawer({
     let calls = 0;
     for (const i of items) {
       if (i.kind === "note") notes += 1;
-      if (i.kind === "call" || i.kind === "call_attempt") calls += 1;
+      if (i.kind === "call") calls += 1;
     }
     return { all: items.length, notes, calls };
   }, [items]);
