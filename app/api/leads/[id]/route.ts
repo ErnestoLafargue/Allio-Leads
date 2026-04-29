@@ -20,6 +20,7 @@ import {
   MEETING_OUTCOME_SALE,
   normalizeMeetingOutcomeStatus,
 } from "@/lib/meeting-outcome";
+import { isMeetingOutcomeLocked, MEETING_OUTCOME_LOCK_DAYS } from "@/lib/meetings";
 import { campaignIdForBookedMeetingOutcome } from "@/lib/meeting-campaign-routing";
 import { ensureStandardCampaignId } from "@/lib/ensure-system-campaigns";
 import { releaseExpiredLocksEverywhere, sellerMayEditLead } from "@/lib/lead-lock";
@@ -172,6 +173,14 @@ export async function PATCH(req: Request, { params }: Params) {
       o !== MEETING_OUTCOME_SALE
     ) {
       return NextResponse.json({ error: "Ugyldigt mødeudfald." }, { status: 400 });
+    }
+    if (isMeetingOutcomeLocked(existing.meetingBookedAt)) {
+      return NextResponse.json(
+        {
+          error: `Udfaldet kan ikke længere ændres — mødet blev booket for mere end ${MEETING_OUTCOME_LOCK_DAYS} dage siden.`,
+        },
+        { status: 400 },
+      );
     }
     adminMeetingOutcome = o;
   }

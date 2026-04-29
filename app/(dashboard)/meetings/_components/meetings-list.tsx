@@ -9,6 +9,7 @@ import {
   MEETING_OUTCOME_LABELS,
   MEETING_OUTCOME_PENDING,
 } from "@/lib/meeting-outcome";
+import { isMeetingOutcomeLocked, MEETING_OUTCOME_LOCK_DAYS } from "@/lib/meetings";
 
 type MeetingRow = {
   id: string;
@@ -46,12 +47,16 @@ export function MeetingsList({ type }: { type: "upcoming" | "past" }) {
   const [savedHintById, setSavedHintById] = useState<Record<string, boolean>>({});
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  /** Når true: hent også tidligere møder hvor lead-status sidenhen er ændret. */
+  const [showAllPast, setShowAllPast] = useState(false);
 
   const title = useMemo(() => (type === "upcoming" ? "Kommende møder" : "Tidligere møder"), [type]);
 
   const load = useCallback(async () => {
     setLoading(true);
-    const res = await fetch(`/api/meetings?type=${type}`);
+    const params = new URLSearchParams({ type });
+    if (type === "past" && showAllPast) params.set("showAll", "true");
+    const res = await fetch(`/api/meetings?${params.toString()}`);
     if (!res.ok) {
       setError("Kunne ikke hente møder");
       setLoading(false);
@@ -61,7 +66,7 @@ export function MeetingsList({ type }: { type: "upcoming" | "past" }) {
     setRows(data);
     setLoading(false);
     setError(null);
-  }, [type]);
+  }, [type, showAllPast]);
 
   useEffect(() => {
     void load();
@@ -132,13 +137,37 @@ export function MeetingsList({ type }: { type: "upcoming" | "past" }) {
 
   return (
     <div className="space-y-4">
-      <div>
-        <h1 className="text-xl font-semibold text-stone-900">{title}</h1>
-        <p className="mt-1 text-sm text-stone-600">
-          {type === "upcoming"
-            ? "Viser alle møder fra i dag og frem."
-            : "Viser alle møder før dags dato (kalenderdag i København)."}
-        </p>
+      <div className="flex flex-wrap items-start justify-between gap-3">
+        <div>
+          <h1 className="text-xl font-semibold text-stone-900">{title}</h1>
+          <p className="mt-1 text-sm text-stone-600">
+            {type === "upcoming"
+              ? "Viser alle møder fra i dag og frem."
+              : showAllPast
+                ? `Viser alle tidligere møder uanset udfald. Udfald kan kun ændres inden for ${MEETING_OUTCOME_LOCK_DAYS} dage efter booking.`
+                : "Viser alle møder før dags dato (kalenderdag i København)."}
+          </p>
+        </div>
+        {type === "past" ? (
+          <button
+            type="button"
+            onClick={() => setShowAllPast((v) => !v)}
+            aria-pressed={showAllPast}
+            className={[
+              "inline-flex items-center gap-1.5 rounded-lg border px-3 py-1.5 text-xs font-semibold shadow-sm transition",
+              showAllPast
+                ? "border-stone-900 bg-stone-900 text-white hover:bg-stone-800"
+                : "border-stone-300 bg-white text-stone-700 hover:bg-stone-50",
+            ].join(" ")}
+            title={
+              showAllPast
+                ? "Vis kun møder med aktiv MEETING_BOOKED-status"
+                : "Vis også tidligere møder hvor lead-status er ændret efterfølgende"
+            }
+          >
+            {showAllPast ? "Vis kun aktive" : "Vis alle tidligere møder"}
+          </button>
+        ) : null}
       </div>
 
       {sessionStatus === "loading" && <p className="text-sm text-stone-500">Henter session…</p>}
@@ -242,10 +271,23 @@ export function MeetingsList({ type }: { type: "upcoming" | "past" }) {
                   </td>
                   {isAdmin && (
                     <td className="px-4 py-3">
-                      <MeetingOutcomeSelect
-                        value={String(m.meetingOutcomeStatus ?? "").trim().toUpperCase() || MEETING_OUTCOME_PENDING}
-                        onChange={(value) => void patchOutcome(m.id, value)}
-                      />
+                      {isMeetingOutcomeLocked(m.meetingBookedAt) ? (
+                        <span
+                          className="inline-flex items-center gap-1 text-xs font-medium text-stone-500"
+                          title={`Udfaldet kan ikke længere ændres — mødet blev booket for mere end ${MEETING_OUTCOME_LOCK_DAYS} dage siden.`}
+                        >
+                          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+                            <rect x="3" y="11" width="18" height="11" rx="2" />
+                            <path d="M7 11V7a5 5 0 0 1 10 0v4" />
+                          </svg>
+                          Låst ({"> "}{MEETING_OUTCOME_LOCK_DAYS} dage)
+                        </span>
+                      ) : (
+                        <MeetingOutcomeSelect
+                          value={String(m.meetingOutcomeStatus ?? "").trim().toUpperCase() || MEETING_OUTCOME_PENDING}
+                          onChange={(value) => void patchOutcome(m.id, value)}
+                        />
+                      )}
                     </td>
                   )}
                 </tr>
