@@ -43,6 +43,10 @@ model User {
 
   agentSessions  AgentSession[]
   dialerCallLogs DialerCallLog[]
+
+  /// Interne opgaver (ticketsystem)
+  ticketsAssigned Ticket[] @relation("TicketAssignedTo")
+  ticketsCreated  Ticket[] @relation("TicketCreatedBy")
 }
 
 /// Én række pr. bruger pr. kalenderdag (København) ved vellykket login.
@@ -344,4 +348,30 @@ model DialerQueueItem {
 
   @@index([campaignId, reservedAt])
   @@index([expiresAt])
+}
+
+/// Internt ticketsystem — opgavestyring for teamet (uafhængigt af leads/møder).
+model Ticket {
+  id              String    @id @default(cuid())
+  title           String
+  description     String    @default("")
+  /// "haster" | "snarest_muligt" | "normal" | "naar_tiden_passer"
+  priority        String    @default("normal")
+  /// "open" | "in_progress" | "waiting" | "done"
+  status          String    @default("open")
+  /// Sættes til 23:59:59 Europe/Copenhagen for valgt dato. null = ingen deadline.
+  deadline        DateTime?
+  assignedUserId  String
+  createdByUserId String
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
+  /// Sættes når status skifter til "done"; nulstilles hvis status ændres tilbage.
+  completedAt     DateTime?
+
+  assignedUser User @relation("TicketAssignedTo", fields: [assignedUserId], references: [id], onDelete: Restrict)
+  createdBy    User @relation("TicketCreatedBy", fields: [createdByUserId], references: [id], onDelete: Restrict)
+
+  @@index([assignedUserId, status, deadline])
+  @@index([status, deadline])
+  @@index([createdByUserId])
 }
