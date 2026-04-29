@@ -12,12 +12,12 @@ export const TICKET_STATUS_LABELS: Record<TicketStatus, string> = {
 /** Rækkefølge til filtre / dropdowns (åben → færdig). */
 export const TICKET_STATUS_ORDER: TicketStatus[] = ["open", "in_progress", "waiting", "done"];
 
-/** Tailwind-klasser for status-pille. */
+/** Tailwind-klasser for status-pille. Holdes flade og ens-formede ift. prioritet/deadline. */
 export const TICKET_STATUS_BADGE_CLASS: Record<TicketStatus, string> = {
-  open: "border border-stone-400 bg-stone-100 text-stone-800",
-  in_progress: "border border-blue-500 bg-blue-100 text-blue-900",
-  waiting: "border border-amber-500 bg-amber-100 text-amber-900",
-  done: "border border-emerald-600 bg-emerald-100 text-emerald-900",
+  open: "bg-stone-200 text-stone-800",
+  in_progress: "bg-blue-100 text-blue-800",
+  waiting: "bg-amber-100 text-amber-800",
+  done: "bg-emerald-100 text-emerald-800",
 };
 
 export function isTicketStatus(v: unknown): v is TicketStatus {

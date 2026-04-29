@@ -64,6 +64,8 @@ export async function PATCH(req: Request, { params }: Params) {
   else if (typeof body.deadline === "string") input.deadlineDayKey = body.deadline;
   if (body.snoozedUntil === null) input.snoozedUntilDayKey = null;
   else if (typeof body.snoozedUntil === "string") input.snoozedUntilDayKey = body.snoozedUntil;
+  if (body.hiddenFromDailyUntil === null) input.hiddenFromDailyUntil = null;
+  else if (body.hiddenFromDailyUntil === "tomorrow") input.hiddenFromDailyUntil = "tomorrow";
 
   try {
     const ticket = await updateTicket(id, input);

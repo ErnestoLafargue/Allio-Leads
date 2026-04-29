@@ -352,23 +352,26 @@ model DialerQueueItem {
 
 /// Internt ticketsystem — opgavestyring for teamet (uafhængigt af leads/møder).
 model Ticket {
-  id              String    @id @default(cuid())
-  title           String
-  description     String    @default("")
+  id                   String    @id @default(cuid())
+  title                String
+  description          String    @default("")
   /// "haster" | "snarest_muligt" | "normal" | "naar_tiden_passer"
-  priority        String    @default("normal")
+  priority             String    @default("normal")
   /// "open" | "in_progress" | "waiting" | "done"
-  status          String    @default("open")
+  status               String    @default("open")
   /// Sættes til 23:59:59 Europe/Copenhagen for valgt dato. null = ingen deadline.
-  deadline        DateTime?
-  assignedUserId  String
-  createdByUserId String
-  createdAt       DateTime  @default(now())
-  updatedAt       DateTime  @updatedAt
+  deadline             DateTime?
+  assignedUserId       String
+  createdByUserId      String
+  createdAt            DateTime  @default(now())
+  updatedAt            DateTime  @updatedAt
   /// Sættes når status skifter til "done"; nulstilles hvis status ændres tilbage.
-  completedAt     DateTime?
+  completedAt          DateTime?
   /// "Udskyd til i morgen": skjules fra dagskalender indtil dette tidspunkt.
-  snoozedUntil    DateTime?
+  snoozedUntil         DateTime?
+  /// Auto-skjul fra dagskalender når status sættes til "in_progress" eller "waiting".
+  /// Sættes typisk til midnat (Europe/Copenhagen) næste dag, så den dukker op igen i morgen.
+  hiddenFromDailyUntil DateTime?
 
   assignedUser User @relation("TicketAssignedTo", fields: [assignedUserId], references: [id], onDelete: Restrict)
   createdBy    User @relation("TicketCreatedBy", fields: [createdByUserId], references: [id], onDelete: Restrict)
@@ -377,4 +380,5 @@ model Ticket {
   @@index([status, deadline])
   @@index([createdByUserId])
   @@index([assignedUserId, snoozedUntil])
+  @@index([assignedUserId, hiddenFromDailyUntil])
 }

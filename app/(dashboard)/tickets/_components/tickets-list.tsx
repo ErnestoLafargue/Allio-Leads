@@ -22,6 +22,8 @@ export type TicketListFilters = {
   priority: TicketPriority | "all";
   assigneeId: string | "all";
   deadlineRange: "all" | "no_deadline" | "today" | "this_week" | "overdue";
+  /** "active" = alt undtagen Færdig. "done" = kun løste opgaver (grå styling). */
+  view: "active" | "done";
 };
 
 export const DEFAULT_LIST_FILTERS: TicketListFilters = {
@@ -30,6 +32,7 @@ export const DEFAULT_LIST_FILTERS: TicketListFilters = {
   priority: "all",
   assigneeId: "all",
   deadlineRange: "all",
+  view: "active",
 };
 
 type Props = {
@@ -64,11 +67,11 @@ export function TicketsList({
       {!hideFilters ? (
       <div className="flex flex-wrap items-center gap-2 border-b border-stone-200 px-4 py-3">
         <SegmentedToggle
-          value={filters.scope}
-          onChange={(v) => update("scope", v)}
+          value={filters.view}
+          onChange={(v) => update("view", v)}
           options={[
-            { value: "mine", label: "Mine tickets" },
-            { value: "all", label: "Alle tickets" },
+            { value: "active", label: "Aktive" },
+            { value: "done", label: "Løste opgaver" },
           ]}
         />
 
@@ -78,7 +81,9 @@ export function TicketsList({
           onChange={(v) => update("status", v as TicketStatus | "all")}
           options={[
             { value: "all", label: "Alle" },
-            ...TICKET_STATUS_ORDER.map((s) => ({ value: s, label: TICKET_STATUS_LABELS[s] })),
+            ...TICKET_STATUS_ORDER.filter((s) => (filters.view === "done" ? s === "done" : s !== "done")).map(
+              (s) => ({ value: s, label: TICKET_STATUS_LABELS[s] }),
+            ),
           ]}
         />
 
@@ -148,21 +153,28 @@ export function TicketsList({
                 </td>
               </tr>
             ) : (
-              filtered.map((t) => (
+              filtered.map((t) => {
+                const isDone = t.status === "done";
+                return (
                 <tr
                   key={t.id}
                   onClick={() => onOpenTicket(t.id)}
-                  className="cursor-pointer transition-colors hover:bg-stone-50"
+                  className={[
+                    "cursor-pointer transition-colors",
+                    isDone ? "bg-stone-50/60 text-stone-500 hover:bg-stone-100" : "hover:bg-stone-50",
+                  ].join(" ")}
                 >
                   <td className="px-4 py-3">
-                    <div className="font-medium text-stone-900">{t.title}</div>
+                    <div className={isDone ? "font-medium text-stone-500 line-through" : "font-medium text-stone-900"}>
+                      {t.title}
+                    </div>
                     {t.description ? (
-                      <div className="mt-0.5 line-clamp-1 text-xs text-stone-500">
+                      <div className="mt-0.5 line-clamp-1 text-xs text-stone-400">
                         {t.description}
                       </div>
                     ) : null}
                   </td>
-                  <td className="px-4 py-3 text-stone-700">
+                  <td className={["px-4 py-3", isDone ? "text-stone-500" : "text-stone-700"].join(" ")}>
                     {t.assignedUser.name}
                   </td>
                   <td className="px-4 py-3">
@@ -174,9 +186,10 @@ export function TicketsList({
                   <td className="px-4 py-3">
                     <TicketStatusBadge status={t.status} />
                   </td>
-                  <td className="px-4 py-3 text-stone-700">{t.createdBy.name}</td>
+                  <td className={["px-4 py-3", isDone ? "text-stone-500" : "text-stone-700"].join(" ")}>{t.createdBy.name}</td>
                 </tr>
-              ))
+                );
+              })
             )}
           </tbody>
         </table>
@@ -251,6 +264,10 @@ function filterTickets(tickets: TicketDto[], f: TicketListFilters): TicketDto[] 
   const inSameWeek = sameWeekChecker(today);
 
   return tickets.filter((t) => {
+    // "view" styrer aktiv vs. løste — done er aldrig blandet ind i Aktive.
+    if (f.view === "active" && t.status === "done") return false;
+    if (f.view === "done" && t.status !== "done") return false;
+
     if (f.status !== "all" && t.status !== f.status) return false;
     if (f.priority !== "all" && t.priority !== f.priority) return false;
     if (f.assigneeId !== "all" && t.assignedUser.id !== f.assigneeId) return false;

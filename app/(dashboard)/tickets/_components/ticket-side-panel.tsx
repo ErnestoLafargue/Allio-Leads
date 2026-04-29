@@ -428,34 +428,53 @@ export function TicketSidePanel(props: Props) {
                 Rediger
               </button>
             ) : null}
-            {isView ? (
+            {isView && ticket?.status === "done" ? (
+              <button
+                type="button"
+                onClick={() => void quickPatch({ status: "open" }, "Kunne ikke genåbne ticket.")}
+                disabled={saving}
+                className="rounded-lg border border-stone-300 bg-white px-3 py-2 text-sm font-medium text-stone-700 transition hover:bg-stone-50 disabled:opacity-60"
+              >
+                Genåbn
+              </button>
+            ) : null}
+            {isView && ticket?.status !== "done" ? (
               <>
+                <button
+                  type="button"
+                  onClick={() => void quickPatch({ hiddenFromDailyUntil: "tomorrow" }, "Kunne ikke udskyde ticket.")}
+                  disabled={saving}
+                  className="rounded-lg border border-amber-300 bg-amber-50 px-3 py-2 text-sm font-medium text-amber-800 transition hover:bg-amber-100 disabled:opacity-60"
+                >
+                  Udskyd til i morgen
+                </button>
+                {ticket?.status !== "in_progress" ? (
+                  <button
+                    type="button"
+                    onClick={() => void quickPatch({ status: "in_progress" }, "Kunne ikke sætte til I gang.")}
+                    disabled={saving}
+                    className="rounded-lg border border-blue-300 bg-blue-50 px-3 py-2 text-sm font-medium text-blue-800 transition hover:bg-blue-100 disabled:opacity-60"
+                  >
+                    I gang
+                  </button>
+                ) : null}
+                {ticket?.status !== "waiting" ? (
+                  <button
+                    type="button"
+                    onClick={() => void quickPatch({ status: "waiting" }, "Kunne ikke sætte til Afventer.")}
+                    disabled={saving}
+                    className="rounded-lg border border-stone-300 bg-stone-50 px-3 py-2 text-sm font-medium text-stone-700 transition hover:bg-stone-100 disabled:opacity-60"
+                  >
+                    Afventer
+                  </button>
+                ) : null}
                 <button
                   type="button"
                   onClick={() => void quickPatch({ status: "done" }, "Kunne ikke markere som færdig.")}
                   disabled={saving}
-                  className="rounded-lg border border-emerald-300 bg-emerald-50 px-3 py-2 text-sm font-medium text-emerald-700 transition hover:bg-emerald-100 disabled:opacity-60"
+                  className="rounded-lg border border-emerald-300 bg-emerald-50 px-3 py-2 text-sm font-medium text-emerald-800 transition hover:bg-emerald-100 disabled:opacity-60"
                 >
-                  Marker som færdig
-                </button>
-                <button
-                  type="button"
-                  onClick={() => {
-                    const tomorrow = new Intl.DateTimeFormat("en-CA", {
-                      timeZone: "Europe/Copenhagen",
-                      year: "numeric",
-                      month: "2-digit",
-                      day: "2-digit",
-                    }).format(new Date(Date.now() + 24 * 3_600_000));
-                    void quickPatch(
-                      { snoozedUntil: tomorrow },
-                      "Kunne ikke udskyde ticket til i morgen.",
-                    );
-                  }}
-                  disabled={saving}
-                  className="rounded-lg border border-amber-300 bg-amber-50 px-3 py-2 text-sm font-medium text-amber-700 transition hover:bg-amber-100 disabled:opacity-60"
-                >
-                  Udskyd til i morgen
+                  Færdig
                 </button>
               </>
             ) : null}

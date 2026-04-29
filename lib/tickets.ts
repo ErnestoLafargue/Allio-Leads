@@ -27,6 +27,7 @@ export type TicketDto = {
   updatedAt: string;
   completedAt: string | null;
   snoozedUntil: string | null;
+  hiddenFromDailyUntil: string | null;
   assignedUser: { id: string; name: string; username: string };
   createdBy: { id: string; name: string; username: string };
 };
@@ -42,6 +43,7 @@ type RawTicket = {
   updatedAt: Date;
   completedAt: Date | null;
   snoozedUntil: Date | null;
+  hiddenFromDailyUntil: Date | null;
   assignedUser: { id: string; name: string; username: string };
   createdBy: { id: string; name: string; username: string };
 };
@@ -58,9 +60,30 @@ function serialize(t: RawTicket): TicketDto {
     updatedAt: t.updatedAt.toISOString(),
     completedAt: t.completedAt ? t.completedAt.toISOString() : null,
     snoozedUntil: t.snoozedUntil ? t.snoozedUntil.toISOString() : null,
+    hiddenFromDailyUntil: t.hiddenFromDailyUntil ? t.hiddenFromDailyUntil.toISOString() : null,
     assignedUser: t.assignedUser,
     createdBy: t.createdBy,
   };
+}
+
+/**
+ * Returnér midnat i Europe/Copenhagen for "i morgen" (relativt til serverens nu).
+ * Bruges til at auto-skjule tickets fra dagskalenderen når status sættes til
+ * "in_progress" eller "waiting" eller når man udskyder.
+ */
+function tomorrowCopenhagenStart(): Date {
+  const today = copenhagenDayKey();
+  const [y, m, d] = today.split("-").map(Number);
+  const nextDayKey = (() => {
+    const utc = Date.UTC(y, m - 1, d) + 86_400_000;
+    return new Intl.DateTimeFormat("en-CA", {
+      timeZone: "UTC",
+      year: "numeric",
+      month: "2-digit",
+      day: "2-digit",
+    }).format(new Date(utc));
+  })();
+  return copenhagenDayBoundsUtcFromDayKey(nextDayKey).start;
 }
 
 export type TicketListFilters = {
@@ -177,6 +200,8 @@ export type UpdateTicketInput = Partial<{
   status: TicketStatus;
   deadlineDayKey: string | null;
   snoozedUntilDayKey: string | null;
+  /** "tomorrow" = sæt til midnat i morgen (Europe/Copenhagen). null = ryd. */
+  hiddenFromDailyUntil: "tomorrow" | null | undefined;
   assignedUserId: string;
 }>;
 
@@ -217,6 +242,18 @@ export async function updateTicket(id: string, input: UpdateTicketInput): Promis
     }
     data.status = input.status;
     data.completedAt = input.status === "done" ? new Date() : null;
+    // Auto-skjul ticket fra dagskalenderen når status går til "i gang" eller "afventer".
+    // "open" eller "done" rydder skjul-feltet, så ticketen kan være aktiv igen.
+    if (input.status === "in_progress" || input.status === "waiting") {
+      data.hiddenFromDailyUntil = tomorrowCopenhagenStart();
+    } else if (input.status === "open" || input.status === "done") {
+      data.hiddenFromDailyUntil = null;
+    }
+  }
+  // Eksplicit override af hiddenFromDailyUntil (har forrang over status-auto)
+  if (input.hiddenFromDailyUntil !== undefined) {
+    data.hiddenFromDailyUntil =
+      input.hiddenFromDailyUntil === "tomorrow" ? tomorrowCopenhagenStart() : null;
   }
 
   const row = await prisma.ticket.update({
@@ -307,7 +344,15 @@ export async function getDailyTicketQueue(
     where: {
       assignedUserId: userId,
       status: { not: "done" },
-      OR: [{ snoozedUntil: null }, { snoozedUntil: { lte: selectedStart } }],
+      AND: [
+        { OR: [{ snoozedUntil: null }, { snoozedUntil: { lte: selectedStart } }] },
+        {
+          OR: [
+            { hiddenFromDailyUntil: null },
+            { hiddenFromDailyUntil: { lte: selectedStart } },
+          ],
+        },
+      ],
     },
     include: TICKET_INCLUDE,
   });

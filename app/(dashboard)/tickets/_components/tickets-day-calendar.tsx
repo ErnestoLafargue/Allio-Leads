@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { TicketPriorityBadge } from "./ticket-priority-badge";
 import { TicketStatusBadge } from "./ticket-status-badge";
 import { TicketDeadlineLabel } from "./ticket-deadline-label";
@@ -63,69 +63,71 @@ export function TicketsDayCalendar({
   const [queue, setQueue] = useState<TicketDto[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [pendingId, setPendingId] = useState<string | null>(null);
 
   const today = todayKey();
 
-  useEffect(() => {
-    let cancelled = false;
-    async function loadQueue() {
+  const loadQueue = useCallback(
+    async (signal?: AbortSignal) => {
       setLoading(true);
       setError(null);
       try {
         const res = await fetch(
           `/api/tickets/daily-queue?userId=${encodeURIComponent(selectedUserId)}&date=${encodeURIComponent(selectedDayKey)}`,
+          { signal },
         );
         const data = await res.json().catch(() => ({}));
         if (!res.ok) {
-          if (!cancelled) setError(typeof data.error === "string" ? data.error : "Kunne ikke hente dagskø.");
+          setError(typeof data.error === "string" ? data.error : "Kunne ikke hente dagskø.");
           return;
         }
-        if (!cancelled) setQueue((data.queue ?? []) as TicketDto[]);
-      } catch {
-        if (!cancelled) setError("Netværksfejl ved hentning af dagskø.");
+        setQueue((data.queue ?? []) as TicketDto[]);
+      } catch (err) {
+        if ((err as { name?: string } | null)?.name === "AbortError") return;
+        setError("Netværksfejl ved hentning af dagskø.");
       } finally {
-        if (!cancelled) setLoading(false);
+        setLoading(false);
       }
-    }
-    void loadQueue();
-    return () => {
-      cancelled = true;
-    };
-  }, [selectedUserId, selectedDayKey]);
+    },
+    [selectedUserId, selectedDayKey],
+  );
+
+  useEffect(() => {
+    const ctrl = new AbortController();
+    void loadQueue(ctrl.signal);
+    return () => ctrl.abort();
+  }, [loadQueue]);
 
   const isViewerSelected = selectedUserId === viewerId;
   const selectedUser = assignees.find((u) => u.id === selectedUserId);
   const selectedDayLabel = selectedDayKey === today ? "I dag" : dayKeyToDisplay(selectedDayKey);
 
-  async function snoozeToTomorrow(ticket: TicketDto) {
-    const tomorrow = shiftDayKey(todayKey(), 1);
-    const res = await fetch(`/api/tickets/${ticket.id}`, {
-      method: "PATCH",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ snoozedUntil: tomorrow }),
-    });
-    const data = await res.json().catch(() => ({}));
-    if (!res.ok) {
-      setError(typeof data.error === "string" ? data.error : "Kunne ikke udskyde ticket.");
-      return;
+  /**
+   * Generic action: PATCH ticket → drop fra lokal queue → genhent kø så den fyldes op.
+   */
+  async function applyAction(ticket: TicketDto, payload: Record<string, unknown>, errorText: string) {
+    setPendingId(ticket.id);
+    setError(null);
+    try {
+      const res = await fetch(`/api/tickets/${ticket.id}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        setError(typeof data.error === "string" ? data.error : errorText);
+        setPendingId(null);
+        return;
+      }
+      onTicketUpdated(data.ticket as TicketDto);
+      // Optimistisk fjern fra liste, så UI'et reagerer øjeblikkeligt
+      setQueue((prev) => prev.filter((t) => t.id !== ticket.id));
+      // Genberegn dagskøen så lavere prioriteter fylder op igen
+      await loadQueue();
+    } finally {
+      setPendingId(null);
     }
-    onTicketUpdated(data.ticket as TicketDto);
-    setQueue((prev) => prev.filter((t) => t.id !== ticket.id));
-  }
-
-  async function markDone(ticket: TicketDto) {
-    const res = await fetch(`/api/tickets/${ticket.id}`, {
-      method: "PATCH",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ status: "done" }),
-    });
-    const data = await res.json().catch(() => ({}));
-    if (!res.ok) {
-      setError(typeof data.error === "string" ? data.error : "Kunne ikke markere som færdig.");
-      return;
-    }
-    onTicketUpdated(data.ticket as TicketDto);
-    setQueue((prev) => prev.filter((t) => t.id !== ticket.id));
   }
 
   return (
@@ -199,11 +201,13 @@ export function TicketsDayCalendar({
           <p className="mt-0.5 text-base font-semibold text-stone-900 first-letter:uppercase">
             {selectedDayLabel}
           </p>
-          <p className="mt-1 text-xs text-stone-500">Her er de vigtigste tickets at arbejde på i dag.</p>
+          <p className="mt-1 text-xs text-stone-500">
+            Aktiv arbejdsliste — sættes til I gang, Afventer, Færdig eller udskydes til i morgen.
+          </p>
         </div>
 
         {error ? <p className="mb-2 text-xs text-red-600">{error}</p> : null}
-        {loading ? (
+        {loading && queue.length === 0 ? (
           <p className="rounded-xl border border-stone-200 bg-stone-50 px-3 py-4 text-sm text-stone-500">Henter dagskalender…</p>
         ) : queue.length === 0 ? (
           <p className="rounded-xl border border-dashed border-stone-300 bg-stone-50 px-3 py-6 text-center text-sm text-stone-500">
@@ -215,9 +219,20 @@ export function TicketsDayCalendar({
               <TicketCard
                 key={t.id}
                 ticket={t}
+                pending={pendingId === t.id}
                 onOpen={onOpenTicket}
-                onSnooze={snoozeToTomorrow}
-                onDone={markDone}
+                onSnooze={(tk) =>
+                  applyAction(tk, { hiddenFromDailyUntil: "tomorrow" }, "Kunne ikke udskyde ticket.")
+                }
+                onSetInProgress={(tk) =>
+                  applyAction(tk, { status: "in_progress" }, "Kunne ikke sætte til I gang.")
+                }
+                onSetWaiting={(tk) =>
+                  applyAction(tk, { status: "waiting" }, "Kunne ikke sætte til Afventer.")
+                }
+                onDone={(tk) =>
+                  applyAction(tk, { status: "done" }, "Kunne ikke markere som færdig.")
+                }
               />
             ))}
           </div>
@@ -229,26 +244,44 @@ export function TicketsDayCalendar({
 
 function TicketCard({
   ticket,
+  pending,
   onOpen,
   onSnooze,
+  onSetInProgress,
+  onSetWaiting,
   onDone,
 }: {
   ticket: TicketDto;
+  pending: boolean;
   onOpen: (id: string) => void;
   onSnooze: (ticket: TicketDto) => void;
+  onSetInProgress: (ticket: TicketDto) => void;
+  onSetWaiting: (ticket: TicketDto) => void;
   onDone: (ticket: TicketDto) => void;
 }) {
   const overdue = ticket.deadline ? ticket.deadline < todayKey() : false;
 
+  function stop(e: React.MouseEvent) {
+    e.stopPropagation();
+  }
+
   return (
-    <button
-      type="button"
+    <div
+      role="button"
+      tabIndex={0}
       onClick={() => onOpen(ticket.id)}
+      onKeyDown={(e) => {
+        if (e.key === "Enter" || e.key === " ") {
+          e.preventDefault();
+          onOpen(ticket.id);
+        }
+      }}
       className={[
-        "block w-full rounded-xl border px-3 py-3 text-left transition",
+        "block w-full cursor-pointer rounded-xl border px-3 py-3 text-left transition",
         overdue
           ? "border-red-200 bg-red-50/70 hover:bg-red-50"
           : "border-stone-200 bg-white hover:bg-stone-50",
+        pending ? "opacity-60" : "",
       ].join(" ")}
     >
       <div className="flex items-start justify-between gap-2">
@@ -262,28 +295,68 @@ function TicketCard({
         <span className="text-stone-300" aria-hidden>·</span>
         <TicketStatusBadge status={ticket.status} />
       </div>
-      <div className="mt-2.5 flex gap-2">
-        <button
-          type="button"
-          onClick={(e) => {
-            e.stopPropagation();
-            onDone(ticket);
-          }}
-          className="rounded-lg border border-emerald-300 bg-emerald-50 px-2 py-1 text-[11px] font-semibold text-emerald-700"
-        >
-          Marker som færdig
-        </button>
-        <button
-          type="button"
-          onClick={(e) => {
-            e.stopPropagation();
-            onSnooze(ticket);
-          }}
-          className="rounded-lg border border-amber-300 bg-amber-50 px-2 py-1 text-[11px] font-semibold text-amber-700"
-        >
-          Udskyd til i morgen
-        </button>
+      <div className="mt-2.5 flex flex-wrap gap-1.5" onClick={stop}>
+        <ActionButton
+          tone="amber"
+          disabled={pending}
+          onClick={() => onSnooze(ticket)}
+          label="Udskyd til i morgen"
+        />
+        <ActionButton
+          tone="blue"
+          disabled={pending || ticket.status === "in_progress"}
+          onClick={() => onSetInProgress(ticket)}
+          label="I gang"
+        />
+        <ActionButton
+          tone="stone"
+          disabled={pending || ticket.status === "waiting"}
+          onClick={() => onSetWaiting(ticket)}
+          label="Afventer"
+        />
+        <ActionButton
+          tone="emerald"
+          disabled={pending}
+          onClick={() => onDone(ticket)}
+          label="Færdig"
+        />
       </div>
+    </div>
+  );
+}
+
+const TONE_CLASSES: Record<"amber" | "blue" | "stone" | "emerald", string> = {
+  amber: "border-amber-300 bg-amber-50 text-amber-800 hover:bg-amber-100",
+  blue: "border-blue-300 bg-blue-50 text-blue-800 hover:bg-blue-100",
+  stone: "border-stone-300 bg-stone-50 text-stone-700 hover:bg-stone-100",
+  emerald: "border-emerald-300 bg-emerald-50 text-emerald-800 hover:bg-emerald-100",
+};
+
+function ActionButton({
+  tone,
+  disabled,
+  onClick,
+  label,
+}: {
+  tone: keyof typeof TONE_CLASSES;
+  disabled: boolean;
+  onClick: () => void;
+  label: string;
+}) {
+  return (
+    <button
+      type="button"
+      disabled={disabled}
+      onClick={(e) => {
+        e.stopPropagation();
+        onClick();
+      }}
+      className={[
+        "inline-flex h-7 items-center justify-center rounded-md border px-2.5 text-[11px] font-semibold leading-none whitespace-nowrap transition disabled:cursor-not-allowed disabled:opacity-50",
+        TONE_CLASSES[tone],
+      ].join(" ")}
+    >
+      {label}
     </button>
   );
 }

@@ -39,7 +39,8 @@ export function TicketDeadlineLabel({ deadline, className }: Props) {
     return () => window.clearInterval(id);
   }, []);
 
-  const base = "inline-flex items-center rounded-md px-2 py-1 text-[11px] font-medium";
+  const base =
+    "inline-flex h-6 items-center justify-center rounded-md px-2.5 text-[11px] font-medium leading-none whitespace-nowrap";
 
   if (!deadline) {
     return (
@@ -52,14 +53,14 @@ export function TicketDeadlineLabel({ deadline, className }: Props) {
   if (isDeadlineOverdue(date, now)) {
     return (
       <span className={[base, "bg-red-100 text-red-800", className ?? ""].join(" ")}>
-        Deadline overskredet · {SHORT_FORMATTER.format(date)}
+        Overskredet · {SHORT_FORMATTER.format(date)}
       </span>
     );
   }
   if (isDeadlineSoon(date, now)) {
     return (
       <span className={[base, "bg-orange-100 text-orange-800", className ?? ""].join(" ")}>
-        Deadline nærmer sig · {SHORT_FORMATTER.format(date)}
+        Snart · {SHORT_FORMATTER.format(date)}
       </span>
     );
   }
