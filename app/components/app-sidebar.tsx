@@ -219,11 +219,14 @@ const SIDEBAR_SECTIONS: SidebarSection[] = [
     ],
   },
   {
-    kind: "link",
+    kind: "group",
     id: "tickets",
-    href: "/tickets",
     label: "Tickets",
     icon: TicketsIcon,
+    items: [
+      { href: "/tickets/mine", label: "Mine tickets" },
+      { href: "/tickets/all", label: "Alle tickets" },
+    ],
   },
   {
     kind: "group",
@@ -254,6 +257,7 @@ export function AppSidebar({
   const [adminOpen, setAdminOpen] = useState(false);
   const [meetingsOpen, setMeetingsOpen] = useState(false);
   const [leadsOpen, setLeadsOpen] = useState(false);
+  const [ticketsOpen, setTicketsOpen] = useState(false);
   const [mobileOpen, setMobileOpen] = useState(false);
 
   const isAdmin = role === "ADMIN";
@@ -279,6 +283,7 @@ export function AppSidebar({
   const meetingsActive = useMemo(() => linkActive("/meetings"), [linkActive]);
 
   const leadsActive = useMemo(() => (pathname ?? "").startsWith("/leads"), [pathname]);
+  const ticketsActive = useMemo(() => (pathname ?? "").startsWith("/tickets"), [pathname]);
 
   useEffect(() => {
     if (!mobileOpen) return;
@@ -364,13 +369,16 @@ export function AppSidebar({
                 const isAdminGroup = s.id === "admin";
                 const isMeetingsGroup = s.id === "meetings";
                 const isLeadsGroup = s.id === "leads";
+                const isTicketsGroup = s.id === "tickets";
                 const open = isAdminGroup
                   ? adminOpen || adminActive
                   : isMeetingsGroup
                     ? meetingsOpen || meetingsActive
                     : isLeadsGroup
                       ? leadsOpen || leadsActive
-                      : false;
+                      : isTicketsGroup
+                        ? ticketsOpen || ticketsActive
+                        : false;
                 return (
                   <div key={s.id}>
                     <button
@@ -379,6 +387,7 @@ export function AppSidebar({
                         if (isAdminGroup) setAdminOpen((v) => !v);
                         if (isMeetingsGroup) setMeetingsOpen((v) => !v);
                         if (isLeadsGroup) setLeadsOpen((v) => !v);
+                        if (isTicketsGroup) setTicketsOpen((v) => !v);
                       }}
                       aria-expanded={open}
                       className={[
@@ -452,6 +461,7 @@ export function AppSidebar({
           if (!adminActive) setAdminOpen(false);
           if (!meetingsActive) setMeetingsOpen(false);
           if (!leadsActive) setLeadsOpen(false);
+          if (!ticketsActive) setTicketsOpen(false);
         }}
         onFocus={() => setHovered(true)}
         onBlur={(e) => {
@@ -460,6 +470,7 @@ export function AppSidebar({
             if (!adminActive) setAdminOpen(false);
             if (!meetingsActive) setMeetingsOpen(false);
             if (!leadsActive) setLeadsOpen(false);
+            if (!ticketsActive) setTicketsOpen(false);
           }
         }}
         aria-label="Hovednavigation"
@@ -530,13 +541,16 @@ export function AppSidebar({
             const isAdminGroup = s.id === "admin";
             const isMeetingsGroup = s.id === "meetings";
             const isLeadsGroup = s.id === "leads";
+            const isTicketsGroup = s.id === "tickets";
             const groupHighlighted = isAdminGroup
               ? adminActive
               : isMeetingsGroup
                 ? meetingsActive
                 : isLeadsGroup
                   ? leadsActive
-                  : false;
+                  : isTicketsGroup
+                    ? ticketsActive
+                    : false;
             const open = expanded
               ? isAdminGroup
                 ? adminOpen || adminActive
@@ -544,6 +558,8 @@ export function AppSidebar({
                   ? meetingsOpen || meetingsActive
                   : isLeadsGroup
                     ? leadsOpen || leadsActive
+                    : isTicketsGroup
+                      ? ticketsOpen || ticketsActive
                     : false
               : false;
             return (
@@ -555,6 +571,7 @@ export function AppSidebar({
                     if (isAdminGroup) setAdminOpen((v) => !v);
                     if (isMeetingsGroup) setMeetingsOpen((v) => !v);
                     if (isLeadsGroup) setLeadsOpen((v) => !v);
+                    if (isTicketsGroup) setTicketsOpen((v) => !v);
                   }}
                   aria-expanded={open}
                   title={!expanded ? s.label : undefined}

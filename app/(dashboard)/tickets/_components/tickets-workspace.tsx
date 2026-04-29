@@ -12,6 +12,7 @@ import type { AssignableUser, TicketDto, TicketsViewer } from "./tickets-shared"
 
 type Props = {
   viewer: TicketsViewer;
+  mode: "mine" | "all";
 };
 
 function todayDayKey(): string {
@@ -23,13 +24,17 @@ function todayDayKey(): string {
   }).format(new Date());
 }
 
-export function TicketsWorkspace({ viewer }: Props) {
+export function TicketsWorkspace({ viewer, mode }: Props) {
   const [tickets, setTickets] = useState<TicketDto[]>([]);
   const [assignees, setAssignees] = useState<AssignableUser[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
-  const [filters, setFilters] = useState<TicketListFilters>(DEFAULT_LIST_FILTERS);
+  const [filters, setFilters] = useState<TicketListFilters>({
+    ...DEFAULT_LIST_FILTERS,
+    scope: mode === "mine" ? "mine" : "all",
+  });
+  const [filtersOpen, setFiltersOpen] = useState(false);
 
   const [panelOpen, setPanelOpen] = useState(false);
   const [panelMode, setPanelMode] = useState<TicketSidePanelMode>("create");
@@ -47,8 +52,6 @@ export function TicketsWorkspace({ viewer }: Props) {
     setLoading(true);
     setError(null);
     try {
-      // Vi henter altid alle tickets — filtrering for "Mine tickets" sker klient-side
-      // så dagskalenderen kan vise alle assignees uden ekstra request.
       const res = await fetch("/api/tickets?scope=all");
       if (!res.ok) {
         const data = await res.json().catch(() => ({}));
@@ -86,11 +89,11 @@ export function TicketsWorkspace({ viewer }: Props) {
 
   // Klient-side scope: tickets jeg er tildelt eller har oprettet.
   const ticketsForList = useMemo(() => {
-    if (filters.scope === "all") return tickets;
+    if (mode === "all" && filters.scope === "all") return tickets;
     return tickets.filter(
       (t) => t.assignedUser.id === viewer.id || t.createdBy.id === viewer.id,
     );
-  }, [tickets, filters.scope, viewer.id]);
+  }, [tickets, mode, filters.scope, viewer.id]);
 
   function handleOpenCreate() {
     setPanelTicketId(null);
@@ -128,21 +131,34 @@ export function TicketsWorkspace({ viewer }: Props) {
     <div className="space-y-4">
       <header className="flex flex-wrap items-center justify-between gap-3">
         <div>
-          <h1 className="text-xl font-semibold text-stone-900">Tickets</h1>
+          <h1 className="text-2xl font-semibold tracking-tight text-stone-900">
+            {mode === "mine" ? "Mine tickets" : "Alle tickets"}
+          </h1>
           <p className="mt-1 text-sm text-stone-600">
-            Internt opgavestyringssystem — opret, tildel og prioritér interne tasks.
+            {mode === "mine"
+              ? "Overblik over dine opgaver og dagens vigtigste fokus."
+              : "Komplet overblik over alle tickets i systemet."}
           </p>
         </div>
-        <button
-          type="button"
-          onClick={handleOpenCreate}
-          className="inline-flex items-center gap-1.5 rounded-lg bg-emerald-600 px-3.5 py-2 text-sm font-semibold text-white shadow-sm transition hover:bg-emerald-700"
-        >
-          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
-            <path d="M12 5v14M5 12h14" />
-          </svg>
-          Opret ticket
-        </button>
+        <div className="flex items-center gap-2">
+          <button
+            type="button"
+            onClick={() => setFiltersOpen((v) => !v)}
+            className="inline-flex items-center gap-1.5 rounded-xl border border-stone-300 bg-white px-3.5 py-2 text-sm font-semibold text-stone-700 shadow-sm transition hover:bg-stone-50"
+          >
+            Filter
+          </button>
+          <button
+            type="button"
+            onClick={handleOpenCreate}
+            className="inline-flex items-center gap-1.5 rounded-xl bg-emerald-600 px-3.5 py-2 text-sm font-semibold text-white shadow-sm transition hover:bg-emerald-700"
+          >
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+              <path d="M12 5v14M5 12h14" />
+            </svg>
+            Opret ticket
+          </button>
+        </div>
       </header>
 
       {error ? (
@@ -151,7 +167,21 @@ export function TicketsWorkspace({ viewer }: Props) {
         </p>
       ) : null}
 
-      <div className="grid gap-4 lg:grid-cols-[minmax(0,1.6fr)_minmax(0,1fr)]">
+      {filtersOpen ? (
+        <div className="rounded-2xl border border-stone-200 bg-white p-3 shadow-sm">
+          <TicketsList
+            tickets={ticketsForList}
+            filters={filters}
+            onFiltersChange={setFilters}
+            assignees={assignees}
+            loading={loading}
+            onOpenTicket={handleOpenTicket}
+            filterOnly
+          />
+        </div>
+      ) : null}
+
+      <div className={`grid gap-5 ${mode === "mine" ? "lg:grid-cols-[minmax(0,1.5fr)_minmax(360px,1fr)]" : "grid-cols-1"}`}>
         <TicketsList
           tickets={ticketsForList}
           filters={filters}
@@ -159,17 +189,20 @@ export function TicketsWorkspace({ viewer }: Props) {
           assignees={assignees}
           loading={loading}
           onOpenTicket={handleOpenTicket}
+          hideFilters
         />
-        <TicketsDayCalendar
-          tickets={tickets}
-          selectedUserId={calendarUserId}
-          onSelectedUserIdChange={setCalendarUserId}
-          selectedDayKey={calendarDayKey}
-          onSelectedDayKeyChange={setCalendarDayKey}
-          assignees={assignees}
-          viewerId={viewer.id}
-          onOpenTicket={handleOpenTicket}
-        />
+        {mode === "mine" ? (
+          <TicketsDayCalendar
+            selectedUserId={calendarUserId}
+            onSelectedUserIdChange={setCalendarUserId}
+            selectedDayKey={calendarDayKey}
+            onSelectedDayKeyChange={setCalendarDayKey}
+            assignees={assignees}
+            viewerId={viewer.id}
+            onOpenTicket={handleOpenTicket}
+            onTicketUpdated={handleSaved}
+          />
+        ) : null}
       </div>
 
       <TicketSidePanel

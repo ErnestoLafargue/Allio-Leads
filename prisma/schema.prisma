@@ -367,6 +367,8 @@ model Ticket {
   updatedAt       DateTime  @updatedAt
   /// Sættes når status skifter til "done"; nulstilles hvis status ændres tilbage.
   completedAt     DateTime?
+  /// "Udskyd til i morgen": skjules fra dagskalender indtil dette tidspunkt.
+  snoozedUntil    DateTime?
 
   assignedUser User @relation("TicketAssignedTo", fields: [assignedUserId], references: [id], onDelete: Restrict)
   createdBy    User @relation("TicketCreatedBy", fields: [createdByUserId], references: [id], onDelete: Restrict)
@@ -374,4 +376,5 @@ model Ticket {
   @@index([assignedUserId, status, deadline])
   @@index([status, deadline])
   @@index([createdByUserId])
+  @@index([assignedUserId, snoozedUntil])
 }

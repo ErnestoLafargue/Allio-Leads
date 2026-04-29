@@ -195,6 +195,29 @@ export function TicketSidePanel(props: Props) {
     }
   }
 
+  async function quickPatch(payload: Record<string, unknown>, fallbackError: string) {
+    if (!ticket) return;
+    setSaving(true);
+    setError(null);
+    try {
+      const res = await fetch(`/api/tickets/${ticket.id}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        setError(typeof data.error === "string" ? data.error : fallbackError);
+        return;
+      }
+      onSaved(data.ticket as TicketDto);
+    } catch {
+      setError(fallbackError);
+    } finally {
+      setSaving(false);
+    }
+  }
+
   function handleKeyDown(e: React.KeyboardEvent<HTMLDivElement>) {
     if (!isFormMode) return;
     // Cmd/Ctrl+Enter submitter formularen
@@ -404,6 +427,37 @@ export function TicketSidePanel(props: Props) {
               >
                 Rediger
               </button>
+            ) : null}
+            {isView ? (
+              <>
+                <button
+                  type="button"
+                  onClick={() => void quickPatch({ status: "done" }, "Kunne ikke markere som færdig.")}
+                  disabled={saving}
+                  className="rounded-lg border border-emerald-300 bg-emerald-50 px-3 py-2 text-sm font-medium text-emerald-700 transition hover:bg-emerald-100 disabled:opacity-60"
+                >
+                  Marker som færdig
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    const tomorrow = new Intl.DateTimeFormat("en-CA", {
+                      timeZone: "Europe/Copenhagen",
+                      year: "numeric",
+                      month: "2-digit",
+                      day: "2-digit",
+                    }).format(new Date(Date.now() + 24 * 3_600_000));
+                    void quickPatch(
+                      { snoozedUntil: tomorrow },
+                      "Kunne ikke udskyde ticket til i morgen.",
+                    );
+                  }}
+                  disabled={saving}
+                  className="rounded-lg border border-amber-300 bg-amber-50 px-3 py-2 text-sm font-medium text-amber-700 transition hover:bg-amber-100 disabled:opacity-60"
+                >
+                  Udskyd til i morgen
+                </button>
+              </>
             ) : null}
             {isFormMode ? (
               <button

@@ -1,19 +1,12 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
-import {
-  TICKET_PRIORITY_LABELS,
-} from "@/lib/ticket-priority";
-import { calculateUrgency, sortTicketsByUrgency } from "@/lib/ticket-urgency";
-import { isActiveTicketStatus } from "@/lib/ticket-status";
+import { useEffect, useState } from "react";
 import { TicketPriorityBadge } from "./ticket-priority-badge";
 import { TicketStatusBadge } from "./ticket-status-badge";
 import { TicketDeadlineLabel } from "./ticket-deadline-label";
 import type { AssignableUser, TicketDto } from "./tickets-shared";
 
 type Props = {
-  tickets: TicketDto[];
-  /** Den bruger hvis dag vi ser. */
   selectedUserId: string;
   onSelectedUserIdChange: (id: string) => void;
   selectedDayKey: string;
@@ -21,6 +14,7 @@ type Props = {
   assignees: AssignableUser[];
   viewerId: string;
   onOpenTicket: (id: string) => void;
+  onTicketUpdated: (ticket: TicketDto) => void;
 };
 
 const DAY_HEADER_FORMATTER = new Intl.DateTimeFormat("da-DK", {
@@ -56,13 +50,7 @@ function shiftDayKey(dayKey: string, deltaDays: number): string {
   }).format(dt);
 }
 
-function dayKeyToEndOfDayUtc(dayKey: string): Date {
-  const [y, m, d] = dayKey.split("-").map(Number);
-  return new Date(Date.UTC(y, m - 1, d, 22, 59, 59));
-}
-
 export function TicketsDayCalendar({
-  tickets,
   selectedUserId,
   onSelectedUserIdChange,
   selectedDayKey,
@@ -70,70 +58,78 @@ export function TicketsDayCalendar({
   assignees,
   viewerId,
   onOpenTicket,
+  onTicketUpdated,
 }: Props) {
-  const [now, setNow] = useState(() => new Date());
-  const [showNoDeadline, setShowNoDeadline] = useState(false);
-
-  useEffect(() => {
-    const id = window.setInterval(() => setNow(new Date()), 60_000);
-    return () => window.clearInterval(id);
-  }, []);
+  const [queue, setQueue] = useState<TicketDto[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
 
   const today = todayKey();
 
-  const { overdue, active, noDeadline, doneCount } = useMemo(() => {
-    const myTickets = tickets.filter((t) => t.assignedUser.id === selectedUserId);
-
-    const overdue: TicketDto[] = [];
-    const active: TicketDto[] = [];
-    const noDeadline: TicketDto[] = [];
-    let doneCount = 0;
-
-    for (const t of myTickets) {
-      if (t.status === "done") {
-        doneCount += 1;
-        continue;
-      }
-      if (!t.deadline) {
-        noDeadline.push(t);
-        continue;
-      }
-      // Overdue: deadline før i dag (uanset valgt dag)
-      if (t.deadline < today) {
-        overdue.push(t);
-        continue;
-      }
-      // Active: vises hvis deadline matcher den valgte dag
-      if (t.deadline === selectedDayKey) {
-        active.push(t);
+  useEffect(() => {
+    let cancelled = false;
+    async function loadQueue() {
+      setLoading(true);
+      setError(null);
+      try {
+        const res = await fetch(
+          `/api/tickets/daily-queue?userId=${encodeURIComponent(selectedUserId)}&date=${encodeURIComponent(selectedDayKey)}`,
+        );
+        const data = await res.json().catch(() => ({}));
+        if (!res.ok) {
+          if (!cancelled) setError(typeof data.error === "string" ? data.error : "Kunne ikke hente dagskø.");
+          return;
+        }
+        if (!cancelled) setQueue((data.queue ?? []) as TicketDto[]);
+      } catch {
+        if (!cancelled) setError("Netværksfejl ved hentning af dagskø.");
+      } finally {
+        if (!cancelled) setLoading(false);
       }
     }
-
-    const sortedActive = sortTicketsByUrgency(
-      active.map((t) => ({
-        ...t,
-        deadline: t.deadline ? dayKeyToEndOfDayUtc(t.deadline) : null,
-      })),
-      now,
-    ).map((t) => myTickets.find((m) => m.id === t.id)!).filter(Boolean);
-
-    const sortedOverdue = sortTicketsByUrgency(
-      overdue.map((t) => ({
-        ...t,
-        deadline: t.deadline ? dayKeyToEndOfDayUtc(t.deadline) : null,
-      })),
-      now,
-    ).map((t) => myTickets.find((m) => m.id === t.id)!).filter(Boolean);
-
-    return { overdue: sortedOverdue, active: sortedActive, noDeadline, doneCount };
-  }, [tickets, selectedUserId, selectedDayKey, today, now]);
+    void loadQueue();
+    return () => {
+      cancelled = true;
+    };
+  }, [selectedUserId, selectedDayKey]);
 
   const isViewerSelected = selectedUserId === viewerId;
   const selectedUser = assignees.find((u) => u.id === selectedUserId);
   const selectedDayLabel = selectedDayKey === today ? "I dag" : dayKeyToDisplay(selectedDayKey);
 
+  async function snoozeToTomorrow(ticket: TicketDto) {
+    const tomorrow = shiftDayKey(todayKey(), 1);
+    const res = await fetch(`/api/tickets/${ticket.id}`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ snoozedUntil: tomorrow }),
+    });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) {
+      setError(typeof data.error === "string" ? data.error : "Kunne ikke udskyde ticket.");
+      return;
+    }
+    onTicketUpdated(data.ticket as TicketDto);
+    setQueue((prev) => prev.filter((t) => t.id !== ticket.id));
+  }
+
+  async function markDone(ticket: TicketDto) {
+    const res = await fetch(`/api/tickets/${ticket.id}`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ status: "done" }),
+    });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) {
+      setError(typeof data.error === "string" ? data.error : "Kunne ikke markere som færdig.");
+      return;
+    }
+    onTicketUpdated(data.ticket as TicketDto);
+    setQueue((prev) => prev.filter((t) => t.id !== ticket.id));
+  }
+
   return (
-    <section className="flex flex-col rounded-2xl border border-stone-200 bg-white shadow-sm">
+    <section className="flex flex-col rounded-2xl border border-stone-200 bg-white shadow-[0_12px_30px_rgba(15,23,42,0.05)]">
       <header className="flex flex-col gap-2 border-b border-stone-200 px-4 py-3">
         <div className="flex items-center justify-between gap-2">
           <h2 className="text-sm font-semibold text-stone-900">Dagskalender</h2>
@@ -203,123 +199,57 @@ export function TicketsDayCalendar({
           <p className="mt-0.5 text-base font-semibold text-stone-900 first-letter:uppercase">
             {selectedDayLabel}
           </p>
+          <p className="mt-1 text-xs text-stone-500">Her er de vigtigste tickets at arbejde på i dag.</p>
         </div>
 
-        {overdue.length > 0 ? (
-          <Section
-            label="Deadline overskredet"
-            tone="danger"
-            count={overdue.length}
-          >
-            {overdue.map((t) => (
-              <TicketCard key={t.id} ticket={t} now={now} onOpen={onOpenTicket} />
-            ))}
-          </Section>
-        ) : null}
-
-        <Section label="Aktive opgaver" tone="default" count={active.length}>
-          {active.length === 0 ? (
-            <p className="rounded-lg border border-dashed border-stone-300 bg-stone-50 px-3 py-4 text-center text-xs text-stone-500">
-              Ingen aktive tickets med deadline {selectedDayKey === today ? "i dag" : "den valgte dag"}.
-            </p>
-          ) : (
-            active.map((t) => (
-              <TicketCard key={t.id} ticket={t} now={now} onOpen={onOpenTicket} />
-            ))
-          )}
-        </Section>
-
-        {noDeadline.length > 0 ? (
-          <details
-            open={showNoDeadline}
-            onToggle={(e) => setShowNoDeadline((e.target as HTMLDetailsElement).open)}
-            className="mt-4 rounded-lg border border-stone-200 bg-stone-50/60 px-3 py-2"
-          >
-            <summary className="cursor-pointer list-none text-xs font-medium text-stone-600">
-              <span className="inline-flex items-center gap-1">
-                <span>{showNoDeadline ? "▾" : "▸"}</span>
-                Uden deadline ({noDeadline.length})
-              </span>
-            </summary>
-            <div className="mt-2 space-y-1.5">
-              {noDeadline.map((t) => (
-                <TicketCard key={t.id} ticket={t} now={now} onOpen={onOpenTicket} />
-              ))}
-            </div>
-          </details>
-        ) : null}
-
-        {doneCount > 0 ? (
-          <p className="mt-4 text-[11px] text-stone-500">
-            {doneCount} færdig{doneCount === 1 ? "" : "e"} ticket{doneCount === 1 ? "" : "s"} skjult — synlige via filter «Færdig» i listen.
+        {error ? <p className="mb-2 text-xs text-red-600">{error}</p> : null}
+        {loading ? (
+          <p className="rounded-xl border border-stone-200 bg-stone-50 px-3 py-4 text-sm text-stone-500">Henter dagskalender…</p>
+        ) : queue.length === 0 ? (
+          <p className="rounded-xl border border-dashed border-stone-300 bg-stone-50 px-3 py-6 text-center text-sm text-stone-500">
+            Ingen aktive tickets for i dag
           </p>
-        ) : null}
+        ) : (
+          <div className="space-y-2.5">
+            {queue.map((t) => (
+              <TicketCard
+                key={t.id}
+                ticket={t}
+                onOpen={onOpenTicket}
+                onSnooze={snoozeToTomorrow}
+                onDone={markDone}
+              />
+            ))}
+          </div>
+        )}
       </div>
     </section>
   );
 }
 
-function Section({
-  label,
-  tone,
-  count,
-  children,
-}: {
-  label: string;
-  tone: "danger" | "default";
-  count: number;
-  children: React.ReactNode;
-}) {
-  return (
-    <div className="mb-4 last:mb-0">
-      <div className="mb-2 flex items-center justify-between">
-        <h3
-          className={[
-            "text-[11px] font-semibold uppercase tracking-wide",
-            tone === "danger" ? "text-red-700" : "text-stone-600",
-          ].join(" ")}
-        >
-          {label}
-        </h3>
-        <span className="text-[11px] font-medium text-stone-400">{count}</span>
-      </div>
-      <div className="space-y-1.5">{children}</div>
-    </div>
-  );
-}
-
 function TicketCard({
   ticket,
-  now,
   onOpen,
+  onSnooze,
+  onDone,
 }: {
   ticket: TicketDto;
-  now: Date;
   onOpen: (id: string) => void;
+  onSnooze: (ticket: TicketDto) => void;
+  onDone: (ticket: TicketDto) => void;
 }) {
-  const urgency = calculateUrgency(
-    {
-      priority: ticket.priority,
-      status: ticket.status,
-      deadline: ticket.deadline ? dayKeyToEndOfDayUtc(ticket.deadline) : null,
-    },
-    now,
-  );
   const overdue = ticket.deadline ? ticket.deadline < todayKey() : false;
-  const inactive = !isActiveTicketStatus(ticket.status);
 
   return (
     <button
       type="button"
       onClick={() => onOpen(ticket.id)}
       className={[
-        "block w-full rounded-lg border px-3 py-2 text-left transition",
+        "block w-full rounded-xl border px-3 py-3 text-left transition",
         overdue
-          ? "border-red-200 bg-red-50 hover:bg-red-100"
+          ? "border-red-200 bg-red-50/70 hover:bg-red-50"
           : "border-stone-200 bg-white hover:bg-stone-50",
-        inactive ? "opacity-60" : "",
       ].join(" ")}
-      title={`Urgency: ${urgency.toFixed(0)}`}
     >
       <div className="flex items-start justify-between gap-2">
         <span className="line-clamp-2 text-sm font-medium text-stone-900">{ticket.title}</span>
@@ -332,7 +262,28 @@ function TicketCard({
         <span className="text-stone-300" aria-hidden>·</span>
         <TicketStatusBadge status={ticket.status} />
       </div>
-      <span className="sr-only">Åbn ticket med prioritet {TICKET_PRIORITY_LABELS[ticket.priority]}</span>
+      <div className="mt-2.5 flex gap-2">
+        <button
+          type="button"
+          onClick={(e) => {
+            e.stopPropagation();
+            onDone(ticket);
+          }}
+          className="rounded-lg border border-emerald-300 bg-emerald-50 px-2 py-1 text-[11px] font-semibold text-emerald-700"
+        >
+          Marker som færdig
+        </button>
+        <button
+          type="button"
+          onClick={(e) => {
+            e.stopPropagation();
+            onSnooze(ticket);
+          }}
+          className="rounded-lg border border-amber-300 bg-amber-50 px-2 py-1 text-[11px] font-semibold text-amber-700"
+        >
+          Udskyd til i morgen
+        </button>
+      </div>
     </button>
   );
 }

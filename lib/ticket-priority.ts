@@ -32,10 +32,10 @@ export const TICKET_PRIORITY_SCORE: Record<TicketPriority, number> = {
 
 /** Tailwind-klasser for prioritets-pille i lister og kort. */
 export const TICKET_PRIORITY_BADGE_CLASS: Record<TicketPriority, string> = {
-  haster: "border border-red-600 bg-red-100 text-red-900",
-  snarest_muligt: "border border-orange-500 bg-orange-100 text-orange-900",
-  normal: "border border-stone-400 bg-stone-100 text-stone-800",
-  naar_tiden_passer: "border border-stone-300 bg-stone-50 text-stone-600",
+  haster: "bg-red-100 text-red-800",
+  snarest_muligt: "bg-orange-100 text-orange-800",
+  normal: "bg-blue-100 text-blue-800",
+  naar_tiden_passer: "bg-stone-200 text-stone-700",
 };
 
 export function isTicketPriority(v: unknown): v is TicketPriority {

@@ -39,6 +39,8 @@ type Props = {
   assignees: AssignableUser[];
   loading: boolean;
   onOpenTicket: (id: string) => void;
+  hideFilters?: boolean;
+  filterOnly?: boolean;
 };
 
 export function TicketsList({
@@ -48,6 +50,8 @@ export function TicketsList({
   assignees,
   loading,
   onOpenTicket,
+  hideFilters = false,
+  filterOnly = false,
 }: Props) {
   const filtered = useMemo(() => filterTickets(tickets, filters), [tickets, filters]);
 
@@ -57,6 +61,7 @@ export function TicketsList({
 
   return (
     <section className="flex flex-col rounded-2xl border border-stone-200 bg-white shadow-sm">
+      {!hideFilters ? (
       <div className="flex flex-wrap items-center gap-2 border-b border-stone-200 px-4 py-3">
         <SegmentedToggle
           value={filters.scope}
@@ -114,6 +119,8 @@ export function TicketsList({
           {loading ? "Henter…" : `${filtered.length} ticket${filtered.length === 1 ? "" : "s"}`}
         </span>
       </div>
+      ) : null}
+      {filterOnly ? null : (
 
       <div className="overflow-x-auto">
         <table className="w-full text-left text-sm">
@@ -174,6 +181,7 @@ export function TicketsList({
           </tbody>
         </table>
       </div>
+      )}
     </section>
   );
 }

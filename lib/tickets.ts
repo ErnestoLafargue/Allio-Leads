@@ -1,4 +1,5 @@
 import { prisma } from "@/lib/prisma";
+import { copenhagenDayBoundsUtcFromDayKey, copenhagenDayKey } from "@/lib/copenhagen-day";
 import { dayKeyFromDate, endOfDayUtcFromDayKey, isDayKey } from "@/lib/ticket-deadline";
 import {
   isTicketPriority,
@@ -25,6 +26,7 @@ export type TicketDto = {
   createdAt: string;
   updatedAt: string;
   completedAt: string | null;
+  snoozedUntil: string | null;
   assignedUser: { id: string; name: string; username: string };
   createdBy: { id: string; name: string; username: string };
 };
@@ -39,6 +41,7 @@ type RawTicket = {
   createdAt: Date;
   updatedAt: Date;
   completedAt: Date | null;
+  snoozedUntil: Date | null;
   assignedUser: { id: string; name: string; username: string };
   createdBy: { id: string; name: string; username: string };
 };
@@ -54,6 +57,7 @@ function serialize(t: RawTicket): TicketDto {
     createdAt: t.createdAt.toISOString(),
     updatedAt: t.updatedAt.toISOString(),
     completedAt: t.completedAt ? t.completedAt.toISOString() : null,
+    snoozedUntil: t.snoozedUntil ? t.snoozedUntil.toISOString() : null,
     assignedUser: t.assignedUser,
     createdBy: t.createdBy,
   };
@@ -172,6 +176,7 @@ export type UpdateTicketInput = Partial<{
   priority: TicketPriority;
   status: TicketStatus;
   deadlineDayKey: string | null;
+  snoozedUntilDayKey: string | null;
   assignedUserId: string;
 }>;
 
@@ -202,6 +207,9 @@ export async function updateTicket(id: string, input: UpdateTicketInput): Promis
   }
   if (input.deadlineDayKey !== undefined) {
     data.deadline = parseDeadlineDayKey(input.deadlineDayKey);
+  }
+  if (input.snoozedUntilDayKey !== undefined) {
+    data.snoozedUntil = parseSnoozedUntilDayKey(input.snoozedUntilDayKey);
   }
   if (input.status !== undefined) {
     if (!isTicketStatus(input.status)) {
@@ -236,4 +244,121 @@ function parseDeadlineDayKey(raw: string | null): Date | null {
     throw new ValidationError("Deadline skal være på formen YYYY-MM-DD.");
   }
   return endOfDayUtcFromDayKey(raw);
+}
+
+function parseSnoozedUntilDayKey(raw: string | null): Date | null {
+  if (raw === null || raw === undefined || raw === "") return null;
+  if (!isDayKey(raw)) {
+    throw new ValidationError("Snooze-dato skal være på formen YYYY-MM-DD.");
+  }
+  const { start } = copenhagenDayBoundsUtcFromDayKey(raw);
+  return start;
+}
+
+export type DailyQueueItem = TicketDto & {
+  queueReason: "overdue" | "important" | "deadline_window" | "fallback";
+};
+
+type QueuePriority = "haster" | "snarest_muligt" | "normal" | "naar_tiden_passer";
+const PRIORITY_RANK: Record<QueuePriority, number> = {
+  haster: 0,
+  snarest_muligt: 1,
+  normal: 2,
+  naar_tiden_passer: 3,
+};
+
+function dateFromDayKeyUtc(dayKey: string): Date {
+  const [y, m, d] = dayKey.split("-").map(Number);
+  return new Date(Date.UTC(y, m - 1, d, 0, 0, 0));
+}
+
+function compareQueueOrder(a: TicketDto, b: TicketDto): number {
+  const aOver = a.deadline ? a.deadline < copenhagenDayKey() : false;
+  const bOver = b.deadline ? b.deadline < copenhagenDayKey() : false;
+  if (aOver !== bOver) return aOver ? -1 : 1;
+
+  const ap = PRIORITY_RANK[a.priority as QueuePriority] ?? 99;
+  const bp = PRIORITY_RANK[b.priority as QueuePriority] ?? 99;
+  if (ap !== bp) return ap - bp;
+
+  if (a.deadline && b.deadline && a.deadline !== b.deadline) {
+    return a.deadline < b.deadline ? -1 : 1;
+  }
+  if (a.deadline && !b.deadline) return -1;
+  if (!a.deadline && b.deadline) return 1;
+  return a.createdAt < b.createdAt ? -1 : 1;
+}
+
+/**
+ * Dagskalender-kø: hvilke tickets bør brugeren arbejde på den valgte dag.
+ */
+export async function getDailyTicketQueue(
+  userId: string,
+  selectedDate: string,
+): Promise<DailyQueueItem[]> {
+  if (!isDayKey(selectedDate)) {
+    throw new ValidationError("selectedDate skal være YYYY-MM-DD.");
+  }
+  const selectedStart = dateFromDayKeyUtc(selectedDate);
+  const plus30 = new Date(selectedStart.getTime() + 30 * 24 * 3_600_000);
+  const plus14 = new Date(selectedStart.getTime() + 14 * 24 * 3_600_000);
+
+  const rows = await prisma.ticket.findMany({
+    where: {
+      assignedUserId: userId,
+      status: { not: "done" },
+      OR: [{ snoozedUntil: null }, { snoozedUntil: { lte: selectedStart } }],
+    },
+    include: TICKET_INCLUDE,
+  });
+  const tickets = rows.map(serialize);
+
+  const overdue: DailyQueueItem[] = [];
+  const important: DailyQueueItem[] = [];
+  const normalWindow: DailyQueueItem[] = [];
+  const normalUrgent: DailyQueueItem[] = [];
+  const noDeadline: DailyQueueItem[] = [];
+
+  for (const t of tickets) {
+    const pri = t.priority as QueuePriority;
+    const deadline = t.deadline ? dateFromDayKeyUtc(t.deadline) : null;
+    const isOverdue = deadline ? deadline < selectedStart : false;
+    if (isOverdue) {
+      overdue.push({ ...t, queueReason: "overdue" });
+      continue;
+    }
+    if (pri === "haster" || pri === "snarest_muligt") {
+      important.push({ ...t, queueReason: "important" });
+      continue;
+    }
+    if (deadline && deadline <= plus30) {
+      if (deadline <= plus14) normalUrgent.push({ ...t, queueReason: "deadline_window" });
+      else normalWindow.push({ ...t, queueReason: "deadline_window" });
+      continue;
+    }
+    if (!deadline) {
+      noDeadline.push({ ...t, queueReason: "fallback" });
+    }
+  }
+
+  important.sort(compareQueueOrder);
+  overdue.sort(compareQueueOrder);
+  normalUrgent.sort(compareQueueOrder);
+  normalWindow.sort(compareQueueOrder);
+  noDeadline.sort(compareQueueOrder);
+
+  const core = [...overdue, ...important];
+  const importantCount = core.filter(
+    (t) => t.priority === "haster" || t.priority === "snarest_muligt",
+  ).length;
+
+  let extras: DailyQueueItem[] = [...normalUrgent];
+  if (importantCount < 5) {
+    const remainingSlots = Math.max(0, 5 - importantCount - normalUrgent.length);
+    extras = [...extras, ...normalWindow.slice(0, remainingSlots)];
+    const remainingAfterNormal = Math.max(0, remainingSlots - normalWindow.length);
+    extras = [...extras, ...noDeadline.slice(0, remainingAfterNormal)];
+  }
+
+  return [...core, ...extras].sort(compareQueueOrder);
 }
