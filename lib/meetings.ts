@@ -41,21 +41,24 @@ export async function getMeetings(type: MeetingsType, options: GetMeetingsOption
   });
 }
 
-/** Antal dage hvor admin må ændre udfaldet på et booket møde efter selve booking-tidspunktet. */
+/** Antal dage hvor admin må ændre udfaldet efter selve mødetidspunktet (ikke booking-tidspunktet). */
 export const MEETING_OUTCOME_LOCK_DAYS = 30;
 
 /**
- * True hvis udfaldet er låst, fordi mødet blev booket for mere end MEETING_OUTCOME_LOCK_DAYS dage siden.
+ * True hvis udfaldet er låst, fordi selve mødetiden ligger mere end MEETING_OUTCOME_LOCK_DAYS dage tilbage.
+ * Bemærk: bygger på meetingScheduledFor (mødet) — IKKE meetingBookedAt (bookingen).
+ * Et møde må altså gerne være booket for længe siden; det er kun selve mødedatoens alder, der låser udfaldet.
  * Bruges både på server (input-validering i PATCH) og klient (deaktiveret select + tooltip).
  */
 export function isMeetingOutcomeLocked(
-  meetingBookedAt: Date | string | null | undefined,
+  meetingScheduledFor: Date | string | null | undefined,
   now: Date = new Date(),
 ): boolean {
-  if (!meetingBookedAt) return false;
-  const booked = meetingBookedAt instanceof Date ? meetingBookedAt : new Date(meetingBookedAt);
-  if (Number.isNaN(booked.getTime())) return false;
+  if (!meetingScheduledFor) return false;
+  const scheduled =
+    meetingScheduledFor instanceof Date ? meetingScheduledFor : new Date(meetingScheduledFor);
+  if (Number.isNaN(scheduled.getTime())) return false;
   const cutoff = now.getTime() - MEETING_OUTCOME_LOCK_DAYS * 86_400_000;
-  return booked.getTime() < cutoff;
+  return scheduled.getTime() < cutoff;
 }
 

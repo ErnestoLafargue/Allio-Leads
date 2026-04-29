@@ -174,10 +174,10 @@ export async function PATCH(req: Request, { params }: Params) {
     ) {
       return NextResponse.json({ error: "Ugyldigt mødeudfald." }, { status: 400 });
     }
-    if (isMeetingOutcomeLocked(existing.meetingBookedAt)) {
+    if (isMeetingOutcomeLocked(existing.meetingScheduledFor)) {
       return NextResponse.json(
         {
-          error: `Udfaldet kan ikke længere ændres — mødet blev booket for mere end ${MEETING_OUTCOME_LOCK_DAYS} dage siden.`,
+          error: `Udfaldet kan ikke længere ændres — mødetidspunktet ligger mere end ${MEETING_OUTCOME_LOCK_DAYS} dage tilbage.`,
         },
         { status: 400 },
       );

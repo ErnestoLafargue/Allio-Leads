@@ -144,7 +144,7 @@ export function MeetingsList({ type }: { type: "upcoming" | "past" }) {
             {type === "upcoming"
               ? "Viser alle møder fra i dag og frem."
               : showAllPast
-                ? `Viser alle tidligere møder uanset udfald. Udfald kan kun ændres inden for ${MEETING_OUTCOME_LOCK_DAYS} dage efter booking.`
+                ? `Viser alle tidligere møder uanset udfald. Udfald kan kun ændres så længe mødetidspunktet er inden for ${MEETING_OUTCOME_LOCK_DAYS} dage tilbage.`
                 : "Viser alle møder før dags dato (kalenderdag i København)."}
           </p>
         </div>
@@ -271,10 +271,10 @@ export function MeetingsList({ type }: { type: "upcoming" | "past" }) {
                   </td>
                   {isAdmin && (
                     <td className="px-4 py-3">
-                      {isMeetingOutcomeLocked(m.meetingBookedAt) ? (
+                      {isMeetingOutcomeLocked(m.meetingScheduledFor) ? (
                         <span
                           className="inline-flex items-center gap-1 text-xs font-medium text-stone-500"
-                          title={`Udfaldet kan ikke længere ændres — mødet blev booket for mere end ${MEETING_OUTCOME_LOCK_DAYS} dage siden.`}
+                          title={`Udfaldet kan ikke længere ændres — mødetidspunktet ligger mere end ${MEETING_OUTCOME_LOCK_DAYS} dage tilbage.`}
                         >
                           <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
                             <rect x="3" y="11" width="18" height="11" rx="2" />
