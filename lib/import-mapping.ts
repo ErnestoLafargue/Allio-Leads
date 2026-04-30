@@ -21,7 +21,7 @@ export const STANDARD_MAPPING_OPTIONS: { id: StandardMappingId; label: string }[
   { id: "phone", label: "Telefonnummer" },
   { id: "notes", label: "Noter" },
   { id: "email", label: "E-mail" },
-  { id: "domain", label: "Domæne / hjemmeside" },
+  { id: "domain", label: "Domæne" },
   { id: "cvr", label: "CVR-nummer" },
   { id: "address", label: "Adresse" },
   { id: "postalCode", label: "Postnr." },

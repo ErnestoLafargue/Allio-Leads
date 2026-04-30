@@ -37,7 +37,11 @@ function buildMappingOptions(fieldConfigJson: string) {
   }
   options.push({ id: "custom:domain", label: "Domæne (ekstra felt)" });
   options.push({ id: "custom:website", label: "Hjemmeside (ekstra felt)" });
-  return options;
+  const deduped = new Map<string, { id: string; label: string }>();
+  for (const option of options) {
+    if (!deduped.has(option.id)) deduped.set(option.id, option);
+  }
+  return Array.from(deduped.values());
 }
 
 const MATCH_FIELD_OPTIONS: { id: EnrichmentMatchField; label: string }[] = [
@@ -214,12 +218,15 @@ export function CampaignEnrichmentPanel({
 
       {open ? (
         <div
-          className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4"
+          className="fixed inset-0 z-50 flex items-start justify-center overflow-y-auto bg-black/40 p-4"
           role="dialog"
           aria-modal="true"
           onClick={() => !loadingPreview && !applying && setOpen(false)}
         >
-          <div className="w-full max-w-5xl rounded-xl border border-stone-200 bg-white p-5 shadow-xl" onClick={(e) => e.stopPropagation()}>
+          <div
+            className="my-4 max-h-[calc(100vh-2rem)] w-full max-w-5xl overflow-y-auto rounded-xl border border-stone-200 bg-white p-5 shadow-xl"
+            onClick={(e) => e.stopPropagation()}
+          >
             <div className="flex items-start justify-between gap-3">
               <div>
                 <h3 className="text-lg font-semibold text-stone-900">Berig kampagne</h3>
@@ -323,7 +330,7 @@ export function CampaignEnrichmentPanel({
                         ))}
                     </select>
                     <span className="mt-1 block text-xs text-stone-500">
-                      Hold Ctrl/Cmd nede for at vælge flere (fx hjemmeside + virksomhedsnavn).
+                      Hold Ctrl/Cmd nede for at vælge flere (fx hjemmeside + virksomhedsnavn). Listen kan scrolles.
                     </span>
                   </label>
                 ) : null}

@@ -101,7 +101,13 @@ function isIncomingValueEmpty(v: string): boolean {
 function isExistingValueEmpty(v: string): boolean {
   const t = v.trim();
   if (!t) return true;
-  if (t.toLowerCase() === EMPTY_COMPANY_PLACEHOLDER) return true;
+  const normalized = t
+    .toLocaleLowerCase("da")
+    .replace(/[()]/g, "")
+    .replace(/\s+/g, " ")
+    .trim();
+  if (normalized === EMPTY_COMPANY_PLACEHOLDER.replace(/[()]/g, "")) return true;
+  if (normalized.includes("uden virksomhedsnavn")) return true;
   return false;
 }
 
