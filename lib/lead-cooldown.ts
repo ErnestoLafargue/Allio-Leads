@@ -27,6 +27,9 @@ export async function applyLeadCooldownResets(): Promise<void> {
     select: { id: true },
   });
   if (toResetVm.length > 0) {
+    // #region agent log
+    fetch("http://localhost:7253/ingest/cae62791-9bb1-4500-92a8-c26abf2c0c90", { method: "POST", headers: { "Content-Type": "application/json", "X-Debug-Session-Id": "d38e61" }, body: JSON.stringify({ sessionId: "d38e61", runId: "voicemail-status-race-v1", hypothesisId: "H5", location: "lib/lead-cooldown.ts:voicemailReset", message: "voicemail cooldown reset triggered", data: { resetCount: toResetVm.length }, timestamp: Date.now() }) }).catch(() => {});
+    // #endregion
     const ids = toResetVm.map((l) => l.id);
     await prisma.lead.updateMany({
       where: { id: { in: ids } },

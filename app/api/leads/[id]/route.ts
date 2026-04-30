@@ -116,6 +116,9 @@ export async function PATCH(req: Request, { params }: Params) {
   const userId = session!.user.id;
 
   const body = await req.json().catch(() => null);
+  // #region agent log
+  fetch("http://localhost:7253/ingest/cae62791-9bb1-4500-92a8-c26abf2c0c90", { method: "POST", headers: { "Content-Type": "application/json", "X-Debug-Session-Id": "d38e61" }, body: JSON.stringify({ sessionId: "d38e61", runId: "voicemail-status-race-v1", hypothesisId: "H3", location: "api/leads/[id]/route.ts:PATCH:entry", message: "lead patch request received", data: { leadId: id, bodyStatus: typeof body?.status === "string" ? body.status : null, queueBump: body?.queueBump === true }, timestamp: Date.now() }) }).catch(() => {});
+  // #endregion
   const queueBump = body?.queueBump === true;
   const adminSkipBookingOverlap =
     session!.user.role === "ADMIN" && body?.adminSkipBookingOverlap === true;
@@ -548,6 +551,10 @@ export async function PATCH(req: Request, { params }: Params) {
     }
     return updated;
   });
+
+  // #region agent log
+  fetch("http://localhost:7253/ingest/cae62791-9bb1-4500-92a8-c26abf2c0c90", { method: "POST", headers: { "Content-Type": "application/json", "X-Debug-Session-Id": "d38e61" }, body: JSON.stringify({ sessionId: "d38e61", runId: "voicemail-status-race-v1", hypothesisId: "H3", location: "api/leads/[id]/route.ts:PATCH:exit", message: "lead patch persisted", data: { leadId: id, existingStatus: existing.status, finalStatus: lead.status, bodyStatus: typeof body?.status === "string" ? body.status : null }, timestamp: Date.now() }) }).catch(() => {});
+  // #endregion
 
   return NextResponse.json(lead);
 }

@@ -88,6 +88,7 @@ function delayMs(ms: number) {
 }
 
 export function CampaignWorkspace({ campaignId, preferredLeadId, voipSession = false }: Props) {
+  const debugRunId = "voicemail-status-race-v1";
   const { data: session } = useSession();
   const sessionUserId = session?.user?.id ?? "";
   const isAdmin = session?.user?.role === "ADMIN";
@@ -612,6 +613,9 @@ export function CampaignWorkspace({ campaignId, preferredLeadId, voipSession = f
       ...buildCampaignLeadPatchBody(getFormSnapshot(predictiveOutcome)),
       ...(shouldBumpNewQueue ? { queueBump: true } : {}),
     };
+    // #region agent log
+    fetch("http://localhost:7253/ingest/cae62791-9bb1-4500-92a8-c26abf2c0c90", { method: "POST", headers: { "Content-Type": "application/json", "X-Debug-Session-Id": "d38e61" }, body: JSON.stringify({ sessionId: "d38e61", runId: debugRunId, hypothesisId: "H1", location: "campaign-workspace.tsx:onNext", message: "onNext patch prepared", data: { leadId: currentId, predictiveOutcome: predictiveOutcome ?? null, uiStatus: status, patchStatus: (patchBody as { status?: string }).status ?? null }, timestamp: Date.now() }) }).catch(() => {});
+    // #endregion
 
     setError(null);
     setBackgroundSyncError(null);
@@ -662,6 +666,9 @@ export function CampaignWorkspace({ campaignId, preferredLeadId, voipSession = f
 
     setBackgroundLockLeadIds((prev) => [...prev, currentId]);
     pendingPatchBodiesRef.current.set(currentId, patchBody);
+    // #region agent log
+    fetch("http://localhost:7253/ingest/cae62791-9bb1-4500-92a8-c26abf2c0c90", { method: "POST", headers: { "Content-Type": "application/json", "X-Debug-Session-Id": "d38e61" }, body: JSON.stringify({ sessionId: "d38e61", runId: debugRunId, hypothesisId: "H5", location: "campaign-workspace.tsx:onNext:switchLead", message: "switching to reserved next lead", data: { previousLeadId: currentId, previousPhone: activeLead.phone, nextLeadId: rj.lead.id, nextPhone: rj.lead.phone, patchStatus: (patchBody as { status?: string }).status ?? null }, timestamp: Date.now() }) }).catch(() => {});
+    // #endregion
     setActiveLead(rj.lead);
     try {
       sessionStorage.setItem(preferStorageKey(campaignId), rj.lead.id);
@@ -795,21 +802,23 @@ export function CampaignWorkspace({ campaignId, preferredLeadId, voipSession = f
   onNextRef.current = onNext;
 
   function requestCallHangupBeforeAdvance() {
-    const hasActiveCall =
-      voipLineStatus === "live" || voipLineStatus === "ringing" || voipLineStatus === "connecting";
-    if (!showVoipStrip || !hasActiveCall) return;
-    // Ikke blokér Gem og næste: signalér hangup og gå straks videre i køen.
+    if (!showVoipStrip) return;
+    // Ikke blokér Gem og næste: signalér altid hangup før lead-skift.
+    // VoIP-strippen no-op'er selv hvis der ikke er aktivt kald.
     setVoipHangupSignal((n) => n + 1);
   }
 
   const handleOutcomeStatusChange = useCallback(
     (next: LeadStatus) => {
+      // #region agent log
+      fetch("http://localhost:7253/ingest/cae62791-9bb1-4500-92a8-c26abf2c0c90", { method: "POST", headers: { "Content-Type": "application/json", "X-Debug-Session-Id": "d38e61" }, body: JSON.stringify({ sessionId: "d38e61", runId: debugRunId, hypothesisId: "H2", location: "campaign-workspace.tsx:handleOutcomeStatusChange", message: "outcome button clicked", data: { leadId: activeLeadRef.current?.id ?? null, next, campaignDialMode }, timestamp: Date.now() }) }).catch(() => {});
+      // #endregion
       setStatus(next);
       if (campaignDialMode !== "PREDICTIVE") return;
       if (next === "NEW" || next === "MEETING_BOOKED" || next === "CALLBACK_SCHEDULED") return;
       queueMicrotask(() => void onNextRef.current(undefined, undefined, next));
     },
-    [campaignDialMode],
+    [campaignDialMode, debugRunId],
   );
 
   async function onSendMail(payload: { to: string; subject: string; message: string }) {

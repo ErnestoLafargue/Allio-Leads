@@ -232,6 +232,9 @@ export async function POST(req: Request) {
         clientState.leadId &&
         (isDetectionEnd || isGreetingEndForMachine)
       ) {
+        // #region agent log
+        fetch("http://localhost:7253/ingest/cae62791-9bb1-4500-92a8-c26abf2c0c90", { method: "POST", headers: { "Content-Type": "application/json", "X-Debug-Session-Id": "d38e61" }, body: JSON.stringify({ sessionId: "d38e61", runId: "voicemail-status-race-v1", hypothesisId: "H4", location: "api/telnyx/webhooks/call-events/route.ts:amd", message: "amd result for lead leg", data: { leadId: clientState.leadId, campaignId: clientState.campaignId, callControlId, amdResult, eventType }, timestamp: Date.now() }) }).catch(() => {});
+        // #endregion
         const apiKey = process.env.TELNYX_API_KEY?.trim();
         if (apiKey) {
           if (amdResult === "human" || amdResult === "unknown") {
