@@ -54,6 +54,14 @@ export type EnrichmentPreviewResult = {
   warnings: string[];
   uploadGroups: number;
 };
+export type EnrichmentFieldBreakdown = {
+  field: string;
+  matchedLeads: number;
+  alreadyFilled: number;
+  empty: number;
+  withIncomingValue: number;
+  plannedUpdates: number;
+};
 
 export type PreparedEnrichment = {
   aggregates: UploadAggregate[];
@@ -130,6 +138,29 @@ function mergeFirstNonEmpty(target: Record<string, string>, source: Record<strin
     if (!value) continue;
     if (!target[key]) target[key] = value;
   }
+}
+
+function isMappingTargetForMatchField(target: string, matchField: EnrichmentMatchField): boolean {
+  if (matchField === "domain") {
+    return target === "domain" || target === "custom:domain" || target === "custom:website";
+  }
+  return target === matchField;
+}
+
+export function restrictMappingForTargetFields(
+  mapping: MappingRecord,
+  targetFields: string[],
+  matchField: EnrichmentMatchField,
+): MappingRecord {
+  const allowedTargets = new Set(targetFields.map((f) => f.trim()).filter(Boolean));
+  const out: MappingRecord = {};
+  for (const [column, target] of Object.entries(mapping)) {
+    if (!target) continue;
+    if (allowedTargets.has(target) || isMappingTargetForMatchField(target, matchField)) {
+      out[column] = target;
+    }
+  }
+  return out;
 }
 
 export function prepareEnrichmentUpload(params: {
@@ -229,13 +260,30 @@ type LeadPatchPlan = {
   };
 };
 
+function incomingValueForField(agg: UploadAggregate, field: string): string {
+  if (field.startsWith("custom:")) {
+    return String(agg.custom[field.slice("custom:".length)] ?? "").trim();
+  }
+  if (field === "domain") return agg.base.domain.trim();
+  return String((agg.base as Record<string, string>)[field] ?? "").trim();
+}
+
+function existingValueForField(lead: LeadEnrichmentSource, leadCustom: Record<string, string>, field: string): string {
+  if (field.startsWith("custom:")) {
+    return String(leadCustom[field.slice("custom:".length)] ?? "");
+  }
+  if (field === "domain") return String(leadCustom.domain ?? "");
+  return String((lead as Record<string, string>)[field] ?? "");
+}
+
 export function buildEnrichmentPreview(params: {
   prepared: PreparedEnrichment;
   leads: LeadEnrichmentSource[];
   matchField: EnrichmentMatchField;
   overwriteExisting: boolean;
-}): EnrichmentPreviewResult & { plans: LeadPatchPlan[] } {
-  const { prepared, leads, matchField, overwriteExisting } = params;
+  focusFields?: string[];
+}): EnrichmentPreviewResult & { plans: LeadPatchPlan[]; fieldBreakdown: EnrichmentFieldBreakdown[] } {
+  const { prepared, leads, matchField, overwriteExisting, focusFields = [] } = params;
   const leadIndex = new Map<string, LeadEnrichmentSource[]>();
   for (const lead of leads) {
     const key = getLeadMatchValue(lead, matchField);
@@ -252,6 +300,17 @@ export function buildEnrichmentPreview(params: {
   let fieldsAdded = 0;
   let fieldsOverwritten = 0;
   let fieldsUnchanged = 0;
+  const breakdownMap = new Map<string, EnrichmentFieldBreakdown>();
+  for (const field of focusFields) {
+    breakdownMap.set(field, {
+      field,
+      matchedLeads: 0,
+      alreadyFilled: 0,
+      empty: 0,
+      withIncomingValue: 0,
+      plannedUpdates: 0,
+    });
+  }
 
   for (const agg of prepared.aggregates) {
     const matchedLeads = leadIndex.get(agg.matchValue) ?? [];
@@ -265,6 +324,23 @@ export function buildEnrichmentPreview(params: {
       const leadCustom = parseCustomFields(lead.customFields);
       const nextCustom = { ...leadCustom };
       const patch: LeadPatchPlan["data"] = {};
+      for (const field of focusFields) {
+        const item = breakdownMap.get(field);
+        if (!item) continue;
+        const existingValue = existingValueForField(lead, leadCustom, field);
+        const incomingValue = incomingValueForField(agg, field);
+        const existingEmpty = isExistingValueEmpty(existingValue);
+        const hasIncoming = !isIncomingValueEmpty(incomingValue);
+        item.matchedLeads += 1;
+        if (existingEmpty) item.empty += 1;
+        else item.alreadyFilled += 1;
+        if (hasIncoming) item.withIncomingValue += 1;
+        const shouldUpdate =
+          hasIncoming &&
+          (overwriteExisting || existingEmpty) &&
+          incomingValue !== existingValue.trim();
+        if (shouldUpdate) item.plannedUpdates += 1;
+      }
 
       const applyStandard = (field: keyof UploadAggregate["base"], existingValue: string) => {
         if (field === "domain") return;
@@ -339,6 +415,7 @@ export function buildEnrichmentPreview(params: {
   return {
     plans,
     uploadGroups: prepared.aggregates.length,
+    fieldBreakdown: Array.from(breakdownMap.values()),
     warnings: prepared.warnings,
     stats: {
       totalRows: prepared.statsBase.totalRows,

@@ -3,7 +3,7 @@
 import { useMemo, useState } from "react";
 import { FIELD_GROUPS, FIELD_GROUP_LABELS, parseFieldConfig } from "@/lib/campaign-fields";
 import { STANDARD_MAPPING_OPTIONS } from "@/lib/import-mapping";
-import type { EnrichmentMatchField, EnrichmentStats } from "@/lib/campaign-enrichment";
+import type { EnrichmentFieldBreakdown, EnrichmentMatchField, EnrichmentStats } from "@/lib/campaign-enrichment";
 
 type PreviewResponse = {
   columns: string[];
@@ -11,6 +11,7 @@ type PreviewResponse = {
   suggestedMapping: Record<string, string>;
   stats: EnrichmentStats;
   warnings: string[];
+  fieldBreakdown?: EnrichmentFieldBreakdown[];
 };
 
 type ApplyResponse = {
@@ -18,6 +19,10 @@ type ApplyResponse = {
   stats: EnrichmentStats;
   warnings: string[];
 };
+type EnrichmentProgressEvent =
+  | { type: "progress"; processedLeads: number; totalLeads: number; percent: number }
+  | { type: "result"; result: ApplyResponse }
+  | { type: "error"; error?: string; details?: string };
 
 function buildMappingOptions(fieldConfigJson: string) {
   const cfg = parseFieldConfig(fieldConfigJson);
@@ -57,14 +62,23 @@ export function CampaignEnrichmentPanel({
   const [previewRows, setPreviewRows] = useState<Record<string, string>[]>([]);
   const [matchField, setMatchField] = useState<EnrichmentMatchField>("cvr");
   const [overwriteExisting, setOverwriteExisting] = useState(false);
+  const [limitToSelectedFields, setLimitToSelectedFields] = useState(false);
+  const [targetFields, setTargetFields] = useState<string[]>([]);
   const [preview, setPreview] = useState<EnrichmentStats | null>(null);
   const [warnings, setWarnings] = useState<string[]>([]);
+  const [fieldBreakdown, setFieldBreakdown] = useState<EnrichmentFieldBreakdown[]>([]);
   const [loadingPreview, setLoadingPreview] = useState(false);
   const [applying, setApplying] = useState(false);
+  const [enrichmentProgressPercent, setEnrichmentProgressPercent] = useState(0);
+  const [enrichmentProgressProcessedLeads, setEnrichmentProgressProcessedLeads] = useState(0);
+  const [enrichmentProgressTotalLeads, setEnrichmentProgressTotalLeads] = useState(0);
   const [error, setError] = useState<string | null>(null);
   const [done, setDone] = useState<ApplyResponse | null>(null);
 
   const mappingOptions = useMemo(() => buildMappingOptions(fieldConfigJson), [fieldConfigJson]);
+  const mappedTargets = new Set(Object.values(mapping));
+  const missingTargetFields = targetFields.filter((field) => !mappedTargets.has(field));
+  const hasInvalidTargetSelection = limitToSelectedFields && (targetFields.length === 0 || missingTargetFields.length > 0);
 
   function resetFlow() {
     setFile(null);
@@ -73,22 +87,27 @@ export function CampaignEnrichmentPanel({
     setPreviewRows([]);
     setPreview(null);
     setWarnings([]);
+    setFieldBreakdown([]);
     setError(null);
     setDone(null);
     setMatchField("cvr");
     setOverwriteExisting(false);
+    setLimitToSelectedFields(false);
+    setTargetFields([]);
   }
 
   async function runPreview(useCurrentMapping: boolean) {
     if (!file) return;
     setError(null);
     setDone(null);
+    setFieldBreakdown([]);
     setLoadingPreview(true);
     const fd = new FormData();
     fd.append("file", file);
     if (useCurrentMapping) fd.append("mapping", JSON.stringify(mapping));
     fd.append("matchField", matchField);
     fd.append("overwriteExisting", overwriteExisting ? "1" : "0");
+    if (limitToSelectedFields) fd.append("targetFields", JSON.stringify(targetFields));
     const res = await fetch(`/api/campaigns/${campaignId}/enrich/preview`, { method: "POST", body: fd });
     setLoadingPreview(false);
     const payload = await res.json().catch(() => ({}));
@@ -101,6 +120,7 @@ export function CampaignEnrichmentPanel({
     setPreviewRows(data.previewRows);
     setPreview(data.stats);
     setWarnings(data.warnings ?? []);
+    setFieldBreakdown(Array.isArray(data.fieldBreakdown) ? data.fieldBreakdown : []);
     if (!useCurrentMapping) setMapping(data.suggestedMapping ?? {});
   }
 
@@ -108,22 +128,75 @@ export function CampaignEnrichmentPanel({
     if (!file || !preview) return;
     setError(null);
     setApplying(true);
+    setEnrichmentProgressPercent(0);
+    setEnrichmentProgressProcessedLeads(0);
+    setEnrichmentProgressTotalLeads(0);
     const fd = new FormData();
     fd.append("file", file);
     fd.append("mapping", JSON.stringify(mapping));
     fd.append("matchField", matchField);
     fd.append("overwriteExisting", overwriteExisting ? "1" : "0");
+    if (limitToSelectedFields) fd.append("targetFields", JSON.stringify(targetFields));
     const res = await fetch(`/api/campaigns/${campaignId}/enrich/apply`, { method: "POST", body: fd });
-    setApplying(false);
-    const payload = await res.json().catch(() => ({}));
     if (!res.ok) {
+      setApplying(false);
+      const payload = await res.json().catch(() => ({}));
       setError([payload.error, payload.details].filter(Boolean).join(": ") || "Berigelse fejlede.");
       return;
     }
-    const data = payload as ApplyResponse;
-    setDone(data);
-    setPreview(data.stats);
-    setWarnings(data.warnings ?? []);
+    const contentType = res.headers.get("content-type") ?? "";
+    if (!contentType.includes("application/x-ndjson") || !res.body) {
+      setApplying(false);
+      const payload = await res.json().catch(() => ({}));
+      const data = payload as ApplyResponse;
+      setDone(data);
+      setPreview(data.stats);
+      setWarnings(data.warnings ?? []);
+      setFieldBreakdown([]);
+      return;
+    }
+
+    const reader = res.body.getReader();
+    const decoder = new TextDecoder();
+    let buffer = "";
+    let gotResult = false;
+    while (true) {
+      const { value, done: streamDone } = await reader.read();
+      if (streamDone) break;
+      buffer += decoder.decode(value, { stream: true });
+      const lines = buffer.split("\n");
+      buffer = lines.pop() ?? "";
+      for (const line of lines) {
+        const trimmed = line.trim();
+        if (!trimmed) continue;
+        let evt: EnrichmentProgressEvent;
+        try {
+          evt = JSON.parse(trimmed) as EnrichmentProgressEvent;
+        } catch {
+          continue;
+        }
+        if (evt.type === "progress") {
+          setEnrichmentProgressPercent(Math.max(0, Math.min(100, evt.percent)));
+          setEnrichmentProgressProcessedLeads(evt.processedLeads);
+          setEnrichmentProgressTotalLeads(evt.totalLeads);
+        } else if (evt.type === "result") {
+          const data = evt.result;
+          setDone(data);
+          setPreview(data.stats);
+          setWarnings(data.warnings ?? []);
+          setFieldBreakdown([]);
+          gotResult = true;
+        } else if (evt.type === "error") {
+          setError([evt.error, evt.details].filter(Boolean).join(": ") || "Berigelse fejlede.");
+          setApplying(false);
+          return;
+        }
+      }
+    }
+    setApplying(false);
+    if (!gotResult) {
+      setError("Berigelse blev afbrudt før resultat.");
+    }
   }
 
   return (
@@ -174,6 +247,7 @@ export function CampaignEnrichmentPanel({
                       setFile(e.target.files?.[0] ?? null);
                       setPreview(null);
                       setDone(null);
+                      setFieldBreakdown([]);
                       setColumns([]);
                       setPreviewRows([]);
                       setMapping({});
@@ -211,12 +285,58 @@ export function CampaignEnrichmentPanel({
                     </span>
                   </span>
                 </label>
+                <label className="flex items-start gap-2 rounded-md border border-stone-200 bg-white px-3 py-2 text-sm text-stone-800">
+                  <input
+                    type="checkbox"
+                    checked={limitToSelectedFields}
+                    onChange={(e) => {
+                      const enabled = e.target.checked;
+                      setLimitToSelectedFields(enabled);
+                      if (!enabled) setTargetFields([]);
+                    }}
+                    className="mt-0.5 h-4 w-4 rounded border-stone-300"
+                  />
+                  <span>
+                    Berig kun valgte felter
+                    <span className="mt-0.5 block text-xs text-stone-500">
+                      Matcher stadig på valgt nøgle (fx CVR), men opdaterer kun de felter du vælger.
+                    </span>
+                  </span>
+                </label>
+                {limitToSelectedFields ? (
+                  <label className="block text-sm font-medium text-stone-700">
+                    Felter der må beriges
+                    <select
+                      multiple
+                      value={targetFields}
+                      onChange={(e) =>
+                        setTargetFields(Array.from(e.currentTarget.selectedOptions).map((option) => option.value))
+                      }
+                      className="mt-1 min-h-36 w-full rounded-md border border-stone-200 bg-white px-3 py-2 text-sm text-stone-900"
+                    >
+                      {mappingOptions
+                        .filter((option) => option.id !== "skip")
+                        .map((option) => (
+                          <option key={`target-${option.id}`} value={option.id}>
+                            {option.label}
+                          </option>
+                        ))}
+                    </select>
+                    <span className="mt-1 block text-xs text-stone-500">
+                      Hold Ctrl/Cmd nede for at vælge flere (fx hjemmeside + virksomhedsnavn).
+                    </span>
+                  </label>
+                ) : null}
 
                 <div className="flex flex-wrap gap-2">
                   <button
                     type="button"
                     onClick={() => void runPreview(false)}
-                    disabled={!file || loadingPreview}
+                    disabled={
+                      !file ||
+                      loadingPreview ||
+                      hasInvalidTargetSelection
+                    }
                     className="rounded-md bg-stone-900 px-3 py-2 text-sm font-medium text-white hover:bg-stone-800 disabled:opacity-60"
                   >
                     {loadingPreview ? "Analyserer…" : "Analyser fil"}
@@ -224,7 +344,12 @@ export function CampaignEnrichmentPanel({
                   <button
                     type="button"
                     onClick={() => void runPreview(true)}
-                    disabled={!file || columns.length === 0 || loadingPreview}
+                    disabled={
+                      !file ||
+                      columns.length === 0 ||
+                      loadingPreview ||
+                      hasInvalidTargetSelection
+                    }
                     className="rounded-md border border-stone-300 bg-white px-3 py-2 text-sm font-medium text-stone-700 hover:bg-stone-50 disabled:opacity-60"
                   >
                     Opdater preview
@@ -245,6 +370,29 @@ export function CampaignEnrichmentPanel({
                     </ul>
                   </div>
                 ) : null}
+                {limitToSelectedFields && fieldBreakdown.length > 0 ? (
+                  <div className="rounded-md border border-stone-200 bg-white p-3 text-xs text-stone-700">
+                    <p className="font-semibold text-stone-900">Status pr. valgt felt (matchende leads)</p>
+                    <ul className="mt-2 space-y-2">
+                      {fieldBreakdown.map((row) => {
+                        const label =
+                          mappingOptions.find((opt) => opt.id === row.field)?.label ?? row.field;
+                        return (
+                          <li key={`field-breakdown-${row.field}`} className="rounded border border-stone-100 bg-stone-50 px-2 py-1.5">
+                            <p className="font-medium text-stone-900">{label}</p>
+                            <p>
+                              Udfyldt: {row.alreadyFilled} • Tomt: {row.empty} • Med værdi i upload: {row.withIncomingValue}
+                              {" "}• Bliver opdateret: {row.plannedUpdates}
+                            </p>
+                          </li>
+                        );
+                      })}
+                    </ul>
+                    <p className="mt-2 text-[11px] text-stone-500">
+                      Ved virksomhedsnavn tælles &quot;(Uden virksomhedsnavn)&quot; som tomt.
+                    </p>
+                  </div>
+                ) : null}
 
                 {warnings.length > 0 ? (
                   <div className="rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-900">
@@ -252,6 +400,16 @@ export function CampaignEnrichmentPanel({
                       <p key={`${w}-${i}`}>{w}</p>
                     ))}
                   </div>
+                ) : null}
+                {limitToSelectedFields && targetFields.length === 0 ? (
+                  <p className="text-xs text-amber-700">
+                    Vælg mindst ét felt at berige.
+                  </p>
+                ) : null}
+                {limitToSelectedFields && missingTargetFields.length > 0 ? (
+                  <p className="text-xs text-amber-700">
+                    Ét eller flere valgte felter er ikke mappet endnu. Map mindst én kolonne til hvert valgt felt i tabellen.
+                  </p>
                 ) : null}
 
                 {error ? <p className="text-sm text-red-600">{error}</p> : null}
@@ -306,12 +464,35 @@ export function CampaignEnrichmentPanel({
                   <button
                     type="button"
                     onClick={() => void applyEnrichment()}
-                    disabled={!preview || preview.leadsToUpdate === 0 || applying}
+                    disabled={
+                      !preview ||
+                      preview.leadsToUpdate === 0 ||
+                      applying ||
+                      hasInvalidTargetSelection
+                    }
                     className="rounded-md bg-emerald-600 px-4 py-2 text-sm font-semibold text-white hover:bg-emerald-700 disabled:opacity-60"
                   >
                     {applying ? "Beriger…" : "Gennemfør berigelse"}
                   </button>
                 </div>
+                {applying ? (
+                  <div className="w-full rounded-md border border-stone-200 bg-stone-50 p-3">
+                    <div className="mb-1 flex items-center justify-between text-xs text-stone-700">
+                      <span>
+                        {enrichmentProgressTotalLeads > 0
+                          ? `Behandler ${enrichmentProgressProcessedLeads} ud af ${enrichmentProgressTotalLeads} leads`
+                          : "Starter berigelse…"}
+                      </span>
+                      <span className="font-semibold tabular-nums">{enrichmentProgressPercent}%</span>
+                    </div>
+                    <div className="h-2 overflow-hidden rounded-full bg-stone-200">
+                      <div
+                        className="h-full rounded-full bg-emerald-600 transition-[width] duration-200"
+                        style={{ width: `${enrichmentProgressPercent}%` }}
+                      />
+                    </div>
+                  </div>
+                ) : null}
               </section>
             </div>
           </div>
