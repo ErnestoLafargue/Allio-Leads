@@ -153,6 +153,13 @@ function isMappingTargetForMatchField(target: string, matchField: EnrichmentMatc
   return target === matchField;
 }
 
+function isTargetBlockedByMatchField(target: string, matchField: EnrichmentMatchField): boolean {
+  if (matchField === "domain") {
+    return target === "domain" || target === "custom:domain" || target === "custom:website";
+  }
+  return target === matchField;
+}
+
 export function restrictMappingForTargetFields(
   mapping: MappingRecord,
   targetFields: string[],
@@ -350,6 +357,7 @@ export function buildEnrichmentPreview(params: {
 
       const applyStandard = (field: keyof UploadAggregate["base"], existingValue: string) => {
         if (field === "domain") return;
+        if (isTargetBlockedByMatchField(field, matchField)) return;
         const incoming = agg.base[field].trim();
         if (isIncomingValueEmpty(incoming)) return;
         if (!overwriteExisting && !isExistingValueEmpty(existingValue)) {
@@ -375,6 +383,7 @@ export function buildEnrichmentPreview(params: {
       applyStandard("industry", lead.industry);
 
       for (const [customKey, raw] of Object.entries(agg.custom)) {
+        if (isTargetBlockedByMatchField(`custom:${customKey}`, matchField)) continue;
         const incoming = raw.trim();
         if (isIncomingValueEmpty(incoming)) continue;
         const existing = String(leadCustom[customKey] ?? "");
@@ -393,7 +402,7 @@ export function buildEnrichmentPreview(params: {
 
       // Domæne kan være map'et som standardfelt; gemmes som custom-felt.
       const domainValue = agg.base.domain.trim();
-      if (!isIncomingValueEmpty(domainValue)) {
+      if (!isTargetBlockedByMatchField("domain", matchField) && !isIncomingValueEmpty(domainValue)) {
         const existingDomain = String(leadCustom.domain ?? "");
         if (!overwriteExisting && !isExistingValueEmpty(existingDomain)) {
           fieldsUnchanged += 1;

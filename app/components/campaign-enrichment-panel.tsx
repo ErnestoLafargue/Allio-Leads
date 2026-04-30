@@ -277,6 +277,10 @@ export function CampaignEnrichmentPanel({
                     ))}
                   </select>
                 </label>
+                <p className="rounded-md border border-blue-200 bg-blue-50 px-3 py-2 text-xs text-blue-900">
+                  Match-nøgle bruges kun som reference til at finde eksisterende leads. Selve berigelsen styres af dine
+                  valg i <strong>Kolonne-mapping</strong>.
+                </p>
 
                 <label className="flex items-start gap-2 rounded-md border border-stone-200 bg-white px-3 py-2 text-sm text-stone-800">
                   <input
