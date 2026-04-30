@@ -93,13 +93,17 @@ export async function GET(req: Request) {
   }
 
   try {
-    const [total, rows] = await Promise.all([
+    const canMergeUncoupled = session.user.role === "ADMIN" && !statusFilter && sort === "time";
+    const fetchTake = canMergeUncoupled ? page * pageSize : pageSize;
+    const fetchSkip = canMergeUncoupled ? 0 : (page - 1) * pageSize;
+
+    const [activityTotal, activityRows, uncoupledTotal, uncoupledRows] = await Promise.all([
       prisma.leadActivityEvent.count({ where }),
       prisma.leadActivityEvent.findMany({
         where,
         orderBy,
-        skip: (page - 1) * pageSize,
-        take: pageSize,
+        skip: fetchSkip,
+        take: fetchTake,
         select: {
           id: true,
           createdAt: true,
@@ -118,9 +122,52 @@ export async function GET(req: Request) {
           user: { select: { id: true, name: true } },
         },
       }),
+      canMergeUncoupled
+        ? prisma.dialerCallLog.count({
+            where: {
+              recordingUrl: { not: null },
+              leadId: null,
+              ...(q
+                ? {
+                    OR: [
+                      { toNumber: { contains: q } },
+                      { fromNumber: { contains: q } },
+                      { callControlId: { contains: q } },
+                    ],
+                  }
+                : {}),
+            },
+          })
+        : Promise.resolve(0),
+      canMergeUncoupled
+        ? prisma.dialerCallLog.findMany({
+            where: {
+              recordingUrl: { not: null },
+              leadId: null,
+              ...(q
+                ? {
+                    OR: [
+                      { toNumber: { contains: q } },
+                      { fromNumber: { contains: q } },
+                      { callControlId: { contains: q } },
+                    ],
+                  }
+                : {}),
+            },
+            orderBy: { startedAt: dir },
+            take: fetchTake,
+            select: {
+              callControlId: true,
+              startedAt: true,
+              recordingUrl: true,
+              toNumber: true,
+              fromNumber: true,
+            },
+          })
+        : Promise.resolve([]),
     ]);
 
-    const items = rows.map((r) => {
+    const activityItems = activityRows.map((r) => {
       const st = r.lead.status;
       const statusLabel = isLeadStatus(st) ? LEAD_STATUS_LABELS[st as LeadStatus] : st;
       return {
@@ -138,11 +185,40 @@ export async function GET(req: Request) {
           statusLabel,
           campaign: r.lead.campaign ? { id: r.lead.campaign.id, name: r.lead.campaign.name } : null,
         },
+        source: "lead" as const,
+        downloadEventId: r.id,
       };
     });
 
+    const uncoupledItems = uncoupledRows.map((r) => ({
+      id: `uncoupled:${r.callControlId}`,
+      at: r.startedAt.toISOString(),
+      durationSeconds: null,
+      recordingUrl: r.recordingUrl,
+      summary: `Ukoblet Telnyx-optagelse (${r.callControlId})`,
+      agent: null,
+      lead: null,
+      source: "uncoupled" as const,
+      downloadEventId: null,
+      uncoupledMeta: {
+        callControlId: r.callControlId,
+        toNumber: r.toNumber,
+        fromNumber: r.fromNumber,
+      },
+    }));
+
+    const merged = canMergeUncoupled
+      ? [...activityItems, ...uncoupledItems]
+          .sort((a, b) => {
+            if (dir === "asc") return a.at.localeCompare(b.at);
+            return b.at.localeCompare(a.at);
+          })
+          .slice((page - 1) * pageSize, page * pageSize)
+      : activityItems;
+    const total = canMergeUncoupled ? activityTotal + uncoupledTotal : activityTotal;
+
     return NextResponse.json({
-      items,
+      items: merged,
       total,
       page,
       pageSize,

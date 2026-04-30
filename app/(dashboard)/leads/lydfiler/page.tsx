@@ -20,7 +20,10 @@ type Row = {
     status: string;
     statusLabel: string;
     campaign: { id: string; name: string } | null;
-  };
+  } | null;
+  source?: "lead" | "uncoupled";
+  downloadEventId?: string | null;
+  uncoupledMeta?: { callControlId?: string | null; toNumber?: string | null; fromNumber?: string | null } | null;
 };
 
 type SortKey = "time" | "company" | "status" | "campaign" | "agent";
@@ -212,28 +215,41 @@ export default function LydfilerPage() {
                     })}
                   </td>
                   <td className="px-3 py-3">
-                    <Link
-                      href={`/leads/${encodeURIComponent(r.lead.id)}`}
-                      className="font-medium text-emerald-800 hover:underline"
-                    >
-                      {r.lead.companyName || "—"}
-                    </Link>
-                    <p className="text-xs text-stone-500">{r.lead.phone || "—"}</p>
+                    {r.lead ? (
+                      <>
+                        <Link
+                          href={`/leads/${encodeURIComponent(r.lead.id)}`}
+                          className="font-medium text-emerald-800 hover:underline"
+                        >
+                          {r.lead.companyName || "—"}
+                        </Link>
+                        <p className="text-xs text-stone-500">{r.lead.phone || "—"}</p>
+                      </>
+                    ) : (
+                      <>
+                        <p className="font-medium text-amber-800">Ukoblet optagelse</p>
+                        <p className="text-xs text-stone-500">
+                          {r.uncoupledMeta?.toNumber || r.uncoupledMeta?.fromNumber || "Ukendt nummer"}
+                        </p>
+                      </>
+                    )}
                   </td>
                   <td className="px-3 py-3">
                     <span className="inline-flex rounded-full border border-stone-200 bg-stone-50 px-2 py-0.5 text-xs font-medium text-stone-800">
-                      {r.lead.statusLabel}
+                      {r.lead ? r.lead.statusLabel : "Ukoblet"}
                     </span>
                   </td>
                   <td className="px-3 py-3 text-stone-700">{r.agent?.name ?? "—"}</td>
                   <td className="max-w-[200px] px-3 py-3 text-stone-700">
-                    {r.lead.campaign ? (
+                    {r.lead?.campaign ? (
                       <Link
                         href={`/kampagner/${encodeURIComponent(r.lead.campaign.id)}/arbejd`}
                         className="line-clamp-2 text-emerald-800 hover:underline"
                       >
                         {r.lead.campaign.name}
                       </Link>
+                    ) : r.source === "uncoupled" ? (
+                      <span className="text-amber-700">Afventer lead-kobling</span>
                     ) : (
                       "—"
                     )}
@@ -249,12 +265,14 @@ export default function LydfilerPage() {
                               variant="adminInline"
                             />
                           </div>
-                          <a
-                            href={`/api/leads/call-recordings/${encodeURIComponent(r.id)}/download`}
-                            className="inline-flex shrink-0 items-center justify-center rounded-md border border-stone-300 bg-white px-2.5 py-1.5 text-xs font-medium text-stone-800 shadow-sm hover:bg-stone-50"
-                          >
-                            Download
-                          </a>
+                          {r.downloadEventId ? (
+                            <a
+                              href={`/api/leads/call-recordings/${encodeURIComponent(r.downloadEventId)}/download`}
+                              className="inline-flex shrink-0 items-center justify-center rounded-md border border-stone-300 bg-white px-2.5 py-1.5 text-xs font-medium text-stone-800 shadow-sm hover:bg-stone-50"
+                            >
+                              Download
+                            </a>
+                          ) : null}
                         </>
                       ) : (
                         <span className="text-xs text-stone-400">—</span>
