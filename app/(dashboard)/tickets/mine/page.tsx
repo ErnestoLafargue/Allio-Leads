@@ -7,6 +7,7 @@ export const dynamic = "force-dynamic";
 export default async function MineTicketsPage() {
   const session = await auth();
   if (!session?.user?.id) redirect("/login");
+  if (session.user.role !== "ADMIN") redirect("/kampagner");
 
   const viewer = {
     id: session.user.id,

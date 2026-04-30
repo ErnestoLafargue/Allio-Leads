@@ -2,7 +2,6 @@
 
 import { useCallback, useEffect, useState } from "react";
 import { TicketPriorityBadge } from "./ticket-priority-badge";
-import { TicketStatusBadge } from "./ticket-status-badge";
 import { TicketDeadlineLabel } from "./ticket-deadline-label";
 import type { AssignableUser, TicketDto } from "./tickets-shared";
 
@@ -202,7 +201,7 @@ export function TicketsDayCalendar({
             {selectedDayLabel}
           </p>
           <p className="mt-1 text-xs text-stone-500">
-            Aktiv arbejdsliste — sættes til I gang, Afventer, Færdig eller udskydes til i morgen.
+            Aktiv arbejdsliste for dagen.
           </p>
         </div>
 
@@ -224,15 +223,6 @@ export function TicketsDayCalendar({
                 onSnooze={(tk) =>
                   applyAction(tk, { hiddenFromDailyUntil: "tomorrow" }, "Kunne ikke udskyde ticket.")
                 }
-                onSetInProgress={(tk) =>
-                  applyAction(tk, { status: "in_progress" }, "Kunne ikke sætte til I gang.")
-                }
-                onSetWaiting={(tk) =>
-                  applyAction(tk, { status: "waiting" }, "Kunne ikke sætte til Afventer.")
-                }
-                onDone={(tk) =>
-                  applyAction(tk, { status: "done" }, "Kunne ikke markere som færdig.")
-                }
               />
             ))}
           </div>
@@ -247,17 +237,11 @@ function TicketCard({
   pending,
   onOpen,
   onSnooze,
-  onSetInProgress,
-  onSetWaiting,
-  onDone,
 }: {
   ticket: TicketDto;
   pending: boolean;
   onOpen: (id: string) => void;
   onSnooze: (ticket: TicketDto) => void;
-  onSetInProgress: (ticket: TicketDto) => void;
-  onSetWaiting: (ticket: TicketDto) => void;
-  onDone: (ticket: TicketDto) => void;
 }) {
   const overdue = ticket.deadline ? ticket.deadline < todayKey() : false;
 
@@ -288,48 +272,23 @@ function TicketCard({
         <span className="line-clamp-2 text-sm font-medium text-stone-900">{ticket.title}</span>
         <TicketPriorityBadge priority={ticket.priority} />
       </div>
-      <div className="mt-1.5 flex flex-wrap items-center gap-1.5 text-xs">
-        <span className="text-stone-500">{ticket.assignedUser.name}</span>
-        <span className="text-stone-300" aria-hidden>·</span>
+      <div className="mt-2 flex items-center text-xs">
         <TicketDeadlineLabel deadline={ticket.deadline} />
-        <span className="text-stone-300" aria-hidden>·</span>
-        <TicketStatusBadge status={ticket.status} />
       </div>
-      <div className="mt-2.5 flex flex-wrap gap-1.5" onClick={stop}>
+      <div className="mt-3 flex" onClick={stop}>
         <ActionButton
           tone="amber"
           disabled={pending}
           onClick={() => onSnooze(ticket)}
           label="Udskyd til i morgen"
         />
-        <ActionButton
-          tone="blue"
-          disabled={pending || ticket.status === "in_progress"}
-          onClick={() => onSetInProgress(ticket)}
-          label="I gang"
-        />
-        <ActionButton
-          tone="stone"
-          disabled={pending || ticket.status === "waiting"}
-          onClick={() => onSetWaiting(ticket)}
-          label="Afventer"
-        />
-        <ActionButton
-          tone="emerald"
-          disabled={pending}
-          onClick={() => onDone(ticket)}
-          label="Færdig"
-        />
       </div>
     </div>
   );
 }
 
-const TONE_CLASSES: Record<"amber" | "blue" | "stone" | "emerald", string> = {
+const TONE_CLASSES: Record<"amber", string> = {
   amber: "border-amber-300 bg-amber-50 text-amber-800 hover:bg-amber-100",
-  blue: "border-blue-300 bg-blue-50 text-blue-800 hover:bg-blue-100",
-  stone: "border-stone-300 bg-stone-50 text-stone-700 hover:bg-stone-100",
-  emerald: "border-emerald-300 bg-emerald-50 text-emerald-800 hover:bg-emerald-100",
 };
 
 function ActionButton({
@@ -352,7 +311,7 @@ function ActionButton({
         onClick();
       }}
       className={[
-        "inline-flex h-7 items-center justify-center rounded-md border px-2.5 text-[11px] font-semibold leading-none whitespace-nowrap transition disabled:cursor-not-allowed disabled:opacity-50",
+        "inline-flex h-8 min-w-[9.5rem] items-center justify-center rounded-md border px-3 text-[11px] font-semibold leading-none whitespace-nowrap transition disabled:cursor-not-allowed disabled:opacity-50",
         TONE_CLASSES[tone],
       ].join(" ")}
     >

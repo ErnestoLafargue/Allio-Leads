@@ -223,6 +223,7 @@ const SIDEBAR_SECTIONS: SidebarSection[] = [
     id: "tickets",
     label: "Tickets",
     icon: TicketsIcon,
+    adminOnly: true,
     items: [
       { href: "/tickets/mine", label: "Mine tickets" },
       { href: "/tickets/all", label: "Alle tickets" },

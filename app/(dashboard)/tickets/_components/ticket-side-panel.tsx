@@ -114,6 +114,9 @@ export function TicketSidePanel(props: Props) {
     return ticket?.title ?? "Ticket";
   }, [isCreate, isEdit, ticket]);
 
+  const footerButtonBaseClass =
+    "inline-flex h-10 min-w-[7.5rem] items-center justify-center rounded-lg border px-3 text-sm font-medium transition disabled:cursor-not-allowed disabled:opacity-60";
+
   async function handleSubmit(e?: React.FormEvent) {
     e?.preventDefault();
     if (!isFormMode) return;
@@ -405,17 +408,17 @@ export function TicketSidePanel(props: Props) {
                 type="button"
                 onClick={() => void handleDelete()}
                 disabled={deleting}
-                className="rounded-lg border border-red-300 bg-white px-3 py-2 text-sm font-medium text-red-700 transition hover:bg-red-50 disabled:opacity-60"
+                className={`${footerButtonBaseClass} border-red-300 bg-white text-red-700 hover:bg-red-50`}
               >
                 {deleting ? "Sletter…" : "Slet"}
               </button>
             ) : null}
           </div>
-          <div className="flex items-center gap-2">
+          <div className="flex flex-wrap items-center justify-end gap-2">
             <button
               type="button"
               onClick={onClose}
-              className="rounded-lg border border-stone-300 bg-white px-3 py-2 text-sm font-medium text-stone-700 transition hover:bg-stone-50"
+              className={`${footerButtonBaseClass} border-stone-300 bg-white text-stone-700 hover:bg-stone-50`}
             >
               {isFormMode ? "Annuller" : "Luk"}
             </button>
@@ -423,7 +426,7 @@ export function TicketSidePanel(props: Props) {
               <button
                 type="button"
                 onClick={() => onModeChange("edit")}
-                className="rounded-lg bg-stone-900 px-3 py-2 text-sm font-medium text-white shadow-sm transition hover:bg-stone-800"
+                className={`${footerButtonBaseClass} border-stone-900 bg-stone-900 text-white shadow-sm hover:bg-stone-800`}
               >
                 Rediger
               </button>
@@ -433,7 +436,7 @@ export function TicketSidePanel(props: Props) {
                 type="button"
                 onClick={() => void quickPatch({ status: "open" }, "Kunne ikke genåbne ticket.")}
                 disabled={saving}
-                className="rounded-lg border border-stone-300 bg-white px-3 py-2 text-sm font-medium text-stone-700 transition hover:bg-stone-50 disabled:opacity-60"
+                className={`${footerButtonBaseClass} border-stone-300 bg-white text-stone-700 hover:bg-stone-50`}
               >
                 Genåbn
               </button>
@@ -444,7 +447,7 @@ export function TicketSidePanel(props: Props) {
                   type="button"
                   onClick={() => void quickPatch({ hiddenFromDailyUntil: "tomorrow" }, "Kunne ikke udskyde ticket.")}
                   disabled={saving}
-                  className="rounded-lg border border-amber-300 bg-amber-50 px-3 py-2 text-sm font-medium text-amber-800 transition hover:bg-amber-100 disabled:opacity-60"
+                  className={`${footerButtonBaseClass} border-amber-300 bg-amber-50 text-amber-800 hover:bg-amber-100`}
                 >
                   Udskyd til i morgen
                 </button>
@@ -453,7 +456,7 @@ export function TicketSidePanel(props: Props) {
                     type="button"
                     onClick={() => void quickPatch({ status: "in_progress" }, "Kunne ikke sætte til I gang.")}
                     disabled={saving}
-                    className="rounded-lg border border-blue-300 bg-blue-50 px-3 py-2 text-sm font-medium text-blue-800 transition hover:bg-blue-100 disabled:opacity-60"
+                    className={`${footerButtonBaseClass} border-blue-300 bg-blue-50 text-blue-800 hover:bg-blue-100`}
                   >
                     I gang
                   </button>
@@ -463,7 +466,7 @@ export function TicketSidePanel(props: Props) {
                     type="button"
                     onClick={() => void quickPatch({ status: "waiting" }, "Kunne ikke sætte til Afventer.")}
                     disabled={saving}
-                    className="rounded-lg border border-stone-300 bg-stone-50 px-3 py-2 text-sm font-medium text-stone-700 transition hover:bg-stone-100 disabled:opacity-60"
+                    className={`${footerButtonBaseClass} border-stone-300 bg-stone-50 text-stone-700 hover:bg-stone-100`}
                   >
                     Afventer
                   </button>
@@ -472,7 +475,7 @@ export function TicketSidePanel(props: Props) {
                   type="button"
                   onClick={() => void quickPatch({ status: "done" }, "Kunne ikke markere som færdig.")}
                   disabled={saving}
-                  className="rounded-lg border border-emerald-300 bg-emerald-50 px-3 py-2 text-sm font-medium text-emerald-800 transition hover:bg-emerald-100 disabled:opacity-60"
+                  className={`${footerButtonBaseClass} border-emerald-300 bg-emerald-50 text-emerald-800 hover:bg-emerald-100`}
                 >
                   Færdig
                 </button>
@@ -483,7 +486,7 @@ export function TicketSidePanel(props: Props) {
                 type="button"
                 onClick={() => void handleSubmit()}
                 disabled={saving}
-                className="rounded-lg bg-emerald-600 px-4 py-2 text-sm font-semibold text-white shadow-sm transition hover:bg-emerald-700 disabled:cursor-not-allowed disabled:bg-emerald-400"
+                className={`${footerButtonBaseClass} border-emerald-600 bg-emerald-600 px-4 font-semibold text-white shadow-sm hover:bg-emerald-700 disabled:bg-emerald-400`}
               >
                 {saving ? "Gemmer…" : isCreate ? "Opret" : "Gem"}
               </button>
