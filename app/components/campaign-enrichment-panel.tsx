@@ -473,7 +473,6 @@ export function CampaignEnrichmentPanel({
                     onClick={() => void applyEnrichment()}
                     disabled={
                       !preview ||
-                      preview.leadsToUpdate === 0 ||
                       applying ||
                       hasInvalidTargetSelection
                     }
