@@ -16,6 +16,7 @@ import { provisionTelnyxAgentsForUsers } from "@/lib/telnyx-provision-agents-ser
 export async function POST(req: Request) {
   const { session, response } = await requireSession();
   if (response) return response;
+  const sessionUserId = session!.user.id;
 
   const body = await req.json().catch(() => null);
   const leadId = typeof body?.leadId === "string" ? body.leadId.trim() : "";
@@ -50,7 +51,7 @@ export async function POST(req: Request) {
   if (voipApiContext !== VOIP_API_CONTEXT.GLOBAL_LEAD_PAGE && !campaignUsesVoipUi(mode)) {
     return NextResponse.json({ error: "Kampagnen er ikke sat til et opkalds-mode (VoIP)." }, { status: 409 });
   }
-  if (!sellerMayEditLead(session.user.role, session.user.id, lead)) {
+  if (!sellerMayEditLead(session!.user.role, sessionUserId, lead)) {
     return NextResponse.json({ error: "Leadet er låst af en anden bruger." }, { status: 409 });
   }
 
@@ -67,7 +68,7 @@ export async function POST(req: Request) {
   // endnu ikke er provisioneret — men det betyder at flere agenter deler samme SIP-URI og
   // dispatcher-bridge vil ikke vide hvem den ringer til.
   let userRow = await prisma.user.findUnique({
-    where: { id: session.user.id },
+    where: { id: sessionUserId },
     select: { telnyxCredentialId: true, telnyxSipUsername: true },
   });
   let autoProvisioned = false;
@@ -75,7 +76,7 @@ export async function POST(req: Request) {
 
   async function autoProvisionOwnAccount(force: boolean) {
     const out = await provisionTelnyxAgentsForUsers({
-      userIds: [session.user.id],
+      userIds: [sessionUserId],
       force,
     });
     if (!out.ok) return false;
@@ -83,7 +84,7 @@ export async function POST(req: Request) {
     if (!row) return false;
     if (row.status !== "ok" && row.status !== "skipped") return false;
     userRow = await prisma.user.findUnique({
-      where: { id: session.user.id },
+      where: { id: sessionUserId },
       select: { telnyxCredentialId: true, telnyxSipUsername: true },
     });
     autoProvisioned = true;
@@ -108,7 +109,7 @@ export async function POST(req: Request) {
   }
 
   const fromPool = getTelnyxFromPoolInfo();
-  const callerNumber = pickTelnyxFromNumber(leadId, { userId: session.user.id });
+  const callerNumber = pickTelnyxFromNumber(leadId, { userId: sessionUserId });
   if (!callerNumber) {
     return NextResponse.json(
       {
