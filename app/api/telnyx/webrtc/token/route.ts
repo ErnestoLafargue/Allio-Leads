@@ -80,7 +80,7 @@ export async function POST(req: Request) {
       force,
     });
     if (!out.ok) return false;
-    const row = out.results.find((r) => r.userId === session.user.id);
+    const row = out.results.find((r) => r.userId === sessionUserId);
     if (!row) return false;
     if (row.status !== "ok" && row.status !== "skipped") return false;
     userRow = await prisma.user.findUnique({
