@@ -11,6 +11,7 @@ import { handleAmdHuman, handleAmdMachine } from "@/lib/dialer-bridge";
 import { LEAD_ACTIVITY_KIND, formatPhoneForActivitySummary } from "@/lib/lead-activity-kinds";
 import { startTelnyxRecording } from "@/lib/telnyx-call-control";
 import { persistTelnyxRecordingToAllio } from "@/lib/telnyx-recording-storage";
+import { normalizePhoneToE164ForDial, phoneStoredVariantsForQuery } from "@/lib/phone-e164";
 
 /**
  * Telnyx Call Control webhook — modtager alle events relateret til opkald
@@ -35,6 +36,71 @@ function safeJsonParse(raw: string): TelnyxWebhookEnvelope | null {
   } catch {
     return null;
   }
+}
+
+async function resolveLeadContextForRecording(params: {
+  callControlId: string;
+  callSessionId: string | null;
+  clientStateLeadId: string | null;
+  clientStateUserId: string | null;
+  fromNumber: string | null;
+  toNumber: string | null;
+}): Promise<{ leadId: string | null; agentUserId: string | null }> {
+  if (params.clientStateLeadId) {
+    return { leadId: params.clientStateLeadId, agentUserId: params.clientStateUserId };
+  }
+
+  const byControl = await prisma.dialerCallLog.findUnique({
+    where: { callControlId: params.callControlId },
+    select: { leadId: true, agentUserId: true },
+  });
+  if (byControl?.leadId) {
+    return { leadId: byControl.leadId, agentUserId: byControl.agentUserId ?? null };
+  }
+
+  if (params.callSessionId) {
+    const bySession = await prisma.dialerCallLog.findFirst({
+      where: { callSessionId: params.callSessionId, leadId: { not: null } },
+      orderBy: { startedAt: "desc" },
+      select: { leadId: true, agentUserId: true },
+    });
+    if (bySession?.leadId) {
+      return { leadId: bySession.leadId, agentUserId: bySession.agentUserId ?? null };
+    }
+  }
+
+  const byBridge = await prisma.dialerCallLog.findFirst({
+    where: {
+      OR: [{ bridgeTargetId: params.callControlId }, { callControlId: byControl?.bridgeTargetId ?? "__none__" }],
+      leadId: { not: null },
+    },
+    orderBy: { startedAt: "desc" },
+    select: { leadId: true, agentUserId: true },
+  });
+  if (byBridge?.leadId) {
+    return { leadId: byBridge.leadId, agentUserId: byBridge.agentUserId ?? null };
+  }
+
+  for (const raw of [params.toNumber, params.fromNumber]) {
+    const e164 = normalizePhoneToE164ForDial(raw ?? "");
+    const digits = e164?.replace(/\D/g, "") ?? "";
+    if (!digits) continue;
+    const variants = phoneStoredVariantsForQuery(digits);
+    const matches = await prisma.lead.findMany({
+      where: { phone: { in: variants } },
+      select: { id: true, phone: true },
+      take: 8,
+    });
+    const exact = matches.filter((m) => {
+      const md = normalizePhoneToE164ForDial(m.phone)?.replace(/\D/g, "") ?? "";
+      return md === digits;
+    });
+    if (exact.length === 1) {
+      return { leadId: exact[0]!.id, agentUserId: null };
+    }
+  }
+
+  return { leadId: null, agentUserId: params.clientStateUserId };
 }
 
 export async function POST(req: Request) {
@@ -360,20 +426,16 @@ export async function POST(req: Request) {
         data: { recordingUrl: url },
       });
 
-      // 2) Find leadId + agent fra DialerCallLog (hvis det er et dispatcher-lead-leg)
-      //    eller fra clientState (hvis det er et manual click-to-call lead-leg).
-      const log = await prisma.dialerCallLog.findUnique({
-        where: { callControlId },
-        select: {
-          leadId: true,
-          agentUserId: true,
-          direction: true,
-          toNumber: true,
-        },
+      const leadCtx = await resolveLeadContextForRecording({
+        callControlId,
+        callSessionId: typeof payload.call_session_id === "string" ? payload.call_session_id : null,
+        clientStateLeadId: clientState?.leadId ?? null,
+        clientStateUserId: clientState?.userId ?? null,
+        fromNumber: typeof payload.from === "string" ? payload.from : null,
+        toNumber: typeof payload.to === "string" ? payload.to : null,
       });
-
-      const leadId = log?.leadId ?? clientState?.leadId ?? null;
-      const agentUserId = log?.agentUserId ?? clientState?.userId ?? null;
+      const leadId = leadCtx.leadId;
+      const agentUserId = leadCtx.agentUserId;
 
       if (!leadId) break;
 
