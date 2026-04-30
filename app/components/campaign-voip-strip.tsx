@@ -237,7 +237,7 @@ export function CampaignVoipStrip({
   const [voipToastFading, setVoipToastFading] = useState(false);
   const endCallInitiatedByUsRef = useRef(false);
   const callHadConnectedRef = useRef(false);
-  const [dialDraft, setDialDraft] = useState(() => (leadPhone || "").trim());
+  const voipPhone = (leadPhone || "").trim();
 
   const [devices, setDevices] = useState<MediaDeviceInfo[]>([]);
   const [permissionDone, setPermissionDone] = useState(false);
@@ -475,7 +475,6 @@ export function CampaignVoipStrip({
     inFlightRef.current = false;
     currentCallContextRef.current = null;
     lastLeadIdRef.current = leadId;
-    setDialDraft((leadPhone || "").trim());
     // Undgå falsk "Klar" mens et aktivt/ringende Telnyx-kald stadig lukkes ned.
     if (!hadActiveOrPendingCall) {
       setLineStatus("idle");
@@ -1029,7 +1028,7 @@ export function CampaignVoipStrip({
     }
   }
 
-  async function startCall(source: "manual" | "auto" = "manual") {
+  async function startCall() {
     if (!audioSetupReady) {
       setLineStatus("idle");
       setDetail(null);
@@ -1039,8 +1038,26 @@ export function CampaignVoipStrip({
       return;
     }
     if (inFlightRef.current) return;
-    const sourcePhone = source === "auto" ? leadPhone : dialDraft;
-    const raw = normalizeDialDraft(sourcePhone);
+    const voipPhoneRaw = voipPhone;
+    const raw = normalizeDialDraft(voipPhoneRaw);
+    const leadRaw = normalizeDialDraft((leadPhone || "").trim());
+    if (raw !== leadRaw) {
+      if (process.env.NODE_ENV !== "production") {
+        console.warn("VOIP phone mismatch", {
+          leadId,
+          leadPhone,
+          voipPhone,
+          callContextPhone: currentCallContextRef.current?.phoneNumber ?? null,
+        });
+      }
+      setLineStatus("error");
+      setDetail("Telefonnummer matcher ikke leadet - opkald blokeret.");
+      reportVoipFailure(
+        "Telefonnummer matcher ikke leadet - opkald blokeret.",
+        "client: voip phone mismatch guard",
+      );
+      return;
+    }
     const toE164 = normalizePhoneToE164ForDial(raw);
     if (!toE164) {
       setLineStatus("idle");
@@ -1068,7 +1085,7 @@ export function CampaignVoipStrip({
       startedAt: Date.now(),
     };
     // #region agent log
-    fetch("http://localhost:7253/ingest/cae62791-9bb1-4500-92a8-c26abf2c0c90", { method: "POST", headers: { "Content-Type": "application/json", "X-Debug-Session-Id": "d38e61" }, body: JSON.stringify({ sessionId: "d38e61", runId: debugRunId, hypothesisId: "H4", location: "campaign-voip-strip.tsx:startCall", message: "startCall initiated", data: { source, leadId, leadPhone, dialDraft, raw, toE164, dialMode: effectiveDialMode, autoStart: effectiveAutoStart, lineStatusBefore: lineStatus, leadEpochAtStart, startAttemptId, callContext: currentCallContextRef.current }, timestamp: Date.now() }) }).catch(() => {});
+    fetch("http://localhost:7253/ingest/cae62791-9bb1-4500-92a8-c26abf2c0c90", { method: "POST", headers: { "Content-Type": "application/json", "X-Debug-Session-Id": "d38e61" }, body: JSON.stringify({ sessionId: "d38e61", runId: debugRunId, hypothesisId: "H4", location: "campaign-voip-strip.tsx:startCall", message: "startCall initiated", data: { leadId, leadPhone, voipPhone, raw, toE164, dialMode: effectiveDialMode, autoStart: effectiveAutoStart, lineStatusBefore: lineStatus, leadEpochAtStart, startAttemptId, callContext: currentCallContextRef.current }, timestamp: Date.now() }) }).catch(() => {});
     // #endregion
     try {
       await ensureClientConnected();
@@ -1174,7 +1191,7 @@ export function CampaignVoipStrip({
       void hangUp();
       return;
     }
-    void startCall("manual");
+    void startCall();
   }
 
   useEffect(() => {
@@ -1196,24 +1213,22 @@ export function CampaignVoipStrip({
   }, [hangupSignal, onHangupSignalHandled]);
 
   useEffect(() => {
-    const key = `${leadId}|${normalizeDialDraft(dialDraft)}|${effectiveAutoStart}`;
+    const key = `${leadId}|${normalizeDialDraft(voipPhone)}|${effectiveAutoStart}`;
     if (!effectiveAutoStart) {
       autoKeyRef.current = null;
       return;
     }
     if (!audioSetupReady) return;
     if (autoKeyRef.current === key) return;
-    if (!normalizeDialDraft(dialDraft)) return;
-    // Kritisk anti-stale guard: auto-start må først ske når inputfeltet er synket
-    // til det aktive leads telefonnummer.
-    if (normalizeDialDraft(dialDraft) !== normalizeDialDraft(leadPhone || "")) return;
+    if (!normalizeDialDraft(voipPhone)) return;
+    if (normalizeDialDraft(voipPhone) !== normalizeDialDraft(leadPhone || "")) return;
     autoKeyRef.current = key;
     // #region agent log
-    fetch("http://localhost:7253/ingest/cae62791-9bb1-4500-92a8-c26abf2c0c90", { method: "POST", headers: { "Content-Type": "application/json", "X-Debug-Session-Id": "d38e61" }, body: JSON.stringify({ sessionId: "d38e61", runId: debugRunId, hypothesisId: "H3", location: "campaign-voip-strip.tsx:autoStartEffect", message: "auto start call triggered", data: { leadId, leadPhone, dialDraft, normalizedDialDraft: normalizeDialDraft(dialDraft), lineStatus, hasActiveCallRef: Boolean(activeCallRef.current), activeCallControlId: activeCallRef.current?.telnyxIDs?.telnyxCallControlId ?? null }, timestamp: Date.now() }) }).catch(() => {});
+    fetch("http://localhost:7253/ingest/cae62791-9bb1-4500-92a8-c26abf2c0c90", { method: "POST", headers: { "Content-Type": "application/json", "X-Debug-Session-Id": "d38e61" }, body: JSON.stringify({ sessionId: "d38e61", runId: debugRunId, hypothesisId: "H3", location: "campaign-voip-strip.tsx:autoStartEffect", message: "auto start call triggered", data: { leadId, leadPhone, voipPhone, normalizedVoipPhone: normalizeDialDraft(voipPhone), lineStatus, hasActiveCallRef: Boolean(activeCallRef.current), activeCallControlId: activeCallRef.current?.telnyxIDs?.telnyxCallControlId ?? null }, timestamp: Date.now() }) }).catch(() => {});
     // #endregion
-    void startCall("auto");
+    void startCall();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [leadId, dialDraft, leadPhone, effectiveAutoStart, audioSetupReady]);
+  }, [leadId, voipPhone, leadPhone, effectiveAutoStart, audioSetupReady]);
 
   /**
    * Predictive-mode: hvis vi har ringet i for lang tid (modtageren tager den ikke),
@@ -1495,8 +1510,8 @@ export function CampaignVoipStrip({
             type="text"
             inputMode="tel"
             autoComplete="off"
-            value={dialDraft}
-            onChange={(e) => setDialDraft(e.target.value)}
+            value={voipPhone}
+            readOnly
             placeholder="Nummer til opkald"
             className="min-w-[12rem] flex-1 rounded-md border border-emerald-200/80 bg-white px-3 py-2 font-mono text-sm font-medium tracking-wide text-stone-900 shadow-sm outline-none ring-emerald-400/40 focus:ring-2"
           />
