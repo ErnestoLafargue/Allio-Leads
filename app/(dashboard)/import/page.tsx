@@ -17,6 +17,12 @@ type PreviewResponse = {
   columns: string[];
   previewRows: Record<string, string>[];
   suggestedMapping: Record<string, string>;
+  overwritePreview?: {
+    cvrMatches: number;
+    protectedCvrs: number;
+    leadsToDelete: number;
+    newLeadsToImport: number;
+  } | null;
 };
 
 type ImportDetailReason = "duplicate_in_file" | "already_in_campaign" | "invalid_row";
@@ -25,6 +31,9 @@ type ImportResult = {
   totalRows: number;
   newLeadsImported: number;
   existingAttached: number;
+  overwriteMatchedCvrs?: number;
+  protectedCvrsSkipped?: number;
+  replacedLeadsDeleted?: number;
   skippedDuplicateInFile: number;
   skippedAlreadyInCampaign: number;
   skippedInvalid: number;
@@ -96,8 +105,10 @@ export default function ImportPage() {
   const [importProgressTotalRows, setImportProgressTotalRows] = useState(0);
   const [importConfirmOpen, setImportConfirmOpen] = useState(false);
   const [includeExistingCvrs, setIncludeExistingCvrs] = useState(false);
+  const [overwriteExistingCvrs, setOverwriteExistingCvrs] = useState(false);
   const [allowMissingCvr, setAllowMissingCvr] = useState(false);
   const [allowMissingCompanyName, setAllowMissingCompanyName] = useState(false);
+  const [overwritePreview, setOverwritePreview] = useState<PreviewResponse["overwritePreview"]>(null);
   const [showAllInCampaignLoading, setShowAllInCampaignLoading] = useState(false);
   const [showAllInCampaignError, setShowAllInCampaignError] = useState<string | null>(null);
   /** Nulstiller fil-input når import er færdig, så «forsiden» er tydelig */
@@ -192,15 +203,19 @@ export default function ImportPage() {
     setMapping({});
     setResult(null);
     setError(null);
+    setOverwritePreview(null);
   }
 
-  async function onAnalyze() {
+  async function onAnalyze(useCurrentMapping = false) {
     if (!file || !campaignId) return;
     setError(null);
     setResult(null);
     setLoadingPreview(true);
     const fd = new FormData();
     fd.append("file", file);
+    fd.append("campaignId", campaignId);
+    if (useCurrentMapping) fd.append("mapping", JSON.stringify(mapping));
+    fd.append("overwriteExistingCvrs", overwriteExistingCvrs ? "1" : "0");
     const res = await fetch("/api/import/preview", { method: "POST", body: fd });
     setLoadingPreview(false);
     if (!res.ok) {
@@ -220,7 +235,8 @@ export default function ImportPage() {
     const data: PreviewResponse = await res.json();
     setColumns(data.columns);
     setPreviewRows(data.previewRows);
-    setMapping(data.suggestedMapping);
+    if (!useCurrentMapping) setMapping(data.suggestedMapping);
+    setOverwritePreview(data.overwritePreview ?? null);
     setStep(2);
   }
 
@@ -277,6 +293,7 @@ export default function ImportPage() {
     fd.append("campaignId", campaignId);
     fd.append("mapping", JSON.stringify(mapping));
     fd.append("includeExistingCvrs", includeExistingCvrs ? "1" : "0");
+    fd.append("overwriteExistingCvrs", overwriteExistingCvrs ? "1" : "0");
     fd.append("allowMissingCvr", allowMissingCvr ? "1" : "0");
     fd.append("allowMissingCompanyName", allowMissingCompanyName ? "1" : "0");
     const res = await fetch("/api/import/csv", { method: "POST", body: fd });
@@ -431,6 +448,13 @@ export default function ImportPage() {
             <ul className="list-inside list-disc space-y-1 tabular-nums">
               <li>{result.totalRows} rækker i filen (efter tomme rækker er fjernet)</li>
               <li>{result.newLeadsImported} nye leads oprettet</li>
+              {overwriteExistingCvrs && (
+                <>
+                  <li>{result.overwriteMatchedCvrs ?? 0} CVR-matches behandlet til overskrivning</li>
+                  <li>{result.protectedCvrsSkipped ?? 0} beskyttede CVR&apos;er sprunget over</li>
+                  <li>{result.replacedLeadsDeleted ?? 0} eksisterende leads slettet/erstattet</li>
+                </>
+              )}
               <li>{result.existingAttached} eksisterende leads knyttet til kampagne (flyttet fra anden kampagne hvis nødvendigt)</li>
               <li>
                 {result.skippedDuplicateInFile + result.skippedAlreadyInCampaign} dubletter sprunget over
@@ -683,6 +707,38 @@ export default function ImportPage() {
                   </span>
                 </span>
               </label>
+              <label className="flex items-start gap-3 rounded-md border border-stone-200 bg-stone-50 px-3 py-2 text-sm text-stone-800">
+                <input
+                  type="checkbox"
+                  checked={overwriteExistingCvrs}
+                  onChange={(e) => setOverwriteExistingCvrs(e.target.checked)}
+                  className="mt-0.5 h-4 w-4 rounded border-stone-300 text-stone-900 focus:ring-stone-400"
+                />
+                <span>
+                  Overskriv eksisterende CVR
+                  <span className="mt-0.5 block text-xs text-stone-600">
+                    Erstatter eksisterende leads med samme CVR. Hvis et lead har aktivitet eller noter, bliver CVR&apos;en sprunget over.
+                  </span>
+                </span>
+              </label>
+              {overwriteExistingCvrs && overwritePreview && (
+                <div className="rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-900">
+                  <p>{overwritePreview.cvrMatches} CVR-matches fundet i kampagnen</p>
+                  <p>{overwritePreview.protectedCvrs} CVR&apos;er er beskyttet og bliver ikke overskrevet</p>
+                  <p>{overwritePreview.leadsToDelete} leads vil blive erstattet</p>
+                  <p>{overwritePreview.newLeadsToImport} nye leads forventes importeret via overskrivning</p>
+                </div>
+              )}
+              {overwriteExistingCvrs && (
+                <button
+                  type="button"
+                  disabled={loadingPreview || !file || !campaignId}
+                  onClick={() => void onAnalyze(true)}
+                  className="rounded-md border border-stone-300 bg-white px-3 py-1.5 text-sm font-medium text-stone-700 hover:bg-stone-50 disabled:opacity-60"
+                >
+                  {loadingPreview ? "Opdaterer preview…" : "Opdater overskriv-preview"}
+                </button>
+              )}
 
               <label className="flex items-start gap-3 rounded-md border border-stone-200 bg-stone-50 px-3 py-2 text-sm text-stone-800">
                 <input
@@ -769,6 +825,9 @@ export default function ImportPage() {
               Leads med samme CVR (8 cifre) oprettes ikke igen. {includeExistingCvrs
                 ? "Eksisterende leads knyttes til kampagnen, hvis de ligger et andet sted."
                 : "Eksisterende leads springes over."}{" "}
+              {overwriteExistingCvrs
+                ? "Ved overskrivning slettes kun leads uden noter og uden beskyttede udfald; beskyttede CVR'er springes over."
+                : ""}{" "}
               Leads med udfald Ikke interesseret eller Ukvalificeret springes altid over. Dubletter i filen springes
               over. {allowMissingCvr ? "Leads uden CVR importeres som nye leads." : "Leads uden CVR springes over."}{" "}
               {allowMissingCompanyName

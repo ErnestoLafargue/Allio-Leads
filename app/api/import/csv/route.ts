@@ -20,11 +20,15 @@ import {
 } from "@/lib/cvr-import";
 
 const MAX_DETAIL_ROWS = 200;
+const PROTECTED_STATUSES = new Set(["CALLBACK_SCHEDULED", "MEETING_BOOKED", "UNQUALIFIED", "NOT_INTERESTED"]);
 
 export type CsvImportResponse = {
   totalRows: number;
   newLeadsImported: number;
   existingAttached: number;
+  overwriteMatchedCvrs: number;
+  protectedCvrsSkipped: number;
+  replacedLeadsDeleted: number;
   skippedDuplicateInFile: number;
   skippedAlreadyInCampaign: number;
   skippedInvalid: number;
@@ -41,6 +45,7 @@ export async function POST(req: Request) {
   const campaignId = typeof campaignIdRaw === "string" ? campaignIdRaw.trim() : "";
   const mappingRaw = form.get("mapping");
   const includeExistingCvrs = form.get("includeExistingCvrs") === "1";
+  const overwriteExistingCvrs = form.get("overwriteExistingCvrs") === "1";
   const allowMissingCvr = form.get("allowMissingCvr") === "1";
   const allowMissingCompanyName = form.get("allowMissingCompanyName") === "1";
   let mapping: MappingRecord | null = null;
@@ -76,9 +81,20 @@ export async function POST(req: Request) {
   const rows = parsed.rows;
 
   const existingLeads = await prisma.lead.findMany({
-    select: { id: true, campaignId: true, cvr: true, status: true },
+    select: { id: true, campaignId: true, cvr: true, status: true, notes: true },
   });
   let cvrToLead = indexLeadsByNormalizedCvr(existingLeads);
+  const campaignLeadsByCvr = new Map<
+    string,
+    { id: string; status: string; notes: string; campaignId: string | null }[]
+  >();
+  for (const lead of existingLeads) {
+    const norm = normalizeCVR(lead.cvr);
+    if (!norm || lead.campaignId !== campaignId) continue;
+    const arr = campaignLeadsByCvr.get(norm) ?? [];
+    arr.push(lead);
+    campaignLeadsByCvr.set(norm, arr);
+  }
 
   const encoder = new TextEncoder();
   const totalRows = rows.length;
@@ -93,12 +109,16 @@ export async function POST(req: Request) {
         totalRows,
         newLeadsImported: 0,
         existingAttached: 0,
+        overwriteMatchedCvrs: 0,
+        protectedCvrsSkipped: 0,
+        replacedLeadsDeleted: 0,
         skippedDuplicateInFile: 0,
         skippedAlreadyInCampaign: 0,
         skippedInvalid: 0,
         details: [],
       };
       const handledCvrsInFile = new Set<string>();
+      const overwriteHandledCvrs = new Set<string>();
       const progressStep = Math.max(1, Math.floor(totalRows / 100));
 
       function pushDetail(row: ImportDetailRow) {
@@ -140,6 +160,40 @@ export async function POST(req: Request) {
             summary.skippedDuplicateInFile += 1;
             pushDetail({ dataRow, cvr: cvrNorm, reason: "duplicate_in_file" });
           } else {
+            if (overwriteExistingCvrs && cvrNorm && !overwriteHandledCvrs.has(cvrNorm)) {
+              const campaignMatches = campaignLeadsByCvr.get(cvrNorm) ?? [];
+              if (campaignMatches.length > 0) {
+                summary.overwriteMatchedCvrs += 1;
+                const protectedMatches = campaignMatches.filter(
+                  (lead) => PROTECTED_STATUSES.has(lead.status) || Boolean(lead.notes?.trim()),
+                );
+                if (protectedMatches.length > 0) {
+                  summary.protectedCvrsSkipped += 1;
+                  summary.skippedAlreadyInCampaign += 1;
+                  handledCvrsInFile.add(cvrNorm);
+                  overwriteHandledCvrs.add(cvrNorm);
+                  pushDetail({
+                    dataRow,
+                    cvr: cvrNorm,
+                    reason: "already_in_campaign",
+                    note: "Beskyttet CVR: mindst ét lead har udfald/aktivitet eller noter",
+                  });
+                  const processed = i + 1;
+                  if (processed === totalRows || processed % progressStep === 0) {
+                    pushProgress(processed);
+                  }
+                  continue;
+                }
+                const idsToDelete = campaignMatches.map((lead) => lead.id);
+                if (idsToDelete.length > 0) {
+                  const deleted = await prisma.lead.deleteMany({ where: { id: { in: idsToDelete } } });
+                  summary.replacedLeadsDeleted += deleted.count;
+                }
+                campaignLeadsByCvr.set(cvrNorm, []);
+                cvrToLead.delete(cvrNorm);
+                overwriteHandledCvrs.add(cvrNorm);
+              }
+            }
             const existing = cvrNorm ? cvrToLead.get(cvrNorm) : null;
             if (existing && cvrNorm) {
               if (existing.status === "NOT_INTERESTED" || existing.status === "UNQUALIFIED") {
@@ -201,6 +255,9 @@ export async function POST(req: Request) {
               });
               if (cvrNorm) {
                 cvrToLead.set(cvrNorm, { id: created.id, campaignId, status: "NEW" });
+                const arr = campaignLeadsByCvr.get(cvrNorm) ?? [];
+                arr.push({ id: created.id, status: "NEW", notes: "", campaignId });
+                campaignLeadsByCvr.set(cvrNorm, arr);
                 handledCvrsInFile.add(cvrNorm);
               }
               summary.newLeadsImported += 1;
