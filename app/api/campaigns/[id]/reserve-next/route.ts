@@ -41,12 +41,11 @@ export async function POST(req: Request, { params }: Params) {
   const body = await req.json().catch(() => null);
   const preferLeadId = typeof body?.preferLeadId === "string" ? body.preferLeadId.trim() : "";
   const excludeLeadId = typeof body?.excludeLeadId === "string" ? body.excludeLeadId.trim() : "";
-  const excludeLeadIds = Array.isArray(body?.excludeLeadIds)
-    ? body.excludeLeadIds
-        .filter((v): v is string => typeof v === "string")
+  const rawExcludeLeadIds: unknown[] = Array.isArray(body?.excludeLeadIds) ? body.excludeLeadIds : [];
+  const excludeLeadIds = rawExcludeLeadIds
+        .filter((v: unknown): v is string => typeof v === "string")
         .map((v) => v.trim())
         .filter(Boolean)
-    : [];
   const excludedLeadSet = new Set<string>([excludeLeadId, ...excludeLeadIds].filter(Boolean));
   const workspaceStartFilter = parseWorkspaceStartDateFilterFromRequestBody(body);
   if (
