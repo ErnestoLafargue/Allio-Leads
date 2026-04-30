@@ -8,6 +8,7 @@ export type StandardMappingId =
   | "phone"
   | "email"
   | "cvr"
+  | "domain"
   | "address"
   | "postalCode"
   | "city"
@@ -20,6 +21,7 @@ export const STANDARD_MAPPING_OPTIONS: { id: StandardMappingId; label: string }[
   { id: "phone", label: "Telefonnummer" },
   { id: "notes", label: "Noter" },
   { id: "email", label: "E-mail" },
+  { id: "domain", label: "Domæne / hjemmeside" },
   { id: "cvr", label: "CVR-nummer" },
   { id: "address", label: "Adresse" },
   { id: "postalCode", label: "Postnr." },
@@ -78,6 +80,15 @@ export function suggestColumnMapping(columns: string[]): Record<string, string> 
       n.includes("e-mail")
     ) {
       t = "email";
+    } else if (
+      n.includes("domain") ||
+      n.includes("hjemmeside") ||
+      n.includes("website") ||
+      n === "url" ||
+      n === "web" ||
+      n === "webside"
+    ) {
+      t = "domain";
     } else if (n.includes("cvr")) {
       t = "cvr";
     } else if (n.includes("adresse") || n === "address" || n === "addr") {
@@ -132,6 +143,9 @@ export function applyColumnMapping(
         break;
       case "cvr":
         flat.cvr = v;
+        break;
+      case "domain":
+        flat.domain = v;
         break;
       case "address":
         flat.adresse = v;

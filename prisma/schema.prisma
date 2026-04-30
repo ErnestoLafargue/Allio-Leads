@@ -47,6 +47,7 @@ model User {
   /// Interne opgaver (ticketsystem)
   ticketsAssigned Ticket[] @relation("TicketAssignedTo")
   ticketsCreated  Ticket[] @relation("TicketCreatedBy")
+  campaignEnrichmentLogs CampaignEnrichmentLog[]
 }
 
 /// Én række pr. bruger pr. kalenderdag (København) ved vellykket login.
@@ -83,6 +84,7 @@ model Campaign {
 
   leads        Lead[]
   visitHistory LeadVisitHistory[]
+  enrichmentLogs CampaignEnrichmentLog[]
 
   agentSessions    AgentSession[]
   dialerCallLogs   DialerCallLog[]
@@ -381,4 +383,30 @@ model Ticket {
   @@index([createdByUserId])
   @@index([assignedUserId, snoozedUntil])
   @@index([assignedUserId, hiddenFromDailyUntil])
+}
+
+/// Log over kampagne-berigelser fra filupload.
+model CampaignEnrichmentLog {
+  id                 String   @id @default(cuid())
+  campaignId         String
+  userId             String
+  filename           String
+  /// cvr | companyName | phone | email | domain
+  matchField         String
+  overwriteExisting  Boolean  @default(false)
+  uploadedRows       Int
+  matchedRows        Int
+  updatedLeads       Int
+  fieldsAdded        Int
+  fieldsOverwritten  Int
+  fieldsUnchanged    Int
+  unmatchedRows      Int
+  duplicateUploadRows Int     @default(0)
+  createdAt          DateTime @default(now())
+
+  campaign Campaign @relation(fields: [campaignId], references: [id], onDelete: Cascade)
+  user     User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([campaignId, createdAt])
+  @@index([userId, createdAt])
 }

@@ -26,6 +26,7 @@ import {
 import { LeadsBulkPanel } from "@/app/components/leads-bulk-panel";
 import { CampaignProtectedSwitch } from "@/app/components/campaign-protected-switch";
 import { CampaignDeleteFlow } from "@/app/components/campaign-delete-flow";
+import { CampaignEnrichmentPanel } from "@/app/components/campaign-enrichment-panel";
 import {
   canDeleteCampaign,
   PROTECTED_CAMPAIGN_DELETE_MESSAGE,
@@ -468,6 +469,7 @@ export default function RedigerKampagnePage() {
             >
               Importer leads
             </Link>
+            <CampaignEnrichmentPanel campaignId={id} fieldConfigJson={serializeFieldConfig({ extensions: ext })} />
             <label className="flex items-center gap-1.5 text-xs text-stone-600">
               <span className="sr-only">Filformat</span>
               <select
