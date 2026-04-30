@@ -13,11 +13,18 @@ function sanitize(s: string): string {
 }
 
 function buildConnectionName(userId: string): string {
-  return `allioagent${sanitize(userId)}`;
+  const core = sanitize(userId).toLowerCase();
+  // Telnyx credential connection_name max = 32 chars.
+  // Keep deterministic suffix from user id to avoid collisions.
+  const suffix = core.slice(-22) || "agent";
+  return `allioagent${suffix}`.slice(0, 32);
 }
 
 function buildSipUsername(userId: string): string {
-  return `allio${sanitize(userId).toLowerCase()}`;
+  const core = sanitize(userId).toLowerCase();
+  // Keep username compact to avoid provider-side length constraints.
+  const suffix = core.slice(-24) || "user";
+  return `allio${suffix}`.slice(0, 30);
 }
 
 export type ProvisionAgentRowResult = {

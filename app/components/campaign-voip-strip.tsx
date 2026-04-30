@@ -94,6 +94,15 @@ type TelnyxCall = {
   remoteStream?: MediaStream;
 };
 
+type VoipCallContext = {
+  leadId: string;
+  campaignId: string;
+  phoneNumber: string;
+  queueItemId: string | null;
+  dialMode: CampaignDialMode;
+  startedAt: number;
+};
+
 function normalizeDialDraft(s: string) {
   return s.replace(/\s/g, "").trim();
 }
@@ -267,6 +276,7 @@ export function CampaignVoipStrip({
   const leadEpochRef = useRef(0);
   const startAttemptRef = useRef(0);
   const lastEndedToneAtRef = useRef(0);
+  const currentCallContextRef = useRef<VoipCallContext | null>(null);
   const hangupSignalRef = useRef(hangupSignal);
   const remoteAudioRef = useRef<HTMLAudioElement | null>(null);
   /**
@@ -454,6 +464,7 @@ export function CampaignVoipStrip({
 
   useEffect(() => {
     if (lastLeadIdRef.current === leadId) return;
+    const hadActiveOrPendingCall = Boolean(activeCallRef.current) || inFlightRef.current;
     // #region agent log
     fetch("http://localhost:7253/ingest/cae62791-9bb1-4500-92a8-c26abf2c0c90", { method: "POST", headers: { "Content-Type": "application/json", "X-Debug-Session-Id": "d38e61" }, body: JSON.stringify({ sessionId: "d38e61", runId: debugRunId, hypothesisId: "H1", location: "campaign-voip-strip.tsx:leadResetEffect", message: "lead change triggers voip reset", data: { previousLeadId: lastLeadIdRef.current, nextLeadId: leadId, nextLeadPhone: leadPhone, lineStatusBeforeReset: lineStatus, hadActiveCallRef: Boolean(activeCallRef.current) }, timestamp: Date.now() }) }).catch(() => {});
     // #endregion
@@ -462,9 +473,13 @@ export function CampaignVoipStrip({
     }
     leadEpochRef.current += 1;
     inFlightRef.current = false;
+    currentCallContextRef.current = null;
     lastLeadIdRef.current = leadId;
     setDialDraft((leadPhone || "").trim());
-    setLineStatus("idle");
+    // Undgå falsk "Klar" mens et aktivt/ringende Telnyx-kald stadig lukkes ned.
+    if (!hadActiveOrPendingCall) {
+      setLineStatus("idle");
+    }
     setDetail(null);
     setVoipToast(null);
     setVoipToastFading(false);
@@ -1012,7 +1027,7 @@ export function CampaignVoipStrip({
     }
   }
 
-  async function startCall() {
+  async function startCall(source: "manual" | "auto" = "manual") {
     if (!audioSetupReady) {
       setLineStatus("idle");
       setDetail(null);
@@ -1022,7 +1037,8 @@ export function CampaignVoipStrip({
       return;
     }
     if (inFlightRef.current) return;
-    const raw = normalizeDialDraft(dialDraft);
+    const sourcePhone = source === "auto" ? leadPhone : dialDraft;
+    const raw = normalizeDialDraft(sourcePhone);
     const toE164 = normalizePhoneToE164ForDial(raw);
     if (!toE164) {
       setLineStatus("idle");
@@ -1041,8 +1057,16 @@ export function CampaignVoipStrip({
     setDetail(clientRef.current ? null : "Forbinder WebRTC…");
     setCallStartAt(Date.now());
     setCallEndAt(null);
+    currentCallContextRef.current = {
+      leadId,
+      campaignId,
+      phoneNumber: toE164,
+      queueItemId: null,
+      dialMode: effectiveDialMode,
+      startedAt: Date.now(),
+    };
     // #region agent log
-    fetch("http://localhost:7253/ingest/cae62791-9bb1-4500-92a8-c26abf2c0c90", { method: "POST", headers: { "Content-Type": "application/json", "X-Debug-Session-Id": "d38e61" }, body: JSON.stringify({ sessionId: "d38e61", runId: debugRunId, hypothesisId: "H4", location: "campaign-voip-strip.tsx:startCall", message: "startCall initiated", data: { leadId, leadPhone, dialDraft, raw, toE164, dialMode: effectiveDialMode, autoStart: effectiveAutoStart, lineStatusBefore: lineStatus, leadEpochAtStart, startAttemptId }, timestamp: Date.now() }) }).catch(() => {});
+    fetch("http://localhost:7253/ingest/cae62791-9bb1-4500-92a8-c26abf2c0c90", { method: "POST", headers: { "Content-Type": "application/json", "X-Debug-Session-Id": "d38e61" }, body: JSON.stringify({ sessionId: "d38e61", runId: debugRunId, hypothesisId: "H4", location: "campaign-voip-strip.tsx:startCall", message: "startCall initiated", data: { source, leadId, leadPhone, dialDraft, raw, toE164, dialMode: effectiveDialMode, autoStart: effectiveAutoStart, lineStatusBefore: lineStatus, leadEpochAtStart, startAttemptId, callContext: currentCallContextRef.current }, timestamp: Date.now() }) }).catch(() => {});
     // #endregion
     try {
       await ensureClientConnected();
@@ -1134,6 +1158,7 @@ export function CampaignVoipStrip({
       /* no-op */
     }
     activeCallRef.current = null;
+    currentCallContextRef.current = null;
     setLineStatus("idle");
     setDetail(null);
     inFlightRef.current = false;
@@ -1148,7 +1173,7 @@ export function CampaignVoipStrip({
       void hangUp();
       return;
     }
-    void startCall();
+    void startCall("manual");
   }
 
   useEffect(() => {
@@ -1178,13 +1203,16 @@ export function CampaignVoipStrip({
     if (!audioSetupReady) return;
     if (autoKeyRef.current === key) return;
     if (!normalizeDialDraft(dialDraft)) return;
+    // Kritisk anti-stale guard: auto-start må først ske når inputfeltet er synket
+    // til det aktive leads telefonnummer.
+    if (normalizeDialDraft(dialDraft) !== normalizeDialDraft(leadPhone || "")) return;
     autoKeyRef.current = key;
     // #region agent log
     fetch("http://localhost:7253/ingest/cae62791-9bb1-4500-92a8-c26abf2c0c90", { method: "POST", headers: { "Content-Type": "application/json", "X-Debug-Session-Id": "d38e61" }, body: JSON.stringify({ sessionId: "d38e61", runId: debugRunId, hypothesisId: "H3", location: "campaign-voip-strip.tsx:autoStartEffect", message: "auto start call triggered", data: { leadId, leadPhone, dialDraft, normalizedDialDraft: normalizeDialDraft(dialDraft), lineStatus, hasActiveCallRef: Boolean(activeCallRef.current), activeCallControlId: activeCallRef.current?.telnyxIDs?.telnyxCallControlId ?? null }, timestamp: Date.now() }) }).catch(() => {});
     // #endregion
-    void startCall();
+    void startCall("auto");
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [leadId, dialDraft, effectiveAutoStart, audioSetupReady]);
+  }, [leadId, dialDraft, leadPhone, effectiveAutoStart, audioSetupReady]);
 
   /**
    * Predictive-mode: hvis vi har ringet i for lang tid (modtageren tager den ikke),
