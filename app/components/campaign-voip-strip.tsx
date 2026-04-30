@@ -266,6 +266,7 @@ export function CampaignVoipStrip({
   const currentLeadIdRef = useRef<string | null>(leadId);
   const leadEpochRef = useRef(0);
   const startAttemptRef = useRef(0);
+  const lastEndedToneAtRef = useRef(0);
   const hangupSignalRef = useRef(hangupSignal);
   const remoteAudioRef = useRef<HTMLAudioElement | null>(null);
   /**
@@ -321,6 +322,38 @@ export function CampaignVoipStrip({
   );
   const reportVoipFailureRef = useRef(reportVoipFailure);
   reportVoipFailureRef.current = reportVoipFailure;
+
+  const playCallEndedTone = useCallback(() => {
+    const now = Date.now();
+    if (now - lastEndedToneAtRef.current < 1200) return;
+    lastEndedToneAtRef.current = now;
+    try {
+      const Ctx = window.AudioContext;
+      if (!Ctx) return;
+      const ctx = new Ctx();
+      const offsets = [0, 0.18, 0.36];
+      for (const offset of offsets) {
+        const osc = ctx.createOscillator();
+        const gain = ctx.createGain();
+        osc.type = "sine";
+        osc.frequency.setValueAtTime(1250, ctx.currentTime + offset);
+        gain.gain.setValueAtTime(0.0001, ctx.currentTime + offset);
+        gain.gain.exponentialRampToValueAtTime(0.12, ctx.currentTime + offset + 0.01);
+        gain.gain.exponentialRampToValueAtTime(0.0001, ctx.currentTime + offset + 0.12);
+        osc.connect(gain);
+        gain.connect(ctx.destination);
+        osc.start(ctx.currentTime + offset);
+        osc.stop(ctx.currentTime + offset + 0.13);
+      }
+      window.setTimeout(() => {
+        void ctx.close().catch(() => {
+          /* no-op */
+        });
+      }, 700);
+    } catch {
+      /* no-op */
+    }
+  }, []);
 
   const onCallEndedForActivityRef = useRef(onCallEndedForActivity);
   onCallEndedForActivityRef.current = onCallEndedForActivity;
@@ -906,6 +939,7 @@ export function CampaignVoipStrip({
             setLineStatus("idle");
             setDetail(null);
             setCallEndAt(Date.now());
+            playCallEndedTone();
             queueMicrotask(() => onCallEndedForActivityRef.current?.());
             // #region agent log
             fetch("http://localhost:7253/ingest/cae62791-9bb1-4500-92a8-c26abf2c0c90", { method: "POST", headers: { "Content-Type": "application/json", "X-Debug-Session-Id": "d38e61" }, body: JSON.stringify({ sessionId: "d38e61", runId: debugRunId, hypothesisId: "H3", location: "campaign-voip-strip.tsx:onNotification:closed", message: "closed state forced idle", data: { leadId, stateToken: stateT, callControlId: maybeCall.telnyxIDs?.telnyxCallControlId ?? null, initiatedByUs, hadLive }, timestamp: Date.now() }) }).catch(() => {});
@@ -1105,6 +1139,7 @@ export function CampaignVoipStrip({
     inFlightRef.current = false;
     clearCallAudioState(true);
     setCallEndAt(Date.now());
+    playCallEndedTone();
     queueMicrotask(() => onCallEndedForActivityRef.current?.());
   }
 
