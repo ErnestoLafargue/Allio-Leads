@@ -11,6 +11,7 @@ import {
   getTelnyxFromPoolInfo,
   pickTelnyxFromNumber,
 } from "@/lib/telnyx-call-control";
+import { provisionTelnyxAgentsForUsers } from "@/lib/telnyx-provision-agents-server";
 
 export async function POST(req: Request) {
   const { session, response } = await requireSession();
@@ -65,19 +66,42 @@ export async function POST(req: Request) {
   // via sip:USERNAME@sip.telnyx.com). Falder tilbage til den globale env var hvis user'en
   // endnu ikke er provisioneret — men det betyder at flere agenter deler samme SIP-URI og
   // dispatcher-bridge vil ikke vide hvem den ringer til.
-  const userRow = await prisma.user.findUnique({
+  let userRow = await prisma.user.findUnique({
     where: { id: session.user.id },
     select: { telnyxCredentialId: true, telnyxSipUsername: true },
   });
-  const telephonyCredentialId =
-    userRow?.telnyxCredentialId?.trim() || getTelnyxTelephonyCredentialId();
-  const sharedFallback = !userRow?.telnyxCredentialId;
+  let autoProvisioned = false;
+  let sharedFallback = !userRow?.telnyxCredentialId;
+
+  async function autoProvisionOwnAccount(force: boolean) {
+    const out = await provisionTelnyxAgentsForUsers({
+      userIds: [session.user.id],
+      force,
+    });
+    if (!out.ok) return false;
+    const row = out.results.find((r) => r.userId === session.user.id);
+    if (!row) return false;
+    if (row.status !== "ok" && row.status !== "skipped") return false;
+    userRow = await prisma.user.findUnique({
+      where: { id: session.user.id },
+      select: { telnyxCredentialId: true, telnyxSipUsername: true },
+    });
+    autoProvisioned = true;
+    sharedFallback = !userRow?.telnyxCredentialId;
+    return true;
+  }
+
+  let telephonyCredentialId = userRow?.telnyxCredentialId?.trim() || getTelnyxTelephonyCredentialId();
+  if (!telephonyCredentialId || !userRow?.telnyxSipUsername?.trim()) {
+    await autoProvisionOwnAccount(false);
+    telephonyCredentialId = userRow?.telnyxCredentialId?.trim() || getTelnyxTelephonyCredentialId();
+  }
   if (!telephonyCredentialId) {
     return NextResponse.json(
       {
         code: "TELNYX_TELEPHONY_CREDENTIAL_MISSING",
         error:
-          "Mangler Telnyx Telephony Credential. Bed admin om at provisionere VoIP for din konto via /administration/telnyx, eller sæt TELNYX_TELEPHONY_CREDENTIAL_ID i Vercel.",
+          "Mangler Telnyx Telephony Credential. Kunne ikke auto-provisionere kontoen; prøv igen eller kør provisioning under /administration/telnyx.",
       },
       { status: 503 },
     );
@@ -96,7 +120,18 @@ export async function POST(req: Request) {
     );
   }
 
-  const token = await createTelnyxWebRtcToken({ telephonyCredentialId, apiKey });
+  let token = await createTelnyxWebRtcToken({ telephonyCredentialId, apiKey });
+  if (!token.ok) {
+    const info = await getTelnyxCredentialInfo({ telephonyCredentialId, apiKey });
+    const shouldReprovision = info.expired === true || !info.found;
+    if (shouldReprovision) {
+      const reprovisioned = await autoProvisionOwnAccount(true);
+      if (reprovisioned) {
+        telephonyCredentialId = userRow?.telnyxCredentialId?.trim() || telephonyCredentialId;
+        token = await createTelnyxWebRtcToken({ telephonyCredentialId, apiKey });
+      }
+    }
+  }
   if (!token.ok) {
     const status = token.status >= 500 ? 502 : 400;
     const credentialMask =
@@ -191,5 +226,6 @@ export async function POST(req: Request) {
     dialMode: mode,
     sipUsername: userRow?.telnyxSipUsername ?? null,
     sharedCredential: sharedFallback,
+    autoProvisioned,
   });
 }
