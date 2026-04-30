@@ -52,7 +52,7 @@ async function resolveLeadContextForRecording(params: {
 
   const byControl = await prisma.dialerCallLog.findUnique({
     where: { callControlId: params.callControlId },
-    select: { leadId: true, agentUserId: true },
+    select: { leadId: true, agentUserId: true, bridgeTargetId: true },
   });
   if (byControl?.leadId) {
     return { leadId: byControl.leadId, agentUserId: byControl.agentUserId ?? null };
