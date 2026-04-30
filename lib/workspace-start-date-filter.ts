@@ -65,7 +65,7 @@ export function clearWorkspaceStartDateFilter(campaignId: string): void {
 /** Body til `POST /api/campaigns/:id/reserve-next` (klient). */
 export function buildReserveNextRequestBody(
   campaignId: string,
-  extra: { preferLeadId?: string; excludeLeadId?: string },
+  extra: { preferLeadId?: string; excludeLeadId?: string; excludeLeadIds?: string[] },
 ): string {
   const f = readWorkspaceStartDateFilter(campaignId);
   const payload: Record<string, unknown> = { ...extra };

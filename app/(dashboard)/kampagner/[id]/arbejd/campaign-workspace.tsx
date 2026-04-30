@@ -496,10 +496,17 @@ export function CampaignWorkspace({ campaignId, preferredLeadId, voipSession = f
 
   async function advanceToNextReservedAfterSave(savedLeadId: string) {
     await releaseLockHttp(savedLeadId);
+    const excludedLeadIds = Array.from(new Set([
+      savedLeadId,
+      ...backgroundLockLeadIdsRef.current,
+    ]));
     const rRes = await fetch(`/api/campaigns/${campaignId}/reserve-next`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: buildReserveNextRequestBody(campaignId, { excludeLeadId: savedLeadId }),
+      body: buildReserveNextRequestBody(campaignId, {
+        excludeLeadId: savedLeadId,
+        excludeLeadIds: excludedLeadIds,
+      }),
     });
     if (!rRes.ok) {
       const j = await rRes.json().catch(() => ({}));
@@ -535,10 +542,17 @@ export function CampaignWorkspace({ campaignId, preferredLeadId, voipSession = f
     if (prefetchInFlightRef.current) return;
     prefetchInFlightRef.current = true;
     try {
+      const excludedLeadIds = Array.from(new Set([
+        excludeLeadId,
+        ...backgroundLockLeadIdsRef.current,
+      ]));
       const res = await fetch(`/api/campaigns/${campaignId}/reserve-next`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: buildReserveNextRequestBody(campaignId, { excludeLeadId }),
+        body: buildReserveNextRequestBody(campaignId, {
+          excludeLeadId,
+          excludeLeadIds: excludedLeadIds,
+        }),
       });
       if (!res.ok) return;
       const json = (await res.json()) as { lead: Lead | null };
@@ -627,10 +641,17 @@ export function CampaignWorkspace({ campaignId, preferredLeadId, voipSession = f
       rj = { lead: buffered };
       void prefetchNextLead(buffered.id);
     } else {
+      const excludedLeadIds = Array.from(new Set([
+        currentId,
+        ...backgroundLockLeadIdsRef.current,
+      ]));
       const rRes = await fetch(`/api/campaigns/${campaignId}/reserve-next`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: buildReserveNextRequestBody(campaignId, { excludeLeadId: currentId }),
+        body: buildReserveNextRequestBody(campaignId, {
+          excludeLeadId: currentId,
+          excludeLeadIds: excludedLeadIds,
+        }),
       });
       if (!rRes.ok) {
         const j = await rRes.json().catch(() => ({}));
