@@ -361,6 +361,8 @@ model Ticket {
   priority             String    @default("normal")
   /// "open" | "in_progress" | "waiting" | "done"
   status               String    @default("open")
+  /// true = vises hos alle brugere i ticket-modulet (fælles opgave).
+  isShared             Boolean   @default(false)
   /// Sættes til 23:59:59 Europe/Copenhagen for valgt dato. null = ingen deadline.
   deadline             DateTime?
   assignedUserId       String
@@ -379,6 +381,7 @@ model Ticket {
   createdBy    User @relation("TicketCreatedBy", fields: [createdByUserId], references: [id], onDelete: Restrict)
 
   @@index([assignedUserId, status, deadline])
+  @@index([isShared, status, deadline])
   @@index([status, deadline])
   @@index([createdByUserId])
   @@index([assignedUserId, snoozedUntil])

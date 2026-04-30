@@ -21,6 +21,7 @@ export type TicketDto = {
   description: string;
   priority: TicketPriority;
   status: TicketStatus;
+  isShared: boolean;
   /** YYYY-MM-DD eller null. Klienten skal aldrig se en tidsstempel. */
   deadline: string | null;
   createdAt: string;
@@ -38,6 +39,7 @@ type RawTicket = {
   description: string;
   priority: string;
   status: string;
+  isShared: boolean;
   deadline: Date | null;
   createdAt: Date;
   updatedAt: Date;
@@ -55,6 +57,7 @@ function serialize(t: RawTicket): TicketDto {
     description: t.description,
     priority: (isTicketPriority(t.priority) ? t.priority : "normal") as TicketPriority,
     status: (isTicketStatus(t.status) ? t.status : "open") as TicketStatus,
+    isShared: Boolean(t.isShared),
     deadline: t.deadline ? dayKeyFromDate(t.deadline) : null,
     createdAt: t.createdAt.toISOString(),
     updatedAt: t.updatedAt.toISOString(),
@@ -103,9 +106,12 @@ export async function listTickets(
   filters: TicketListFilters = {},
 ): Promise<TicketDto[]> {
   const where: Record<string, unknown> = {};
+  const andClauses: Record<string, unknown>[] = [];
 
   if (filters.scope === "mine") {
-    where.OR = [{ assignedUserId: viewerId }, { createdByUserId: viewerId }];
+    andClauses.push({
+      OR: [{ assignedUserId: viewerId }, { createdByUserId: viewerId }, { isShared: true }],
+    });
   }
   if (filters.status && isTicketStatus(filters.status)) {
     where.status = filters.status;
@@ -114,7 +120,7 @@ export async function listTickets(
     where.priority = filters.priority;
   }
   if (filters.assigneeId) {
-    where.assignedUserId = filters.assigneeId;
+    andClauses.push({ OR: [{ assignedUserId: filters.assigneeId }, { isShared: true }] });
   }
 
   if (filters.fromDayKey || filters.toDayKey) {
@@ -129,6 +135,9 @@ export async function listTickets(
       range.lte = endOfDayUtcFromDayKey(filters.toDayKey);
     }
     where.deadline = range;
+  }
+  if (andClauses.length) {
+    where.AND = andClauses;
   }
 
   const rows = await prisma.ticket.findMany({
@@ -150,7 +159,8 @@ export type CreateTicketInput = {
   priority: TicketPriority;
   status?: TicketStatus;
   deadlineDayKey?: string | null;
-  assignedUserId: string;
+  assignedUserId?: string;
+  isShared?: boolean;
 };
 
 export async function createTicket(
@@ -170,7 +180,9 @@ export async function createTicket(
   if (!isTicketStatus(status)) {
     throw new ValidationError(`Ugyldig status. Forventede én af: ${TICKET_STATUSES.join(", ")}.`);
   }
-  if (!input.assignedUserId?.trim()) {
+  const isShared = Boolean(input.isShared);
+  const normalizedAssignedUserId = input.assignedUserId?.trim() || viewerId;
+  if (!normalizedAssignedUserId) {
     throw new ValidationError("Tildelt bruger er påkrævet.");
   }
 
@@ -183,8 +195,9 @@ export async function createTicket(
       description: input.description?.trim() ?? "",
       priority: input.priority,
       status,
+      isShared,
       deadline,
-      assignedUserId: input.assignedUserId,
+      assignedUserId: normalizedAssignedUserId,
       createdByUserId: viewerId,
       completedAt,
     },
@@ -203,6 +216,7 @@ export type UpdateTicketInput = Partial<{
   /** "tomorrow" = sæt til midnat i morgen (Europe/Copenhagen). null = ryd. */
   hiddenFromDailyUntil: "tomorrow" | null | undefined;
   assignedUserId: string;
+  isShared: boolean;
 }>;
 
 export async function updateTicket(id: string, input: UpdateTicketInput): Promise<TicketDto> {
@@ -229,6 +243,9 @@ export async function updateTicket(id: string, input: UpdateTicketInput): Promis
       throw new ValidationError("Tildelt bruger kan ikke være tom.");
     }
     data.assignedUserId = input.assignedUserId;
+  }
+  if (input.isShared !== undefined) {
+    data.isShared = Boolean(input.isShared);
   }
   if (input.deadlineDayKey !== undefined) {
     data.deadline = parseDeadlineDayKey(input.deadlineDayKey);
@@ -342,7 +359,7 @@ export async function getDailyTicketQueue(
 
   const rows = await prisma.ticket.findMany({
     where: {
-      assignedUserId: userId,
+      OR: [{ assignedUserId: userId }, { isShared: true }],
       status: { not: "done" },
       AND: [
         { OR: [{ snoozedUntil: null }, { snoozedUntil: { lte: selectedStart } }] },

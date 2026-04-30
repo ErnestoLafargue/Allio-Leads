@@ -60,6 +60,7 @@ export async function PATCH(req: Request, { params }: Params) {
   if (typeof body.priority === "string") input.priority = body.priority as TicketPriority;
   if (typeof body.status === "string") input.status = body.status as TicketStatus;
   if (typeof body.assignedUserId === "string") input.assignedUserId = body.assignedUserId;
+  if (typeof body.isShared === "boolean") input.isShared = body.isShared;
   if (body.deadline === null) input.deadlineDayKey = null;
   else if (typeof body.deadline === "string") input.deadlineDayKey = body.deadline;
   if (body.snoozedUntil === null) input.snoozedUntilDayKey = null;

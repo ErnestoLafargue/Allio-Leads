@@ -57,7 +57,8 @@ export async function POST(req: Request) {
           : body.deadline === null
             ? null
             : undefined,
-      assignedUserId: typeof body.assignedUserId === "string" ? body.assignedUserId : "",
+      assignedUserId: typeof body.assignedUserId === "string" ? body.assignedUserId : undefined,
+      isShared: body.isShared === true,
     });
     return NextResponse.json({ ticket }, { status: 201 });
   } catch (err) {

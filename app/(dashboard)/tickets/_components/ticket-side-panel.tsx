@@ -51,6 +51,7 @@ export function TicketSidePanel(props: Props) {
   const [status, setStatus] = useState<TicketStatus>("open");
   const [deadline, setDeadline] = useState<string>("");
   const [assignedUserId, setAssignedUserId] = useState<string>("");
+  const [isShared, setIsShared] = useState(false);
 
   const [saving, setSaving] = useState(false);
   const [deleting, setDeleting] = useState(false);
@@ -79,6 +80,7 @@ export function TicketSidePanel(props: Props) {
       setStatus("open");
       setDeadline("");
       setAssignedUserId(defaultAssigneeId ?? viewer.id ?? "");
+      setIsShared(false);
     } else if (ticket) {
       setTitle(ticket.title);
       setDescription(ticket.description);
@@ -86,6 +88,7 @@ export function TicketSidePanel(props: Props) {
       setStatus(ticket.status);
       setDeadline(ticket.deadline ?? "");
       setAssignedUserId(ticket.assignedUser.id);
+      setIsShared(ticket.isShared);
     }
     setError(null);
   }, [open, isCreate, ticket, defaultAssigneeId, viewer.id]);
@@ -138,6 +141,7 @@ export function TicketSidePanel(props: Props) {
       status,
       deadline: deadline || null,
       assignedUserId,
+      isShared,
     };
 
     try {
@@ -287,8 +291,17 @@ export function TicketSidePanel(props: Props) {
           <Field label="Tildelt bruger" required>
             <select
               ref={assigneeRef}
-              value={assignedUserId}
-              onChange={(e) => setAssignedUserId(e.target.value)}
+              value={isShared ? "__ALL_ADMINS__" : assignedUserId}
+              onChange={(e) => {
+                const value = e.target.value;
+                if (value === "__ALL_ADMINS__") {
+                  setIsShared(true);
+                  if (!assignedUserId) setAssignedUserId(defaultAssigneeId ?? viewer.id ?? "");
+                  return;
+                }
+                setIsShared(false);
+                setAssignedUserId(value);
+              }}
               disabled={!isFormMode}
               className="w-full rounded-lg border border-stone-300 bg-white px-3 py-2 text-sm text-stone-900 outline-none ring-emerald-500 focus:border-emerald-500 focus:ring-2 disabled:cursor-not-allowed disabled:bg-stone-50 disabled:text-stone-700"
             >
@@ -296,6 +309,7 @@ export function TicketSidePanel(props: Props) {
                 <option value="">Henter brugere…</option>
               ) : (
                 <>
+                  <option value="__ALL_ADMINS__">Vilkårlig / vis hos alle</option>
                   {!assignedUserId ? <option value="" disabled>Vælg ansvarlig</option> : null}
                   {assignees.map((u) => (
                     <option key={u.id} value={u.id}>
@@ -305,6 +319,11 @@ export function TicketSidePanel(props: Props) {
                 </>
               )}
             </select>
+            <p className="mt-1 text-[11px] text-stone-500">
+              {isShared
+                ? "Denne opgave vises hos alle i ticket-modulet."
+                : "Denne opgave vises primært hos den valgte bruger."}
+            </p>
           </Field>
 
           <Field label="Prioritet">

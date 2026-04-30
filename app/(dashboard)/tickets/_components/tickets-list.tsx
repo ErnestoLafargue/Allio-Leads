@@ -175,7 +175,7 @@ export function TicketsList({
                     ) : null}
                   </td>
                   <td className={["px-4 py-3", isDone ? "text-stone-500" : "text-stone-700"].join(" ")}>
-                    {t.assignedUser.name}
+                    {t.isShared ? "Vilkårlig / alle" : t.assignedUser.name}
                   </td>
                   <td className="px-4 py-3">
                     <TicketPriorityBadge priority={t.priority} />
