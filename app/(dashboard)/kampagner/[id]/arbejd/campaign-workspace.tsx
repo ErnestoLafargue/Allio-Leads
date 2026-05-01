@@ -88,7 +88,6 @@ function delayMs(ms: number) {
 }
 
 export function CampaignWorkspace({ campaignId, preferredLeadId, voipSession = false }: Props) {
-  const debugRunId = "voicemail-status-race-v1";
   const { data: session } = useSession();
   const sessionUserId = session?.user?.id ?? "";
   const isAdmin = session?.user?.role === "ADMIN";
@@ -407,15 +406,54 @@ export function CampaignWorkspace({ campaignId, preferredLeadId, voipSession = f
             ? "ready"
             : "offline";
 
-  const handleAssignedLead = useCallback((lead: AssignedLead) => {
-    // Server har bridged et nyt lead til denne agent → naviger til lead'et hvis vi
-    // ikke allerede er på det. Bruges af parallel-dispatcher.
-    if (typeof window === "undefined") return;
-    const targetUrl = `/kampagner/${campaignId}/arbejd?leadId=${encodeURIComponent(lead.id)}&voipSession=1`;
-    if (!window.location.pathname.endsWith("/arbejd") || activeLeadRef.current?.id !== lead.id) {
-      window.location.assign(targetUrl);
+  /** Før hard navigation (bridge): gem pending udfald så de ikke tabes og parallel-AMD ikke vinder racet. */
+  const flushPendingLeadPatches = useCallback(async () => {
+    const entries = Array.from(pendingPatchBodiesRef.current.entries());
+    if (entries.length === 0) return;
+    pendingPatchBodiesRef.current.clear();
+    const flushedOk = new Set<string>();
+    for (const [leadId, body] of entries) {
+      let ok = false;
+      for (let attempt = 0; attempt < BG_SAVE_RETRIES; attempt++) {
+        try {
+          const res = await fetch(`/api/leads/${leadId}`, {
+            method: "PATCH",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify(body),
+            keepalive: true,
+          });
+          if (res.ok) {
+            ok = true;
+            break;
+          }
+        } catch {
+          /* prøv igen */
+        }
+        await delayMs(350 * (attempt + 1));
+      }
+      if (ok) {
+        flushedOk.add(leadId);
+        await releaseLockHttp(leadId);
+      }
     }
-  }, [campaignId]);
+    if (flushedOk.size > 0) {
+      setBackgroundLockLeadIds((prev) => prev.filter((id) => !flushedOk.has(id)));
+    }
+  }, []);
+
+  const handleAssignedLead = useCallback(
+    async (lead: AssignedLead) => {
+      // Server har bridged et nyt lead til denne agent → naviger til lead'et hvis vi
+      // ikke allerede er på det. Bruges af parallel-dispatcher.
+      if (typeof window === "undefined") return;
+      await flushPendingLeadPatches();
+      const targetUrl = `/kampagner/${campaignId}/arbejd?leadId=${encodeURIComponent(lead.id)}&voipSession=1`;
+      if (!window.location.pathname.endsWith("/arbejd") || activeLeadRef.current?.id !== lead.id) {
+        window.location.assign(targetUrl);
+      }
+    },
+    [campaignId, flushPendingLeadPatches],
+  );
 
   const { stats: dialerStats, sipReady } = useDialerPresence({
     campaignId: isAutoDialModeForPresence ? campaignId : null,
@@ -627,9 +665,6 @@ export function CampaignWorkspace({ campaignId, preferredLeadId, voipSession = f
       ...buildCampaignLeadPatchBody(getFormSnapshot(predictiveOutcome)),
       ...(shouldBumpNewQueue ? { queueBump: true } : {}),
     };
-    // #region agent log
-    fetch("http://localhost:7253/ingest/cae62791-9bb1-4500-92a8-c26abf2c0c90", { method: "POST", headers: { "Content-Type": "application/json", "X-Debug-Session-Id": "d38e61" }, body: JSON.stringify({ sessionId: "d38e61", runId: debugRunId, hypothesisId: "H1", location: "campaign-workspace.tsx:onNext", message: "onNext patch prepared", data: { leadId: currentId, predictiveOutcome: predictiveOutcome ?? null, uiStatus: status, patchStatus: (patchBody as { status?: string }).status ?? null }, timestamp: Date.now() }) }).catch(() => {});
-    // #endregion
 
     setError(null);
     setBackgroundSyncError(null);
@@ -687,9 +722,6 @@ export function CampaignWorkspace({ campaignId, preferredLeadId, voipSession = f
 
     setBackgroundLockLeadIds((prev) => [...prev, currentId]);
     pendingPatchBodiesRef.current.set(currentId, patchBody);
-    // #region agent log
-    fetch("http://localhost:7253/ingest/cae62791-9bb1-4500-92a8-c26abf2c0c90", { method: "POST", headers: { "Content-Type": "application/json", "X-Debug-Session-Id": "d38e61" }, body: JSON.stringify({ sessionId: "d38e61", runId: debugRunId, hypothesisId: "H5", location: "campaign-workspace.tsx:onNext:switchLead", message: "switching to reserved next lead", data: { previousLeadId: currentId, previousPhone: activeLead.phone, nextLeadId: rj.lead.id, nextPhone: rj.lead.phone, patchStatus: (patchBody as { status?: string }).status ?? null }, timestamp: Date.now() }) }).catch(() => {});
-    // #endregion
     setActiveLead(rj.lead);
     try {
       sessionStorage.setItem(preferStorageKey(campaignId), rj.lead.id);
@@ -866,15 +898,12 @@ export function CampaignWorkspace({ campaignId, preferredLeadId, voipSession = f
 
   const handleOutcomeStatusChange = useCallback(
     (next: LeadStatus) => {
-      // #region agent log
-      fetch("http://localhost:7253/ingest/cae62791-9bb1-4500-92a8-c26abf2c0c90", { method: "POST", headers: { "Content-Type": "application/json", "X-Debug-Session-Id": "d38e61" }, body: JSON.stringify({ sessionId: "d38e61", runId: debugRunId, hypothesisId: "H2", location: "campaign-workspace.tsx:handleOutcomeStatusChange", message: "outcome button clicked", data: { leadId: activeLeadRef.current?.id ?? null, next, campaignDialMode }, timestamp: Date.now() }) }).catch(() => {});
-      // #endregion
       setStatus(next);
       if (campaignDialMode !== "PREDICTIVE") return;
       if (next === "NEW" || next === "MEETING_BOOKED" || next === "CALLBACK_SCHEDULED") return;
       queueMicrotask(() => void onNextRef.current(undefined, undefined, next));
     },
-    [campaignDialMode, debugRunId],
+    [campaignDialMode],
   );
 
   async function onSendMail(payload: { to: string; subject: string; message: string }) {

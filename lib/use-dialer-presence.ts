@@ -41,8 +41,8 @@ export type UseDialerPresenceOptions = {
   status: DialerPresenceStatus;
   /// Heartbeat-interval i ms (default 5000)
   intervalMs?: number;
-  /// Triggers når serveren har tildelt et nyt lead via bridge
-  onAssignedLead?: (lead: AssignedLead) => void;
+  /// Triggers når serveren har tildelt et nyt lead via bridge (may return a Promise — awaited af heartbeat)
+  onAssignedLead?: (lead: AssignedLead) => void | Promise<void>;
   /// Hvis aktiveret: kald /api/dialer/dispatch parallel med presence (kun når status=ready)
   /// for at få serveren til at placere parallelle udgående opkald.
   enableDispatch?: boolean;
@@ -117,7 +117,8 @@ export function useDialerPresence(options: UseDialerPresenceOptions) {
       const newAssignedId = data.assignedLead?.id ?? null;
       if (newAssignedId && newAssignedId !== lastAssignedRef.current) {
         lastAssignedRef.current = newAssignedId;
-        onAssignedRef.current?.(data.assignedLead!);
+        const cb = onAssignedRef.current;
+        if (cb) await Promise.resolve(cb(data.assignedLead!));
       } else if (!newAssignedId && lastAssignedRef.current) {
         lastAssignedRef.current = null;
       }

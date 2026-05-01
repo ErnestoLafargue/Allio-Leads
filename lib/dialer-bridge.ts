@@ -11,6 +11,7 @@
  */
 
 import { prisma } from "@/lib/prisma";
+import type { LeadStatus } from "@/lib/lead-status";
 import {
   bridgeTelnyxCalls,
   buildTelnyxAgentSipUri,
@@ -21,6 +22,13 @@ import {
   startTelnyxRecording,
 } from "@/lib/telnyx-call-control";
 import { encodeDialerClientState, PRESENCE_FRESH_WINDOW_MS } from "@/lib/dialer-shared";
+
+/** Statusser hvor et sent AMD=machine stadig må sætte VOICEMAIL (leadet er stadig i «åben» dialer-pulje). */
+const AMD_VOICEMAIL_ALLOWED: ReadonlySet<LeadStatus> = new Set(["NEW", "NOT_HOME"]);
+
+function leadStatusAllowsAmdVoicemail(status: string | null | undefined): boolean {
+  return typeof status === "string" && AMD_VOICEMAIL_ALLOWED.has(status as LeadStatus);
+}
 
 /**
  * Find første ledige agent i en kampagne.
@@ -270,6 +278,10 @@ export async function handleAmdHuman(params: {
 /**
  * Trigger fra webhook'en når AMD-result = machine.
  * Hangup, marker lead som VOICEMAIL, frigør køen.
+ *
+ * Hvis agenten allerede har lukket leadet (NOT_INTERESTED, UNQUALIFIED, møde, callback m.m.),
+ * må vi **ikke** overskrive status — ellers ender VOICEMAIL i 2t-cooldown og leadet kommer tilbage som NEW.
+ * Vi lægger stadig på og rydder kø + call-log.
  */
 export async function handleAmdMachine(params: {
   apiKey: string;
@@ -281,22 +293,14 @@ export async function handleAmdMachine(params: {
     apiKey: params.apiKey,
     callControlId: params.leadCallControlId,
   });
-  await prisma.$transaction([
-    prisma.lead.update({
-      where: { id: params.leadId },
-      data: {
-        status: "VOICEMAIL",
-        voicemailMarkedAt: new Date(),
-        lastOutcomeAt: new Date(),
-      },
-    }),
-    prisma.leadOutcomeLog.create({
-      data: {
-        leadId: params.leadId,
-        userId: null, // system-event (AMD)
-        status: "VOICEMAIL",
-      },
-    }),
+
+  const leadRow = await prisma.lead.findUnique({
+    where: { id: params.leadId },
+    select: { status: true },
+  });
+  const allowVoicemailOutcome = leadStatusAllowsAmdVoicemail(leadRow?.status);
+
+  const cleanupOps = [
     prisma.dialerCallLog.updateMany({
       where: { callControlId: params.leadCallControlId },
       data: {
@@ -308,7 +312,55 @@ export async function handleAmdMachine(params: {
     prisma.dialerQueueItem.deleteMany({
       where: { leadId: params.leadId, campaignId: params.campaignId },
     }),
-  ]);
+  ];
+
+  if (allowVoicemailOutcome) {
+    await prisma.$transaction([
+      prisma.lead.update({
+        where: { id: params.leadId },
+        data: {
+          status: "VOICEMAIL",
+          voicemailMarkedAt: new Date(),
+          lastOutcomeAt: new Date(),
+        },
+      }),
+      prisma.leadOutcomeLog.create({
+        data: {
+          leadId: params.leadId,
+          userId: null, // system-event (AMD)
+          status: "VOICEMAIL",
+        },
+      }),
+      ...cleanupOps,
+    ]);
+  } else {
+    await prisma.$transaction(cleanupOps);
+  }
+}
+
+/**
+ * Læg alle igangværende predictive lead-ben (outbound-lead) på for et lead — fx når agenten sætter terminal udfald,
+ * så AMD ikke kan lande efterfølgende og overskrive.
+ */
+export async function hangupActiveOutboundLeadLegsForLead(params: {
+  apiKey: string;
+  leadId: string;
+}): Promise<void> {
+  const open = await prisma.dialerCallLog.findMany({
+    where: {
+      leadId: params.leadId,
+      direction: "outbound-lead",
+      endedAt: null,
+      state: { notIn: ["hangup", "failed"] },
+    },
+    select: { callControlId: true },
+  });
+  for (const row of open) {
+    await hangupTelnyxCall({
+      apiKey: params.apiKey,
+      callControlId: row.callControlId,
+    });
+  }
 }
 
 /**

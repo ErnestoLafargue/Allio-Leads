@@ -26,8 +26,19 @@ import { ensureStandardCampaignId } from "@/lib/ensure-system-campaigns";
 import { releaseExpiredLocksEverywhere, sellerMayEditLead } from "@/lib/lead-lock";
 import { findLeadBookingOverlapInDb } from "@/lib/booking/overlap-db";
 import { LEAD_ACTIVITY_KIND } from "@/lib/lead-activity-kinds";
+import { hangupActiveOutboundLeadLegsForLead } from "@/lib/dialer-bridge";
 
 type Params = { params: Promise<{ id: string }> };
+
+/** Udfald der fjerner leadet fra NEW-puljen — læg igangværende predictive lead-ben på så AMD ikke overskriver. */
+const PATCH_HANGUP_OUTBOUND_LEAD_STATUSES: ReadonlySet<LeadStatus> = new Set([
+  "NOT_INTERESTED",
+  "UNQUALIFIED",
+  "MEETING_BOOKED",
+  "CALLBACK_SCHEDULED",
+  "NOT_HOME",
+  "VOICEMAIL",
+]);
 
 function isRealOutcomeStatus(status: string): boolean {
   return status !== "NEW" && status !== "CALLBACK_SCHEDULED";
@@ -116,9 +127,6 @@ export async function PATCH(req: Request, { params }: Params) {
   const userId = session!.user.id;
 
   const body = await req.json().catch(() => null);
-  // #region agent log
-  fetch("http://localhost:7253/ingest/cae62791-9bb1-4500-92a8-c26abf2c0c90", { method: "POST", headers: { "Content-Type": "application/json", "X-Debug-Session-Id": "d38e61" }, body: JSON.stringify({ sessionId: "d38e61", runId: "voicemail-status-race-v1", hypothesisId: "H3", location: "api/leads/[id]/route.ts:PATCH:entry", message: "lead patch request received", data: { leadId: id, bodyStatus: typeof body?.status === "string" ? body.status : null, queueBump: body?.queueBump === true }, timestamp: Date.now() }) }).catch(() => {});
-  // #endregion
   const queueBump = body?.queueBump === true;
   const adminSkipBookingOverlap =
     session!.user.role === "ADMIN" && body?.adminSkipBookingOverlap === true;
@@ -552,9 +560,19 @@ export async function PATCH(req: Request, { params }: Params) {
     return updated;
   });
 
-  // #region agent log
-  fetch("http://localhost:7253/ingest/cae62791-9bb1-4500-92a8-c26abf2c0c90", { method: "POST", headers: { "Content-Type": "application/json", "X-Debug-Session-Id": "d38e61" }, body: JSON.stringify({ sessionId: "d38e61", runId: "voicemail-status-race-v1", hypothesisId: "H3", location: "api/leads/[id]/route.ts:PATCH:exit", message: "lead patch persisted", data: { leadId: id, existingStatus: existing.status, finalStatus: lead.status, bodyStatus: typeof body?.status === "string" ? body.status : null }, timestamp: Date.now() }) }).catch(() => {});
-  // #endregion
+  const apiKey = process.env.TELNYX_API_KEY?.trim();
+  if (
+    apiKey &&
+    existing.status !== status &&
+    isLeadStatus(status) &&
+    PATCH_HANGUP_OUTBOUND_LEAD_STATUSES.has(status)
+  ) {
+    try {
+      await hangupActiveOutboundLeadLegsForLead({ apiKey, leadId: id });
+    } catch (err) {
+      console.error("[leads:PATCH] hangupActiveOutboundLeadLegsForLead failed", err);
+    }
+  }
 
   return NextResponse.json(lead);
 }
