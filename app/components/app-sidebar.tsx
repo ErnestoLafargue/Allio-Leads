@@ -255,10 +255,8 @@ export function AppSidebar({
 }) {
   const pathname = usePathname();
   const [hovered, setHovered] = useState(false);
-  const [adminOpen, setAdminOpen] = useState(false);
-  const [meetingsOpen, setMeetingsOpen] = useState(false);
-  const [leadsOpen, setLeadsOpen] = useState(false);
-  const [ticketsOpen, setTicketsOpen] = useState(false);
+  const [desktopOpenGroupId, setDesktopOpenGroupId] = useState<string | null>(null);
+  const [mobileOpenGroupId, setMobileOpenGroupId] = useState<string | null>(null);
   const [mobileOpen, setMobileOpen] = useState(false);
 
   const isAdmin = role === "ADMIN";
@@ -372,23 +370,24 @@ export function AppSidebar({
                 const isLeadsGroup = s.id === "leads";
                 const isTicketsGroup = s.id === "tickets";
                 const open = isAdminGroup
-                  ? adminOpen || adminActive
+                  ? mobileOpenGroupId === s.id || adminActive
                   : isMeetingsGroup
-                    ? meetingsOpen || meetingsActive
+                    ? mobileOpenGroupId === s.id || meetingsActive
                     : isLeadsGroup
-                      ? leadsOpen || leadsActive
+                      ? mobileOpenGroupId === s.id || leadsActive
                       : isTicketsGroup
-                        ? ticketsOpen || ticketsActive
+                        ? mobileOpenGroupId === s.id || ticketsActive
                         : false;
                 return (
                   <div key={s.id}>
                     <button
                       type="button"
                       onClick={() => {
-                        if (isAdminGroup) setAdminOpen((v) => !v);
-                        if (isMeetingsGroup) setMeetingsOpen((v) => !v);
-                        if (isLeadsGroup) setLeadsOpen((v) => !v);
-                        if (isTicketsGroup) setTicketsOpen((v) => !v);
+                        if (mobileOpenGroupId === s.id) {
+                          setMobileOpenGroupId(null);
+                        } else {
+                          setMobileOpenGroupId(s.id);
+                        }
                       }}
                       aria-expanded={open}
                       className={[
@@ -459,19 +458,19 @@ export function AppSidebar({
         onMouseEnter={() => setHovered(true)}
         onMouseLeave={() => {
           setHovered(false);
-          if (!adminActive) setAdminOpen(false);
-          if (!meetingsActive) setMeetingsOpen(false);
-          if (!leadsActive) setLeadsOpen(false);
-          if (!ticketsActive) setTicketsOpen(false);
+          if (desktopOpenGroupId === "admin" && !adminActive) setDesktopOpenGroupId(null);
+          if (desktopOpenGroupId === "meetings" && !meetingsActive) setDesktopOpenGroupId(null);
+          if (desktopOpenGroupId === "leads" && !leadsActive) setDesktopOpenGroupId(null);
+          if (desktopOpenGroupId === "tickets" && !ticketsActive) setDesktopOpenGroupId(null);
         }}
         onFocus={() => setHovered(true)}
         onBlur={(e) => {
             if (!e.currentTarget.contains(e.relatedTarget as Node)) {
             setHovered(false);
-            if (!adminActive) setAdminOpen(false);
-            if (!meetingsActive) setMeetingsOpen(false);
-            if (!leadsActive) setLeadsOpen(false);
-            if (!ticketsActive) setTicketsOpen(false);
+            if (desktopOpenGroupId === "admin" && !adminActive) setDesktopOpenGroupId(null);
+            if (desktopOpenGroupId === "meetings" && !meetingsActive) setDesktopOpenGroupId(null);
+            if (desktopOpenGroupId === "leads" && !leadsActive) setDesktopOpenGroupId(null);
+            if (desktopOpenGroupId === "tickets" && !ticketsActive) setDesktopOpenGroupId(null);
           }
         }}
         aria-label="Hovednavigation"
@@ -554,13 +553,13 @@ export function AppSidebar({
                     : false;
             const open = expanded
               ? isAdminGroup
-                ? adminOpen || adminActive
+                ? desktopOpenGroupId === s.id || adminActive
                 : isMeetingsGroup
-                  ? meetingsOpen || meetingsActive
+                  ? desktopOpenGroupId === s.id || meetingsActive
                   : isLeadsGroup
-                    ? leadsOpen || leadsActive
+                    ? desktopOpenGroupId === s.id || leadsActive
                     : isTicketsGroup
-                      ? ticketsOpen || ticketsActive
+                      ? desktopOpenGroupId === s.id || ticketsActive
                     : false
               : false;
             return (
@@ -569,10 +568,11 @@ export function AppSidebar({
                   type="button"
                   onClick={() => {
                     if (!expanded) return;
-                    if (isAdminGroup) setAdminOpen((v) => !v);
-                    if (isMeetingsGroup) setMeetingsOpen((v) => !v);
-                    if (isLeadsGroup) setLeadsOpen((v) => !v);
-                    if (isTicketsGroup) setTicketsOpen((v) => !v);
+                    if (desktopOpenGroupId === s.id) {
+                      setDesktopOpenGroupId(null);
+                    } else {
+                      setDesktopOpenGroupId(s.id);
+                    }
                   }}
                   aria-expanded={open}
                   title={!expanded ? s.label : undefined}

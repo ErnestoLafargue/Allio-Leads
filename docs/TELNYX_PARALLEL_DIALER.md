@@ -88,7 +88,7 @@ Hver bridged samtale optages som mp3 (dual-channel: agent venstre, lead højre).
 | Scenario | Trigger |
 |----------|---------|
 | Power Dialer / Predictive (server-dispatched) | Når AMD-resultatet er `human_residence` / `human_business` / `unknown` (ikke ved machine/fax). Optagelse starter på lead-leggen og fanger automatisk agentens audio når bridge fuldføres. |
-| Click-to-call (WebRTC) | Når `call.answered` modtages med `client_state.kind === "manual"`. Frontenden pre-fetcher clientState fra `/api/telnyx/manual-call/prepare` så Telnyx kender lead/agent-konteksten. |
+| Click-to-call (WebRTC) | Når `call.answered` modtages med `client_state.kind === "manual"`. Frontenden henter `clientState` fra `/api/telnyx/manual-call/prepare` (pre-fetch + **synkront igen i klik-pathen** hvis ref stadig er tom) så Telnyx kender lead/agent-konteksten. Hvis `client_state` alligevel mangler, startes optagelse kun som **fallback** når From/To matcher præcis ét lead — og aldrig på `DialerCallLog.direction === outbound-lead` (parallel dialer; AMD styrer optagelse). |
 | Voicemail / fax | **Aldrig** — `handleAmdMachine` lægger på før optagelse kan starte. |
 
 **Hvor vises optagelserne?**

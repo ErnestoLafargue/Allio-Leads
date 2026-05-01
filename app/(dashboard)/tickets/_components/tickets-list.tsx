@@ -1,9 +1,10 @@
 "use client";
 
-import { useMemo } from "react";
+import { useMemo, useState } from "react";
 import {
   TICKET_PRIORITIES,
   TICKET_PRIORITY_LABELS,
+  TICKET_PRIORITY_ORDER,
   type TicketPriority,
 } from "@/lib/ticket-priority";
 import {
@@ -44,7 +45,11 @@ type Props = {
   onOpenTicket: (id: string) => void;
   hideFilters?: boolean;
   filterOnly?: boolean;
+  compactTable?: boolean;
 };
+
+type SortColumn = "title" | "assignee" | "priority" | "deadline" | "status" | "createdBy";
+type SortDirection = "asc" | "desc";
 
 export function TicketsList({
   tickets,
@@ -55,11 +60,41 @@ export function TicketsList({
   onOpenTicket,
   hideFilters = false,
   filterOnly = false,
+  compactTable = false,
 }: Props) {
+  const [sortColumn, setSortColumn] = useState<SortColumn | null>(null);
+  const [sortDirection, setSortDirection] = useState<SortDirection | null>(null);
   const filtered = useMemo(() => filterTickets(tickets, filters), [tickets, filters]);
+  const sorted = useMemo(
+    () => sortTickets(filtered, sortColumn, sortDirection),
+    [filtered, sortColumn, sortDirection],
+  );
 
   function update<K extends keyof TicketListFilters>(key: K, value: TicketListFilters[K]) {
     onFiltersChange({ ...filters, [key]: value });
+  }
+
+  function cycleSort(column: SortColumn) {
+    if (sortColumn !== column) {
+      setSortColumn(column);
+      setSortDirection("asc");
+      return;
+    }
+    if (sortDirection === "asc") {
+      setSortDirection("desc");
+      return;
+    }
+    if (sortDirection === "desc") {
+      setSortColumn(null);
+      setSortDirection(null);
+      return;
+    }
+    setSortDirection("asc");
+  }
+
+  function sortIndicator(column: SortColumn): string {
+    if (sortColumn !== column || !sortDirection) return "";
+    return sortDirection === "asc" ? " ▲" : " ▼";
   }
 
   return (
@@ -128,15 +163,37 @@ export function TicketsList({
       {filterOnly ? null : (
 
       <div className="overflow-x-auto">
-        <table className="w-full text-left text-sm">
+        <table className={`w-full text-left text-sm ${compactTable ? "table-fixed" : ""}`}>
+          {compactTable ? (
+            <colgroup>
+              <col className="w-[48%]" />
+              <col className="w-[12%]" />
+              <col className="w-[10%]" />
+              <col className="w-[11%]" />
+              <col className="w-[9%]" />
+              <col className="w-[10%]" />
+            </colgroup>
+          ) : null}
           <thead className="border-b border-stone-200 bg-stone-50 text-stone-600">
             <tr>
-              <th className="px-4 py-2.5 font-medium">Titel</th>
-              <th className="px-4 py-2.5 font-medium">Tildelt</th>
-              <th className="px-4 py-2.5 font-medium">Prioritet</th>
-              <th className="px-4 py-2.5 font-medium">Deadline</th>
-              <th className="px-4 py-2.5 font-medium">Status</th>
-              <th className="px-4 py-2.5 font-medium">Oprettet af</th>
+              <th className="px-4 py-2.5 font-medium">
+                <SortHeader label={`Titel${sortIndicator("title")}`} onClick={() => cycleSort("title")} />
+              </th>
+              <th className="px-4 py-2.5 font-medium">
+                <SortHeader label={`Tildelt${sortIndicator("assignee")}`} onClick={() => cycleSort("assignee")} />
+              </th>
+              <th className="px-4 py-2.5 font-medium">
+                <SortHeader label={`Prioritet${sortIndicator("priority")}`} onClick={() => cycleSort("priority")} />
+              </th>
+              <th className="px-4 py-2.5 font-medium">
+                <SortHeader label={`Deadline${sortIndicator("deadline")}`} onClick={() => cycleSort("deadline")} />
+              </th>
+              <th className="px-4 py-2.5 font-medium">
+                <SortHeader label={`Status${sortIndicator("status")}`} onClick={() => cycleSort("status")} />
+              </th>
+              <th className="px-4 py-2.5 font-medium">
+                <SortHeader label={`Oprettet af${sortIndicator("createdBy")}`} onClick={() => cycleSort("createdBy")} />
+              </th>
             </tr>
           </thead>
           <tbody className="divide-y divide-stone-100">
@@ -146,14 +203,14 @@ export function TicketsList({
                   Henter tickets…
                 </td>
               </tr>
-            ) : filtered.length === 0 ? (
+            ) : sorted.length === 0 ? (
               <tr>
                 <td colSpan={6} className="px-4 py-10 text-center text-stone-500">
                   Ingen tickets matcher dine filtre.
                 </td>
               </tr>
             ) : (
-              filtered.map((t) => {
+              sorted.map((t) => {
                 const isDone = t.status === "done";
                 return (
                 <tr
@@ -165,16 +222,22 @@ export function TicketsList({
                   ].join(" ")}
                 >
                   <td className="px-4 py-3">
-                    <div className={isDone ? "font-medium text-stone-500 line-through" : "font-medium text-stone-900"}>
+                    <div className={`${
+                      isDone ? "font-medium text-stone-500 line-through" : "font-medium text-stone-900"
+                    } ${compactTable ? "line-clamp-1" : ""}`}>
                       {t.title}
                     </div>
-                    {t.description ? (
+                    {!compactTable && t.description ? (
                       <div className="mt-0.5 line-clamp-1 text-xs text-stone-400">
                         {t.description}
                       </div>
                     ) : null}
                   </td>
-                  <td className={["px-4 py-3", isDone ? "text-stone-500" : "text-stone-700"].join(" ")}>
+                  <td className={[
+                    "px-4 py-3",
+                    compactTable ? "align-middle" : "",
+                    isDone ? "text-stone-500" : "text-stone-700",
+                  ].join(" ")}>
                     {t.isShared ? "Vilkårlig / alle" : t.assignedUser.name}
                   </td>
                   <td className="px-4 py-3">
@@ -196,6 +259,18 @@ export function TicketsList({
       </div>
       )}
     </section>
+  );
+}
+
+function SortHeader({ label, onClick }: { label: string; onClick: () => void }) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      className="inline-flex items-center text-left text-xs font-semibold uppercase tracking-wide text-stone-600 hover:text-stone-900"
+    >
+      {label}
+    </button>
   );
 }
 
@@ -294,6 +369,90 @@ function filterTickets(tickets: TicketDto[], f: TicketListFilters): TicketDto[] 
     }
     return true;
   });
+}
+
+function sortTickets(
+  tickets: TicketDto[],
+  column: SortColumn | null,
+  direction: SortDirection | null,
+): TicketDto[] {
+  const list = [...tickets];
+  if (!column || !direction) {
+    list.sort(compareDefault);
+    return list;
+  }
+  const multiplier = direction === "asc" ? 1 : -1;
+  list.sort((a, b) => {
+    let cmp = 0;
+    switch (column) {
+      case "title":
+        cmp = cmpText(a.title, b.title);
+        break;
+      case "assignee":
+        cmp = cmpText(ticketAssigneeName(a), ticketAssigneeName(b));
+        break;
+      case "priority":
+        cmp = cmpPriority(a.priority, b.priority);
+        break;
+      case "deadline":
+        cmp = cmpDeadline(a.deadline, b.deadline);
+        break;
+      case "status":
+        cmp = cmpStatus(a.status, b.status);
+        break;
+      case "createdBy":
+        cmp = cmpText(a.createdBy.name, b.createdBy.name);
+        break;
+      default:
+        cmp = 0;
+        break;
+    }
+    if (cmp !== 0) return cmp * multiplier;
+    return compareDefault(a, b);
+  });
+  return list;
+}
+
+function compareDefault(a: TicketDto, b: TicketDto): number {
+  const deadlineCmp = cmpDeadline(a.deadline, b.deadline);
+  if (deadlineCmp !== 0) return deadlineCmp;
+  const priorityCmp = cmpPriority(a.priority, b.priority);
+  if (priorityCmp !== 0) return priorityCmp;
+  const statusCmp = cmpStatus(a.status, b.status);
+  if (statusCmp !== 0) return statusCmp;
+  const createdCmp = cmpDateIso(a.createdAt, b.createdAt);
+  if (createdCmp !== 0) return createdCmp;
+  return cmpText(a.title, b.title);
+}
+
+function ticketAssigneeName(t: TicketDto): string {
+  return t.isShared ? "Vilkårlig / alle" : t.assignedUser.name;
+}
+
+function cmpText(a: string, b: string): number {
+  return a.localeCompare(b, "da", { sensitivity: "base" });
+}
+
+function cmpPriority(a: TicketPriority, b: TicketPriority): number {
+  const rank = new Map(TICKET_PRIORITY_ORDER.map((p, i) => [p, i]));
+  return (rank.get(a) ?? 99) - (rank.get(b) ?? 99);
+}
+
+function cmpStatus(a: TicketStatus, b: TicketStatus): number {
+  const rank = new Map(TICKET_STATUS_ORDER.map((s, i) => [s, i]));
+  return (rank.get(a) ?? 99) - (rank.get(b) ?? 99);
+}
+
+function cmpDeadline(a: string | null, b: string | null): number {
+  if (a && b) return a.localeCompare(b);
+  if (a && !b) return -1;
+  if (!a && b) return 1;
+  return 0;
+}
+
+function cmpDateIso(a: string, b: string): number {
+  if (a === b) return 0;
+  return a < b ? -1 : 1;
 }
 
 function todayDayKey(): string {

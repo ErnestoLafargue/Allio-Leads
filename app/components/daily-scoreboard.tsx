@@ -77,7 +77,8 @@ export function DailyScoreboard() {
     <div className="space-y-3 rounded-xl border border-amber-200/80 bg-gradient-to-b from-amber-50/90 to-white p-6 shadow-sm">
       <div className="flex flex-wrap items-baseline justify-between gap-2">
         <h2 className="text-sm font-semibold text-amber-950">
-          Scoreboard pr. dag · kontakt-episoder (Ny markerer nyt forsøg, København)
+          Scoreboard pr. dag · kontakter og samtaler fra opkald (Telnyx/WebRTC), møder fra udfald ·
+          København
         </h2>
         <div className="flex flex-wrap items-center gap-2">
           <button
@@ -151,8 +152,12 @@ export function DailyScoreboard() {
           </tbody>
         </table>
       </div>
+      <p className="text-xs text-stone-500">
+        Kontakter: opkaldsforsøg (max ét pr. 2 t. pr. lead); samtaler: ≥ 20 s. forbundet tale eller
+        optagelse; møder: booket møde via udfald.
+      </p>
       {data.rows.length === 0 && (
-        <p className="text-sm text-stone-600">Ingen aktivitet denne dag (login eller udfald).</p>
+        <p className="text-sm text-stone-600">Ingen rækker denne dag (login eller aktivitet).</p>
       )}
     </div>
   );

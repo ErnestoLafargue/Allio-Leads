@@ -5,6 +5,7 @@ import {
   normalizeLeaderboardOutcomeStatus,
   scoreboardDeltaInvariantHolds,
   shouldLogOutcomeForLeaderboard,
+  tallyMeetingsFromOutcomeEpisodes,
   tallyScoreboardFromContactEpisodes,
 } from "./lead-outcome-log";
 
@@ -136,5 +137,19 @@ describe("tallyScoreboardFromContactEpisodes", () => {
       { leadId: L, userId: U, status: "VOICEMAIL", createdAt: at("2026-04-18T11:00:00.000Z") },
     ]);
     expect(m.get(U)).toEqual({ meetings: 0, conversations: 1, contacts: 2 });
+  });
+});
+
+describe("tallyMeetingsFromOutcomeEpisodes", () => {
+  it("isolér møder fra episode-tælling", () => {
+    const m = tallyMeetingsFromOutcomeEpisodes([
+      {
+        leadId: "lead-1",
+        userId: "user-a",
+        status: "MEETING_BOOKED",
+        createdAt: new Date("2026-04-18T10:00:00.000Z"),
+      },
+    ]);
+    expect(m.get("user-a")).toBe(1);
   });
 });

@@ -13,6 +13,32 @@ import { startTelnyxRecording } from "@/lib/telnyx-call-control";
 import { persistTelnyxRecordingToAllio } from "@/lib/telnyx-recording-storage";
 import { normalizePhoneToE164ForDial, phoneStoredVariantsForQuery } from "@/lib/phone-e164";
 
+/** Entydig lead-match på baggrund af From/To (samme logik som recording-kontekst). */
+async function findUniqueLeadIdByCallParties(
+  fromNumber: string | null,
+  toNumber: string | null,
+): Promise<string | null> {
+  for (const raw of [toNumber, fromNumber]) {
+    const e164 = normalizePhoneToE164ForDial(raw ?? "");
+    const digits = e164?.replace(/\D/g, "") ?? "";
+    if (!digits) continue;
+    const variants = phoneStoredVariantsForQuery(digits);
+    const matches = await prisma.lead.findMany({
+      where: { phone: { in: variants } },
+      select: { id: true, phone: true },
+      take: 8,
+    });
+    const exact = matches.filter((m) => {
+      const md = normalizePhoneToE164ForDial(m.phone)?.replace(/\D/g, "") ?? "";
+      return md === digits;
+    });
+    if (exact.length === 1) {
+      return exact[0]!.id;
+    }
+  }
+  return null;
+}
+
 /**
  * Telnyx Call Control webhook — modtager alle events relateret til opkald
  * vores server placerer (lead-legs + agent-legs).
@@ -81,23 +107,9 @@ async function resolveLeadContextForRecording(params: {
     return { leadId: byBridge.leadId, agentUserId: byBridge.agentUserId ?? null };
   }
 
-  for (const raw of [params.toNumber, params.fromNumber]) {
-    const e164 = normalizePhoneToE164ForDial(raw ?? "");
-    const digits = e164?.replace(/\D/g, "") ?? "";
-    if (!digits) continue;
-    const variants = phoneStoredVariantsForQuery(digits);
-    const matches = await prisma.lead.findMany({
-      where: { phone: { in: variants } },
-      select: { id: true, phone: true },
-      take: 8,
-    });
-    const exact = matches.filter((m) => {
-      const md = normalizePhoneToE164ForDial(m.phone)?.replace(/\D/g, "") ?? "";
-      return md === digits;
-    });
-    if (exact.length === 1) {
-      return { leadId: exact[0]!.id, agentUserId: null };
-    }
+  const byPhone = await findUniqueLeadIdByCallParties(params.toNumber, params.fromNumber);
+  if (byPhone) {
+    return { leadId: byPhone, agentUserId: null };
   }
 
   return { leadId: null, agentUserId: params.clientStateUserId };
@@ -121,6 +133,8 @@ export async function POST(req: Request) {
     return NextResponse.json({ ok: true });
   }
 
+  const hasTelnyxClientState =
+    typeof payload.client_state === "string" && payload.client_state.length > 0;
   const clientState = decodeDialerClientState(payload.client_state);
 
   // Find eksisterende DialerCallLog (oprettes af dispatcher før udgående eller her ved inbound)
@@ -215,6 +229,41 @@ export async function POST(req: Request) {
             });
           });
         }
+      } else if (!hasTelnyxClientState && existing?.direction !== "outbound-lead") {
+        // WebRTC uden client_state (fx race: bruger ringede før /manual-call/prepare nåede
+        // at sætte ref) — start optagelse når vi kan koble til præcis ét lead via numre.
+        // outbound-lead = parallel dialer; der startes optagelse først ved AMD=menneske.
+        const apiKey = process.env.TELNYX_API_KEY?.trim();
+        if (apiKey) {
+          const dir = String(payload.direction ?? "").toLowerCase();
+          if (dir !== "inbound") {
+            const leadIdGuess = await findUniqueLeadIdByCallParties(
+              typeof payload.from === "string" ? payload.from : null,
+              typeof payload.to === "string" ? payload.to : null,
+            );
+            if (leadIdGuess) {
+              queueMicrotask(() => {
+                startTelnyxRecording({
+                  apiKey,
+                  callControlId,
+                  format: "mp3",
+                  channels: "dual",
+                })
+                  .then((rec) => {
+                    if (!rec.ok) {
+                      console.error(
+                        "[telnyx:webhook] record_start (phone-fallback) fejlede:",
+                        rec.message,
+                      );
+                    }
+                  })
+                  .catch((err) => {
+                    console.error("[telnyx:webhook] record_start (phone-fallback) exception:", err);
+                  });
+              });
+            }
+          }
+        }
       }
       break;
     }
@@ -298,9 +347,6 @@ export async function POST(req: Request) {
         clientState.leadId &&
         (isDetectionEnd || isGreetingEndForMachine)
       ) {
-        // #region agent log
-        fetch("http://localhost:7253/ingest/cae62791-9bb1-4500-92a8-c26abf2c0c90", { method: "POST", headers: { "Content-Type": "application/json", "X-Debug-Session-Id": "d38e61" }, body: JSON.stringify({ sessionId: "d38e61", runId: "voicemail-status-race-v1", hypothesisId: "H4", location: "api/telnyx/webhooks/call-events/route.ts:amd", message: "amd result for lead leg", data: { leadId: clientState.leadId, campaignId: clientState.campaignId, callControlId, amdResult, eventType }, timestamp: Date.now() }) }).catch(() => {});
-        // #endregion
         const apiKey = process.env.TELNYX_API_KEY?.trim();
         if (apiKey) {
           if (amdResult === "human" || amdResult === "unknown") {

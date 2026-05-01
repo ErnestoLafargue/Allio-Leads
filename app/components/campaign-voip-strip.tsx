@@ -15,7 +15,12 @@ import {
   VOIP_STORED_SPK_KEY,
   writeStoredDeviceId,
 } from "@/lib/voip-audio-devices";
-import { describeVoipCallFailureForUi, describeVoipStartupFailure } from "@/lib/voip-call-messages";
+import {
+  describeVoipCallFailureForUi,
+  describeVoipStartupFailure,
+  detectPredictiveOutcomeFromCall,
+  type PredictiveAutoOutcome,
+} from "@/lib/voip-call-messages";
 import { type VoipApiContext, VOIP_API_CONTEXT } from "@/lib/voip-api-context";
 
 type Props = {
@@ -31,6 +36,10 @@ type Props = {
    * Workspace bruger typisk dette til at gå videre til næste lead automatisk.
    */
   onUnansweredTimeout?: () => void;
+  /** Predictive-mode: auto-udfald når Telnyx-lukårsag tydeligt peger på voicemail/no answer. */
+  onPredictiveAutoOutcome?: (outcome: Exclude<PredictiveAutoOutcome, null>) => void;
+  /** Gem nyt telefonnummer på selve leadet (source of truth). */
+  onUpdateLeadPhone?: (nextPhone: string) => Promise<{ ok: boolean; message?: string }> | { ok: boolean; message?: string };
   /** Antal millisekunder før Predictive-modus giver op og kalder `onUnansweredTimeout`. */
   unansweredTimeoutMs?: number;
   /**
@@ -102,6 +111,16 @@ type VoipCallContext = {
   dialMode: CampaignDialMode;
   startedAt: number;
 };
+
+function getCallIdentity(call: TelnyxCall | null): string | null {
+  if (!call) return null;
+  return (
+    call.telnyxIDs?.telnyxCallControlId ??
+    call.telnyxIDs?.telnyxSessionId ??
+    call.telnyxIDs?.telnyxLegId ??
+    null
+  );
+}
 
 function normalizeDialDraft(s: string) {
   return s.replace(/\s/g, "").trim();
@@ -209,6 +228,8 @@ export function CampaignVoipStrip({
   dialMode,
   autoStartCall,
   onUnansweredTimeout,
+  onPredictiveAutoOutcome,
+  onUpdateLeadPhone,
   unansweredTimeoutMs = 25_000,
   onLineStatusChange,
   hangupSignal = 0,
@@ -235,6 +256,9 @@ export function CampaignVoipStrip({
   const [detail, setDetail] = useState<string | null>(null);
   const [voipToast, setVoipToast] = useState<string | null>(null);
   const [voipToastFading, setVoipToastFading] = useState(false);
+  const [editingPhone, setEditingPhone] = useState(false);
+  const [phoneDraft, setPhoneDraft] = useState("");
+  const [savingPhone, setSavingPhone] = useState(false);
   const endCallInitiatedByUsRef = useRef(false);
   const callHadConnectedRef = useRef(false);
   const voipPhone = (leadPhone || "").trim();
@@ -276,6 +300,8 @@ export function CampaignVoipStrip({
   const leadEpochRef = useRef(0);
   const startAttemptRef = useRef(0);
   const lastEndedToneAtRef = useRef(0);
+  const manualHangupCallIdsRef = useRef<Set<string>>(new Set());
+  const manualHangupAtRef = useRef(0);
   const currentCallContextRef = useRef<VoipCallContext | null>(null);
   const hangupSignalRef = useRef(hangupSignal);
   const remoteAudioRef = useRef<HTMLAudioElement | null>(null);
@@ -489,9 +515,17 @@ export function CampaignVoipStrip({
     setCallStartAt(null);
     setCallEndAt(null);
     setRemoteStream(null);
+    setEditingPhone(false);
+    setPhoneDraft((leadPhone || "").trim());
     // Kun nyt lead — ikke når brugeren retter telefonfeltet på leadet
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [debugRunId, leadId, lineStatus]);
+
+  useEffect(() => {
+    if (!editingPhone) {
+      setPhoneDraft((leadPhone || "").trim());
+    }
+  }, [leadPhone, editingPhone]);
 
   /** Pre-load Telnyx WebRTC SDK-chunken så snart komponenten mountes,
    *  så den er klar i memory inden brugeren trykker «Ring op». */
@@ -941,8 +975,19 @@ export function CampaignVoipStrip({
 
           const stateT = stateToken(maybeCall.state);
           if (CLOSED_STATES.has(stateT)) {
-            const initiatedByUs = endCallInitiatedByUsRef.current;
+            const closedCallIdentity = getCallIdentity(maybeCall);
+            const initiatedByManualHangupId = Boolean(
+              closedCallIdentity && manualHangupCallIdsRef.current.has(closedCallIdentity),
+            );
+            const initiatedByManualHangupTime = Date.now() - manualHangupAtRef.current < 5000;
+            const initiatedByUs =
+              endCallInitiatedByUsRef.current ||
+              initiatedByManualHangupId ||
+              initiatedByManualHangupTime;
             endCallInitiatedByUsRef.current = false;
+            if (closedCallIdentity) {
+              manualHangupCallIdsRef.current.delete(closedCallIdentity);
+            }
             const hadLive = callHadConnectedRef.current;
             callHadConnectedRef.current = false;
             const sipCode = Number((maybeCall as TelnyxCall).sipCode) || 0;
@@ -964,6 +1009,20 @@ export function CampaignVoipStrip({
               const desc = describeVoipCallFailureForUi({ hadLive, sipCode, cause, sipReason });
               if (desc) {
                 reportVoipFailureRef.current(desc.userText, desc.technical);
+              }
+              const autoOutcome = detectPredictiveOutcomeFromCall({
+                hadLive,
+                sipCode,
+                cause,
+                sipReason,
+              });
+              if (
+                autoOutcome &&
+                effectiveDialMode === "PREDICTIVE" &&
+                autoStartCallRef.current &&
+                typeof onPredictiveAutoOutcome === "function"
+              ) {
+                onPredictiveAutoOutcome(autoOutcome);
               }
             }
             return;
@@ -1029,6 +1088,12 @@ export function CampaignVoipStrip({
   }
 
   async function startCall() {
+    if (editingPhone) {
+      setLineStatus("error");
+      setDetail("Gem nummeret først før opkald.");
+      pushVoipToast("Gem nummeret først før opkald.");
+      return;
+    }
     if (!audioSetupReady) {
       setLineStatus("idle");
       setDetail(null);
@@ -1123,8 +1188,29 @@ export function CampaignVoipStrip({
       }
       // Send clientState så Telnyx kan korrelere webhooks → leadId/userId/campaignId
       // (auto-start recording, opret CALL_RECORDING-aktivitet i lead-historik).
-      if (manualClientStateRef.current) {
-        callOptions.clientState = manualClientStateRef.current;
+      // Sikrer clientState i klik-pathen: pre-fetch effect kan stadig køre, så ref kan være tom.
+      let clientStateForCall = manualClientStateRef.current;
+      if (!clientStateForCall) {
+        try {
+          const prepRes = await fetch("/api/telnyx/manual-call/prepare", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ leadId, voipApiContext }),
+            credentials: "same-origin",
+          });
+          if (prepRes.ok) {
+            const prepData = (await prepRes.json()) as { clientState?: string };
+            if (typeof prepData?.clientState === "string" && prepData.clientState.length > 0) {
+              clientStateForCall = prepData.clientState;
+              manualClientStateRef.current = prepData.clientState;
+            }
+          }
+        } catch {
+          /* optagelse/webhook-korrelation — opkald må fortsætte */
+        }
+      }
+      if (clientStateForCall) {
+        callOptions.clientState = clientStateForCall;
       }
 
       const call = clientRef.current.newCall(callOptions) as TelnyxCall;
@@ -1166,11 +1252,38 @@ export function CampaignVoipStrip({
     }
   }
 
+  async function onSavePhoneFromVoip() {
+    const nextPhone = phoneDraft.trim();
+    if (!onUpdateLeadPhone) {
+      setEditingPhone(false);
+      setPhoneDraft((leadPhone || "").trim());
+      return;
+    }
+    if (savingPhone) return;
+    setSavingPhone(true);
+    try {
+      const result = await onUpdateLeadPhone(nextPhone);
+      if (!result.ok) {
+        pushVoipToast(result.message || "Kunne ikke gemme telefonnummer.");
+        return;
+      }
+      setEditingPhone(false);
+      pushVoipToast(result.message || "Nummer opdateret.");
+    } finally {
+      setSavingPhone(false);
+    }
+  }
+
   async function hangUp() {
     // #region agent log
     fetch("http://localhost:7253/ingest/cae62791-9bb1-4500-92a8-c26abf2c0c90", { method: "POST", headers: { "Content-Type": "application/json", "X-Debug-Session-Id": "d38e61" }, body: JSON.stringify({ sessionId: "d38e61", runId: debugRunId, hypothesisId: "H5", location: "campaign-voip-strip.tsx:hangUp", message: "hangUp invoked", data: { leadId, lineStatusBefore: lineStatus, activeCallControlId: activeCallRef.current?.telnyxIDs?.telnyxCallControlId ?? null }, timestamp: Date.now() }) }).catch(() => {});
     // #endregion
     endCallInitiatedByUsRef.current = true;
+    manualHangupAtRef.current = Date.now();
+    const activeCallIdentity = getCallIdentity(activeCallRef.current);
+    if (activeCallIdentity) {
+      manualHangupCallIdsRef.current.add(activeCallIdentity);
+    }
     try {
       await activeCallRef.current?.hangup?.();
     } catch {
@@ -1510,11 +1623,27 @@ export function CampaignVoipStrip({
             type="text"
             inputMode="tel"
             autoComplete="off"
-            value={voipPhone}
-            readOnly
+            value={editingPhone ? phoneDraft : voipPhone}
+            onChange={(e) => setPhoneDraft(e.target.value)}
+            readOnly={!editingPhone}
             placeholder="Nummer til opkald"
             className="min-w-[12rem] flex-1 rounded-md border border-emerald-200/80 bg-white px-3 py-2 font-mono text-sm font-medium tracking-wide text-stone-900 shadow-sm outline-none ring-emerald-400/40 focus:ring-2"
           />
+          <button
+            type="button"
+            onClick={() => {
+              if (editingPhone) {
+                void onSavePhoneFromVoip();
+                return;
+              }
+              setPhoneDraft((leadPhone || "").trim());
+              setEditingPhone(true);
+            }}
+            disabled={savingPhone}
+            className="rounded-md border border-emerald-200 bg-white px-3 py-2 text-xs font-semibold text-emerald-800 shadow-sm hover:bg-emerald-50 disabled:opacity-60"
+          >
+            {editingPhone ? (savingPhone ? "Gemmer..." : "Gem nummer") : "Rediger nummer"}
+          </button>
 
           <div
             className={`inline-flex min-w-[4.5rem] items-center justify-center rounded-md border px-2 py-1 font-mono text-sm font-semibold tabular-nums ${

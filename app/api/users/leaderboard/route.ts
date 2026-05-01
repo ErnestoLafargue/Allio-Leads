@@ -6,10 +6,9 @@ import {
   copenhagenDayBoundsUtcFromDayKey,
   copenhagenDayKey,
 } from "@/lib/copenhagen-day";
-import {
-  tallyScoreboardFromContactEpisodes,
-  warnIfScoreboardUserTallyInconsistent,
-} from "@/lib/lead-outcome-log";
+import { tallyMeetingsFromOutcomeEpisodes, warnIfScoreboardUserTallyInconsistent } from "@/lib/lead-outcome-log";
+import { LEAD_ACTIVITY_KIND } from "@/lib/lead-activity-kinds";
+import { mergeScoringUserIds, tallyTelnyxLeaderboardMetrics } from "@/lib/leaderboard-telnyx";
 
 type PresentUser = {
   userId: string;
@@ -92,14 +91,63 @@ export async function GET(req: Request) {
     }
     const todayKey = copenhagenDayKey();
 
-    const logRows = await prisma.leadOutcomeLog.findMany({
-      where: { createdAt: { gte: start, lt: end } },
-      select: { leadId: true, userId: true, status: true, createdAt: true },
-      orderBy: { createdAt: "asc" },
-    });
+    const [logRows, dialerRows, activityRows] = await Promise.all([
+      prisma.leadOutcomeLog.findMany({
+        where: { createdAt: { gte: start, lt: end } },
+        select: { leadId: true, userId: true, status: true, createdAt: true },
+        orderBy: { createdAt: "asc" },
+      }),
+      prisma.dialerCallLog.findMany({
+        where: {
+          startedAt: { gte: start, lt: end },
+          leadId: { not: null },
+          direction: "outbound-lead",
+        },
+        select: {
+          callControlId: true,
+          callSessionId: true,
+          direction: true,
+          leadId: true,
+          agentUserId: true,
+          startedAt: true,
+          answeredAt: true,
+          bridgedAt: true,
+          endedAt: true,
+          lead: {
+            select: {
+              lockedByUserId: true,
+              lockedAt: true,
+              lockExpiresAt: true,
+              assignedUserId: true,
+            },
+          },
+        },
+      }),
+      prisma.leadActivityEvent.findMany({
+        where: {
+          createdAt: { gte: start, lt: end },
+          userId: { not: null },
+          kind: { in: [LEAD_ACTIVITY_KIND.CALL_ATTEMPT, LEAD_ACTIVITY_KIND.CALL_RECORDING] },
+        },
+        select: {
+          kind: true,
+          userId: true,
+          leadId: true,
+          createdAt: true,
+          durationSeconds: true,
+          telnyxCallLegId: true,
+        },
+      }),
+    ]);
 
-    const episodeTallies = tallyScoreboardFromContactEpisodes(logRows);
-    const scoringUserIds = [...episodeTallies.keys()];
+    const meetingTallies = tallyMeetingsFromOutcomeEpisodes(logRows);
+    const telnyxTallies = tallyTelnyxLeaderboardMetrics(dialerRows, activityRows);
+
+    const scoringUserIds = mergeScoringUserIds(
+      telnyxTallies.contacts,
+      telnyxTallies.conversations,
+      meetingTallies,
+    );
 
     let present = await loadPresentUsers(dayKey);
     present = await mergePresentWithOutcomeUsers(present, scoringUserIds);
@@ -115,20 +163,18 @@ export async function GET(req: Request) {
 
     const board = present
       .map((p) => {
-        const t = episodeTallies.get(p.userId) ?? {
-          meetings: 0,
-          conversations: 0,
-          contacts: 0,
-        };
-        warnIfScoreboardUserTallyInconsistent(p.userId, t.meetings, t.conversations, t.contacts);
+        const meetings = meetingTallies.get(p.userId) ?? 0;
+        const conversations = telnyxTallies.conversations.get(p.userId) ?? 0;
+        const contacts = telnyxTallies.contacts.get(p.userId) ?? 0;
+        warnIfScoreboardUserTallyInconsistent(p.userId, meetings, conversations, contacts);
         return {
           userId: p.user.id,
           name: p.user.name,
           username: p.user.username,
           role: p.user.role,
-          meetings: t.meetings,
-          conversations: t.conversations,
-          contacts: t.contacts,
+          meetings,
+          conversations,
+          contacts,
         };
       })
       .sort((a, b) => {

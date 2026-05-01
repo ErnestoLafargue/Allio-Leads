@@ -829,6 +829,41 @@ export function CampaignWorkspace({ campaignId, preferredLeadId, voipSession = f
     setVoipHangupSignal((n) => n + 1);
   }
 
+  const handleUpdateLeadPhoneFromVoip = useCallback(async (nextPhoneRaw: string) => {
+    const lead = activeLeadRef.current;
+    if (!lead) {
+      return { ok: false, message: "Intet aktivt lead." };
+    }
+    const nextPhone = nextPhoneRaw.trim();
+    setPhone(nextPhone);
+    setActiveLead((prev) => (prev ? { ...prev, phone: nextPhone } : prev));
+    const patchBody = {
+      ...buildCampaignLeadPatchBody(getFormSnapshot()),
+      phone: nextPhone,
+    };
+    try {
+      const res = await fetch(`/api/leads/${lead.id}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(patchBody),
+      });
+      if (!res.ok) {
+        const j = await res.json().catch(() => ({}));
+        return {
+          ok: false,
+          message: typeof j.error === "string" ? j.error : "Kunne ikke gemme nummer på lead.",
+        };
+      }
+      const updated = (await res.json()) as Lead;
+      setActiveLead(updated);
+      setPhone(updated.phone ?? nextPhone);
+      setError(null);
+      return { ok: true, message: "Nummer opdateret på lead." };
+    } catch {
+      return { ok: false, message: "Netværksfejl ved gem af nummer." };
+    }
+  }, [getFormSnapshot]);
+
   const handleOutcomeStatusChange = useCallback(
     (next: LeadStatus) => {
       // #region agent log
@@ -1208,6 +1243,11 @@ export function CampaignWorkspace({ campaignId, preferredLeadId, voipSession = f
             setStatus("NOT_HOME");
             queueMicrotask(() => void onNextRef.current(undefined, undefined, "NOT_HOME"));
           }}
+          onPredictiveAutoOutcome={(outcome) => {
+            setStatus(outcome);
+            queueMicrotask(() => void onNextRef.current(undefined, undefined, outcome));
+          }}
+          onUpdateLeadPhone={handleUpdateLeadPhoneFromVoip}
           unansweredTimeoutMs={25_000}
           onLineStatusChange={setVoipLineStatus}
           hangupSignal={voipHangupSignal}

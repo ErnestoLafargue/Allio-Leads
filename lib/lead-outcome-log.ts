@@ -2,7 +2,8 @@ import { isLeadStatus, type LeadStatus } from "@/lib/lead-status";
 
 /**
  * Udfald der skriver ét LeadOutcomeLog ved gem (én række pr. reelt statusskifte).
- * Inkl. NEW og UNQUALIFIED. Scoreboard grupperer i «kontakt-episoder» adskilt af NEW (også system-logs ved auto-reset).
+ * Inkl. NEW og UNQUALIFIED. Scoreboard **møder** grupperes i «kontakt-episoder» adskilt af NEW;
+ * kontakter/samtaler tælles via Telnyx (`lib/leaderboard-telnyx.ts`).
  */
 export const LEADERBOARD_LOG_STATUSES = new Set<LeadStatus>([
   "NEW",
@@ -62,11 +63,6 @@ export function warnIfScoreboardUserTallyInconsistent(
   contacts: number,
 ): void {
   if (process.env.NODE_ENV !== "development") return;
-  if (conversations > contacts) {
-    console.warn(
-      `[scoreboard] Bruger ${userId}: samtaler (${conversations}) > kontakter (${contacts})`,
-    );
-  }
   if (meetings > conversations) {
     console.warn(
       `[scoreboard] Bruger ${userId}: møder (${meetings}) > samtaler (${conversations})`,
@@ -145,6 +141,16 @@ export function tallyScoreboardFromContactEpisodes(
   }
 
   return tallies;
+}
+
+/** Kun møder fra udfalds-episoder (øvrige felter i scoreboard kommer fra Telnyx). */
+export function tallyMeetingsFromOutcomeEpisodes(rows: OutcomeLogRowForScoreboard[]): Map<string, number> {
+  const full = tallyScoreboardFromContactEpisodes(rows);
+  const meetings = new Map<string, number>();
+  for (const [uid, d] of full) {
+    if (d.meetings > 0) meetings.set(uid, d.meetings);
+  }
+  return meetings;
 }
 
 type ExistingForLog = {

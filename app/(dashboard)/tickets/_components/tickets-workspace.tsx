@@ -39,6 +39,7 @@ export function TicketsWorkspace({ viewer, mode }: Props) {
   const [panelOpen, setPanelOpen] = useState(false);
   const [panelMode, setPanelMode] = useState<TicketSidePanelMode>("create");
   const [panelTicketId, setPanelTicketId] = useState<string | null>(null);
+  const [calendarReloadToken, setCalendarReloadToken] = useState(0);
 
   const [calendarUserId, setCalendarUserId] = useState<string>(viewer.id);
   const [calendarDayKey, setCalendarDayKey] = useState<string>(() => todayDayKey());
@@ -117,6 +118,7 @@ export function TicketsWorkspace({ viewer, mode }: Props) {
       if (exists) return prev.map((t) => (t.id === saved.id ? saved : t));
       return [saved, ...prev];
     });
+    setCalendarReloadToken((n) => n + 1);
     setPanelTicketId(saved.id);
     setPanelMode("view");
     setPanelOpen(true);
@@ -124,6 +126,7 @@ export function TicketsWorkspace({ viewer, mode }: Props) {
 
   function handleDeleted(id: string) {
     setTickets((prev) => prev.filter((t) => t.id !== id));
+    setCalendarReloadToken((n) => n + 1);
     setPanelOpen(false);
   }
 
@@ -190,6 +193,7 @@ export function TicketsWorkspace({ viewer, mode }: Props) {
           loading={loading}
           onOpenTicket={handleOpenTicket}
           hideFilters
+          compactTable={mode === "all"}
         />
         {mode === "mine" ? (
           <TicketsDayCalendar
@@ -201,6 +205,7 @@ export function TicketsWorkspace({ viewer, mode }: Props) {
             viewerId={viewer.id}
             onOpenTicket={handleOpenTicket}
             onTicketUpdated={handleSaved}
+            reloadToken={calendarReloadToken}
           />
         ) : null}
       </div>

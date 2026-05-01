@@ -14,6 +14,7 @@ type Props = {
   viewerId: string;
   onOpenTicket: (id: string) => void;
   onTicketUpdated: (ticket: TicketDto) => void;
+  reloadToken?: number;
 };
 
 const DAY_HEADER_FORMATTER = new Intl.DateTimeFormat("da-DK", {
@@ -58,6 +59,7 @@ export function TicketsDayCalendar({
   viewerId,
   onOpenTicket,
   onTicketUpdated,
+  reloadToken = 0,
 }: Props) {
   const [queue, setQueue] = useState<TicketDto[]>([]);
   const [loading, setLoading] = useState(true);
@@ -95,7 +97,7 @@ export function TicketsDayCalendar({
     const ctrl = new AbortController();
     void loadQueue(ctrl.signal);
     return () => ctrl.abort();
-  }, [loadQueue]);
+  }, [loadQueue, reloadToken]);
 
   const isViewerSelected = selectedUserId === viewerId;
   const selectedUser = assignees.find((u) => u.id === selectedUserId);

@@ -24,6 +24,8 @@ export type VoipCallFailureMeta = {
   sipReason: string;
 };
 
+export type PredictiveAutoOutcome = "VOICEMAIL" | "NOT_HOME" | "NOT_INTERESTED" | null;
+
 function nonEmpty(s: string): string | null {
   const t = s.trim();
   return t ? t : null;
@@ -86,6 +88,15 @@ export function describeVoipCallFailureForUi(meta: VoipCallFailureMeta): {
   if (NETWORK.has(sipCode) || (sipCode >= 500 && sipCode < 600) || CAUSE_NETWORK.test(cause)) {
     return { userText: "Ingen forbindelse", technical };
   }
+  // Telnyx D17 / "Account is disabled" — kontoniveau-spærring (saldo, KYC, suspended).
+  // Specifik mapping så agenten ved at det IKKE er en kode-/lead-fejl, men noget admin skal håndtere.
+  if (
+    sipCode === 403 &&
+    (/account\s*is\s*disabled|d17/i.test(reasonNorm) ||
+      /account\s*is\s*disabled|d17/i.test(causeNorm))
+  ) {
+    return { userText: "Telnyx-konto er spærret — kontakt admin", technical };
+  }
   if (sipCode === 403) {
     return { userText: "Opkaldet kunne ikke gennemføres", technical };
   }
@@ -114,6 +125,36 @@ export function describeVoipCallFailureForUi(meta: VoipCallFailureMeta): {
     return { userText: VOIP_ERROR_FALLBACK, technical };
   }
   return { userText: VOIP_ERROR_FALLBACK, technical };
+}
+
+/**
+ * Klassificerer et afsluttet opkald til et muligt automatisk predictive-udfald.
+ * Bruges kun som hint i auto-flow (agenten kan altid overstyre manuelt).
+ */
+export function detectPredictiveOutcomeFromCall(meta: VoipCallFailureMeta): PredictiveAutoOutcome {
+  const { hadLive, sipCode, cause, sipReason } = meta;
+  if (hadLive) return null;
+  const causeNorm = nonEmpty(cause)?.toLowerCase() ?? "";
+  const reasonNorm = nonEmpty(sipReason)?.toLowerCase() ?? "";
+  const combined = `${causeNorm} ${reasonNorm}`.trim();
+
+  if (/voicemail|answering[\s_-]*machine|machine[\s_-]*detected|beep[\s_-]*detected|fax/.test(combined)) {
+    return "VOICEMAIL";
+  }
+
+  if (BUSY.has(sipCode) || /busy|user[\s_-]*busy/.test(combined)) {
+    return "NOT_HOME";
+  }
+
+  if (NO_ANSWER.has(sipCode) || REJECT.has(sipCode) || /no[\s_-]*answer|timeout|unavailable/.test(combined)) {
+    return "NOT_HOME";
+  }
+
+  if (sipCode === 404 || sipCode === 484 || /invalid[\s_-]*number|unallocated/.test(combined)) {
+    return "NOT_INTERESTED";
+  }
+
+  return null;
 }
 
 /** Fejl før opkaldet er etableret (newCall, token, m.m.) */
