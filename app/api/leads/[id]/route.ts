@@ -236,16 +236,13 @@ export async function PATCH(req: Request, { params }: Params) {
     }
   }
 
-  /** Forhindrer forsinkede PATCH (fx baggrundsgem) i at sætte lead tilbage til «Ny» mens tilbagekald er aktivt — så andre ikke kan trække det i køen. */
-  if (existing.status === "CALLBACK_SCHEDULED" && status !== "CALLBACK_SCHEDULED") {
-    return NextResponse.json(
-      {
-        error:
-          "Leadet har et planlagt tilbagekald. Afslut eller annullér tilbagekaldet (tilbagekald & kalender / lead-detalje) før du ændrer udfald via almindelig gem.",
-      },
-      { status: 409 },
-    );
-  }
+  // Tidligere afviste vi alle CALLBACK_SCHEDULED → andet udfald-PATCHes med 409.
+  // Cleanup-blokken nedenfor (callbackScheduledFor m.fl. = null når status skifter
+  // væk fra CALLBACK_SCHEDULED) håndterer overgangen atomisk i samme transaction,
+  // og adgang er allerede dækket af canAccessCallbackLead + sellerMayEditLead
+  // ovenfor — så agenten kan gemme et nyt udfald direkte uden et separat afslut-
+  // tilbagekald-kald først. Det eksplicitte /api/leads/[id]/callback endpoint
+  // bevares til kalender/listevue-flowet.
 
   let meetingBookedAt = existing.meetingBookedAt;
   let meetingScheduledFor = existing.meetingScheduledFor;
