@@ -90,21 +90,38 @@ type QueueOrderFields = {
   status: string;
   importedAt: string;
   lastOutcomeAt?: string;
+  /**
+   * Seneste outbound dial-forsøg uanset om der blev gemt et udfald — bruges
+   * sammen med lastOutcomeAt så leads vi har ringet til, men ikke fået svar fra
+   * (no_answer / originate_failed / timeout / busy), ikke loops til toppen.
+   */
+  lastDialAttemptAt?: string;
   id: string;
   hasOutcomeLogToday?: boolean;
 };
 
-/** Fælles sortering: status-rang → uden udfald nogensinde først → ældst udfald først → senest importeret → id */
+function touchedAtMs(row: QueueOrderFields): number {
+  const oa = row.lastOutcomeAt ? new Date(row.lastOutcomeAt).getTime() : Number.NaN;
+  const da = row.lastDialAttemptAt ? new Date(row.lastDialAttemptAt).getTime() : Number.NaN;
+  const oaFinite = Number.isFinite(oa);
+  const daFinite = Number.isFinite(da);
+  if (oaFinite && daFinite) return oa > da ? oa : da;
+  if (oaFinite) return oa;
+  if (daFinite) return da;
+  return Number.NaN;
+}
+
+/** Fælles sortering: status-rang → uden touch (udfald eller dial) først → ældst touch først → senest importeret → id */
 export function compareLeadQueueOrder(a: QueueOrderFields, b: QueueOrderFields): number {
   const ra = queueRank(a.status);
   const rb = queueRank(b.status);
   if (ra !== rb) return ra - rb;
-  const oa = a.lastOutcomeAt ? new Date(a.lastOutcomeAt).getTime() : Number.NaN;
-  const ob = b.lastOutcomeAt ? new Date(b.lastOutcomeAt).getTime() : Number.NaN;
-  const aHas = Number.isFinite(oa) ? 1 : 0;
-  const bHas = Number.isFinite(ob) ? 1 : 0;
-  if (aHas !== bHas) return aHas - bHas;
-  if (aHas && bHas && oa !== ob) return oa - ob;
+  const tA = touchedAtMs(a);
+  const tB = touchedAtMs(b);
+  const aTouched = Number.isFinite(tA) ? 1 : 0;
+  const bTouched = Number.isFinite(tB) ? 1 : 0;
+  if (aTouched !== bTouched) return aTouched - bTouched;
+  if (aTouched && bTouched && tA !== tB) return tA - tB;
   const ha = a.hasOutcomeLogToday === true ? 1 : 0;
   const hb = b.hasOutcomeLogToday === true ? 1 : 0;
   if (ha !== hb) return ha - hb;

@@ -263,6 +263,7 @@ export async function POST(req: Request) {
       meetingScheduledFor: true,
       importedAt: true,
       lastOutcomeAt: true,
+      lastDialAttemptAt: true,
     },
     orderBy: [{ importedAt: "asc" }],
     take: Math.min(500, Math.max(newCallsNeeded * 25, 50)),
@@ -304,6 +305,8 @@ export async function POST(req: Request) {
           r?.importedAt instanceof Date ? r.importedAt.toISOString() : String(r?.importedAt ?? ""),
         lastOutcomeAt:
           r?.lastOutcomeAt instanceof Date ? r.lastOutcomeAt.toISOString() : undefined,
+        lastDialAttemptAt:
+          r?.lastDialAttemptAt instanceof Date ? r.lastDialAttemptAt.toISOString() : undefined,
       };
     }),
   );
@@ -320,13 +323,22 @@ export async function POST(req: Request) {
     const e164 = normalizePhoneToE164ForDial(lead.phone);
     if (!e164) continue; // ugyldigt nummer
     try {
-      await prisma.dialerQueueItem.create({
-        data: {
-          campaignId,
-          leadId: lead.id,
-          expiresAt,
-        },
-      });
+      // Atomisk: opret kø-item OG bump lastDialAttemptAt så samme lead ikke
+      // re-vælges som "fresh" i næste heartbeat hvis dial-forsøget aldrig
+      // resulterer i et udfald (no_answer / originate_failed / timeout).
+      await prisma.$transaction([
+        prisma.dialerQueueItem.create({
+          data: {
+            campaignId,
+            leadId: lead.id,
+            expiresAt,
+          },
+        }),
+        prisma.lead.update({
+          where: { id: lead.id },
+          data: { lastDialAttemptAt: new Date() },
+        }),
+      ]);
       reserved.push({ leadId: lead.id, phone: lead.phone, e164 });
     } catch {
       // Race: andet dispatch tog samme lead, prøv næste

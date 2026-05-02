@@ -139,6 +139,8 @@ model Lead {
   importedAt    DateTime  @default(now())
   /// Seneste tidspunkt et egentligt udfald blev ændret (ikke callback-planlægning)
   lastOutcomeAt DateTime?
+  /// Seneste outbound dial-forsøg (sættes også uden udfald) — bruges til at deprioritere rørte leads i predictive/power.
+  lastDialAttemptAt DateTime?
 
   /// Lås: én sælger ad gangen — frigives ved navigering eller efter max. inaktivitet (LEAD_LOCK_MAX_IDLE_SECONDS)
   lockedByUserId String?
@@ -173,6 +175,7 @@ model Lead {
   @@index([campaignId, callbackReservedByUserId, callbackScheduledFor])
   @@index([assignedUserId, meetingScheduledFor])
   @@index([lastOutcomeAt])
+  @@index([campaignId, status, lastDialAttemptAt])
 }
 
 /// Idempotens-log for daglig SMS-reminder pr. bruger.

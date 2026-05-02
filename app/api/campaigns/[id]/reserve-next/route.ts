@@ -191,6 +191,7 @@ export async function POST(req: Request, { params }: Params) {
         meetingOutcomeStatus: true,
         importedAt: true,
         lastOutcomeAt: true,
+        lastDialAttemptAt: true,
         customFields: true,
         meetingScheduledFor: true,
         industry: true,
@@ -211,6 +212,7 @@ export async function POST(req: Request, { params }: Params) {
       meetingOutcomeStatus: r.meetingOutcomeStatus,
       importedAt: r.importedAt,
       lastOutcomeAt: r.lastOutcomeAt,
+      lastDialAttemptAt: r.lastDialAttemptAt,
     }));
     const afterStartDate = useServerView
       ? getActiveCampaignLeads(mapped, fieldConfigJson, campaign.activeQueueFilter)
@@ -239,6 +241,8 @@ export async function POST(req: Request, { params }: Params) {
           r.importedAt instanceof Date ? r.importedAt.toISOString() : String(r.importedAt),
         lastOutcomeAt:
           r.lastOutcomeAt instanceof Date ? r.lastOutcomeAt.toISOString() : undefined,
+        lastDialAttemptAt:
+          r.lastDialAttemptAt instanceof Date ? r.lastDialAttemptAt.toISOString() : undefined,
       })),
     );
 

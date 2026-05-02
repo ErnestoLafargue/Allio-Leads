@@ -66,6 +66,62 @@ describe("compareLeadQueueOrder", () => {
     };
     expect(compareLeadQueueOrder(a, b)).toBeLessThan(0);
   });
+
+  it("placerer urørte leads før dem der er dialet uden gemt udfald (lastDialAttemptAt)", () => {
+    const fresh = {
+      status: "NEW",
+      id: "fresh",
+      importedAt: "2025-01-01T00:00:00.000Z",
+      hasOutcomeLogToday: false,
+    };
+    const dialed = {
+      status: "NEW",
+      id: "dialed",
+      importedAt: "2025-01-01T00:00:00.000Z",
+      hasOutcomeLogToday: false,
+      lastDialAttemptAt: "2025-06-01T08:00:00.000Z",
+    };
+    expect(compareLeadQueueOrder(fresh, dialed)).toBeLessThan(0);
+    expect(compareLeadQueueOrder(dialed, fresh)).toBeGreaterThan(0);
+  });
+
+  it("blandt rørte leads sorteres ældste touch først (uanset om touch er udfald eller dial)", () => {
+    const oldDial = {
+      status: "NEW",
+      id: "old",
+      importedAt: "2025-01-01T00:00:00.000Z",
+      hasOutcomeLogToday: false,
+      lastDialAttemptAt: "2025-06-01T08:00:00.000Z",
+    };
+    const recentOutcome = {
+      status: "NEW",
+      id: "recent",
+      importedAt: "2025-01-01T00:00:00.000Z",
+      hasOutcomeLogToday: false,
+      lastOutcomeAt: "2025-06-02T08:00:00.000Z",
+    };
+    expect(compareLeadQueueOrder(oldDial, recentOutcome)).toBeLessThan(0);
+    expect(compareLeadQueueOrder(recentOutcome, oldDial)).toBeGreaterThan(0);
+  });
+
+  it("bruger seneste af lastOutcomeAt og lastDialAttemptAt som touch-tidspunkt", () => {
+    const dialedAfterOutcome = {
+      status: "NEW",
+      id: "x",
+      importedAt: "2025-01-01T00:00:00.000Z",
+      hasOutcomeLogToday: false,
+      lastOutcomeAt: "2025-05-01T08:00:00.000Z",
+      lastDialAttemptAt: "2025-06-01T08:00:00.000Z",
+    };
+    const onlyOldOutcome = {
+      status: "NEW",
+      id: "y",
+      importedAt: "2025-01-01T00:00:00.000Z",
+      hasOutcomeLogToday: false,
+      lastOutcomeAt: "2025-05-15T08:00:00.000Z",
+    };
+    expect(compareLeadQueueOrder(onlyOldOutcome, dialedAfterOutcome)).toBeLessThan(0);
+  });
 });
 
 describe("isQueueEligibleStatus", () => {

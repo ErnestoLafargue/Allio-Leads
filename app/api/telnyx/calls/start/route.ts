@@ -210,6 +210,13 @@ export async function POST(req: Request) {
     `Opkald startet til ${phoneLabel} (Telnyx ${dial.callControlId}).`,
   );
 
+  // Bump lastDialAttemptAt så manuelt initierede opkald også flytter leadet
+  // bagerst i kampagne-køen (matcher predictive-dispatcherens adfærd).
+  await prisma.lead.update({
+    where: { id: leadId },
+    data: { lastDialAttemptAt: new Date() },
+  }).catch(() => {});
+
   return NextResponse.json({
     ok: true,
     callControlId: dial.callControlId,

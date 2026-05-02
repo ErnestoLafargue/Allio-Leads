@@ -79,6 +79,14 @@ export async function POST(req: Request) {
     userId: session.user.id,
   });
 
+  // WebRTC click-to-call dialer leadet umiddelbart efter denne prepare —
+  // bump lastDialAttemptAt så samme lead ikke loops til toppen i predictive
+  // hvis brugeren ikke når at gemme et udfald.
+  await prisma.lead.update({
+    where: { id: lead.id },
+    data: { lastDialAttemptAt: new Date() },
+  }).catch(() => {});
+
   return NextResponse.json({ ok: true, clientState });
 }
 

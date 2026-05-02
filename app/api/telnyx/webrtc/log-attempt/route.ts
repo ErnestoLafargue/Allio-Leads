@@ -69,6 +69,13 @@ export async function POST(req: Request) {
     return NextResponse.json({ error: "Kunne ikke logge aktivitet." }, { status: 500 });
   }
 
+  // Defensiv: hvis prepare-kaldet blev sprunget over (fx ældre klient), sikrer
+  // vi her at lastDialAttemptAt opdateres så leadet flytter bagerst i køen.
+  await prisma.lead.update({
+    where: { id: leadId },
+    data: { lastDialAttemptAt: new Date() },
+  }).catch(() => {});
+
   return NextResponse.json({ ok: true });
 }
 
