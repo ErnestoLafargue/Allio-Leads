@@ -608,6 +608,13 @@ export function CampaignWorkspace({ campaignId, preferredLeadId, voipSession = f
     }
   }
 
+  /** Kassér forudhentet næste-lead (fx ved udfaldsændring eller før ordnet gem+navigation). */
+  const clearPrefetchReservation = useCallback(() => {
+    const pid = prefetchedLeadRef.current?.id;
+    setPrefetchedLead(null);
+    if (pid) void releaseLockHttp(pid);
+  }, []);
+
   async function onNext(
     meetingScheduledForISO?: string,
     adminSkipBookingOverlap?: boolean,
@@ -668,48 +675,59 @@ export function CampaignWorkspace({ campaignId, preferredLeadId, voipSession = f
 
     setError(null);
     setBackgroundSyncError(null);
+    clearPrefetchReservation();
 
-    let rj: { lead: Lead | null };
-    if (prefetchedLeadRef.current) {
-      const buffered = prefetchedLeadRef.current;
-      setPrefetchedLead(null);
-      rj = { lead: buffered };
-      void prefetchNextLead(buffered.id);
-    } else {
-      const excludedLeadIds = Array.from(new Set([
-        currentId,
-        ...backgroundLockLeadIdsRef.current,
-      ]));
-      const rRes = await fetch(`/api/campaigns/${campaignId}/reserve-next`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: buildReserveNextRequestBody(campaignId, {
-          excludeLeadId: currentId,
-          excludeLeadIds: excludedLeadIds,
-        }),
-      });
-      if (!rRes.ok) {
-        const j = await rRes.json().catch(() => ({}));
-        setError(typeof j.error === "string" ? j.error : "Kunne ikke hente næste lead.");
-        return;
-      }
-      rj = (await rRes.json()) as { lead: Lead | null };
-    }
-
-    if (!rj.lead) {
-      setSaving(true);
+    setSaving(true);
+    let updatedLead: Lead | null = null;
+    for (let attempt = 0; attempt < BG_SAVE_RETRIES; attempt++) {
       const res = await fetch(`/api/leads/${currentId}`, {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(patchBody),
       });
-      setSaving(false);
-      if (!res.ok) {
-        const j = await res.json().catch(() => ({}));
-        setError(typeof j.error === "string" ? j.error : "Kunne ikke gemme");
-        return;
+      if (res.ok) {
+        updatedLead = (await res.json()) as Lead;
+        break;
       }
-      await releaseLockHttp(currentId);
+      await delayMs(350 * (attempt + 1));
+    }
+    setSaving(false);
+
+    if (!updatedLead) {
+      setError("Kunne ikke gemme");
+      return;
+    }
+
+    pendingPatchBodiesRef.current.delete(currentId);
+    await releaseLockHttp(currentId);
+    setBackgroundSyncError(null);
+
+    const excludedLeadIds = Array.from(new Set([
+      currentId,
+      ...backgroundLockLeadIdsRef.current,
+    ]));
+    const rRes = await fetch(`/api/campaigns/${campaignId}/reserve-next`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: buildReserveNextRequestBody(campaignId, {
+        excludeLeadId: currentId,
+        excludeLeadIds: excludedLeadIds,
+      }),
+    });
+    if (!rRes.ok) {
+      const j = await rRes.json().catch(() => ({}));
+      setError(typeof j.error === "string" ? j.error : "Kunne ikke hente næste lead.");
+      setActiveLead(updatedLead);
+      try {
+        sessionStorage.setItem(preferStorageKey(campaignId), updatedLead.id);
+      } catch {
+        /* ignore */
+      }
+      return;
+    }
+
+    const rj = (await rRes.json()) as { lead: Lead | null };
+    if (!rj.lead) {
       setActiveLead(null);
       setDone(true);
       try {
@@ -720,40 +738,13 @@ export function CampaignWorkspace({ campaignId, preferredLeadId, voipSession = f
       return;
     }
 
-    setBackgroundLockLeadIds((prev) => [...prev, currentId]);
-    pendingPatchBodiesRef.current.set(currentId, patchBody);
     setActiveLead(rj.lead);
     try {
       sessionStorage.setItem(preferStorageKey(campaignId), rj.lead.id);
     } catch {
       /* ignore */
     }
-
-    void (async () => {
-      let ok = false;
-      for (let attempt = 0; attempt < BG_SAVE_RETRIES; attempt++) {
-        const res = await fetch(`/api/leads/${currentId}`, {
-          method: "PATCH",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify(patchBody),
-        });
-        if (res.ok) {
-          ok = true;
-          break;
-        }
-        await delayMs(350 * (attempt + 1));
-      }
-      pendingPatchBodiesRef.current.delete(currentId);
-      if (ok) {
-        setBackgroundLockLeadIds((prev) => prev.filter((id) => id !== currentId));
-        await releaseLockHttp(currentId);
-        setBackgroundSyncError(null);
-      } else {
-        setBackgroundSyncError(
-          "Kunne ikke gemme forrige lead efter flere forsøg. Det er stadig låst for andre — genindlæs siden og prøv igen.",
-        );
-      }
-    })();
+    void prefetchNextLead(rj.lead.id);
   }
 
   function openCallbackDialog() {
@@ -898,12 +889,13 @@ export function CampaignWorkspace({ campaignId, preferredLeadId, voipSession = f
 
   const handleOutcomeStatusChange = useCallback(
     (next: LeadStatus) => {
+      clearPrefetchReservation();
       setStatus(next);
       if (campaignDialMode !== "PREDICTIVE") return;
       if (next === "NEW" || next === "MEETING_BOOKED" || next === "CALLBACK_SCHEDULED") return;
       queueMicrotask(() => void onNextRef.current(undefined, undefined, next));
     },
-    [campaignDialMode],
+    [campaignDialMode, clearPrefetchReservation],
   );
 
   async function onSendMail(payload: { to: string; subject: string; message: string }) {

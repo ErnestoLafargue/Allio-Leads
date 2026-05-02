@@ -6,7 +6,7 @@ import { filterLeadsByCampaignProtectedSetting } from "@/lib/reklamebeskyttet-fi
 import { getLeadIdsWithOutcomeLogToday } from "@/lib/lead-outcome-today";
 import { isLeadInRebookingDialerPool, sortLeadsForCampaignCallQueue } from "@/lib/lead-queue";
 import { MEETING_OUTCOME_REBOOK, normalizeMeetingOutcomeStatus } from "@/lib/meeting-outcome";
-import { releaseExpiredLocksEverywhere, tryAcquireLeadLock } from "@/lib/lead-lock";
+import { releaseExpiredLocksEverywhere, releaseLeadLock, tryAcquireLeadLock } from "@/lib/lead-lock";
 import {
   filterLeadsByWorkspaceStartDate,
   parseWorkspaceStartDateFilterFromRequestBody,
@@ -87,6 +87,7 @@ export async function POST(req: Request, { params }: Params) {
       );
     }
 
+    const systemCampaignType = campaign.systemCampaignType;
     const now = new Date();
 
     async function tryReserve(id: string) {
@@ -96,19 +97,45 @@ export async function POST(req: Request, { params }: Params) {
         where: { id },
         include: leadInclude,
       });
-      if (lead) {
-        await prisma.leadVisitHistory.create({
-          data: {
-            leadId: lead.id,
-            userId,
-            campaignId: lead.campaign?.id ?? null,
-            companyName: lead.companyName,
-            statusAtVisit: lead.status,
-            dayKey: copenhagenDayKey(now),
-            visitedAt: now,
-          },
-        });
+      if (!lead) return null;
+
+      const isCallbackCandidate =
+        lead.status === "CALLBACK_SCHEDULED" &&
+        lead.callbackStatus === "PENDING" &&
+        lead.callbackReservedByUserId === userId;
+
+      if (!isCallbackCandidate) {
+        if (systemCampaignType === "rebooking") {
+          if (
+            !isLeadInRebookingDialerPool({
+              status: lead.status,
+              meetingOutcomeStatus: lead.meetingOutcomeStatus,
+            })
+          ) {
+            await releaseLeadLock(prisma, id, userId);
+            return null;
+          }
+        } else if (
+          lead.status !== "NEW" ||
+          lead.callbackScheduledFor != null ||
+          lead.callbackReservedByUserId != null
+        ) {
+          await releaseLeadLock(prisma, id, userId);
+          return null;
+        }
       }
+
+      await prisma.leadVisitHistory.create({
+        data: {
+          leadId: lead.id,
+          userId,
+          campaignId: lead.campaign?.id ?? null,
+          companyName: lead.companyName,
+          statusAtVisit: lead.status,
+          dayKey: copenhagenDayKey(now),
+          visitedAt: now,
+        },
+      });
       return lead;
     }
 
