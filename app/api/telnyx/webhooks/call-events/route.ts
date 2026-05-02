@@ -93,13 +93,20 @@ async function resolveLeadContextForRecording(params: {
   }
 
   if (params.callSessionId) {
-    const bySession = await prisma.dialerCallLog.findFirst({
+    /// Flere legs deler call_session_id; recording.saved kan bruge et call_control_id der ikke
+    /// findes som række — samler alle logs i sessionen med lead og vælger entydigt lead.
+    const sessionRows = await prisma.dialerCallLog.findMany({
       where: { callSessionId: params.callSessionId, leadId: { not: null } },
+      select: { leadId: true, agentUserId: true, direction: true },
       orderBy: { startedAt: "desc" },
-      select: { leadId: true, agentUserId: true },
     });
-    if (bySession?.leadId) {
-      return { leadId: bySession.leadId, agentUserId: bySession.agentUserId ?? null };
+    if (sessionRows.length > 0) {
+      const leadIds = new Set(sessionRows.map((r) => r.leadId!));
+      if (leadIds.size === 1) {
+        const row =
+          sessionRows.find((r) => r.direction === "outbound-lead") ?? sessionRows[0]!;
+        return { leadId: row.leadId!, agentUserId: row.agentUserId ?? null };
+      }
     }
   }
 
@@ -474,15 +481,29 @@ export async function POST(req: Request) {
 
       if (!url) break;
 
-      // 1) Persistér på DialerCallLog
+      const sessionIdForRec =
+        typeof payload.call_session_id === "string" ? payload.call_session_id : null;
+
+      // 1) Persistér på DialerCallLog — primær leg + lead-leg(s) i samme Telnyx-session
+      //    (recording.saved kan referere et andet call_control_id end ved call.initiated).
       await prisma.dialerCallLog.updateMany({
         where: { callControlId },
         data: { recordingUrl: url },
       });
+      if (sessionIdForRec) {
+        await prisma.dialerCallLog.updateMany({
+          where: {
+            callSessionId: sessionIdForRec,
+            direction: "outbound-lead",
+            leadId: { not: null },
+          },
+          data: { recordingUrl: url },
+        });
+      }
 
       const leadCtx = await resolveLeadContextForRecording({
         callControlId,
-        callSessionId: typeof payload.call_session_id === "string" ? payload.call_session_id : null,
+        callSessionId: sessionIdForRec,
         clientStateLeadId: clientState?.leadId ?? null,
         clientStateUserId: clientState?.userId ?? null,
         fromNumber: typeof payload.from === "string" ? payload.from : null,
@@ -496,8 +517,7 @@ export async function POST(req: Request) {
         const toNum = typeof payload.to === "string" ? payload.to : null;
         console.warn("[call-events] call.recording.saved: no leadId — optagelse gemmes kun på DialerCallLog", {
           callControlIdSuffix: callControlId.length > 8 ? callControlId.slice(-8) : callControlId,
-          callSessionId:
-            typeof payload.call_session_id === "string" ? payload.call_session_id.slice(-8) : null,
+          callSessionId: sessionIdForRec ? sessionIdForRec.slice(-8) : null,
           clientStateLeadId: clientState?.leadId ?? null,
           fromTail: maskPhoneTailForLog(fromNum),
           toTail: maskPhoneTailForLog(toNum),
@@ -565,6 +585,7 @@ export async function POST(req: Request) {
       // Kopiér optagelsen til Vercel Blob i baggrunden og opdatér URL når den er klar,
       // så afspilning ikke afhænger af udløbende Telnyx-download-links.
       if (telnyxRecordingUrl) {
+        const sidForBlob = sessionIdForRec;
         after(() => {
           void (async () => {
             try {
@@ -582,6 +603,16 @@ export async function POST(req: Request) {
                 where: { callControlId },
                 data: { recordingUrl: playbackUrl },
               });
+              if (sidForBlob) {
+                await prisma.dialerCallLog.updateMany({
+                  where: {
+                    callSessionId: sidForBlob,
+                    direction: "outbound-lead",
+                    leadId: { not: null },
+                  },
+                  data: { recordingUrl: playbackUrl },
+                });
+              }
             } catch (err) {
               console.error("[call-events] recording blob persist (after):", err);
             }
