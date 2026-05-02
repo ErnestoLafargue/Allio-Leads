@@ -273,14 +273,24 @@ export function BookingPanel({
             Vælg udfaldet <strong>Møde booket</strong> for at gemme tidspunktet på leadet.
           </p>
         ) : null}
-        <button
-          type="button"
-          disabled={!canConfirm}
-          onClick={() => void handleConfirm()}
-          className="order-1 rounded-xl bg-blue-600 px-5 py-2.5 text-sm font-semibold text-white shadow-md transition hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-50 sm:order-2"
-        >
-          {isSubmitting ? "Gemmer…" : "Bekræft booking"}
-        </button>
+        <div className="order-1 flex w-full flex-col gap-2 sm:order-2 sm:w-auto sm:flex-row sm:gap-3">
+          <a
+            href="https://calendly.com/victor-allio/onboarding"
+            target="_blank"
+            rel="noopener noreferrer"
+            className="inline-flex items-center justify-center rounded-xl border border-slate-200 bg-white px-5 py-2.5 text-center text-sm font-semibold text-slate-800 shadow-sm transition hover:bg-slate-50"
+          >
+            Calendly
+          </a>
+          <button
+            type="button"
+            disabled={!canConfirm}
+            onClick={() => void handleConfirm()}
+            className="rounded-xl bg-blue-600 px-5 py-2.5 text-sm font-semibold text-white shadow-md transition hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-50"
+          >
+            {isSubmitting ? "Gemmer…" : "Bekræft booking"}
+          </button>
+        </div>
       </div>
     </section>
   );
