@@ -12,7 +12,7 @@ type MailDraft = {
 const EMPTY_DRAFT_ID = "empty";
 const CLINIC_DRAFT_ID = "clinics_allio_intro";
 
-const CLINIC_DEFAULT_SUBJECT = "Tak for snakken - her er hvad Allio kan gore for jer";
+const CLINIC_DEFAULT_SUBJECT = "Tak for snakken - her er hvad Allio kan gøre for jer";
 
 const CLINIC_DEFAULT_MESSAGE = `<!DOCTYPE html>
 <html lang="da">
