@@ -21,6 +21,7 @@ import {
   detectPredictiveOutcomeFromCall,
   type PredictiveAutoOutcome,
 } from "@/lib/voip-call-messages";
+import { decideClosedNotification } from "@/lib/voip-closed-decision";
 import { type VoipApiContext, VOIP_API_CONTEXT } from "@/lib/voip-api-context";
 
 type Props = {
@@ -318,6 +319,14 @@ export function CampaignVoipStrip({
   const manualHangupCallIdsRef = useRef<Set<string>>(new Set());
   const manualHangupAtRef = useRef(0);
   const currentCallContextRef = useRef<VoipCallContext | null>(null);
+  /**
+   * Map fra call-identity (telnyxCallControlId/sessionId/legId) → timerKey for hvert
+   * påbegyndt opkald. Bruges af CLOSED-handleren til at finalize det KORREKTE call legs
+   * timer (i stedet for det aktuelt aktive), så stale CLOSED for tidligere opkald ikke
+   * fryser uret på et live opkald. Entries ryddes når opkaldet faktisk lukkes ned eller
+   * ved lead-skift.
+   */
+  const callIdentityToTimerKeyRef = useRef<Map<string, string>>(new Map());
   const hangupSignalRef = useRef(hangupSignal);
   const remoteAudioRef = useRef<HTMLAudioElement | null>(null);
   /**
@@ -464,31 +473,63 @@ export function CampaignVoipStrip({
   const outLevel = useAudioLevel(micMonitorStream);
   const inLevel = useAudioLevel(activeCall ? remoteStream : null);
 
-  // Under aktivt opkald: lægger Date.now() - start ind i beregningen, så uret følger
-  // væguret uanset om setInterval sænkes i baggrund eller springer. Tick er kun
-  // der for at få re-renders (1/s).
+  // Under aktivt opkald: varighed = Date.now() − startAt (følger væguret, så throttlet
+  // setInterval ikke får uret til at hænge bagud). Vi har brug for ~1 re-render/sek.
+  // for at uret tegner ny værdi. Re-render-trigger kommer fra flere uafhængige kilder
+  // så ingen enkelt-mekanisme (background-throttling, OS-sleep) kan stoppe uret:
+  //
+  //   1. Recursive setTimeout justeret til næste hele sekund (Date.now() % 1000).
+  //      Mere robust end setInterval over for clock-drift; re-armer altid med korrekt
+  //      offset selvom forrige tick blev throttlet.
+  //   2. visibilitychange — tab-skifte kan throttle/unparkere timere i Chrome.
+  //   3. window focus + pageshow — laptop wake / window-skifte kan stoppe timere.
+  //   4. Watchdog ved hver render: hvis displayed tid afviger fra wall-clock med >1.5s
+  //      skedulér straks endnu en tick på næste microtask (selvkorrektion).
   const timerStartAt = callTimer?.startAt ?? null;
   const timerEndAt = callTimer?.endAt ?? null;
   useEffect(() => {
     if (!timerStartAt) return;
     if (timerEndAt) return;
-    const id = window.setInterval(() => {
-      setCallDurationTick((n) => n + 1);
-    }, 1000);
-    return () => window.clearInterval(id);
-  }, [timerStartAt, timerEndAt]);
 
-  // Synk når brugeren vender tilbage til fanen (timere kan være kraftigt throttlet i baggrunden).
-  useEffect(() => {
-    if (!timerStartAt) return;
-    if (timerEndAt) return;
-    const onVis = () => {
-      if (document.visibilityState === "visible") {
+    let cancelled = false;
+    let timeoutId: number | null = null;
+
+    const scheduleNextTick = () => {
+      if (cancelled) return;
+      // Sigter mod næste hele sekund i wall-clock for at undgå drift; 1000ms hvis
+      // vi tilfældigvis lige står på et helt sekund.
+      const msUntilNextSecond = 1000 - (Date.now() % 1000) || 1000;
+      timeoutId = window.setTimeout(() => {
+        if (cancelled) return;
         setCallDurationTick((n) => n + 1);
-      }
+        scheduleNextTick();
+      }, msUntilNextSecond);
     };
-    document.addEventListener("visibilitychange", onVis);
-    return () => document.removeEventListener("visibilitychange", onVis);
+
+    const wakeUp = () => {
+      if (cancelled) return;
+      // Tving en re-render straks; den næste re-render re-armer scheduleNextTick.
+      setCallDurationTick((n) => n + 1);
+    };
+
+    const onVisibility = () => {
+      if (document.visibilityState === "visible") wakeUp();
+    };
+    const onPageShow = () => wakeUp();
+    const onFocus = () => wakeUp();
+
+    scheduleNextTick();
+    document.addEventListener("visibilitychange", onVisibility);
+    window.addEventListener("pageshow", onPageShow);
+    window.addEventListener("focus", onFocus);
+
+    return () => {
+      cancelled = true;
+      if (timeoutId != null) window.clearTimeout(timeoutId);
+      document.removeEventListener("visibilitychange", onVisibility);
+      window.removeEventListener("pageshow", onPageShow);
+      window.removeEventListener("focus", onFocus);
+    };
   }, [timerStartAt, timerEndAt]);
 
   // `callDurationTick` udløser 1 re-render/sek. under kald. Varighed = Date.now()−start
@@ -500,6 +541,23 @@ export function CampaignVoipStrip({
       : timerEndAt != null
         ? Math.max(0, (timerEndAt - timerStartAt) / 1000)
         : Math.max(0, (Date.now() - timerStartAt) / 1000);
+
+  // Watchdog: hvis vi opdager mere end 1.5s drift mellem displayed tid og wall-clock
+  // (fx fordi setTimeout blev throttlet), tving endnu en tick på næste microtask så
+  // visningen springer op-til-dato i stedet for at hænge bagud.
+  const lastShownSecondsRef = useRef(0);
+  useEffect(() => {
+    if (timerStartAt == null || timerEndAt != null) {
+      lastShownSecondsRef.current = 0;
+      return;
+    }
+    const wallSeconds = Math.max(0, (Date.now() - timerStartAt) / 1000);
+    if (wallSeconds - shownSeconds > 1.5) {
+      const id = window.setTimeout(() => setCallDurationTick((n) => n + 1), 0);
+      return () => window.clearTimeout(id);
+    }
+    lastShownSecondsRef.current = shownSeconds;
+  });
 
   useEffect(() => {
     currentLeadIdRef.current = leadId;
@@ -928,6 +986,7 @@ export function CampaignVoipStrip({
    */
   function resetCallTimer() {
     callKeyRef.current = null;
+    callIdentityToTimerKeyRef.current.clear();
     setCallTimer(null);
   }
 
@@ -1054,6 +1113,28 @@ export function CampaignVoipStrip({
           const stateT = stateToken(maybeCall.state);
           if (CLOSED_STATES.has(stateT)) {
             const closedCallIdentity = getCallIdentity(maybeCall);
+            // Afgør om CLOSED rammer det aktive opkald (som skal afsluttes pænt) eller
+            // om det er en stale notifikation for et tidligere/parallelt call leg (som
+            // ikke må røre uret eller status). Se lib/voip-closed-decision.ts.
+            const decision = decideClosedNotification(
+              { callObject: maybeCall, identity: closedCallIdentity },
+              {
+                callObject: activeCallRef.current,
+                identity: getCallIdentity(activeCallRef.current),
+              },
+              callIdentityToTimerKeyRef.current,
+              currentCallContextRef.current?.timerKey ?? callKeyRef.current,
+            );
+            if (closedCallIdentity) {
+              callIdentityToTimerKeyRef.current.delete(closedCallIdentity);
+            }
+            if (!decision.isClosingActiveCall) {
+              // Stale CLOSED for et andet call leg — ingen side-effekter.
+              // #region agent log
+              fetch("http://localhost:7253/ingest/cae62791-9bb1-4500-92a8-c26abf2c0c90", { method: "POST", headers: { "Content-Type": "application/json", "X-Debug-Session-Id": "d38e61" }, body: JSON.stringify({ sessionId: "d38e61", runId: debugRunId, hypothesisId: "H3", location: "campaign-voip-strip.tsx:onNotification:closed:stale", message: "stale CLOSED ignored (not active call)", data: { leadId, stateToken: stateT, closedCallIdentity, activeCallIdentity: getCallIdentity(activeCallRef.current) }, timestamp: Date.now() }) }).catch(() => {});
+              // #endregion
+              return;
+            }
             const initiatedByManualHangupId = Boolean(
               closedCallIdentity && manualHangupCallIdsRef.current.has(closedCallIdentity),
             );
@@ -1072,12 +1153,7 @@ export function CampaignVoipStrip({
             const cause = String((maybeCall as TelnyxCall).cause ?? "");
             const sipReason = String((maybeCall as TelnyxCall).sipReason ?? "");
             activeCallRef.current = null;
-            // Bind finalize til opkalds-instansens timerKey hvis den findes (sat i startCall);
-            // ellers fald tilbage til den aktuelle key i ref. Forældede CLOSED for tidligere
-            // opkald no-op'er fordi finalizeCallTimer er keyed.
-            const closedTimerKey =
-              currentCallContextRef.current?.timerKey ?? callKeyRef.current;
-            clearCallAudioState(true, closedTimerKey);
+            clearCallAudioState(true, decision.closedTimerKey);
             setLineStatus("idle");
             setDetail(null);
             if (!initiatedByUs) {
@@ -1125,6 +1201,18 @@ export function CampaignVoipStrip({
 
           activeCallRef.current = maybeCall;
           attachCallStreams(maybeCall);
+          // Registrér call-identity → timerKey så CLOSED-handleren senere kan finalize
+          // det KORREKTE call legs timer (ikke det aktuelt aktive). Telnyx populerer
+          // telnyxIDs asynkront, så vi opdaterer mappen ved hver notifikation indtil
+          // identiteten er kendt.
+          {
+            const liveIdentity = getCallIdentity(maybeCall);
+            const liveTimerKey =
+              currentCallContextRef.current?.timerKey ?? callKeyRef.current;
+            if (liveIdentity && liveTimerKey && !callIdentityToTimerKeyRef.current.has(liveIdentity)) {
+              callIdentityToTimerKeyRef.current.set(liveIdentity, liveTimerKey);
+            }
+          }
           const mapped = callStateToLineStatus(maybeCall.state);
           if (mapped) {
             if (mapped === "live") {
