@@ -301,6 +301,15 @@ export function CampaignVoipStrip({
   const initPromiseRef = useRef<Promise<void> | null>(null);
   const inFlightRef = useRef(false);
   const autoKeyRef = useRef<string | null>(null);
+  /**
+   * Når brugeren manuelt har gemt et nyt telefonnummer på det aktuelle lead, må
+   * predictive auto-start IKKE re-fyre opkaldet til det nye nummer. Agenten skal
+   * selv klikke "Ring op" som ved click-to-call. Når leadId skifter til næste
+   * lead nulstiller lead-reset-effekten flaget, så kampagnens normale dial mode
+   * (predictive m.m.) gælder igen. Vi gemmer leadId frem for en boolean så et
+   * forældet flag aldrig kan smitte over på et andet lead.
+   */
+  const suppressAutoStartForLeadIdRef = useRef<string | null>(null);
   const lastLeadIdRef = useRef<string | null>(null);
   const currentLeadIdRef = useRef<string | null>(leadId);
   const leadEpochRef = useRef(0);
@@ -515,6 +524,10 @@ export function CampaignVoipStrip({
     endCallInitiatedByUsRef.current = false;
     callHadConnectedRef.current = false;
     autoKeyRef.current = null;
+    // Suppression af auto-start (sat når brugeren manuelt redigerede + gemte
+    // nummer) skal kun gælde det forrige lead — næste lead skal følge
+    // kampagnens normale dial mode (predictive m.m.).
+    suppressAutoStartForLeadIdRef.current = null;
     setManualHeadsetConfirm(false);
     setRemoteStream(null);
     setEditingPhone(false);
@@ -1344,6 +1357,11 @@ export function CampaignVoipStrip({
       }
       setEditingPhone(false);
       pushVoipToast(result.message || "Nummer opdateret.");
+      // Predictive må ikke automatisk ringe det nyligt redigerede nummer op for
+      // dette lead — agenten skal aktivt klikke "Ring op" (click-to-call). Når
+      // leadId skifter til næste lead, fjerner lead-reset-effekten flaget igen,
+      // så kampagnens normale dial mode genoptages.
+      suppressAutoStartForLeadIdRef.current = leadId;
     } finally {
       setSavingPhone(false);
     }
@@ -1414,6 +1432,12 @@ export function CampaignVoipStrip({
     if (autoKeyRef.current === key) return;
     if (!stripDialFormatting(voipPhone)) return;
     if (stripDialFormatting(voipPhone) !== stripDialFormatting(leadPhone || "")) return;
+    // Hvis brugeren netop har gemt et nyt nummer på dette lead, må predictive
+    // ikke automatisk ringe det op — det skal være click-to-call. Suppression
+    // ophæves når leadId skifter (lead-reset-effekten nuller flaget).
+    if (suppressAutoStartForLeadIdRef.current === leadId) {
+      return;
+    }
     // Et `voipPhone`-skift mid-call må ikke kunne re-fyre startCall — det ville
     // generere et nyt timerKey og smide det aktuelle ur tilbage til en frisk
     // start (eller 00:00 hvis Telnyx ikke når at svare). Vi holder os til kun
