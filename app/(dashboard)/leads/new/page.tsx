@@ -10,10 +10,27 @@ import type { LeadStatus } from "@/lib/lead-status";
 
 type CampaignOption = { id: string; name: string };
 
+/** Kun relative app-stier — undgår open redirect. */
+function leadCreateReturnPath(nextParam: string | null): string {
+  const fallback = "/leads";
+  const raw = nextParam?.trim() ?? "";
+  if (!raw.startsWith("/") || raw.startsWith("//")) return fallback;
+  try {
+    const base = "http://internal.local";
+    const u = new URL(raw, base);
+    if (u.origin !== base) return fallback;
+    const path = `${u.pathname}${u.search}${u.hash}`;
+    return path.length > 0 ? path : fallback;
+  } catch {
+    return fallback;
+  }
+}
+
 export default function NewLeadPage() {
   const router = useRouter();
   const search = useSearchParams();
   const fromUrl = search.get("campaignId")?.trim() ?? "";
+  const returnAfterCreate = leadCreateReturnPath(search.get("next"));
   const [campaigns, setCampaigns] = useState<CampaignOption[]>([]);
   const [picked, setPicked] = useState("");
   const campaignId = fromUrl || picked;
@@ -121,35 +138,40 @@ export default function NewLeadPage() {
     setMeetingContactErrors({});
     setError(null);
     setLoading(true);
-    const res = await fetch("/api/leads", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        campaignId,
-        companyName: trimmedCompanyName,
-        phone,
-        email,
-        cvr,
-        address,
-        postalCode,
-        city,
-        industry,
-        notes,
-        meetingContactName: meetingContactName.trim(),
-        meetingContactEmail: meetingContactEmail.trim(),
-        meetingContactPhonePrivate: meetingContactPhonePrivate.trim(),
-        status,
-        meetingScheduledFor: status === "MEETING_BOOKED" ? meetingScheduledFor : null,
-        customFields: custom,
-      }),
-    });
-    setLoading(false);
-    if (!res.ok) {
-      const j = await res.json().catch(() => ({}));
-      setError(j.error ?? "Kunne ikke oprette");
-      return;
+    try {
+      const res = await fetch("/api/leads", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          campaignId,
+          companyName: trimmedCompanyName,
+          phone,
+          email,
+          cvr,
+          address,
+          postalCode,
+          city,
+          industry,
+          notes,
+          meetingContactName: meetingContactName.trim(),
+          meetingContactEmail: meetingContactEmail.trim(),
+          meetingContactPhonePrivate: meetingContactPhonePrivate.trim(),
+          status,
+          meetingScheduledFor: status === "MEETING_BOOKED" ? meetingScheduledFor : null,
+          customFields: custom,
+        }),
+      });
+      if (!res.ok) {
+        const j = await res.json().catch(() => ({}));
+        setError(j.error ?? "Kunne ikke oprette");
+        return;
+      }
+      router.replace(returnAfterCreate);
+    } catch {
+      setError("Netværksfejl — prøv igen.");
+    } finally {
+      setLoading(false);
     }
-    router.push("/leads");
   }
 
   if (loadingCampaigns) {
@@ -174,7 +196,10 @@ export default function NewLeadPage() {
   return (
     <div className="mx-auto max-w-6xl space-y-6">
       <div>
-        <Link href="/leads" className="text-sm text-stone-500 hover:text-stone-800">
+        <Link
+          href={returnAfterCreate}
+          className="text-sm text-stone-500 hover:text-stone-800"
+        >
           ← Tilbage til leads
         </Link>
         <h1 className="mt-2 text-xl font-semibold text-stone-900">Nyt lead</h1>

@@ -1,6 +1,18 @@
 import { NextResponse } from "next/server";
 import { sendTomorrowMeetingReminders } from "@/lib/meeting-reminders";
 
+/**
+ * Daglig SMS «møde i morgen» til tildelte sælgere.
+ *
+ * Vercel cron kører i UTC. Én fast UTC-tid rammer ikke altid 18:45 Europe/Copenhagen
+ * (CET vs CEST). Derfor to triggers:
+ * - 16:45 UTC → 18:45 når Danmark er UTC+2 (sommertid)
+ * - 17:45 UTC → 18:45 når Danmark er UTC+1 (vintertid)
+ *
+ * Ruten tillader kun faktisk afsendelse kl. 18:45 lokalt (eller ?force=1).
+ * Den anden daglige kørsel returnerer skipped uden sideeffekter.
+ * Idempotens i `MeetingReminderDispatch` forhindrer dobbelt-SMS hvis begge ramte vinduet.
+ */
 export async function GET(req: Request) {
   const auth = req.headers.get("authorization")?.trim() ?? "";
   const expected = process.env.CRON_SECRET?.trim() ?? "";

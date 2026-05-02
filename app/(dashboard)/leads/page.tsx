@@ -28,7 +28,7 @@ export default function LeadsPage() {
             className="w-full min-w-[200px] rounded-md border border-stone-200 bg-white px-3 py-2 text-sm text-stone-900 shadow-sm outline-none ring-stone-400 focus:ring-2 sm:w-64"
           />
           <Link
-            href="/leads/new"
+            href="/leads/new?next=/leads"
             className="shrink-0 rounded-md bg-stone-800 px-3 py-2 text-sm font-medium text-white hover:bg-stone-900"
           >
             Nyt lead

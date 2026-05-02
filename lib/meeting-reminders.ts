@@ -28,6 +28,14 @@ function buildReminderSms(name: string, meetings: { meetingScheduledFor: string;
   return `${header}\n\n${lines.join("\n")}`;
 }
 
+/**
+ * Sender SMS via Telnyx `POST /v2/messages`.
+ *
+ * Afsender (`from`): sæt `TELNYX_SMS_FROM_NUMBER` i Vercel (anbefalet til SMS), ellers
+ * falder vi tilbage til `TELNYX_FROM_NUMBER`. Værdien skal være et E.164-nummer som i
+ * Telnyx-portalen er aktiveret til **udgående SMS** (Messaging) — typisk samme pulje som
+ * jeres voice-numre (+45…), men det er konto-/nummerkonfiguration, ikke antaget i koden.
+ */
 export async function sendTomorrowMeetingReminders() {
   const apiKey = process.env.TELNYX_API_KEY?.trim() || "";
   const fromRaw =

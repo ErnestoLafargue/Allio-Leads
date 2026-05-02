@@ -31,7 +31,9 @@ export function copenhagenDayBoundsUtcFromDayKey(dayKey: string): { start: Date;
     const pd = fmt.find((p) => p.type === "day")!.value;
     const ph = fmt.find((p) => p.type === "hour")!.value;
     const pmin = fmt.find((p) => p.type === "minute")!.value;
-    if (`${py}-${pm}-${pd}` === dayKey && ph === "00" && pmin === "00") {
+    // Node/ICU med en-CA kan bruge time «24» for midnat, ikke «00».
+    const isMidnight = pmin === "00" && (ph === "00" || ph === "24");
+    if (`${py}-${pm}-${pd}` === dayKey && isMidnight) {
       start = d;
       break;
     }
@@ -84,7 +86,8 @@ export function copenhagenDayBoundsUtc(reference = new Date()): { start: Date; e
     const pd = parts.find((p) => p.type === "day")!.value;
     const ph = parts.find((p) => p.type === "hour")!.value;
     const pmin = parts.find((p) => p.type === "minute")!.value;
-    if (`${py}-${pm}-${pd}` === ymd && ph === "00" && pmin === "00") {
+    const isMidnight = pmin === "00" && (ph === "00" || ph === "24");
+    if (`${py}-${pm}-${pd}` === ymd && isMidnight) {
       start = d;
       break;
     }

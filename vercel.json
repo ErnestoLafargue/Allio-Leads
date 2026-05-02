@@ -6,6 +6,10 @@
     {
       "path": "/api/cron/meeting-reminders",
       "schedule": "45 16 * * *"
+    },
+    {
+      "path": "/api/cron/meeting-reminders",
+      "schedule": "45 17 * * *"
     }
   ]
 }
