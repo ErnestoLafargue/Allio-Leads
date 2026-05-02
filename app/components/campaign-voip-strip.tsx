@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { CampaignDialMode } from "@/lib/dial-mode";
-import { normalizePhoneToE164ForDial } from "@/lib/phone-e164";
+import { normalizePhoneToE164ForDial, stripDialFormatting } from "@/lib/phone-e164";
 import { useAudioLevel } from "@/lib/use-audio-level";
 import {
   ensureMicPermissionAndEnumerate,
@@ -110,6 +110,8 @@ type VoipCallContext = {
   queueItemId: string | null;
   dialMode: CampaignDialMode;
   startedAt: number;
+  /** Unik nøgle for opkalds-instansen, så timer-mutationer kan ignoreres for forældede opkald. */
+  timerKey: string;
 };
 
 function getCallIdentity(call: TelnyxCall | null): string | null {
@@ -120,10 +122,6 @@ function getCallIdentity(call: TelnyxCall | null): string | null {
     call.telnyxIDs?.telnyxLegId ??
     null
   );
-}
-
-function normalizeDialDraft(s: string) {
-  return s.replace(/\s/g, "").trim();
 }
 
 /**
@@ -276,9 +274,17 @@ export function CampaignVoipStrip({
   const [refreshBusy, setRefreshBusy] = useState(false);
   const [refreshInfo, setRefreshInfo] = useState<string | null>(null);
 
-  const [callStartAt, setCallStartAt] = useState<number | null>(null);
-  const [callEndAt, setCallEndAt] = useState<number | null>(null);
-  /** Tvinger re-render så uret opdaterer; faktisk varighed bruger Date.now() + callStartAt, ikke en akkumuleret tick. */
+  /**
+   * Atomar timer-state pr. opkaldsinstans. `key` er et UUID der bindes til opkaldet
+   * når `beginCallTimer()` køres; alle finalize/reset-operationer skal medbringe
+   * samme key så forældede SDK-callbacks (fx CLOSED for et tidligere opkald) ikke
+   * kan rive uret tilbage og vise 00:00 mens et nyere opkald lever videre.
+   */
+  type CallTimerState = { key: string; startAt: number; endAt: number | null };
+  const [callTimer, setCallTimer] = useState<CallTimerState | null>(null);
+  /** Spejl af `callTimer.key` til langlivede SDK-callbacks (telnyx.notification). */
+  const callKeyRef = useRef<string | null>(null);
+  /** Tvinger re-render så uret opdaterer; faktisk varighed bruger Date.now() + callTimer.startAt, ikke en akkumuleret tick. */
   const [callDurationTick, setCallDurationTick] = useState(0);
   const [remoteStream, setRemoteStream] = useState<MediaStream | null>(null);
   /**
@@ -452,19 +458,21 @@ export function CampaignVoipStrip({
   // Under aktivt opkald: lægger Date.now() - start ind i beregningen, så uret følger
   // væguret uanset om setInterval sænkes i baggrund eller springer. Tick er kun
   // der for at få re-renders (1/s).
+  const timerStartAt = callTimer?.startAt ?? null;
+  const timerEndAt = callTimer?.endAt ?? null;
   useEffect(() => {
-    if (!callStartAt) return;
-    if (callEndAt) return;
+    if (!timerStartAt) return;
+    if (timerEndAt) return;
     const id = window.setInterval(() => {
       setCallDurationTick((n) => n + 1);
     }, 1000);
     return () => window.clearInterval(id);
-  }, [callStartAt, callEndAt]);
+  }, [timerStartAt, timerEndAt]);
 
   // Synk når brugeren vender tilbage til fanen (timere kan være kraftigt throttlet i baggrunden).
   useEffect(() => {
-    if (!callStartAt) return;
-    if (callEndAt) return;
+    if (!timerStartAt) return;
+    if (timerEndAt) return;
     const onVis = () => {
       if (document.visibilityState === "visible") {
         setCallDurationTick((n) => n + 1);
@@ -472,17 +480,17 @@ export function CampaignVoipStrip({
     };
     document.addEventListener("visibilitychange", onVis);
     return () => document.removeEventListener("visibilitychange", onVis);
-  }, [callStartAt, callEndAt]);
+  }, [timerStartAt, timerEndAt]);
 
   // `callDurationTick` udløser 1 re-render/sek. under kald. Varighed = Date.now()−start
   // så uret følger væguret (før brugte vi et frosset "now"-snapshot der kunne hænge).
   void callDurationTick;
   const shownSeconds: number =
-    !callStartAt
+    timerStartAt == null
       ? 0
-      : callEndAt
-        ? Math.max(0, (callEndAt - callStartAt) / 1000)
-        : Math.max(0, (Date.now() - callStartAt) / 1000);
+      : timerEndAt != null
+        ? Math.max(0, (timerEndAt - timerStartAt) / 1000)
+        : Math.max(0, (Date.now() - timerStartAt) / 1000);
 
   useEffect(() => {
     currentLeadIdRef.current = leadId;
@@ -491,15 +499,11 @@ export function CampaignVoipStrip({
   useEffect(() => {
     if (lastLeadIdRef.current === leadId) return;
     const hadActiveOrPendingCall = Boolean(activeCallRef.current) || inFlightRef.current;
+    const needsHangup = Boolean(activeCallRef.current);
     // #region agent log
     fetch("http://localhost:7253/ingest/cae62791-9bb1-4500-92a8-c26abf2c0c90", { method: "POST", headers: { "Content-Type": "application/json", "X-Debug-Session-Id": "d38e61" }, body: JSON.stringify({ sessionId: "d38e61", runId: debugRunId, hypothesisId: "H1", location: "campaign-voip-strip.tsx:leadResetEffect", message: "lead change triggers voip reset", data: { previousLeadId: lastLeadIdRef.current, nextLeadId: leadId, nextLeadPhone: leadPhone, lineStatusBeforeReset: lineStatus, hadActiveCallRef: Boolean(activeCallRef.current) }, timestamp: Date.now() }) }).catch(() => {});
     // #endregion
-    if (activeCallRef.current) {
-      void hangUp();
-    }
     leadEpochRef.current += 1;
-    inFlightRef.current = false;
-    currentCallContextRef.current = null;
     lastLeadIdRef.current = leadId;
     // Undgå falsk "Klar" mens et aktivt/ringende Telnyx-kald stadig lukkes ned.
     if (!hadActiveOrPendingCall) {
@@ -512,14 +516,33 @@ export function CampaignVoipStrip({
     callHadConnectedRef.current = false;
     autoKeyRef.current = null;
     setManualHeadsetConfirm(false);
-    setCallStartAt(null);
-    setCallEndAt(null);
     setRemoteStream(null);
     setEditingPhone(false);
     setPhoneDraft((leadPhone || "").trim());
+    // VIGTIGT: hangUp() finalizer uret (callTimer.endAt) for det netop lukkede
+    // opkald. Hvis vi nullede uret synkront her ville et race give 00:00
+    // mid-call. Vi awaiter derfor hangUp og NULLER FØRST DEREFTER.
+    let cancelled = false;
+    void (async () => {
+      if (needsHangup) {
+        try {
+          await hangUp();
+        } catch {
+          /* hangUp logger selv; vi må ikke blokere lead-reset */
+        }
+      } else {
+        inFlightRef.current = false;
+        currentCallContextRef.current = null;
+      }
+      if (cancelled) return;
+      resetCallTimer();
+    })();
+    return () => {
+      cancelled = true;
+    };
     // Kun nyt lead — ikke når brugeren retter telefonfeltet på leadet
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [debugRunId, leadId, lineStatus]);
+  }, [debugRunId, leadId]);
 
   useEffect(() => {
     if (!editingPhone) {
@@ -853,10 +876,52 @@ export function CampaignVoipStrip({
     }
   }
 
-  function clearCallAudioState(finalizeTimer: boolean) {
+  /**
+   * Starter et nyt opkald-ur. Genererer et UUID som key og publicerer både i state
+   * (til render) og i `callKeyRef` (så langlivede SDK-callbacks kan tjekke om de
+   * stadig hører til det aktuelle opkald). Returnerer key så caller kan binde det
+   * videre i `currentCallContextRef.current.timerKey` osv.
+   */
+  function beginCallTimer(): string {
+    const key =
+      typeof crypto !== "undefined" && typeof crypto.randomUUID === "function"
+        ? crypto.randomUUID()
+        : `${Date.now()}-${Math.random().toString(36).slice(2)}`;
+    callKeyRef.current = key;
+    setCallTimer({ key, startAt: Date.now(), endAt: null });
+    return key;
+  }
+
+  /**
+   * Idempotent + keyed afslutning af opkald-uret. Forældede SDK-callbacks (CLOSED
+   * for et tidligere opkald, double-fire fra clearCallAudioState) er no-ops fordi
+   * key ikke matcher det aktuelle. Genaffyringer for samme key respekterer det
+   * første endAt — det rigtige slut-tidspunkt taber aldrig til en ny `Date.now()`.
+   */
+  function finalizeCallTimer(key: string | null | undefined, at: number = Date.now()) {
+    if (!key) return;
+    setCallTimer((prev) => {
+      if (!prev) return prev;
+      if (prev.key !== key) return prev;
+      if (prev.endAt != null) return prev;
+      return { ...prev, endAt: at };
+    });
+  }
+
+  /**
+   * Nulstiller uret helt. Bruges udelukkende fra lead-reset-stien EFTER `hangUp()`
+   * har resolveret — så vi aldrig får en mid-call race hvor uret pludselig viser
+   * 00:00 mens et SDK-opkald stadig lever videre.
+   */
+  function resetCallTimer() {
+    callKeyRef.current = null;
+    setCallTimer(null);
+  }
+
+  function clearCallAudioState(finalizeTimer: boolean, timerKey?: string | null) {
     setRemoteStream(null);
     if (finalizeTimer) {
-      setCallEndAt((prev) => (prev ?? Date.now()));
+      finalizeCallTimer(timerKey ?? callKeyRef.current);
     }
   }
 
@@ -994,10 +1059,14 @@ export function CampaignVoipStrip({
             const cause = String((maybeCall as TelnyxCall).cause ?? "");
             const sipReason = String((maybeCall as TelnyxCall).sipReason ?? "");
             activeCallRef.current = null;
-            clearCallAudioState(true);
+            // Bind finalize til opkalds-instansens timerKey hvis den findes (sat i startCall);
+            // ellers fald tilbage til den aktuelle key i ref. Forældede CLOSED for tidligere
+            // opkald no-op'er fordi finalizeCallTimer er keyed.
+            const closedTimerKey =
+              currentCallContextRef.current?.timerKey ?? callKeyRef.current;
+            clearCallAudioState(true, closedTimerKey);
             setLineStatus("idle");
             setDetail(null);
-            setCallEndAt(Date.now());
             if (!initiatedByUs) {
               playCallEndedTone();
             }
@@ -1103,9 +1172,15 @@ export function CampaignVoipStrip({
       return;
     }
     if (inFlightRef.current) return;
+    // Genstart aldrig et opkald mens et tidligere stadig lever — det ville
+    // generere et nyt timerKey via beginCallTimer() og smide det aktuelle ur.
+    // Auto-start på et leadId-skift er allerede gated af lead-reset effekten
+    // (som awaiter hangUp), så når vi når hertil bør disse altid være tomme;
+    // guarden er en defensiv backstop.
+    if (activeCallRef.current) return;
     const voipPhoneRaw = voipPhone;
-    const raw = normalizeDialDraft(voipPhoneRaw);
-    const leadRaw = normalizeDialDraft((leadPhone || "").trim());
+    const raw = stripDialFormatting(voipPhoneRaw);
+    const leadRaw = stripDialFormatting((leadPhone || "").trim());
     if (raw !== leadRaw) {
       if (process.env.NODE_ENV !== "production") {
         console.warn("VOIP phone mismatch", {
@@ -1139,8 +1214,7 @@ export function CampaignVoipStrip({
     setLineStatus("connecting");
     // Hvis klienten allerede er pre-warmet, skip "Forbinder WebRTC…"-flash.
     setDetail(clientRef.current ? null : "Forbinder WebRTC…");
-    setCallStartAt(Date.now());
-    setCallEndAt(null);
+    const timerKey = beginCallTimer();
     currentCallContextRef.current = {
       leadId,
       campaignId,
@@ -1148,6 +1222,7 @@ export function CampaignVoipStrip({
       queueItemId: null,
       dialMode: effectiveDialMode,
       startedAt: Date.now(),
+      timerKey,
     };
     // #region agent log
     fetch("http://localhost:7253/ingest/cae62791-9bb1-4500-92a8-c26abf2c0c90", { method: "POST", headers: { "Content-Type": "application/json", "X-Debug-Session-Id": "d38e61" }, body: JSON.stringify({ sessionId: "d38e61", runId: debugRunId, hypothesisId: "H4", location: "campaign-voip-strip.tsx:startCall", message: "startCall initiated", data: { leadId, leadPhone, voipPhone, raw, toE164, dialMode: effectiveDialMode, autoStart: effectiveAutoStart, lineStatusBefore: lineStatus, leadEpochAtStart, startAttemptId, callContext: currentCallContextRef.current }, timestamp: Date.now() }) }).catch(() => {});
@@ -1245,7 +1320,7 @@ export function CampaignVoipStrip({
       setLineStatus("idle");
       setDetail(null);
       reportVoipFailure(d.userText, d.technical);
-      setCallEndAt(Date.now());
+      finalizeCallTimer(currentCallContextRef.current?.timerKey ?? callKeyRef.current);
       clearCallAudioState(false);
     } finally {
       inFlightRef.current = false;
@@ -1290,12 +1365,16 @@ export function CampaignVoipStrip({
       /* no-op */
     }
     activeCallRef.current = null;
+    // Læs timerKey FØR vi nuller currentCallContextRef, så finalize binder til
+    // den korrekte opkalds-instans (forældede CLOSED-callbacks der måtte komme
+    // bagefter no-op'er fordi finalizeCallTimer er keyed).
+    const hangupTimerKey =
+      currentCallContextRef.current?.timerKey ?? callKeyRef.current;
     currentCallContextRef.current = null;
     setLineStatus("idle");
     setDetail(null);
     inFlightRef.current = false;
-    clearCallAudioState(true);
-    setCallEndAt(Date.now());
+    clearCallAudioState(true, hangupTimerKey);
     queueMicrotask(() => onCallEndedForActivityRef.current?.());
   }
 
@@ -1326,22 +1405,36 @@ export function CampaignVoipStrip({
   }, [hangupSignal, onHangupSignalHandled]);
 
   useEffect(() => {
-    const key = `${leadId}|${normalizeDialDraft(voipPhone)}|${effectiveAutoStart}`;
+    const key = `${leadId}|${stripDialFormatting(voipPhone)}|${effectiveAutoStart}`;
     if (!effectiveAutoStart) {
       autoKeyRef.current = null;
       return;
     }
     if (!audioSetupReady) return;
     if (autoKeyRef.current === key) return;
-    if (!normalizeDialDraft(voipPhone)) return;
-    if (normalizeDialDraft(voipPhone) !== normalizeDialDraft(leadPhone || "")) return;
+    if (!stripDialFormatting(voipPhone)) return;
+    if (stripDialFormatting(voipPhone) !== stripDialFormatting(leadPhone || "")) return;
+    // Et `voipPhone`-skift mid-call må ikke kunne re-fyre startCall — det ville
+    // generere et nyt timerKey og smide det aktuelle ur tilbage til en frisk
+    // start (eller 00:00 hvis Telnyx ikke når at svare). Vi holder os til kun
+    // at auto-starte når linjen er reelt klar.
+    if (
+      activeCallRef.current ||
+      inFlightRef.current ||
+      lineStatus === "live" ||
+      lineStatus === "ringing" ||
+      lineStatus === "connecting"
+    ) {
+      return;
+    }
     autoKeyRef.current = key;
     // #region agent log
-    fetch("http://localhost:7253/ingest/cae62791-9bb1-4500-92a8-c26abf2c0c90", { method: "POST", headers: { "Content-Type": "application/json", "X-Debug-Session-Id": "d38e61" }, body: JSON.stringify({ sessionId: "d38e61", runId: debugRunId, hypothesisId: "H3", location: "campaign-voip-strip.tsx:autoStartEffect", message: "auto start call triggered", data: { leadId, leadPhone, voipPhone, normalizedVoipPhone: normalizeDialDraft(voipPhone), lineStatus, hasActiveCallRef: Boolean(activeCallRef.current), activeCallControlId: activeCallRef.current?.telnyxIDs?.telnyxCallControlId ?? null }, timestamp: Date.now() }) }).catch(() => {});
+    // (activeCallRef.current er pr. definition null her — vi returnerede ovenfor hvis det var sat)
+    fetch("http://localhost:7253/ingest/cae62791-9bb1-4500-92a8-c26abf2c0c90", { method: "POST", headers: { "Content-Type": "application/json", "X-Debug-Session-Id": "d38e61" }, body: JSON.stringify({ sessionId: "d38e61", runId: debugRunId, hypothesisId: "H3", location: "campaign-voip-strip.tsx:autoStartEffect", message: "auto start call triggered", data: { leadId, leadPhone, voipPhone, normalizedVoipPhone: stripDialFormatting(voipPhone), lineStatus, hasActiveCallRef: false, activeCallControlId: null }, timestamp: Date.now() }) }).catch(() => {});
     // #endregion
     void startCall();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [leadId, voipPhone, leadPhone, effectiveAutoStart, audioSetupReady]);
+  }, [leadId, voipPhone, leadPhone, effectiveAutoStart, audioSetupReady, lineStatus]);
 
   /**
    * Predictive-mode: hvis vi har ringet i for lang tid (modtageren tager den ikke),
@@ -1370,7 +1463,7 @@ export function CampaignVoipStrip({
       ? "text-emerald-700"
       : lineStatus === "ringing" || lineStatus === "connecting"
         ? "text-amber-700"
-        : callStartAt
+        : callTimer
           ? "text-stone-600"
           : "text-stone-400";
 
@@ -1654,7 +1747,7 @@ export function CampaignVoipStrip({
                   : "border-stone-200 bg-stone-50"
             } ${timerTone}`}
             aria-label="Opkaldstid"
-            title={callStartAt && !callEndAt ? "Varighed i samtalen" : "Sidste samtales varighed"}
+            title={callTimer && callTimer.endAt == null ? "Varighed i samtalen" : "Sidste samtales varighed"}
           >
             {timerLabel}
           </div>

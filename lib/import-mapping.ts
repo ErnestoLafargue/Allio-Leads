@@ -1,4 +1,5 @@
 import { buildNormRow, normKey } from "./import-parse-helpers";
+import { canonicalLeadPhoneForStorage } from "./phone-e164";
 import { parseFieldConfig } from "./campaign-fields";
 import type { FieldGroupKey } from "./campaign-fields";
 
@@ -207,7 +208,7 @@ export function pickBaseFromNorm(n: Record<string, string>) {
   const notes = n["noter"] || n["notes"] || n["kommentar"] || "";
   return {
     companyName: companyName.trim(),
-    phone: phone.trim(),
+    phone: canonicalLeadPhoneForStorage(phone),
     email: email.trim(),
     cvr: cvr.trim(),
     address: address.trim(),

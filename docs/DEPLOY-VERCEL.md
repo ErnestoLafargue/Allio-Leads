@@ -15,6 +15,18 @@ Vercel kører **serverless** — der findes ingen vedvarende disk til `dev.db` (
 2. Kopiér **connection string** (PostgreSQL, med `sslmode=require`).
 3. Brug den som `DATABASE_URL` (se nedenfor).
 
+### Pooled connection til Vercel (anbefalet)
+
+Vercel kører mange korte **serverless**-processer. Uden pool skal hver invocation ofte åbne en direkte forbindelse til Postgres, hvilket hurtigt rammer `max_connections` og giver midlertidige fejl (fx Prisma **P1001** / **P1017**).
+
+**Tjekliste før produktion:**
+
+- I Neon-dashboardet: vælg connection string beregnet til **serverless** / **pooling** (værten indeholder typisk `-pooler` eller «Pooled connection»).
+- Sæt **den** streng som `DATABASE_URL` under Vercel → Environment Variables (Production).
+- Hvis brugerne ofte ser timeout efter længere inaktivitet: overvej mindre aggressiv **auto-suspend** eller højere minimum compute på det Neon-projekt, der betjener produktion.
+
+Lokalt og til engangs-scripts kan du stadig bruge en direkte (unpooled) URL i din egen `.env`; det vigtige er, at **Vercel-runtime** bruger pooled URL til app-trafik.
+
 ## 3. Vercel
 
 1. [vercel.com](https://vercel.com) → **Add New Project** → importér GitHub-repo.
@@ -28,6 +40,8 @@ Vercel kører **serverless** — der findes ingen vedvarende disk til `dev.db` (
 | `AUTH_URL` | Din offentlige URL, fx `https://dit-projekt.vercel.app` |
 | `VIRK_API_BASIC_AUTH` | Base64 Basic Auth værdi til VIRK API (uden `Basic ` prefix) |
 | `SEED_ADMIN_PASSWORD` | Kun til **første** seed lokalt eller via engangs-script (valgfri på Vercel) |
+| `TELNYX_API_KEY`, `TELNYX_CONNECTION_ID`, … | Se [TELNYX_PARALLEL_DIALER.md](TELNYX_PARALLEL_DIALER.md) — Call Control-webhook skal pege på `/api/telnyx/webhooks/call-events`. |
+| `BLOB_READ_WRITE_TOKEN` | **Anbefalet** til call recordings: permanente lydfil-URL’er i Vercel Blob (ellers Telnyx-URL kan udløbe). |
 
 4. Deploy. Build kører `prisma migrate deploy` og opretter tabeller i Neon.
 
@@ -60,3 +74,5 @@ Fjern eller roter `SEED_ADMIN_PASSWORD` bagefter. Sælgere oprettes som **ADMIN*
 
 - **Build fejler på Prisma**: Tjek at `DATABASE_URL` er sat under **Environment Variables** for det miljø Vercel bygger med, og at Neon tillader forbindelser fra Vercels IP (Neon gør som standard).
 - **Login virker ikke efter deploy**: Sæt `AUTH_URL` til den præcise HTTPS-URL Vercel giver.
+- **«Kunne ikke hente kampagner» midlertidigt**: Kan være Neon-timeout, connection pool eller kort advisory lock under `prisma migrate deploy` i et andet build. Sammenhold tidspunktet med [Vercel → Deployments → den aktuelle deployment → Build logs] og Neon-dashboard (compute activity). Bekræft i Neon SQL at `SELECT COUNT(*) FROM "Campaign"` er > 0 og at kolonner som `dialMode` findes — så er det typisk ikke manglende migration.
+- **Lydfiler efter opkald mangler**: Se tjeklisten **«Tjekliste: Lydfiler vises i appen»** i [TELNYX_PARALLEL_DIALER.md](TELNYX_PARALLEL_DIALER.md) (webhook-URL, Vercel logs, `BLOB_READ_WRITE_TOKEN`, sync-endpoint).

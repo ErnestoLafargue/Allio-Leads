@@ -127,20 +127,38 @@ export function describeVoipCallFailureForUi(meta: VoipCallFailureMeta): {
   return { userText: VOIP_ERROR_FALLBACK, technical };
 }
 
+const VOICEMAIL_PATTERN =
+  /voicemail|answering[\s_-]*machine|machine[\s_-]*detect(ed|ion)?|machine[\s_-]*greeting|amd[\s_-]*(machine|result)|beep[\s_-]*detected|fax(?![a-z])/;
+
 /**
  * Klassificerer et afsluttet opkald til et muligt automatisk predictive-udfald.
  * Bruges kun som hint i auto-flow (agenten kan altid overstyre manuelt).
+ *
+ * Prioritets-rækkefølge (vigtig — må ikke ændres uden at opdatere tests):
+ *   1. Voicemail (cause/reason indeholder voicemail/AMD/fax) — vinder ALTID, selv hvis
+ *      opkaldet nåede at forbinde (`hadLive=true`). Hvis Telnyx fortæller os at den anden
+ *      ende er en svaremaskine, skal leadet markeres VOICEMAIL — ikke NOT_HOME / null.
+ *   2. `hadLive=true` (uden voicemail-hint) → null. Agenten har talt med nogen og skal selv
+ *      vælge udfald.
+ *   3. Optaget / no-answer → NOT_HOME.
+ *   4. «Forkert nummer» (sipCode 404/484, UNALLOCATED_NUMBER, "invalid destination") → NOT_HOME.
+ *      Må IKKE auto-mappes til NOT_INTERESTED — det forurener "Ikke interesseret"-statistikken
+ *      og lukker leadet permanent uden at en agent har vurderet det. NOT_HOME giver
+ *      `applyLeadCooldownResets` (lib/lead-cooldown.ts) mulighed for at sende leadet tilbage
+ *      til NEW efter 6 timer, og en agent kan manuelt sætte UNQUALIFIED hvis nummeret reelt
+ *      er dødt.
  */
 export function detectPredictiveOutcomeFromCall(meta: VoipCallFailureMeta): PredictiveAutoOutcome {
   const { hadLive, sipCode, cause, sipReason } = meta;
-  if (hadLive) return null;
   const causeNorm = nonEmpty(cause)?.toLowerCase() ?? "";
   const reasonNorm = nonEmpty(sipReason)?.toLowerCase() ?? "";
   const combined = `${causeNorm} ${reasonNorm}`.trim();
 
-  if (/voicemail|answering[\s_-]*machine|machine[\s_-]*detected|beep[\s_-]*detected|fax/.test(combined)) {
+  if (VOICEMAIL_PATTERN.test(combined)) {
     return "VOICEMAIL";
   }
+
+  if (hadLive) return null;
 
   if (BUSY.has(sipCode) || /busy|user[\s_-]*busy/.test(combined)) {
     return "NOT_HOME";
@@ -151,7 +169,7 @@ export function detectPredictiveOutcomeFromCall(meta: VoipCallFailureMeta): Pred
   }
 
   if (sipCode === 404 || sipCode === 484 || /invalid[\s_-]*number|unallocated/.test(combined)) {
-    return "NOT_INTERESTED";
+    return "NOT_HOME";
   }
 
   return null;

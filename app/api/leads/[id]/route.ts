@@ -27,6 +27,7 @@ import { releaseExpiredLocksEverywhere, sellerMayEditLead } from "@/lib/lead-loc
 import { findLeadBookingOverlapInDb } from "@/lib/booking/overlap-db";
 import { LEAD_ACTIVITY_KIND } from "@/lib/lead-activity-kinds";
 import { hangupActiveOutboundLeadLegsForLead } from "@/lib/dialer-bridge";
+import { canonicalLeadPhoneForStorage } from "@/lib/phone-e164";
 
 type Params = { params: Promise<{ id: string }> };
 
@@ -198,7 +199,8 @@ export async function PATCH(req: Request, { params }: Params) {
 
   const companyName =
     typeof body?.companyName === "string" ? body.companyName.trim() : existing.companyName;
-  const phone = typeof body?.phone === "string" ? body.phone.trim() : existing.phone;
+  const phone =
+    typeof body?.phone === "string" ? canonicalLeadPhoneForStorage(body.phone) : existing.phone;
   const email = typeof body?.email === "string" ? body.email : existing.email;
   const cvr = typeof body?.cvr === "string" ? body.cvr : existing.cvr;
   const address = typeof body?.address === "string" ? body.address : existing.address;
@@ -278,7 +280,7 @@ export async function PATCH(req: Request, { params }: Params) {
       meetingContactEmail = body.meetingContactEmail.trim();
     }
     if (typeof body?.meetingContactPhonePrivate === "string") {
-      meetingContactPhonePrivate = body.meetingContactPhonePrivate.trim();
+      meetingContactPhonePrivate = canonicalLeadPhoneForStorage(body.meetingContactPhonePrivate);
     }
 
     if (!meetingContactName || !meetingContactEmail || !meetingContactPhonePrivate) {
@@ -322,7 +324,7 @@ export async function PATCH(req: Request, { params }: Params) {
           : (existing.meetingContactEmail ?? "");
       meetingContactPhonePrivate =
         typeof body?.meetingContactPhonePrivate === "string"
-          ? body.meetingContactPhonePrivate.trim()
+          ? canonicalLeadPhoneForStorage(body.meetingContactPhonePrivate)
           : (existing.meetingContactPhonePrivate ?? "");
       meetingOutcomeStatus = MEETING_OUTCOME_PENDING;
     } else {
@@ -336,7 +338,7 @@ export async function PATCH(req: Request, { params }: Params) {
         meetingContactEmail = body.meetingContactEmail.trim();
       }
       if (typeof body?.meetingContactPhonePrivate === "string") {
-        meetingContactPhonePrivate = body.meetingContactPhonePrivate.trim();
+        meetingContactPhonePrivate = canonicalLeadPhoneForStorage(body.meetingContactPhonePrivate);
       }
       meetingOutcomeStatus = MEETING_OUTCOME_PENDING;
       meetingCommissionDayKey = "";

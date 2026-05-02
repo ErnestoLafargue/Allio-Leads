@@ -100,6 +100,38 @@ Når Telnyx fyrer `call.recording.saved` (typisk 2-5 sek efter samtale slutter):
 
 Gentagne `recording.saved`-events (Telnyx retry) opdaterer eksisterende aktivitet i stedet for at oprette duplikater (matchet på `telnyxCallLegId`).
 
+### Tjekliste: Lydfiler vises i appen (fejlsøgning)
+
+Brug denne liste hvis I ser mange opkald men få eller ingen rækker med `CALL_RECORDING` i Neon.
+
+1. **Webhook i Telnyx (verify-telnyx-webhook)**  
+   - Gå til **Voice → Programmable Voice → Call Control Applications**.  
+   - Åbn den application hvis **ID** matcher `TELNYX_CONNECTION_ID` i Vercel (samme værdi som i miljøvariablerne).  
+   - **Webhook URL** skal være præcis: `https://<jeres-produktionsdomæne>/api/telnyx/webhooks/call-events` (HTTPS, ingen trailing slash medmindre jeres host kræver det).  
+   - **API version** = v2.  
+   - Hvis I bruger `TELNYX_CALL_WEBHOOK_URL` i Vercel, skal den pege på **samme** route — ikke en gammel sti (fx `/api/telnyx/voice/events` hvis den ikke findes).
+
+2. **Vercel logs (verify-vercel-logs)**  
+   Efter et testopkald hvor leadet **besvarer**: i Vercel → projekt → Logs, søg efter:  
+   - `call.recording.saved` (payload behandles i webhook)  
+   - `[telnyx:webhook] manual record_start fejlede` eller `record_start (phone-fallback) fejlede`  
+   - `[call-events] call.recording.saved: no leadId` (korrelation fejlede — se punkt 4)  
+   - `[call-events] recording blob persist` (Blob-kopi)  
+   Hvis der **aldrig** kommer webhook-trafik: domæne/firewall, forkert application i Telnyx, eller opkald sendes ikke gennem den Call Control-app der har webhook’en.
+
+3. **Vercel Blob (verify-blob-env)**  
+   - Sæt `BLOB_READ_WRITE_TOKEN` under Vercel → Storage / Blob (eller som env var).  
+   - Uden token gemmes stadig Telnyx’ midlertidige mp3-URL i DB; afspilning kan stoppe når linket udløber. Med token kopieres filen til Blob og `recordingUrl` opdateres.
+
+4. **Korrelation (leadId)**  
+   Optagelsen knyttes til et lead via `client_state`, `DialerCallLog` eller unikt telefonmatch. Ved tvivl: ret telefonfelter (E.164 / kanonisering) og brug sync-endpointet nedenfor.
+
+5. **Manuel sync fra Telnyx API (test-sync-endpoint)**  
+   Hvis optagelsen findes i Telnyx-portalen men ikke i Allio, kan en bruger med adgang til leadet kalde:  
+   `POST /api/leads/<leadId>/sync-telnyx-recordings` med body (JSON), fx:  
+   `{ "maxPages": 3, "daysBack": 90, "copyToBlob": true }`  
+   Kræver session (log ind i appen og brug browser devtools eller `curl` med session-cookie). Se [`app/api/leads/[id]/sync-telnyx-recordings/route.ts`](../app/api/leads/[id]/sync-telnyx-recordings/route.ts).
+
 ## Voicemail-detektion (AMD)
 
 Hvert udgående opkald fra dispatcheren placeres med `answering_machine_detection: "premium"` og `answering_machine_detection_config` (analysetid, greeting-tærskler). Telnyx svarer med disse webhook-events efter ~1.5–4 sek:

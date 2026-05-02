@@ -9,6 +9,7 @@ import { MEETING_OUTCOME_PENDING } from "@/lib/meeting-outcome";
 import { shouldLogOutcomeForLeaderboard } from "@/lib/lead-outcome-log";
 import { findLeadBookingOverlapInDb } from "@/lib/booking/overlap-db";
 import { requireDefaultMeetingAssigneeId } from "@/lib/meeting-assignee";
+import { canonicalLeadPhoneForStorage } from "@/lib/phone-e164";
 
 export async function POST(req: Request) {
   const { session, response } = await requireSession();
@@ -20,12 +21,15 @@ export async function POST(req: Request) {
   const meetingContactName = typeof body?.meetingContactName === "string" ? body.meetingContactName.trim() : "";
   const meetingContactEmail = typeof body?.meetingContactEmail === "string" ? body.meetingContactEmail.trim() : "";
   const meetingContactPhonePrivate =
-    typeof body?.meetingContactPhonePrivate === "string" ? body.meetingContactPhonePrivate.trim() : "";
+    typeof body?.meetingContactPhonePrivate === "string"
+      ? canonicalLeadPhoneForStorage(body.meetingContactPhonePrivate)
+      : "";
   const scheduledRaw = body?.meetingScheduledFor;
 
   /** Lead kræver companyName/phone — udfyldes automatisk fra mødekontakt når kunden ikke angiver virksomhed. */
   const companyNameFromBody = typeof body?.companyName === "string" ? body.companyName.trim() : "";
-  const phoneFromBody = typeof body?.phone === "string" ? body.phone.trim() : "";
+  const phoneFromBody =
+    typeof body?.phone === "string" ? canonicalLeadPhoneForStorage(body.phone) : "";
   const emailFromBody = typeof body?.email === "string" ? body.email.trim() : "";
   const addressFromBody = typeof body?.address === "string" ? body.address.trim() : "";
 

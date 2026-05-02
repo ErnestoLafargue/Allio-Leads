@@ -26,6 +26,12 @@ type Campaign = {
 
 const PINNED_TOP_TYPES = new Set(["active_customers", "upcoming_meetings", "rebooking"]);
 
+function delay(ms: number) {
+  return new Promise<void>((resolve) => {
+    window.setTimeout(resolve, ms);
+  });
+}
+
 function PhonePlayIcon({ className }: { className?: string }) {
   return (
     <svg
@@ -114,6 +120,7 @@ export default function StartPage() {
   const [campaigns, setCampaigns] = useState<Campaign[]>([]);
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState<string | null>(null);
+  const [loadErrorHint, setLoadErrorHint] = useState<"migrate" | "retry_later" | null>(null);
   const [search, setSearch] = useState("");
 
   const isAdmin = session?.user.role === "ADMIN";
@@ -121,21 +128,66 @@ export default function StartPage() {
   const load = useCallback(async () => {
     setLoading(true);
     setLoadError(null);
-    const res = await fetch("/api/campaigns");
-    if (res.ok) {
-      const data = await res.json();
-      setCampaigns(Array.isArray(data) ? data : []);
-    } else {
+    setLoadErrorHint(null);
+
+    const maxAttempts = 3;
+    for (let attempt = 0; attempt < maxAttempts; attempt++) {
+      const res = await fetch("/api/campaigns");
+      if (res.ok) {
+        const data = await res.json();
+        setCampaigns(Array.isArray(data) ? data : []);
+        setLoading(false);
+        return;
+      }
+
+      const j = (await res.json().catch(() => ({}))) as {
+        error?: string;
+        userHint?: string;
+      };
+      const hint =
+        j.userHint === "migrate" || j.userHint === "retry_later" ? j.userHint : null;
+
+      if (res.status === 401) {
+        setCampaigns([]);
+        setLoadError(
+          typeof j.error === "string" ? j.error : "Du skal være logget ind.",
+        );
+        setLoadErrorHint(null);
+        setLoading(false);
+        return;
+      }
+
+      if (hint === "migrate") {
+        setCampaigns([]);
+        setLoadError(
+          typeof j.error === "string" ? j.error : "Kunne ikke hente kampagner.",
+        );
+        setLoadErrorHint("migrate");
+        setLoading(false);
+        return;
+      }
+
+      const retryableStatus =
+        res.status === 500 || res.status === 502 || res.status === 503;
+      const shouldRetry =
+        attempt < maxAttempts - 1 &&
+        retryableStatus &&
+        (hint === "retry_later" || hint === null);
+
+      if (shouldRetry) {
+        await delay(1000 * (attempt + 1));
+        continue;
+      }
+
       setCampaigns([]);
-      const j = await res.json().catch(() => ({}));
-      const msg =
-        typeof j.error === "string"
-          ? j.error
-          : res.status === 401
-            ? "Du skal være logget ind."
-            : "Kunne ikke hente kampagner.";
-      setLoadError(msg);
+      setLoadError(
+        typeof j.error === "string" ? j.error : "Kunne ikke hente kampagner.",
+      );
+      setLoadErrorHint(hint === "retry_later" ? "retry_later" : null);
+      setLoading(false);
+      return;
     }
+
     setLoading(false);
   }, []);
 
@@ -209,14 +261,21 @@ export default function StartPage() {
       {loadError && (
         <div className="rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-950">
           <p className="font-medium">{loadError}</p>
-          <p className="mt-2 text-amber-900/90">
-            Hvis du lige har opdateret koden: kør{" "}
-            <code className="rounded bg-amber-100/80 px-1.5 py-0.5 font-mono text-xs">
-              npx prisma migrate deploy
-            </code>{" "}
-            i projektmappen og genstart udviklingsserveren — så matcher databasen igen, og kampagnerne
-            vises.
-          </p>
+          {loadErrorHint === "migrate" ? (
+            <p className="mt-2 text-amber-900/90">
+              Hvis du lige har opdateret koden: kør{" "}
+              <code className="rounded bg-amber-100/80 px-1.5 py-0.5 font-mono text-xs">
+                npx prisma migrate deploy
+              </code>{" "}
+              i projektmappen og genstart udviklingsserveren — så matcher databasen igen, og kampagnerne
+              vises.
+            </p>
+          ) : loadErrorHint === "retry_later" ? (
+            <p className="mt-2 text-amber-900/90">
+              Det kan være en kort forstyrrelse (fx under deploy eller hvis Neon var inaktiv). Prøv at
+              genindlæse siden om lidt.
+            </p>
+          ) : null}
         </div>
       )}
 

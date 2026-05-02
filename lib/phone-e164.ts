@@ -1,9 +1,32 @@
 /**
+ * Fjerner formatering og usynlige tegn som ofte sniger sig ind ved copy-paste
+ * (unicode-mellemrum, zero-width, NBSP, parenteser, bindestreg).
+ * Bruges før E.164-parsing og til at rydde DB-værdier når E.164 ikke kan udledes.
+ */
+export function stripDialFormatting(raw: string): string {
+  return raw
+    .normalize("NFKC")
+    .replace(/[\u200B-\u200F\u202A-\u202E\u2060\uFEFF]/g, "")
+    .replace(/\p{Zs}/gu, "")
+    .replace(/[\s\-\.\u00A0()]/g, "")
+    .trim();
+}
+
+/**
+ * Gem-værdi: foretræk kompakt E.164; ellers cifre/tegn uden dial-støj (fx ældre 8-cifrede DK).
+ */
+export function canonicalLeadPhoneForStorage(raw: string): string {
+  const t = raw.trim();
+  if (!t) return "";
+  return normalizePhoneToE164ForDial(t) ?? stripDialFormatting(t);
+}
+
+/**
  * Normaliserer til E.164 til udgående opkald (primært danske 8-cifrede numre).
  * Returnerer null hvis input ikke kan bruges sikkert.
  */
 export function normalizePhoneToE164ForDial(raw: string): string | null {
-  const s = raw.replace(/[\s\-\.\u00A0()]/g, "").trim();
+  const s = stripDialFormatting(raw);
   if (!s) return null;
 
   if (s.startsWith("+")) {

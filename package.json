@@ -12,7 +12,8 @@
     "db:seed": "tsx prisma/seed.ts",
     "db:set-password": "tsx prisma/set-password.ts",
     "db:migrate": "node scripts/run-prisma-migrate.cjs",
-    "telnyx:provision-agents": "tsx scripts/provision-telnyx-agents.ts"
+    "telnyx:provision-agents": "tsx scripts/provision-telnyx-agents.ts",
+    "db:canonicalize-phones": "tsx scripts/canonicalize-lead-phones.ts"
   },
   "prisma": {
     "seed": "tsx prisma/seed.ts"

@@ -16,6 +16,7 @@ import {
   parseActiveCampaignQueueView,
 } from "@/lib/active-campaign-queue";
 import { requireDefaultMeetingAssigneeId } from "@/lib/meeting-assignee";
+import { canonicalLeadPhoneForStorage } from "@/lib/phone-e164";
 
 export async function GET(req: Request) {
   const { session, response } = await requireSession();
@@ -223,7 +224,8 @@ export async function POST(req: Request) {
   const body = await req.json().catch(() => null);
   const campaignId = typeof body?.campaignId === "string" ? body.campaignId.trim() : "";
   const companyName = typeof body?.companyName === "string" ? body.companyName.trim() : "";
-  const phone = typeof body?.phone === "string" ? body.phone.trim() : "";
+  const phone =
+    typeof body?.phone === "string" ? canonicalLeadPhoneForStorage(body.phone) : "";
 
   if (!campaignId || !companyName) {
     return NextResponse.json(
@@ -254,7 +256,7 @@ export async function POST(req: Request) {
     typeof body?.meetingContactEmail === "string" ? body.meetingContactEmail.trim() : "";
   const meetingContactPhonePrivate =
     typeof body?.meetingContactPhonePrivate === "string"
-      ? body.meetingContactPhonePrivate.trim()
+      ? canonicalLeadPhoneForStorage(body.meetingContactPhonePrivate)
       : "";
 
   if (meetingContactEmail.length > 0 && !meetingContactEmailValid(meetingContactEmail)) {

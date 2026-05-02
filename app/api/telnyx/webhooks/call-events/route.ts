@@ -39,6 +39,14 @@ async function findUniqueLeadIdByCallParties(
   return null;
 }
 
+/** Sidste 2 cifre til logs — ikke fuldt nummer. */
+function maskPhoneTailForLog(raw: string | null | undefined): string {
+  if (raw == null || raw === "") return "—";
+  const d = raw.replace(/\D/g, "");
+  if (d.length < 2) return "**";
+  return `**${d.slice(-2)}`;
+}
+
 /**
  * Telnyx Call Control webhook — modtager alle events relateret til opkald
  * vores server placerer (lead-legs + agent-legs).
@@ -483,7 +491,19 @@ export async function POST(req: Request) {
       const leadId = leadCtx.leadId;
       const agentUserId = leadCtx.agentUserId;
 
-      if (!leadId) break;
+      if (!leadId) {
+        const fromNum = typeof payload.from === "string" ? payload.from : null;
+        const toNum = typeof payload.to === "string" ? payload.to : null;
+        console.warn("[call-events] call.recording.saved: no leadId — optagelse gemmes kun på DialerCallLog", {
+          callControlIdSuffix: callControlId.length > 8 ? callControlId.slice(-8) : callControlId,
+          callSessionId:
+            typeof payload.call_session_id === "string" ? payload.call_session_id.slice(-8) : null,
+          clientStateLeadId: clientState?.leadId ?? null,
+          fromTail: maskPhoneTailForLog(fromNum),
+          toTail: maskPhoneTailForLog(toNum),
+        });
+        break;
+      }
 
       // 3) Skriv en CALL_RECORDING-aktivitet så optagelsen bliver afspilbar i UI'et.
       //    Sæt agent-navnet hvis vi kender det.

@@ -1,4 +1,21 @@
-import { normalizePhoneToE164ForDial } from "@/lib/phone-e164";
+import {
+  normalizePhoneToE164ForDial,
+  stripDialFormatting,
+} from "@/lib/phone-e164";
+
+function resolveOutboundCallFromField(from: string): string {
+  const t = from.trim();
+  if (!t) return t;
+  return normalizePhoneToE164ForDial(t) ?? stripDialFormatting(t);
+}
+
+/** PSTN/E.164 — uden mellemrum. SIP-URI (`sip:…`) må ikke ændres. */
+function resolveOutboundCallToField(to: string): string {
+  const t = to.trim();
+  if (!t) return t;
+  if (/^sip:/i.test(t)) return t;
+  return normalizePhoneToE164ForDial(t) ?? stripDialFormatting(t);
+}
 
 const TELNYX_API_BASE = "https://api.telnyx.com/v2";
 
@@ -837,10 +854,12 @@ export async function dialTelnyxOutbound(params: {
   /// Telnyx svarer 200, kører AMD/answer i baggrunden, og bridger automatisk når begge legs er live.
   linkTo?: string;
 }): Promise<DialResult> {
+  const from = resolveOutboundCallFromField(params.from);
+  const to = resolveOutboundCallToField(params.to);
   const payload: Record<string, unknown> = {
     connection_id: params.connectionId,
-    from: params.from,
-    to: params.to,
+    from,
+    to,
   };
   if (params.clientState) payload.client_state = params.clientState;
   if (params.webhookUrl) payload.webhook_url = params.webhookUrl;
