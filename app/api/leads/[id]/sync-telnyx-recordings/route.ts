@@ -3,15 +3,18 @@ import { prisma } from "@/lib/prisma";
 import { requireSession } from "@/lib/api-auth";
 import { canAccessBookedMeetingNotes } from "@/lib/lead-meeting-access";
 import { canAccessCallbackLead } from "@/lib/lead-callback-access";
-import { runRecordingsBackfillForLead } from "@/lib/telnyx-recordings-backfill";
+import { mergeBackfillStats, runRecordingsBackfillForLead } from "@/lib/telnyx-recordings-backfill";
+import type { BackfillStats } from "@/lib/telnyx-recordings-backfill";
 
 type Params = { params: Promise<{ id: string }> };
+
+const MAX_SESSION_ROUNDS = 12;
 
 /**
  * POST /api/leads/[id]/sync-telnyx-recordings
  *
- * Henter et udsnit af Telnyx-optagelser og knytter dem til dette lead (samme logik som admin-backfill),
- * så historiske opkald der aldrig fik webhook kan vises under Aktivitet.
+ * Henter Telnyx-optagelser målrettet via DialerCallLog-sessioner og lead-telefon
+ * (filter[to]/[from]), samme kerne som admin-backfill.
  */
 export async function POST(req: Request, { params }: Params) {
   const { session, response } = await requireSession();
@@ -48,42 +51,80 @@ export async function POST(req: Request, { params }: Params) {
   }
 
   const body = (await req.json().catch(() => null)) as
-    | { maxPages?: number; daysBack?: number; copyToBlob?: boolean }
+    | {
+        daysBack?: number;
+        copyToBlob?: boolean;
+        maxSessionQueries?: number;
+        sessionBatchStart?: number;
+        maxPhonePages?: number;
+        /** @deprecated brug maxPhonePages */
+        maxPages?: number;
+      }
     | null;
 
-  const maxPages = Math.min(10, Math.max(1, Math.floor(Number(body?.maxPages) || 3)));
-  const daysBack = Math.min(365, Math.max(1, Math.floor(Number(body?.daysBack) || 90)));
+  const daysBack = Math.min(730, Math.max(1, Math.floor(Number(body?.daysBack) || 120)));
   const copyToBlob = body?.copyToBlob !== false;
+  const maxSessionQueries = Math.min(80, Math.max(1, Math.floor(Number(body?.maxSessionQueries) || 35)));
+  const maxPhonePages = Math.min(
+    20,
+    Math.max(1, Math.floor(Number(body?.maxPhonePages ?? body?.maxPages) || 8)),
+  );
 
   const fromIso = new Date(Date.now() - daysBack * 86400000).toISOString();
 
-  const out = await runRecordingsBackfillForLead({
-    apiKey,
-    leadId,
-    startPage: 1,
-    pageSize: 100,
-    maxPages,
-    fromIso,
-    toIso: null,
-    dryRun: false,
-    copyToBlob,
-  });
+  let sessionBatchStart = Math.max(0, Math.floor(Number(body?.sessionBatchStart) || 0));
+  let mergedStats: BackfillStats | null = null;
+  let pagesProcessed = 0;
+  let totalPages: number | null = null;
+  let totalSessions = 0;
+  let nextSessionBatchStart: number | null = null;
 
-  if (!out.ok) {
-    return NextResponse.json(
-      { ok: false, error: out.message },
-      { status: out.status >= 400 && out.status < 600 ? out.status : 502 },
-    );
+  for (let round = 0; round < MAX_SESSION_ROUNDS; round++) {
+    const out = await runRecordingsBackfillForLead({
+      apiKey,
+      leadId,
+      pageSize: 100,
+      fromIso,
+      toIso: null,
+      dryRun: false,
+      copyToBlob,
+      maxSessionQueries,
+      sessionBatchStart,
+      maxPhonePages,
+      includePhoneFilters: round === 0,
+    });
+
+    if (!out.ok) {
+      return NextResponse.json(
+        { ok: false, error: out.message },
+        { status: out.status >= 400 && out.status < 600 ? out.status : 502 },
+      );
+    }
+
+    mergedStats = mergedStats
+      ? mergeBackfillStats(mergedStats, out.result.stats)
+      : out.result.stats;
+    pagesProcessed += out.result.pagesProcessed;
+    totalPages = out.result.totalPages ?? totalPages;
+    totalSessions = out.result.totalSessions;
+    nextSessionBatchStart = out.result.nextSessionBatchStart;
+
+    if (nextSessionBatchStart == null) break;
+    sessionBatchStart = nextSessionBatchStart;
   }
 
   return NextResponse.json({
     ok: true,
     leadId,
     daysBack,
-    maxPages,
-    stats: out.result.stats,
-    nextPage: out.result.nextPage,
-    totalPages: out.result.totalPages,
+    maxSessionQueries,
+    maxPhonePages,
+    stats: mergedStats!,
+    pagesProcessed,
+    totalPages,
+    totalSessions,
+    nextSessionBatchStart,
+    nextPage: null,
   });
 }
 

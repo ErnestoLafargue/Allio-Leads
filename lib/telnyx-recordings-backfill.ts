@@ -13,11 +13,8 @@ import { prisma } from "@/lib/prisma";
 import { decodeDialerClientState } from "@/lib/dialer-shared";
 import { LEAD_ACTIVITY_KIND, formatPhoneForActivitySummary } from "@/lib/lead-activity-kinds";
 import { persistTelnyxRecordingToAllio } from "@/lib/telnyx-recording-storage";
-import {
-  normalizePhoneToE164ForDial,
-  phoneDigitsForMatch,
-  phoneStoredVariantsForQuery,
-} from "@/lib/phone-e164";
+import { resolveLeadContextForTelnyxRecording } from "@/lib/telnyx-recording-lead-resolve";
+import { normalizePhoneToE164ForDial } from "@/lib/phone-e164";
 
 const TELNYX_API_BASE = "https://api.telnyx.com/v2";
 
@@ -95,7 +92,7 @@ export type TelnyxRecordingsListResult =
   | { ok: false; status: number; message: string; raw?: unknown };
 
 /**
- * GET /v2/recordings — én side pr. kald. Telnyx tillader filter[created_at][gte/lte].
+ * GET /v2/recordings — én side pr. kald. Telnyx: filter[created_at], call_session_id, m.m.
  */
 export async function listTelnyxRecordings(params: {
   apiKey: string;
@@ -103,12 +100,20 @@ export async function listTelnyxRecordings(params: {
   pageSize?: number;
   fromIso?: string | null;
   toIso?: string | null;
+  filterCallSessionId?: string | null;
+  filterCallControlId?: string | null;
+  filterFrom?: string | null;
+  filterTo?: string | null;
 }): Promise<TelnyxRecordingsListResult> {
   const qs = new URLSearchParams();
   qs.set("page[number]", String(Math.max(1, params.pageNumber ?? 1)));
   qs.set("page[size]", String(Math.min(250, Math.max(1, params.pageSize ?? 100))));
   if (params.fromIso) qs.set("filter[created_at][gte]", params.fromIso);
   if (params.toIso) qs.set("filter[created_at][lte]", params.toIso);
+  if (params.filterCallSessionId) qs.set("filter[call_session_id]", params.filterCallSessionId);
+  if (params.filterCallControlId) qs.set("filter[call_control_id]", params.filterCallControlId);
+  if (params.filterFrom) qs.set("filter[from]", params.filterFrom);
+  if (params.filterTo) qs.set("filter[to]", params.filterTo);
 
   let res: Response;
   try {
@@ -201,11 +206,29 @@ function emptyStats(): BackfillStats {
   };
 }
 
+export function mergeBackfillStats(a: BackfillStats, b: BackfillStats): BackfillStats {
+  return {
+    scanned: a.scanned + b.scanned,
+    matched: a.matched + b.matched,
+    created: a.created + b.created,
+    updated: a.updated + b.updated,
+    copiedToBlob: a.copiedToBlob + b.copiedToBlob,
+    uncoupled: a.uncoupled + b.uncoupled,
+    errors: [...a.errors, ...b.errors].slice(-50),
+  };
+}
+
 async function findLeadIdForRecording(rec: TelnyxRecording): Promise<{
   leadId: string | null;
   campaignId: string | null;
   agentUserId: string | null;
-  source: "client_state" | "call_control_log" | "call_session_log" | "phone_match" | "none";
+  source:
+    | "client_state"
+    | "call_control_log"
+    | "call_session_log"
+    | "bridge"
+    | "phone_match"
+    | "none";
 }> {
   const cs = decodeDialerClientState(rec.clientState);
   if (cs?.leadId) {
@@ -217,65 +240,43 @@ async function findLeadIdForRecording(rec: TelnyxRecording): Promise<{
     };
   }
 
-  if (rec.callControlId) {
-    const log = await prisma.dialerCallLog.findUnique({
-      where: { callControlId: rec.callControlId },
-      select: { leadId: true, campaignId: true, agentUserId: true },
-    });
-    if (log?.leadId) {
-      return {
-        leadId: log.leadId,
-        campaignId: log.campaignId ?? null,
-        agentUserId: log.agentUserId ?? null,
-        source: "call_control_log",
-      };
-    }
+  const resolved = await resolveLeadContextForTelnyxRecording({
+    callControlId: rec.callControlId,
+    callSessionId: rec.callSessionId,
+    clientStateLeadId: null,
+    clientStateUserId: cs?.userId ?? null,
+    fromNumber: rec.fromNumber,
+    toNumber: rec.toNumber,
+  });
+
+  if (!resolved.leadId) {
+    return { leadId: null, campaignId: null, agentUserId: null, source: "none" };
   }
 
-  if (rec.callSessionId) {
-    const log = await prisma.dialerCallLog.findFirst({
-      where: { callSessionId: rec.callSessionId, leadId: { not: null } },
-      select: { leadId: true, campaignId: true, agentUserId: true },
-      orderBy: { startedAt: "desc" },
-    });
-    if (log?.leadId) {
-      return {
-        leadId: log.leadId,
-        campaignId: log.campaignId ?? null,
-        agentUserId: log.agentUserId ?? null,
-        source: "call_session_log",
-      };
-    }
-  }
+  const sourceMap: Record<
+    string,
+    "call_control_log" | "call_session_log" | "bridge" | "phone_match" | "none"
+  > = {
+    call_control: "call_control_log",
+    call_session: "call_session_log",
+    bridge: "bridge",
+    phone: "phone_match",
+    none: "none",
+    client_state: "none",
+  };
+  const source = sourceMap[resolved.resolutionSource] ?? "none";
 
-  // Sidste forsøg — match på telefon (Telnyx E.164 vs. lead.phone med/uden +45).
-  // Kun når præcis ét lead matcher efter normalisering.
-  const seenDigits = new Set<string>();
-  for (const raw of [rec.toNumber, rec.fromNumber]) {
-    const digits = phoneDigitsForMatch(raw);
-    if (!digits || seenDigits.has(digits)) continue;
-    seenDigits.add(digits);
-    const variants = phoneStoredVariantsForQuery(digits);
-    const matches = await prisma.lead.findMany({
-      where: { phone: { in: variants } },
-      select: { id: true, campaignId: true, phone: true },
-      take: 12,
-    });
-    const exact = matches.filter((m) => {
-      const ld = normalizePhoneToE164ForDial(m.phone)?.replace(/\D/g, "") ?? "";
-      return ld === digits;
-    });
-    if (exact.length === 1) {
-      return {
-        leadId: exact[0]!.id,
-        campaignId: exact[0]!.campaignId ?? null,
-        agentUserId: null,
-        source: "phone_match",
-      };
-    }
-  }
+  const leadRow = await prisma.lead.findUnique({
+    where: { id: resolved.leadId },
+    select: { campaignId: true },
+  });
 
-  return { leadId: null, campaignId: null, agentUserId: null, source: "none" };
+  return {
+    leadId: resolved.leadId,
+    campaignId: leadRow?.campaignId ?? null,
+    agentUserId: resolved.agentUserId,
+    source,
+  };
 }
 
 type LocatedLead = Awaited<ReturnType<typeof findLeadIdForRecording>>;
@@ -412,6 +413,16 @@ async function processOneRecording(
       data: { recordingUrl: playbackUrl },
     });
   }
+  if (rec.callSessionId && located.leadId) {
+    await prisma.dialerCallLog.updateMany({
+      where: {
+        callSessionId: rec.callSessionId,
+        direction: "outbound-lead",
+        leadId: located.leadId,
+      },
+      data: { recordingUrl: playbackUrl },
+    });
+  }
 }
 
 export type BackfillRunResult = {
@@ -421,6 +432,10 @@ export type BackfillRunResult = {
   pagesProcessed: number;
   /** Total side-antal hvis Telnyx oplyser det. */
   totalPages: number | null;
+  /** Per-lead: næste offset i DialerCallLog-sessionlisten, eller null når færdig. */
+  nextSessionBatchStart: number | null;
+  /** Per-lead: antal kendte call_session_id for leadet. */
+  totalSessions: number;
 };
 
 /**
@@ -480,7 +495,14 @@ export async function runRecordingsBackfill(params: {
     if (list.recordings.length < pageSize) {
       return {
         ok: true,
-        result: { stats, nextPage: null, pagesProcessed, totalPages: lastTotalPages },
+        result: {
+          stats,
+          nextPage: null,
+          pagesProcessed,
+          totalPages: lastTotalPages,
+          nextSessionBatchStart: null,
+          totalSessions: 0,
+        },
       };
     }
     page += 1;
@@ -488,80 +510,177 @@ export async function runRecordingsBackfill(params: {
 
   return {
     ok: true,
-    result: { stats, nextPage: page, pagesProcessed, totalPages: lastTotalPages },
+    result: {
+      stats,
+      nextPage: page,
+      pagesProcessed,
+      totalPages: lastTotalPages,
+      nextSessionBatchStart: null,
+      totalSessions: 0,
+    },
   };
 }
 
+const MAX_SESSION_RECORDING_PAGES = 25;
+const MAX_PHONE_FILTER_PAGES = 8;
+
 /**
  * Som `runRecordingsBackfill`, men kun optagelser der kan knyttes til ét bestemt lead.
- * Bruges fra lead-detalje så historiske Telnyx-optagelser kan vises uden admin.
+ * Henter målrettet via `call_session_id` fra `DialerCallLog` og via Telnyx `filter[to]/[from]`
+ * på leadets nummer — ikke den globale nyeste-side-liste.
  */
 export async function runRecordingsBackfillForLead(params: {
   apiKey: string;
   leadId: string;
-  startPage?: number;
   pageSize?: number;
   maxPages?: number;
   fromIso?: string | null;
   toIso?: string | null;
   dryRun?: boolean;
   copyToBlob?: boolean;
+  /** Antal session-IDs der queries mod Telnyx pr. invocation. */
+  maxSessionQueries?: number;
+  /** Offset i sorteret session-liste (fortsæt med `nextSessionBatchStart` fra forrige svar). */
+  sessionBatchStart?: number;
+  /** Max sider pr. retning for telefonfiltrering (to + from). */
+  maxPhonePages?: number;
+  /** Sæt false når kun yderligere session-batches hentes (undgå duplikate Telnyx-kald). */
+  includePhoneFilters?: boolean;
 }): Promise<{ ok: true; result: BackfillRunResult } | { ok: false; status: number; message: string }> {
   const stats = emptyStats();
-  const pageSize = params.pageSize ?? 100;
-  const maxPages = Math.max(1, Math.min(10, params.maxPages ?? 3));
-  let page = Math.max(1, params.startPage ?? 1);
+  const pageSize = Math.min(250, Math.max(1, params.pageSize ?? 100));
+  const maxPhonePages = Math.min(20, Math.max(1, params.maxPhonePages ?? MAX_PHONE_FILTER_PAGES));
+  const maxSessionQueries = Math.min(80, Math.max(1, params.maxSessionQueries ?? 30));
+  const sessionBatchStart = Math.max(0, Math.floor(params.sessionBatchStart ?? 0));
+  const fromIso = params.fromIso ?? null;
+  const toIso = params.toIso ?? null;
+
+  const lead = await prisma.lead.findUnique({
+    where: { id: params.leadId },
+    select: { phone: true },
+  });
+  if (!lead) {
+    return { ok: false, status: 404, message: "Lead ikke fundet." };
+  }
+
+  const sessionGroups = await prisma.dialerCallLog.groupBy({
+    by: ["callSessionId"],
+    where: { leadId: params.leadId, callSessionId: { not: null } },
+    _max: { startedAt: true },
+  });
+
+  const sortedSessions = sessionGroups
+    .filter((g): g is typeof g & { callSessionId: string } => g.callSessionId != null)
+    .sort((a, b) => {
+      const ta = a._max.startedAt?.getTime() ?? 0;
+      const tb = b._max.startedAt?.getTime() ?? 0;
+      return tb - ta;
+    });
+
+  const totalSessions = sortedSessions.length;
+  const sessionBatch = sortedSessions.slice(sessionBatchStart, sessionBatchStart + maxSessionQueries);
+  const nextSessionBatchStart =
+    sessionBatchStart + sessionBatch.length < totalSessions
+      ? sessionBatchStart + sessionBatch.length
+      : null;
+
+  const byId = new Map<string, TelnyxRecording>();
   let pagesProcessed = 0;
   let lastTotalPages: number | null = null;
 
-  for (let i = 0; i < maxPages; i++) {
-    const list = await listTelnyxRecordings({
-      apiKey: params.apiKey,
-      pageNumber: page,
-      pageSize,
-      fromIso: params.fromIso ?? null,
-      toIso: params.toIso ?? null,
-    });
-    if (!list.ok) {
-      return { ok: false, status: list.status || 502, message: list.message };
+  for (const row of sessionBatch) {
+    const sid = row.callSessionId;
+    let page = 1;
+    for (;;) {
+      const list = await listTelnyxRecordings({
+        apiKey: params.apiKey,
+        pageNumber: page,
+        pageSize,
+        fromIso,
+        toIso,
+        filterCallSessionId: sid,
+      });
+      if (!list.ok) {
+        return { ok: false, status: list.status || 502, message: list.message };
+      }
+      pagesProcessed += 1;
+      lastTotalPages = list.page.totalPages ?? lastTotalPages;
+      for (const rec of list.recordings) {
+        byId.set(rec.id, rec);
+      }
+      if (list.recordings.length < pageSize) break;
+      page += 1;
+      if (page > MAX_SESSION_RECORDING_PAGES) break;
     }
-    pagesProcessed += 1;
-    lastTotalPages = list.page.totalPages ?? lastTotalPages;
+  }
 
-    for (const rec of list.recordings) {
-      stats.scanned += 1;
-      try {
-        const located = await findLeadIdForRecording(rec);
-        if (!located.leadId || located.leadId !== params.leadId) continue;
-        await processOneRecording(
-          rec,
-          {
-            dryRun: Boolean(params.dryRun),
-            copyToBlob: params.copyToBlob !== false,
-            countScanned: false,
-            located,
-          },
-          stats,
-        );
-      } catch (err) {
-        stats.errors.push({
-          recordingId: rec.id,
-          message: err instanceof Error ? err.message : String(err),
+  const includePhoneFilters = params.includePhoneFilters !== false;
+  const e164 = normalizePhoneToE164ForDial(lead.phone ?? "");
+  if (includePhoneFilters && e164) {
+    for (const filterTo of [true, false] as const) {
+      let page = 1;
+      for (let i = 0; i < maxPhonePages; i++) {
+        const list = await listTelnyxRecordings({
+          apiKey: params.apiKey,
+          pageNumber: page,
+          pageSize,
+          fromIso,
+          toIso,
+          filterTo: filterTo ? e164 : null,
+          filterFrom: filterTo ? null : e164,
         });
+        if (!list.ok) {
+          return { ok: false, status: list.status || 502, message: list.message };
+        }
+        pagesProcessed += 1;
+        lastTotalPages = list.page.totalPages ?? lastTotalPages;
+        for (const rec of list.recordings) {
+          byId.set(rec.id, rec);
+        }
+        if (list.recordings.length < pageSize) break;
+        page += 1;
       }
     }
+  }
 
-    if (list.recordings.length < pageSize) {
-      return {
-        ok: true,
-        result: { stats, nextPage: null, pagesProcessed, totalPages: lastTotalPages },
-      };
+  const sorted = Array.from(byId.values()).sort((a, b) => {
+    const ta = a.createdAtIso ? Date.parse(a.createdAtIso) : 0;
+    const tb = b.createdAtIso ? Date.parse(b.createdAtIso) : 0;
+    return tb - ta;
+  });
+
+  for (const rec of sorted) {
+    stats.scanned += 1;
+    try {
+      const located = await findLeadIdForRecording(rec);
+      if (!located.leadId || located.leadId !== params.leadId) continue;
+      await processOneRecording(
+        rec,
+        {
+          dryRun: Boolean(params.dryRun),
+          copyToBlob: params.copyToBlob !== false,
+          countScanned: false,
+          located,
+        },
+        stats,
+      );
+    } catch (err) {
+      stats.errors.push({
+        recordingId: rec.id,
+        message: err instanceof Error ? err.message : String(err),
+      });
     }
-    page += 1;
   }
 
   return {
     ok: true,
-    result: { stats, nextPage: page, pagesProcessed, totalPages: lastTotalPages },
+    result: {
+      stats,
+      nextPage: null,
+      pagesProcessed,
+      totalPages: lastTotalPages,
+      nextSessionBatchStart,
+      totalSessions,
+    },
   };
 }

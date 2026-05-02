@@ -10,6 +10,10 @@
     {
       "path": "/api/cron/meeting-reminders",
       "schedule": "45 17 * * *"
+    },
+    {
+      "path": "/api/cron/telnyx-recordings-backfill",
+      "schedule": "15 3 * * *"
     }
   ]
 }

@@ -11,33 +11,10 @@ import { handleAmdHuman, handleAmdMachine } from "@/lib/dialer-bridge";
 import { LEAD_ACTIVITY_KIND, formatPhoneForActivitySummary } from "@/lib/lead-activity-kinds";
 import { startTelnyxRecording } from "@/lib/telnyx-call-control";
 import { persistTelnyxRecordingToAllio } from "@/lib/telnyx-recording-storage";
-import { normalizePhoneToE164ForDial, phoneStoredVariantsForQuery } from "@/lib/phone-e164";
-
-/** Entydig lead-match på baggrund af From/To (samme logik som recording-kontekst). */
-async function findUniqueLeadIdByCallParties(
-  fromNumber: string | null,
-  toNumber: string | null,
-): Promise<string | null> {
-  for (const raw of [toNumber, fromNumber]) {
-    const e164 = normalizePhoneToE164ForDial(raw ?? "");
-    const digits = e164?.replace(/\D/g, "") ?? "";
-    if (!digits) continue;
-    const variants = phoneStoredVariantsForQuery(digits);
-    const matches = await prisma.lead.findMany({
-      where: { phone: { in: variants } },
-      select: { id: true, phone: true },
-      take: 8,
-    });
-    const exact = matches.filter((m) => {
-      const md = normalizePhoneToE164ForDial(m.phone)?.replace(/\D/g, "") ?? "";
-      return md === digits;
-    });
-    if (exact.length === 1) {
-      return exact[0]!.id;
-    }
-  }
-  return null;
-}
+import {
+  findUniqueLeadIdByCallParties,
+  resolveLeadContextForTelnyxRecording,
+} from "@/lib/telnyx-recording-lead-resolve";
 
 /** Sidste 2 cifre til logs — ikke fuldt nummer. */
 function maskPhoneTailForLog(raw: string | null | undefined): string {
@@ -70,64 +47,6 @@ function safeJsonParse(raw: string): TelnyxWebhookEnvelope | null {
   } catch {
     return null;
   }
-}
-
-async function resolveLeadContextForRecording(params: {
-  callControlId: string;
-  callSessionId: string | null;
-  clientStateLeadId: string | null;
-  clientStateUserId: string | null;
-  fromNumber: string | null;
-  toNumber: string | null;
-}): Promise<{ leadId: string | null; agentUserId: string | null }> {
-  if (params.clientStateLeadId) {
-    return { leadId: params.clientStateLeadId, agentUserId: params.clientStateUserId };
-  }
-
-  const byControl = await prisma.dialerCallLog.findUnique({
-    where: { callControlId: params.callControlId },
-    select: { leadId: true, agentUserId: true, bridgeTargetId: true },
-  });
-  if (byControl?.leadId) {
-    return { leadId: byControl.leadId, agentUserId: byControl.agentUserId ?? null };
-  }
-
-  if (params.callSessionId) {
-    /// Flere legs deler call_session_id; recording.saved kan bruge et call_control_id der ikke
-    /// findes som række — samler alle logs i sessionen med lead og vælger entydigt lead.
-    const sessionRows = await prisma.dialerCallLog.findMany({
-      where: { callSessionId: params.callSessionId, leadId: { not: null } },
-      select: { leadId: true, agentUserId: true, direction: true },
-      orderBy: { startedAt: "desc" },
-    });
-    if (sessionRows.length > 0) {
-      const leadIds = new Set(sessionRows.map((r) => r.leadId!));
-      if (leadIds.size === 1) {
-        const row =
-          sessionRows.find((r) => r.direction === "outbound-lead") ?? sessionRows[0]!;
-        return { leadId: row.leadId!, agentUserId: row.agentUserId ?? null };
-      }
-    }
-  }
-
-  const byBridge = await prisma.dialerCallLog.findFirst({
-    where: {
-      OR: [{ bridgeTargetId: params.callControlId }, { callControlId: byControl?.bridgeTargetId ?? "__none__" }],
-      leadId: { not: null },
-    },
-    orderBy: { startedAt: "desc" },
-    select: { leadId: true, agentUserId: true },
-  });
-  if (byBridge?.leadId) {
-    return { leadId: byBridge.leadId, agentUserId: byBridge.agentUserId ?? null };
-  }
-
-  const byPhone = await findUniqueLeadIdByCallParties(params.toNumber, params.fromNumber);
-  if (byPhone) {
-    return { leadId: byPhone, agentUserId: null };
-  }
-
-  return { leadId: null, agentUserId: params.clientStateUserId };
 }
 
 export async function POST(req: Request) {
@@ -501,7 +420,7 @@ export async function POST(req: Request) {
         });
       }
 
-      const leadCtx = await resolveLeadContextForRecording({
+      const leadCtx = await resolveLeadContextForTelnyxRecording({
         callControlId,
         callSessionId: sessionIdForRec,
         clientStateLeadId: clientState?.leadId ?? null,
