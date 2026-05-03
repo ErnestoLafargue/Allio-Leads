@@ -100,6 +100,8 @@ type TelnyxCall = {
   sipCode?: number;
   hangup?: () => Promise<void> | void;
   answer?: (options?: { audio?: MediaTrackConstraints | boolean; video?: boolean }) => Promise<void> | void;
+  /** Send én eller flere DTMF-cifre (Telnyx WebRTC SDK). */
+  dtmf?: (dtmf: string) => void;
   localStream?: MediaStream;
   remoteStream?: MediaStream;
 };
@@ -272,6 +274,7 @@ export function CampaignVoipStrip({
   const [verifyError, setVerifyError] = useState<string | null>(null);
   const [manualHeadsetConfirm, setManualHeadsetConfirm] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
+  const [dtmfPadOpen, setDtmfPadOpen] = useState(false);
   const [refreshBusy, setRefreshBusy] = useState(false);
   const [refreshInfo, setRefreshInfo] = useState<string | null>(null);
 
@@ -355,6 +358,22 @@ export function CampaignVoipStrip({
     setVoipToast(text);
   }, []);
 
+  const sendDtmfDigit = useCallback(
+    (digit: string) => {
+      try {
+        const call = activeCallRef.current;
+        if (!call?.dtmf) {
+          pushVoipToast("Taster virker ikke på dette opkald.");
+          return;
+        }
+        call.dtmf(digit);
+      } catch {
+        pushVoipToast("Kunne ikke sende tone.");
+      }
+    },
+    [pushVoipToast],
+  );
+
   const logVoipFailureToServer = useCallback(
     async (userText: string, technical: string) => {
       try {
@@ -434,6 +453,12 @@ export function CampaignVoipStrip({
       clearTimeout(tClear);
     };
   }, [voipToast]);
+
+  useEffect(() => {
+    if (lineStatus === "idle" || lineStatus === "error") {
+      setDtmfPadOpen(false);
+    }
+  }, [lineStatus]);
 
   const inputDevs = useMemo(() => devices.filter((d) => d.kind === "audioinput"), [devices]);
   const outputDevs = useMemo(() => devices.filter((d) => d.kind === "audiooutput"), [devices]);
@@ -576,6 +601,7 @@ export function CampaignVoipStrip({
     if (!hadActiveOrPendingCall) {
       setLineStatus("idle");
     }
+    setDtmfPadOpen(false);
     setDetail(null);
     setVoipToast(null);
     setVoipToastFading(false);
@@ -1869,6 +1895,29 @@ export function CampaignVoipStrip({
             <AudioLevelBar level={activeCall ? inLevel : 0} label="Ind" variant="in" />
           </div>
 
+          {lineStatus === "live" ? (
+            <button
+              type="button"
+              onClick={() => setDtmfPadOpen((v) => !v)}
+              className={`inline-flex shrink-0 items-center gap-1.5 rounded-full border px-2.5 py-1.5 text-[11px] font-semibold shadow-sm transition ${
+                dtmfPadOpen
+                  ? "border-emerald-400 bg-emerald-600 text-white hover:bg-emerald-700"
+                  : "border-emerald-200 bg-white text-emerald-800 hover:bg-emerald-50"
+              }`}
+              aria-expanded={dtmfPadOpen}
+              aria-controls={`voip-dtmf-pad-${leadId}`}
+              title={dtmfPadOpen ? "Skjul tastatur" : "Åbn tastatur til omstilling / IVR"}
+            >
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className="h-3.5 w-3.5" aria-hidden="true">
+                <rect x="3" y="3" width="7" height="7" rx="1" />
+                <rect x="14" y="3" width="7" height="7" rx="1" />
+                <rect x="3" y="14" width="7" height="7" rx="1" />
+                <rect x="14" y="14" width="7" height="7" rx="1" />
+              </svg>
+              Taster
+            </button>
+          ) : null}
+
           <button
             type="button"
             onClick={onRoundButtonClick}
@@ -1894,6 +1943,42 @@ export function CampaignVoipStrip({
             )}
           </button>
         </div>
+
+        {lineStatus === "live" && dtmfPadOpen ? (
+          <div
+            id={`voip-dtmf-pad-${leadId}`}
+            className="mt-3 rounded-xl border border-emerald-100 bg-white/85 px-3 py-3"
+            role="group"
+            aria-label="DTMF taster"
+          >
+            <p className="mb-2 text-center text-[11px] font-medium text-emerald-900/85">
+              Tryk for at vælge i menu eller omstilling
+            </p>
+            <div className="mx-auto grid max-w-[11rem] grid-cols-3 gap-2">
+              {(["1", "2", "3", "4", "5", "6", "7", "8", "9"] as const).map((d) => (
+                <button
+                  key={d}
+                  type="button"
+                  onClick={() => sendDtmfDigit(d)}
+                  className="rounded-lg border border-emerald-200/90 bg-white py-2.5 text-sm font-semibold tabular-nums text-stone-900 shadow-sm transition hover:bg-emerald-50 active:bg-emerald-100"
+                  aria-label={`Send tone ${d}`}
+                >
+                  {d}
+                </button>
+              ))}
+            </div>
+            <div className="mx-auto mt-2 flex max-w-[11rem] justify-center">
+              <button
+                type="button"
+                onClick={() => sendDtmfDigit("0")}
+                className="w-[calc((100%-0.5rem)/3)] min-w-[3rem] rounded-lg border border-emerald-200/90 bg-white py-2.5 text-sm font-semibold tabular-nums text-stone-900 shadow-sm transition hover:bg-emerald-50 active:bg-emerald-100"
+                aria-label="Send tone 0"
+              >
+                0
+              </button>
+            </div>
+          </div>
+        ) : null}
 
         {detail ? (
           <p
