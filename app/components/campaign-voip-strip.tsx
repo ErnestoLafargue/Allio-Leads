@@ -239,7 +239,6 @@ export function CampaignVoipStrip({
   onCallEndedForActivity,
   voipApiContext = VOIP_API_CONTEXT.CAMPAIGN_ARBEJD,
 }: Props) {
-  const debugRunId = "voip-lead-switch-v2";
   const isGlobalVoip = voipApiContext === VOIP_API_CONTEXT.GLOBAL_LEAD_PAGE;
   const effectiveDialMode: CampaignDialMode = isGlobalVoip ? "CLICK_TO_CALL" : dialMode;
   const effectiveAutoStart = isGlobalVoip ? false : autoStartCall;
@@ -249,11 +248,8 @@ export function CampaignVoipStrip({
   const onLineStatusRef = useRef(onLineStatusChange);
   onLineStatusRef.current = onLineStatusChange;
   useEffect(() => {
-    // #region agent log
-    fetch("http://localhost:7253/ingest/cae62791-9bb1-4500-92a8-c26abf2c0c90", { method: "POST", headers: { "Content-Type": "application/json", "X-Debug-Session-Id": "d38e61" }, body: JSON.stringify({ sessionId: "d38e61", runId: debugRunId, hypothesisId: "H4", location: "campaign-voip-strip.tsx:lineStatusEffect", message: "lineStatus changed", data: { leadId, lineStatus }, timestamp: Date.now() }) }).catch(() => {});
-    // #endregion
     onLineStatusRef.current?.(lineStatus);
-  }, [debugRunId, leadId, lineStatus]);
+  }, [leadId, lineStatus]);
   const [detail, setDetail] = useState<string | null>(null);
   const [voipToast, setVoipToast] = useState<string | null>(null);
   const [voipToastFading, setVoipToastFading] = useState(false);
@@ -317,7 +313,6 @@ export function CampaignVoipStrip({
   const lastLeadIdRef = useRef<string | null>(null);
   const currentLeadIdRef = useRef<string | null>(leadId);
   const leadEpochRef = useRef(0);
-  const startAttemptRef = useRef(0);
   const lastEndedToneAtRef = useRef(0);
   const manualHangupCallIdsRef = useRef<Set<string>>(new Set());
   const manualHangupAtRef = useRef(0);
@@ -592,9 +587,6 @@ export function CampaignVoipStrip({
     if (lastLeadIdRef.current === leadId) return;
     const hadActiveOrPendingCall = Boolean(activeCallRef.current) || inFlightRef.current;
     const needsHangup = Boolean(activeCallRef.current);
-    // #region agent log
-    fetch("http://localhost:7253/ingest/cae62791-9bb1-4500-92a8-c26abf2c0c90", { method: "POST", headers: { "Content-Type": "application/json", "X-Debug-Session-Id": "d38e61" }, body: JSON.stringify({ sessionId: "d38e61", runId: debugRunId, hypothesisId: "H1", location: "campaign-voip-strip.tsx:leadResetEffect", message: "lead change triggers voip reset", data: { previousLeadId: lastLeadIdRef.current, nextLeadId: leadId, nextLeadPhone: leadPhone, lineStatusBeforeReset: lineStatus, hadActiveCallRef: Boolean(activeCallRef.current) }, timestamp: Date.now() }) }).catch(() => {});
-    // #endregion
     leadEpochRef.current += 1;
     lastLeadIdRef.current = leadId;
     // Undgå falsk "Klar" mens et aktivt/ringende Telnyx-kald stadig lukkes ned.
@@ -639,7 +631,7 @@ export function CampaignVoipStrip({
     };
     // Kun nyt lead — ikke når brugeren retter telefonfeltet på leadet
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [debugRunId, leadId]);
+  }, [leadId]);
 
   useEffect(() => {
     if (!editingPhone) {
@@ -1132,9 +1124,6 @@ export function CampaignVoipStrip({
           const maybeCall =
             payload.call && typeof payload.call === "object" ? (payload.call as TelnyxCall) : null;
           if (!maybeCall) return;
-          // #region agent log
-          fetch("http://localhost:7253/ingest/cae62791-9bb1-4500-92a8-c26abf2c0c90", { method: "POST", headers: { "Content-Type": "application/json", "X-Debug-Session-Id": "d38e61" }, body: JSON.stringify({ sessionId: "d38e61", runId: debugRunId, hypothesisId: "H1", location: "campaign-voip-strip.tsx:onNotification:raw", message: "telnyx notification received", data: { leadId, stateToken: stateToken(maybeCall.state), direction: maybeCall.direction ?? null, callControlId: maybeCall.telnyxIDs?.telnyxCallControlId ?? null, activeCallControlId: activeCallRef.current?.telnyxIDs?.telnyxCallControlId ?? null, activeCallState: stateToken(activeCallRef.current?.state) }, timestamp: Date.now() }) }).catch(() => {});
-          // #endregion
 
           const stateT = stateToken(maybeCall.state);
           if (CLOSED_STATES.has(stateT)) {
@@ -1156,9 +1145,6 @@ export function CampaignVoipStrip({
             }
             if (!decision.isClosingActiveCall) {
               // Stale CLOSED for et andet call leg — ingen side-effekter.
-              // #region agent log
-              fetch("http://localhost:7253/ingest/cae62791-9bb1-4500-92a8-c26abf2c0c90", { method: "POST", headers: { "Content-Type": "application/json", "X-Debug-Session-Id": "d38e61" }, body: JSON.stringify({ sessionId: "d38e61", runId: debugRunId, hypothesisId: "H3", location: "campaign-voip-strip.tsx:onNotification:closed:stale", message: "stale CLOSED ignored (not active call)", data: { leadId, stateToken: stateT, closedCallIdentity, activeCallIdentity: getCallIdentity(activeCallRef.current) }, timestamp: Date.now() }) }).catch(() => {});
-              // #endregion
               return;
             }
             const initiatedByManualHangupId = Boolean(
@@ -1186,9 +1172,6 @@ export function CampaignVoipStrip({
               playCallEndedTone();
             }
             queueMicrotask(() => onCallEndedForActivityRef.current?.());
-            // #region agent log
-            fetch("http://localhost:7253/ingest/cae62791-9bb1-4500-92a8-c26abf2c0c90", { method: "POST", headers: { "Content-Type": "application/json", "X-Debug-Session-Id": "d38e61" }, body: JSON.stringify({ sessionId: "d38e61", runId: debugRunId, hypothesisId: "H3", location: "campaign-voip-strip.tsx:onNotification:closed", message: "closed state forced idle", data: { leadId, stateToken: stateT, callControlId: maybeCall.telnyxIDs?.telnyxCallControlId ?? null, initiatedByUs, hadLive }, timestamp: Date.now() }) }).catch(() => {});
-            // #endregion
             if (!initiatedByUs) {
               const desc = describeVoipCallFailureForUi({ hadLive, sipCode, cause, sipReason });
               if (desc) {
@@ -1245,9 +1228,6 @@ export function CampaignVoipStrip({
               callHadConnectedRef.current = true;
             }
             setLineStatus(mapped);
-            // #region agent log
-            fetch("http://localhost:7253/ingest/cae62791-9bb1-4500-92a8-c26abf2c0c90", { method: "POST", headers: { "Content-Type": "application/json", "X-Debug-Session-Id": "d38e61" }, body: JSON.stringify({ sessionId: "d38e61", runId: debugRunId, hypothesisId: "H1", location: "campaign-voip-strip.tsx:onNotification:mapped", message: "notification mapped to line status", data: { leadId, stateToken: stateT, mapped, callControlId: maybeCall.telnyxIDs?.telnyxCallControlId ?? null }, timestamp: Date.now() }) }).catch(() => {});
-            // #endregion
           }
 
           if (shouldAutoAnswer) {
@@ -1334,7 +1314,6 @@ export function CampaignVoipStrip({
     }
 
     const leadEpochAtStart = leadEpochRef.current;
-    const startAttemptId = ++startAttemptRef.current;
     inFlightRef.current = true;
     endCallInitiatedByUsRef.current = false;
     callHadConnectedRef.current = false;
@@ -1351,24 +1330,15 @@ export function CampaignVoipStrip({
       startedAt: Date.now(),
       timerKey,
     };
-    // #region agent log
-    fetch("http://localhost:7253/ingest/cae62791-9bb1-4500-92a8-c26abf2c0c90", { method: "POST", headers: { "Content-Type": "application/json", "X-Debug-Session-Id": "d38e61" }, body: JSON.stringify({ sessionId: "d38e61", runId: debugRunId, hypothesisId: "H4", location: "campaign-voip-strip.tsx:startCall", message: "startCall initiated", data: { leadId, leadPhone, voipPhone, raw, toE164, dialMode: effectiveDialMode, autoStart: effectiveAutoStart, lineStatusBefore: lineStatus, leadEpochAtStart, startAttemptId, callContext: currentCallContextRef.current }, timestamp: Date.now() }) }).catch(() => {});
-    // #endregion
     try {
       await ensureClientConnected();
       if (leadEpochRef.current !== leadEpochAtStart || currentLeadIdRef.current !== leadId) {
-        // #region agent log
-        fetch("http://localhost:7253/ingest/cae62791-9bb1-4500-92a8-c26abf2c0c90", { method: "POST", headers: { "Content-Type": "application/json", "X-Debug-Session-Id": "d38e61" }, body: JSON.stringify({ sessionId: "d38e61", runId: debugRunId, hypothesisId: "H6", location: "campaign-voip-strip.tsx:startCall:staleAfterConnect", message: "stale call attempt cancelled after connect", data: { leadIdAtAttempt: leadId, currentLeadId: currentLeadIdRef.current, leadEpochAtStart, currentLeadEpoch: leadEpochRef.current, startAttemptId }, timestamp: Date.now() }) }).catch(() => {});
-        // #endregion
         return;
       }
       if (!clientRef.current) throw new Error("WebRTC-klient blev ikke initialiseret.");
 
       await setAudioElementSink(remoteAudioRef.current, speakerId);
       if (leadEpochRef.current !== leadEpochAtStart || currentLeadIdRef.current !== leadId) {
-        // #region agent log
-        fetch("http://localhost:7253/ingest/cae62791-9bb1-4500-92a8-c26abf2c0c90", { method: "POST", headers: { "Content-Type": "application/json", "X-Debug-Session-Id": "d38e61" }, body: JSON.stringify({ sessionId: "d38e61", runId: debugRunId, hypothesisId: "H6", location: "campaign-voip-strip.tsx:startCall:staleAfterAudioSink", message: "stale call attempt cancelled after audio setup", data: { leadIdAtAttempt: leadId, currentLeadId: currentLeadIdRef.current, leadEpochAtStart, currentLeadEpoch: leadEpochRef.current, startAttemptId }, timestamp: Date.now() }) }).catch(() => {});
-        // #endregion
         return;
       }
 
@@ -1452,9 +1422,6 @@ export function CampaignVoipStrip({
 
       const call = clientRef.current.newCall(callOptions) as TelnyxCall;
       if (leadEpochRef.current !== leadEpochAtStart || currentLeadIdRef.current !== leadId) {
-        // #region agent log
-        fetch("http://localhost:7253/ingest/cae62791-9bb1-4500-92a8-c26abf2c0c90", { method: "POST", headers: { "Content-Type": "application/json", "X-Debug-Session-Id": "d38e61" }, body: JSON.stringify({ sessionId: "d38e61", runId: debugRunId, hypothesisId: "H7", location: "campaign-voip-strip.tsx:startCall:staleAfterNewCall", message: "stale call hung up after newCall", data: { leadIdAtAttempt: leadId, currentLeadId: currentLeadIdRef.current, leadEpochAtStart, currentLeadEpoch: leadEpochRef.current, startAttemptId, toE164 }, timestamp: Date.now() }) }).catch(() => {});
-        // #endregion
         try {
           await call.hangup?.();
         } catch {
@@ -1517,9 +1484,6 @@ export function CampaignVoipStrip({
   }
 
   async function hangUp() {
-    // #region agent log
-    fetch("http://localhost:7253/ingest/cae62791-9bb1-4500-92a8-c26abf2c0c90", { method: "POST", headers: { "Content-Type": "application/json", "X-Debug-Session-Id": "d38e61" }, body: JSON.stringify({ sessionId: "d38e61", runId: debugRunId, hypothesisId: "H5", location: "campaign-voip-strip.tsx:hangUp", message: "hangUp invoked", data: { leadId, lineStatusBefore: lineStatus, activeCallControlId: activeCallRef.current?.telnyxIDs?.telnyxCallControlId ?? null }, timestamp: Date.now() }) }).catch(() => {});
-    // #endregion
     endCallInitiatedByUsRef.current = true;
     manualHangupAtRef.current = Date.now();
     const activeCallIdentity = getCallIdentity(activeCallRef.current);
@@ -1556,9 +1520,6 @@ export function CampaignVoipStrip({
   useEffect(() => {
     if (hangupSignal === hangupSignalRef.current) return;
     hangupSignalRef.current = hangupSignal;
-    // #region agent log
-    fetch("http://localhost:7253/ingest/cae62791-9bb1-4500-92a8-c26abf2c0c90", { method: "POST", headers: { "Content-Type": "application/json", "X-Debug-Session-Id": "d38e61" }, body: JSON.stringify({ sessionId: "d38e61", runId: debugRunId, hypothesisId: "H2", location: "campaign-voip-strip.tsx:hangupSignalEffect", message: "hangup signal observed", data: { leadId, hangupSignal, lineStatus, hasActiveCallRef: Boolean(activeCallRef.current), activeCallControlId: activeCallRef.current?.telnyxIDs?.telnyxCallControlId ?? null }, timestamp: Date.now() }) }).catch(() => {});
-    // #endregion
     if (activeCallRef.current) {
       void (async () => {
         await hangUp();
@@ -1610,10 +1571,6 @@ export function CampaignVoipStrip({
       return;
     }
     autoKeyRef.current = key;
-    // #region agent log
-    // (activeCallRef.current er pr. definition null her — vi returnerede ovenfor hvis det var sat)
-    fetch("http://localhost:7253/ingest/cae62791-9bb1-4500-92a8-c26abf2c0c90", { method: "POST", headers: { "Content-Type": "application/json", "X-Debug-Session-Id": "d38e61" }, body: JSON.stringify({ sessionId: "d38e61", runId: debugRunId, hypothesisId: "H3", location: "campaign-voip-strip.tsx:autoStartEffect", message: "auto start call triggered", data: { leadId, leadPhone, voipPhone, normalizedVoipPhone: stripDialFormatting(voipPhone), lineStatus, hasActiveCallRef: false, activeCallControlId: null }, timestamp: Date.now() }) }).catch(() => {});
-    // #endregion
     void startCall();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [leadId, voipPhone, leadPhone, effectiveAutoStart, audioSetupReady, lineStatus]);
