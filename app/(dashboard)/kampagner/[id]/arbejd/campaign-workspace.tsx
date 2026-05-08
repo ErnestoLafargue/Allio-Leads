@@ -87,6 +87,28 @@ function delayMs(ms: number) {
   return new Promise<void>((r) => setTimeout(r, ms));
 }
 
+/** PATCH lead med de samme retries som baggrundsgem / flush før bridge. */
+async function patchLeadDocument(
+  leadId: string,
+  body: Record<string, unknown>,
+): Promise<boolean> {
+  for (let attempt = 0; attempt < BG_SAVE_RETRIES; attempt++) {
+    try {
+      const res = await fetch(`/api/leads/${leadId}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(body),
+        keepalive: true,
+      });
+      if (res.ok) return true;
+    } catch {
+      /* prøv igen */
+    }
+    await delayMs(350 * (attempt + 1));
+  }
+  return false;
+}
+
 export function CampaignWorkspace({ campaignId, preferredLeadId, voipSession = false }: Props) {
   const { data: session } = useSession();
   const sessionUserId = session?.user?.id ?? "";
@@ -112,6 +134,8 @@ export function CampaignWorkspace({ campaignId, preferredLeadId, voipSession = f
   const prefetchInFlightRef = useRef(false);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
+  /** Kort blokering af «Gem og næste» under optimistisk skift (dobbeltklik / prefetch-promovering). */
+  const [nextAdvanceBusy, setNextAdvanceBusy] = useState(false);
   /** Fejl ved baggrundsgem af forrige lead (blokér ikke næste lead). */
   const [backgroundSyncError, setBackgroundSyncError] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -120,6 +144,9 @@ export function CampaignWorkspace({ campaignId, preferredLeadId, voipSession = f
   const [backgroundLockLeadIds, setBackgroundLockLeadIds] = useState<string[]>([]);
   const backgroundLockLeadIdsRef = useRef<string[]>([]);
   const pendingPatchBodiesRef = useRef<Map<string, Record<string, unknown>>>(new Map());
+  /** Undgå to samtidige baggrundsk PATCH-job for samme lead (fx gentagne klik når reserve-next fejler). */
+  const backgroundPatchWorkerLeadIdsRef = useRef<Set<string>>(new Set());
+  const onNextInFlightRef = useRef(false);
 
   const [companyName, setCompanyName] = useState("");
   const [phone, setPhone] = useState("");
@@ -411,34 +438,39 @@ export function CampaignWorkspace({ campaignId, preferredLeadId, voipSession = f
     const entries = Array.from(pendingPatchBodiesRef.current.entries());
     if (entries.length === 0) return;
     pendingPatchBodiesRef.current.clear();
-    const flushedOk = new Set<string>();
+    const batchIds = new Set(entries.map(([id]) => id));
     for (const [leadId, body] of entries) {
-      let ok = false;
-      for (let attempt = 0; attempt < BG_SAVE_RETRIES; attempt++) {
-        try {
-          const res = await fetch(`/api/leads/${leadId}`, {
-            method: "PATCH",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify(body),
-            keepalive: true,
-          });
-          if (res.ok) {
-            ok = true;
-            break;
-          }
-        } catch {
-          /* prøv igen */
+      await patchLeadDocument(leadId, body);
+      await releaseLockHttp(leadId);
+    }
+    setBackgroundLockLeadIds((prev) => prev.filter((id) => !batchIds.has(id)));
+  }, []);
+
+  /** Gem lead i baggrunden efter optimistisk skift til næste (Gem og næste). */
+  const queueBackgroundPatch = useCallback((leadId: string, body: Record<string, unknown>) => {
+    setBackgroundSyncError(null);
+    setBackgroundLockLeadIds((prev) => (prev.includes(leadId) ? prev : [...prev, leadId]));
+    pendingPatchBodiesRef.current.set(leadId, body);
+    if (backgroundPatchWorkerLeadIdsRef.current.has(leadId)) return;
+    backgroundPatchWorkerLeadIdsRef.current.add(leadId);
+    void (async () => {
+      try {
+        const snapshot = pendingPatchBodiesRef.current.get(leadId) ?? body;
+        const ok = await patchLeadDocument(leadId, snapshot);
+        pendingPatchBodiesRef.current.delete(leadId);
+        setBackgroundLockLeadIds((prev) => prev.filter((id) => id !== leadId));
+        if (ok) {
+          await releaseLockHttp(leadId);
+        } else {
+          setBackgroundSyncError(
+            "Kunne ikke gemme forrige lead i baggrunden. Tjek netværk eller åbn leadet fra listen for at gemme igen.",
+          );
+          await releaseLockHttp(leadId);
         }
-        await delayMs(350 * (attempt + 1));
+      } finally {
+        backgroundPatchWorkerLeadIdsRef.current.delete(leadId);
       }
-      if (ok) {
-        flushedOk.add(leadId);
-        await releaseLockHttp(leadId);
-      }
-    }
-    if (flushedOk.size > 0) {
-      setBackgroundLockLeadIds((prev) => prev.filter((id) => !flushedOk.has(id)));
-    }
+    })();
   }, []);
 
   const handleAssignedLead = useCallback(
@@ -734,77 +766,73 @@ export function CampaignWorkspace({ campaignId, preferredLeadId, voipSession = f
     };
 
     setError(null);
-    setBackgroundSyncError(null);
-    clearPrefetchReservation();
 
-    setSaving(true);
-    let updatedLead: Lead | null = null;
-    for (let attempt = 0; attempt < BG_SAVE_RETRIES; attempt++) {
-      const res = await fetch(`/api/leads/${currentId}`, {
-        method: "PATCH",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(patchBody),
-      });
-      if (res.ok) {
-        updatedLead = (await res.json()) as Lead;
-        break;
-      }
-      await delayMs(350 * (attempt + 1));
-    }
-    setSaving(false);
+    if (onNextInFlightRef.current) return;
+    onNextInFlightRef.current = true;
+    setNextAdvanceBusy(true);
 
-    if (!updatedLead) {
-      setError("Kunne ikke gemme");
-      return;
-    }
-
-    pendingPatchBodiesRef.current.delete(currentId);
-    await releaseLockHttp(currentId);
-    setBackgroundSyncError(null);
-
-    const excludedLeadIds = Array.from(new Set([
-      currentId,
-      ...backgroundLockLeadIdsRef.current,
-    ]));
-    const rRes = await fetch(`/api/campaigns/${campaignId}/reserve-next`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: buildReserveNextRequestBody(campaignId, {
-        excludeLeadId: currentId,
-        excludeLeadIds: excludedLeadIds,
-      }),
-    });
-    if (!rRes.ok) {
-      const j = await rRes.json().catch(() => ({}));
-      setError(typeof j.error === "string" ? j.error : "Kunne ikke hente næste lead.");
-      setActiveLead(updatedLead);
-      try {
-        sessionStorage.setItem(preferStorageKey(campaignId), updatedLead.id);
-      } catch {
-        /* ignore */
-      }
-      return;
-    }
-
-    const rj = (await rRes.json()) as { lead: Lead | null };
-    if (!rj.lead) {
-      setActiveLead(null);
-      setDone(true);
-      try {
-        sessionStorage.removeItem(preferStorageKey(campaignId));
-      } catch {
-        /* ignore */
-      }
-      return;
-    }
-
-    setActiveLead(rj.lead);
     try {
-      sessionStorage.setItem(preferStorageKey(campaignId), rj.lead.id);
-    } catch {
-      /* ignore */
+      const pf = prefetchedLeadRef.current;
+      const usePrefetch =
+        Boolean(pf && pf.id !== currentId && !backgroundLockLeadIdsRef.current.includes(pf.id));
+
+      const applyNextLead = (next: Lead | null) => {
+        if (!next) {
+          setActiveLead(null);
+          setDone(true);
+          try {
+            sessionStorage.removeItem(preferStorageKey(campaignId));
+          } catch {
+            /* ignore */
+          }
+          return;
+        }
+        setActiveLead(next);
+        loadFormFromLead(next);
+        try {
+          sessionStorage.setItem(preferStorageKey(campaignId), next.id);
+        } catch {
+          /* ignore */
+        }
+        void prefetchNextLead(next.id);
+      };
+
+      if (usePrefetch && pf) {
+        setPrefetchedLead(null);
+        prefetchInFlightRef.current = false;
+        applyNextLead(pf);
+        queueBackgroundPatch(currentId, patchBody);
+        return;
+      }
+
+      clearPrefetchReservation();
+
+      setSaving(true);
+      const excludedLeadIds = Array.from(new Set([currentId, ...backgroundLockLeadIdsRef.current]));
+      const rRes = await fetch(`/api/campaigns/${campaignId}/reserve-next`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: buildReserveNextRequestBody(campaignId, {
+          excludeLeadId: currentId,
+          excludeLeadIds: excludedLeadIds,
+        }),
+      });
+      setSaving(false);
+
+      queueBackgroundPatch(currentId, patchBody);
+
+      if (!rRes.ok) {
+        const j = await rRes.json().catch(() => ({}));
+        setError(typeof j.error === "string" ? j.error : "Kunne ikke hente næste lead.");
+        return;
+      }
+
+      const rj = (await rRes.json()) as { lead: Lead | null };
+      applyNextLead(rj.lead);
+    } finally {
+      onNextInFlightRef.current = false;
+      setNextAdvanceBusy(false);
     }
-    void prefetchNextLead(rj.lead.id);
   }
 
   function openCallbackDialog() {
@@ -1118,7 +1146,7 @@ export function CampaignWorkspace({ campaignId, preferredLeadId, voipSession = f
       String(current.callbackStatus ?? "PENDING").trim().toUpperCase() === "PENDING");
 
   const showNextForMeeting = status !== "MEETING_BOOKED";
-  const nextLabel = saving ? "Gemmer…" : "Gem og næste";
+  const nextLabel = saving ? "Henter næste…" : nextAdvanceBusy ? "Skifter…" : "Gem og næste";
   const showBackgroundSaveHint = backgroundLockLeadIds.length > 0;
   const nextButtonClass =
     "rounded-xl bg-stone-900 px-6 py-3 text-sm font-semibold text-white shadow-md transition hover:bg-stone-800 disabled:opacity-60 shrink-0";
@@ -1126,7 +1154,12 @@ export function CampaignWorkspace({ campaignId, preferredLeadId, voipSession = f
   function renderNextButton() {
     if (!showNextForMeeting) return null;
     return (
-      <button type="button" disabled={saving} onClick={() => void onNext()} className={nextButtonClass}>
+      <button
+        type="button"
+        disabled={saving || nextAdvanceBusy}
+        onClick={() => void onNext()}
+        className={nextButtonClass}
+      >
         {nextLabel}
       </button>
     );
