@@ -26,6 +26,8 @@ model User {
   telnyxCredentialId String? @unique
   /// SIP-username knyttet til ovennævnte credential — server bruger sip:{username}@sip.telnyx.com som transfer-target
   telnyxSipUsername  String? @unique
+  /// Telnyx credential_connections.id (Call Control) for samme WebRTC-connection som telnyxCredentialId. Cache for bridge uden ekstra API-kald.
+  telnyxCredentialConnectionId String?
 
   bookedMeetings            Lead[]                    @relation("LeadBookedBy")
   assignedMeetings          Lead[]                    @relation("LeadMeetingAssignedTo")

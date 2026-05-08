@@ -11,6 +11,7 @@ import {
   getTelnyxFromPoolInfo,
   pickTelnyxFromNumber,
 } from "@/lib/telnyx-call-control";
+import { ensureTelnyxCredentialConnectionIdCached } from "@/lib/telnyx-cache-credential-connection";
 import { provisionTelnyxAgentsForUsers } from "@/lib/telnyx-provision-agents-server";
 
 export async function POST(req: Request) {
@@ -215,6 +216,16 @@ export async function POST(req: Request) {
       },
       { status },
     );
+  }
+
+  if (token.ok && !sharedFallback && sessionUserId && telephonyCredentialId) {
+    void ensureTelnyxCredentialConnectionIdCached({
+      userId: sessionUserId,
+      telephonyCredentialId,
+      apiKey,
+    }).catch(() => {
+      /* cache er best-effort */
+    });
   }
 
   return NextResponse.json({

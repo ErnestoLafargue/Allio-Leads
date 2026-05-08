@@ -117,8 +117,16 @@ async function resolveAgentOutboundConnectionId(params: {
 }): Promise<string | null> {
   const user = await prisma.user.findUnique({
     where: { id: params.agentUserId },
-    select: { telnyxCredentialId: true },
+    select: {
+      telnyxCredentialId: true,
+      telnyxCredentialConnectionId: true,
+    },
   });
+  const cached = user?.telnyxCredentialConnectionId?.trim();
+  if (cached) {
+    return cached;
+  }
+
   const credId = user?.telnyxCredentialId?.trim();
   if (credId) {
     const info = await getTelnyxCredentialInfo({
@@ -126,7 +134,13 @@ async function resolveAgentOutboundConnectionId(params: {
       telephonyCredentialId: credId,
     });
     const fromCred = info.connectionId?.trim();
-    if (fromCred) return fromCred;
+    if (fromCred) {
+      await prisma.user.updateMany({
+        where: { id: params.agentUserId },
+        data: { telnyxCredentialConnectionId: fromCred },
+      });
+      return fromCred;
+    }
     if (typeof console !== "undefined") {
       console.error("[dialer-bridge] Agent-credential uden connection_id — fallback til env", {
         agentUserId: params.agentUserId,
