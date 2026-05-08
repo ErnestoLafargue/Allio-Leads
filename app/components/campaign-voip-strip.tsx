@@ -1566,10 +1566,19 @@ export function CampaignVoipStrip({
       })();
       return;
     }
+    // PREDICTIVE: lead-ben kører server-side uden `client.newCall()`, så `activeCallRef`
+    // er ofte null mens strippen viser connecting/ringing. Parent (`requestCallHangupBeforeAdvance`)
+    // øger hangupSignal ved «Gem og næste» — vi skal stadig nulstille UI og timer.
+    if (
+      dialModeRef.current === "PREDICTIVE" &&
+      (lineStatus === "connecting" || lineStatus === "ringing" || lineStatus === "live")
+    ) {
+      void hangUp();
+    }
     onHangupSignalHandled?.();
     // we intentionally track only signal/callback; active call state is read from ref
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [hangupSignal, onHangupSignalHandled]);
+  }, [hangupSignal, onHangupSignalHandled, lineStatus]);
 
   useEffect(() => {
     const key = `${leadId}|${stripDialFormatting(voipPhone)}|${effectiveAutoStart}`;
