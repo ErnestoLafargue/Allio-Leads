@@ -289,6 +289,7 @@ export async function POST(req: Request) {
     case "call.hangup": {
       const cause = String(payload.hangup_cause ?? "");
       const source = String(payload.hangup_source ?? "");
+      const normalizedCause = cause.trim().toLowerCase();
       await prisma.dialerCallLog.updateMany({
         where: { callControlId },
         data: {
@@ -354,6 +355,36 @@ export async function POST(req: Request) {
               currentLeadId: null,
             },
           });
+        }
+
+        // Hvis agent-leggen fejler med user_busy (typisk når agent-endpointet ikke svarer),
+        // afslut leadet deterministisk som NOT_HOME i stedet for at lade klientens 25s fallback
+        // være eneste vej. Det fjerner "opretter forbindelse" dead-end.
+        if (log.direction === "outbound-agent" && normalizedCause === "user_busy") {
+          if (log.bridgeTargetId) {
+            await prisma.dialerCallLog.updateMany({
+              where: { callControlId: log.bridgeTargetId },
+              data: {
+                state: "failed",
+                endedAt: new Date(),
+                hangupCause: "agent_leg_user_busy",
+                hangupSource: source || null,
+              },
+            });
+          }
+          if (log.leadId) {
+            await prisma.lead.updateMany({
+              where: {
+                id: log.leadId,
+                status: "NEW",
+              },
+              data: {
+                status: "NOT_HOME",
+                notHomeMarkedAt: new Date(),
+                lastOutcomeAt: new Date(),
+              },
+            });
+          }
         }
       }
       break;
