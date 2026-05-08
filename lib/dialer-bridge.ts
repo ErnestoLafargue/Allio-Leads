@@ -17,6 +17,7 @@ import {
   buildTelnyxAgentSipUri,
   dialTelnyxOutbound,
   getTelnyxConnectionId,
+  getTelnyxCredentialInfo,
   hangupTelnyxCall,
   isTelnyxChannelLimitError,
   pickTelnyxFromNumber,
@@ -64,16 +65,16 @@ export async function reserveReadyAgent(params: {
       if (updated.count === 1) {
         const user = await tx.user.findUnique({
           where: { id: session.userId },
-          select: { telnyxSipUsername: true },
+          select: { telnyxSipUsername: true, telnyxCredentialId: true },
         });
-        if (user?.telnyxSipUsername) {
+        if (user?.telnyxSipUsername && user.telnyxCredentialId) {
           return {
             userId: session.userId,
             sipUsername: user.telnyxSipUsername,
             sessionId: session.id,
           };
         }
-        // Agent har ingen SIP — sæt tilbage til ready og prøv næste
+        // Agent mangler SIP eller Telnyx-credential — sæt tilbage til ready og prøv næste
         await tx.agentSession.update({
           where: { id: session.id },
           data: { status: "ready" },
@@ -101,6 +102,39 @@ export async function releaseAgentSession(params: {
       currentLeadId: null,
     },
   });
+}
+
+/**
+ * Call Control `connection_id` til udgående opkald der skal ringe agentens WebRTC op.
+ * Agentens browser logger ind på den **credential connection** der blev oprettet ved
+ * provisioning (`User.telnyxCredentialId` → Telnyx `connection_id`). Hvis vi i stedet
+ * bruger den globale `TELNYX_CONNECTION_ID` (fx powerdialer-app), ender bridge ofte i
+ * `user_busy` fordi kaldet ikke rammer den samme SIP-registrering som WebRTC-klienten.
+ */
+async function resolveAgentOutboundConnectionId(params: {
+  apiKey: string;
+  agentUserId: string;
+}): Promise<string | null> {
+  const user = await prisma.user.findUnique({
+    where: { id: params.agentUserId },
+    select: { telnyxCredentialId: true },
+  });
+  const credId = user?.telnyxCredentialId?.trim();
+  if (credId) {
+    const info = await getTelnyxCredentialInfo({
+      apiKey: params.apiKey,
+      telephonyCredentialId: credId,
+    });
+    const fromCred = info.connectionId?.trim();
+    if (fromCred) return fromCred;
+    if (typeof console !== "undefined") {
+      console.error("[dialer-bridge] Agent-credential uden connection_id — fallback til env", {
+        agentUserId: params.agentUserId,
+        fetchError: info.fetchError,
+      });
+    }
+  }
+  return getTelnyxConnectionId()?.trim() ?? null;
 }
 
 /**
@@ -185,10 +219,17 @@ export async function handleAmdHuman(params: {
     return { status: "no-agent" };
   }
 
-  const connectionId = getTelnyxConnectionId();
+  const connectionId = await resolveAgentOutboundConnectionId({
+    apiKey: params.apiKey,
+    agentUserId: reserved.userId,
+  });
   if (!connectionId) {
     await releaseAgentSession({ sessionId: reserved.sessionId, newStatus: "ready" });
-    return { status: "failed", message: "TELNYX_CONNECTION_ID mangler — kan ikke bridge" };
+    return {
+      status: "failed",
+      message:
+        "Kunne ikke bestemme Telnyx connection_id til agent-bridge (mangler credential eller TELNYX_CONNECTION_ID).",
+    };
   }
   const fromNumber = pickTelnyxFromNumber(params.leadId, { userId: reserved.userId });
   if (!fromNumber) {
