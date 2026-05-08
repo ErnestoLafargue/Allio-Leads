@@ -17,6 +17,8 @@ import {
   hasActiveQueueViewConstraints,
   parseActiveCampaignQueueView,
 } from "@/lib/active-campaign-queue";
+import { normalizeCampaignDialMode } from "@/lib/dial-mode";
+import { powerDialerEligibleOrPastWhere } from "@/lib/power-dialer-batch";
 
 type Params = { params: Promise<{ id: string }> };
 
@@ -68,6 +70,7 @@ export async function POST(req: Request, { params }: Params) {
       where: { id: campaignId },
       select: {
         id: true,
+        dialMode: true,
         includeProtectedBusinesses: true,
         systemCampaignType: true,
         fieldConfig: true,
@@ -89,6 +92,10 @@ export async function POST(req: Request, { params }: Params) {
 
     const systemCampaignType = campaign.systemCampaignType;
     const now = new Date();
+    const powerDialEligible =
+      normalizeCampaignDialMode(campaign.dialMode) === "POWER_DIALER"
+        ? powerDialerEligibleOrPastWhere(now)
+        : {};
 
     async function tryReserve(id: string) {
       const ok = await tryAcquireLeadLock(prisma, id, userId, now);
@@ -183,8 +190,9 @@ export async function POST(req: Request, { params }: Params) {
                 /** Efter opkald/gem som «Ny» (eller auto fra voicemail) — stadig under genbook-kampagnen */
                 newInDialerPool,
               ],
+              ...powerDialEligible,
             }
-          : { campaignId, ...newInDialerPool },
+          : { campaignId, ...newInDialerPool, ...powerDialEligible },
       select: {
         id: true,
         status: true,

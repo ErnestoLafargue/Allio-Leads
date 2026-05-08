@@ -7,12 +7,20 @@ import {
   pickCallControlId,
   type TelnyxWebhookEnvelope,
 } from "@/lib/dialer-shared";
-import { handleAmdHuman, handleAmdMachine } from "@/lib/dialer-bridge";
 import {
+  handleAmdHuman,
+  handleAmdMachine,
+  handlePowerDialerAmdUncertain,
+} from "@/lib/dialer-bridge";
+import {
+  isPowerDialerUncertain,
   mapTelnyxAmdResult,
   shouldBridgeToAgent,
   shouldMarkVoicemail,
 } from "@/lib/telnyx-amd-result";
+import { normalizeCampaignDialMode } from "@/lib/dial-mode";
+import { resolveParallelDialModeFromClientState } from "@/lib/resolve-parallel-dial-mode";
+import { requeuePowerDialerLeadAfterNonBridge } from "@/lib/power-dialer-requeue";
 import { LEAD_ACTIVITY_KIND, formatPhoneForActivitySummary } from "@/lib/lead-activity-kinds";
 import { startTelnyxRecording } from "@/lib/telnyx-call-control";
 import { persistTelnyxRecordingToAllio } from "@/lib/telnyx-recording-storage";
@@ -262,8 +270,46 @@ export async function POST(req: Request) {
       ) {
         const apiKey = process.env.TELNYX_API_KEY?.trim();
         if (apiKey) {
-          if (shouldBridgeToAgent(amdResult)) {
-            // Bridge til ledig agent — fire-and-forget for ikke at blokere webhook'en.
+          const parallelMode = await resolveParallelDialModeFromClientState(prisma, clientState);
+          const isPowerDial = parallelMode === "POWER_DIALER";
+
+          if (isPowerDial) {
+            if (shouldMarkVoicemail(amdResult)) {
+              queueMicrotask(() => {
+                handleAmdMachine({
+                  apiKey,
+                  campaignId: clientState.campaignId,
+                  leadId: clientState.leadId!,
+                  leadCallControlId: callControlId,
+                }).catch((err) => {
+                  console.error("[telnyx:webhook] handleAmdMachine fejlede:", err);
+                });
+              });
+            } else if (amdResult === "human") {
+              queueMicrotask(() => {
+                handleAmdHuman({
+                  apiKey,
+                  campaignId: clientState.campaignId,
+                  leadId: clientState.leadId!,
+                  leadCallControlId: callControlId,
+                  webhookUrl: process.env.TELNYX_CALL_WEBHOOK_URL?.trim() || undefined,
+                }).catch((err) => {
+                  console.error("[telnyx:webhook] handleAmdHuman fejlede:", err);
+                });
+              });
+            } else if (isPowerDialerUncertain(amdResult)) {
+              queueMicrotask(() => {
+                handlePowerDialerAmdUncertain({
+                  apiKey,
+                  campaignId: clientState.campaignId,
+                  leadId: clientState.leadId!,
+                  leadCallControlId: callControlId,
+                }).catch((err) => {
+                  console.error("[telnyx:webhook] handlePowerDialerAmdUncertain fejlede:", err);
+                });
+              });
+            }
+          } else if (shouldBridgeToAgent(amdResult)) {
             queueMicrotask(() => {
               handleAmdHuman({
                 apiKey,
@@ -276,8 +322,6 @@ export async function POST(req: Request) {
               });
             });
           } else if (shouldMarkVoicemail(amdResult)) {
-            // Voicemail/fax → hangup leadet og marker som VOICEMAIL i databasen,
-            // så det IKKE kan blive sendt til en agent senere.
             queueMicrotask(() => {
               handleAmdMachine({
                 apiKey,
@@ -316,6 +360,8 @@ export async function POST(req: Request) {
           agentUserId: true,
           direction: true,
           bridgeTargetId: true,
+          bridgedAt: true,
+          amdResult: true,
         },
       });
 
@@ -364,11 +410,38 @@ export async function POST(req: Request) {
           });
         }
 
+        // Power Dialer: lead-leg lagt på uden bridge og uden AMD-udfald → undgå øjeblikkelig re-dial.
+        if (
+          log.direction === "outbound-lead" &&
+          log.leadId &&
+          log.campaignId &&
+          !log.bridgedAt &&
+          !log.agentUserId &&
+          (log.amdResult == null || String(log.amdResult).trim() === "")
+        ) {
+          const c = await prisma.campaign.findUnique({
+            where: { id: log.campaignId },
+            select: { dialMode: true },
+          });
+          if (normalizeCampaignDialMode(c?.dialMode) === "POWER_DIALER") {
+            await requeuePowerDialerLeadAfterNonBridge(prisma, { leadId: log.leadId });
+          }
+        }
+
         // Hvis agent-leggen fejler med user_busy (typisk når agent-endpointet ikke svarer),
         // afslut leadet deterministisk som NOT_HOME i stedet for at lade klientens 25s fallback
         // være eneste vej. Det fjerner "opretter forbindelse" dead-end.
+        // Hvis lead-leggen allerede var bridged, må vi ikke overskrive lead-udfald.
         if (log.direction === "outbound-agent" && normalizedCause === "user_busy") {
+          let leadBridged = false;
           if (log.bridgeTargetId) {
+            const leadLeg = await prisma.dialerCallLog.findUnique({
+              where: { callControlId: log.bridgeTargetId },
+              select: { bridgedAt: true },
+            });
+            leadBridged = Boolean(leadLeg?.bridgedAt);
+          }
+          if (log.bridgeTargetId && !leadBridged) {
             await prisma.dialerCallLog.updateMany({
               where: { callControlId: log.bridgeTargetId },
               data: {
@@ -379,7 +452,7 @@ export async function POST(req: Request) {
               },
             });
           }
-          if (log.leadId) {
+          if (log.leadId && !leadBridged) {
             await prisma.lead.updateMany({
               where: {
                 id: log.leadId,

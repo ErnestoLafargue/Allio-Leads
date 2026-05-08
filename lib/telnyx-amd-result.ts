@@ -10,7 +10,7 @@
  *   - "human"   → bridge til agent
  *   - "machine" → hangup + marker som VOICEMAIL
  *   - "fax"     → hangup + marker som VOICEMAIL (faxmaskine = ikke et menneske)
- *   - "unknown" → fallback: bridge til agent (bedre at lade agenten beslutte end at miste lead)
+ *   - "unknown" → Predictive: bridge til agent. Power Dialer: requeue + cooldown (ingen bridge).
  *
  * Bruges af [`app/api/telnyx/webhooks/call-events/route.ts`](app/api/telnyx/webhooks/call-events/route.ts).
  */
@@ -55,4 +55,14 @@ export function shouldMarkVoicemail(amd: AmdInternalResult): boolean {
  */
 export function shouldBridgeToAgent(amd: AmdInternalResult): boolean {
   return amd === "human" || amd === "unknown";
+}
+
+/** Power Dialer: tydelig maskine/fax (samme som VOICEMAIL-gren i dag). */
+export function isPowerDialerDefiniteVoicemail(amd: AmdInternalResult): boolean {
+  return shouldMarkVoicemail(amd);
+}
+
+/** Power Dialer: usikker AMD — ikke bridge; requeue + cooldown i stedet. */
+export function isPowerDialerUncertain(amd: AmdInternalResult): boolean {
+  return amd === "unknown";
 }

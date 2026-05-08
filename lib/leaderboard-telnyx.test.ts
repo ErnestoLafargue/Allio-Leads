@@ -103,7 +103,8 @@ describe("collapseNearDuplicateAttempts", () => {
     const attempts: ContactAttempt[] = [
       { userId: "u1", leadId: "l1", at: t0 },
       { userId: "u1", leadId: "l1", at: new Date(t0.getTime() + 30_000) },
-      { userId: "u1", leadId: "l1", at: new Date(t0.getTime() + 120_000) },
+      /** Stadig < collapse-vindue fra første *bevarede* (t0); mellemliggende rækker droppes. */
+      { userId: "u1", leadId: "l1", at: new Date(t0.getTime() + 45_000) },
     ];
     const out = collapseNearDuplicateAttempts(attempts, LEADERBOARD_SAME_ATTEMPT_COLLAPSE_MS);
     expect(out).toHaveLength(1);

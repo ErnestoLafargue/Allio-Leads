@@ -8,7 +8,7 @@
     "postinstall": "prisma generate",
     "start": "next start",
     "lint": "eslint",
-    "test": "vitest run",
+    "test": "vitest run --config vitest.config.mts",
     "db:seed": "tsx prisma/seed.ts",
     "db:set-password": "tsx prisma/set-password.ts",
     "db:migrate": "node scripts/run-prisma-migrate.cjs",

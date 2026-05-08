@@ -300,6 +300,15 @@ export function CampaignWorkspace({ campaignId, preferredLeadId, voipSession = f
     return !preferLeadId;
   }, [campaignDialMode, voipSession, preferredLeadId, campaignId]);
 
+  /** Afledt vente-/forbindelses-state for Power auto-dial (lettere end spredte booleans). */
+  type PowerDialerUiState = "queue_empty" | "waiting_for_calls" | "connecting_human";
+  const powerDialerUiState = useMemo((): PowerDialerUiState | null => {
+    if (!isPowerAutoDialSession) return null;
+    if (powerDialerQueueEmpty) return "queue_empty";
+    if (powerDialerConnecting) return "connecting_human";
+    return "waiting_for_calls";
+  }, [isPowerAutoDialSession, powerDialerQueueEmpty, powerDialerConnecting]);
+
   useEffect(() => {
     let cancelled = false;
     async function load() {
@@ -1128,42 +1137,45 @@ export function CampaignWorkspace({ campaignId, preferredLeadId, voipSession = f
   }
 
   if (!done && !activeLead && isPowerAutoDialSession) {
-    return (
-      <div className="space-y-8 py-12">
-        <div>
-          <Link href="/kampagner" className="text-sm text-stone-500 hover:text-stone-800">
-            ← Kampagner
-          </Link>
-          <h1 className="mt-2 text-xl font-semibold text-stone-900">{campaignName}</h1>
-        </div>
-        <div className="mx-auto max-w-lg space-y-6 rounded-xl border border-stone-200 bg-white p-10 text-center shadow-sm">
-          {powerDialerQueueEmpty ? (
-            <div className="space-y-4">
-              <p className="text-stone-800">Ingen flere leads i køen til Power Dialer lige nu.</p>
-              <Link
-                href="/kampagner"
-                className="inline-block text-sm font-medium text-stone-700 underline-offset-2 hover:underline"
-              >
-                ← Tilbage til kampagner
-              </Link>
+    if (powerDialerUiState === "queue_empty") {
+      return (
+        <div className="min-h-[40vh] space-y-6 px-4 py-8">
+          <div className="sticky top-0 z-10 -mx-4 bg-stone-50/90 px-4 pb-3 pt-2 backdrop-blur-sm">
+            <div className="h-1.5 w-full overflow-hidden rounded-full bg-stone-200">
+              <div className="h-full w-full rounded-full bg-emerald-600/40" />
             </div>
-          ) : (
-            <>
-              <p className="text-sm font-medium text-stone-700">
-                {powerDialerConnecting ? "Forbinder samtale…" : "Ringer op i baggrunden"}
-              </p>
-              <div className="h-1.5 w-full overflow-hidden rounded-full bg-stone-200">
-                <div className="h-full w-full rounded-full bg-emerald-600 animate-power-dialer-wait-fill" />
-              </div>
-              {sipReady === false ? (
-                <p className="text-xs text-amber-800">
-                  Telnyx WebRTC er ikke klar — tjek dine indstillinger eller genindlæs siden.
-                </p>
-              ) : null}
-              {error ? <p className="text-sm text-red-600">{error}</p> : null}
-            </>
-          )}
+          </div>
+          <p className="text-center text-sm text-stone-700">Ingen flere leads i køen til Power Dialer lige nu.</p>
+          <p className="text-center">
+            <Link href="/kampagner" className="text-sm font-medium text-stone-700 underline-offset-2 hover:underline">
+              Tilbage til kampagner
+            </Link>
+          </p>
         </div>
+      );
+    }
+
+    return (
+      <div className="min-h-[50vh] px-4 py-4">
+        <div className="sticky top-0 z-10 -mx-4 bg-stone-50/90 px-4 pb-3 pt-2 backdrop-blur-sm">
+          <div className="h-1.5 w-full overflow-hidden rounded-full bg-stone-200">
+            <div className="h-full w-full rounded-full bg-emerald-600 animate-power-dialer-wait-fill" />
+          </div>
+        </div>
+        {powerDialerUiState === "connecting_human" ? (
+          <p className="mt-3 text-center text-xs text-stone-500">Forbinder…</p>
+        ) : null}
+        {sipReady === false ? (
+          <p className="mt-3 text-center text-xs text-amber-800">
+            Telnyx WebRTC er ikke klar — tjek dine indstillinger eller genindlæs siden.
+          </p>
+        ) : null}
+        {error ? <p className="mt-3 text-center text-sm text-red-600">{error}</p> : null}
+        <p className="mt-10 text-center">
+          <Link href="/kampagner" className="text-xs text-stone-500 underline-offset-2 hover:text-stone-800 hover:underline">
+            Kampagner
+          </Link>
+        </p>
       </div>
     );
   }

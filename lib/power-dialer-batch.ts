@@ -3,6 +3,7 @@
  * Genbruger kø-filter, sortering og DialerQueueItem som soft-lock.
  */
 
+import type { Prisma } from "@prisma/client";
 import type { PrismaClient } from "@prisma/client";
 import { getActiveCampaignLeads } from "@/lib/active-campaign-queue";
 import { sortLeadsForCampaignCallQueue } from "@/lib/lead-queue";
@@ -17,6 +18,16 @@ export type ClaimedDialerLead = {
   e164: string;
   queueItemId: string;
 };
+
+/** Kun Power Dialer: leads i cooldown efter usikkert AMD / no-bridge hangup må ikke claimes. */
+export function powerDialerEligibleOrPastWhere(now: Date): Prisma.LeadWhereInput {
+  return {
+    OR: [
+      { powerDialerEligibleAfter: { equals: null } },
+      { powerDialerEligibleAfter: { lte: now } },
+    ],
+  };
+}
 
 type CampaignQueueFields = {
   id: string;
@@ -33,11 +44,14 @@ export async function claimDispatchLeadBatch(
   params: {
     campaign: CampaignQueueFields;
     newCallsNeeded: number;
+    restrictPowerDialerEligibleAfter?: boolean;
   },
 ): Promise<ClaimedDialerLead[]> {
-  const { campaign, newCallsNeeded } = params;
+  const { campaign, newCallsNeeded, restrictPowerDialerEligibleAfter } = params;
   const campaignId = campaign.id;
   if (newCallsNeeded <= 0) return [];
+
+  const now = new Date();
 
   const queuedLeadIds = (
     await prisma.dialerQueueItem.findMany({
@@ -53,6 +67,7 @@ export async function claimDispatchLeadBatch(
       lockedByUserId: null,
       id: queuedLeadIds.length > 0 ? { notIn: queuedLeadIds } : undefined,
       callbackReservedByUserId: null,
+      ...(restrictPowerDialerEligibleAfter ? powerDialerEligibleOrPastWhere(now) : {}),
     },
     select: {
       id: true,

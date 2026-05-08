@@ -24,6 +24,7 @@ import {
   startTelnyxRecording,
 } from "@/lib/telnyx-call-control";
 import { encodeDialerClientState, PRESENCE_FRESH_WINDOW_MS } from "@/lib/dialer-shared";
+import { requeuePowerDialerLeadAfterNonBridge } from "@/lib/power-dialer-requeue";
 
 /** Statusser hvor et sent AMD=machine stadig må sætte VOICEMAIL (leadet er stadig i «åben» dialer-pulje). */
 const AMD_VOICEMAIL_ALLOWED: ReadonlySet<LeadStatus> = new Set(["NEW", "NOT_HOME"]);
@@ -395,6 +396,38 @@ export async function handleAmdMachine(params: {
   } else {
     await prisma.$transaction(cleanupOps);
   }
+}
+
+/**
+ * Power Dialer: AMD usikkert (not_sure, silence, …) — ingen bridge, lead forbliver NEW,
+ * cooldown + bagerst i kø via `powerDialerEligibleAfter` / `lastDialAttemptAt`.
+ */
+export async function handlePowerDialerAmdUncertain(params: {
+  apiKey: string;
+  campaignId: string;
+  leadId: string;
+  leadCallControlId: string;
+}) {
+  await hangupTelnyxCall({
+    apiKey: params.apiKey,
+    callControlId: params.leadCallControlId,
+  });
+
+  await requeuePowerDialerLeadAfterNonBridge(prisma, { leadId: params.leadId });
+
+  await prisma.$transaction([
+    prisma.dialerCallLog.updateMany({
+      where: { callControlId: params.leadCallControlId },
+      data: {
+        state: "hangup",
+        endedAt: new Date(),
+        hangupCause: "power_amd_uncertain",
+      },
+    }),
+    prisma.dialerQueueItem.deleteMany({
+      where: { leadId: params.leadId, campaignId: params.campaignId },
+    }),
+  ]);
 }
 
 /**

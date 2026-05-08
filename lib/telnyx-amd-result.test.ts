@@ -1,5 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
+  isPowerDialerDefiniteVoicemail,
+  isPowerDialerUncertain,
   mapTelnyxAmdResult,
   shouldBridgeToAgent,
   shouldMarkVoicemail,
@@ -68,6 +70,21 @@ describe("shouldBridgeToAgent — afgør om vi skal bridge til ledig agent", () 
   it("'machine' og 'fax' → ingen bridge (det er voicemail)", () => {
     expect(shouldBridgeToAgent("machine")).toBe(false);
     expect(shouldBridgeToAgent("fax")).toBe(false);
+  });
+});
+
+describe("Power Dialer: isPowerDialerDefiniteVoicemail / isPowerDialerUncertain", () => {
+  it("maskine og fax er definitive voicemail", () => {
+    expect(isPowerDialerDefiniteVoicemail("machine")).toBe(true);
+    expect(isPowerDialerDefiniteVoicemail("fax")).toBe(true);
+    expect(isPowerDialerDefiniteVoicemail("human")).toBe(false);
+    expect(isPowerDialerDefiniteVoicemail("unknown")).toBe(false);
+  });
+
+  it("kun unknown er usikker (requeue i Power — ikke bridge)", () => {
+    expect(isPowerDialerUncertain("unknown")).toBe(true);
+    expect(isPowerDialerUncertain("human")).toBe(false);
+    expect(isPowerDialerUncertain(mapTelnyxAmdResult("not_sure"))).toBe(true);
   });
 });
 

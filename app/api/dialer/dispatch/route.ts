@@ -247,6 +247,7 @@ export async function POST(req: Request) {
   const reserved = await claimDispatchLeadBatch(prisma, {
     campaign,
     newCallsNeeded,
+    restrictPowerDialerEligibleAfter: mode === "POWER_DIALER",
   });
 
   if (reserved.length === 0) {
