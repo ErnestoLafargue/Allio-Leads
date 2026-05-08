@@ -8,6 +8,11 @@ import {
   type TelnyxWebhookEnvelope,
 } from "@/lib/dialer-shared";
 import { handleAmdHuman, handleAmdMachine } from "@/lib/dialer-bridge";
+import {
+  mapTelnyxAmdResult,
+  shouldBridgeToAgent,
+  shouldMarkVoicemail,
+} from "@/lib/telnyx-amd-result";
 import { LEAD_ACTIVITY_KIND, formatPhoneForActivitySummary } from "@/lib/lead-activity-kinds";
 import { startTelnyxRecording } from "@/lib/telnyx-call-control";
 import { persistTelnyxRecordingToAllio } from "@/lib/telnyx-recording-storage";
@@ -212,44 +217,11 @@ export async function POST(req: Request) {
     case "call.machine.premium.detection.ended":
     case "call.machine.greeting.ended":
     case "call.machine.premium.greeting.ended": {
-      // Telnyx returnerer forskellige result-værdier afhængigt af AMD-mode:
-      //   detect:           human | machine | not_sure
-      //   premium:          human_residence | human_business | machine | silence | fax_detected | not_sure
-      //   greeting/beep:    ended | beep_detected | no_beep_detected | not_sure
-      //
-      // Vi mapper alle varianter til vores 4 interne kategorier:
-      //   "human"   → bridge til agent
-      //   "machine" → hangup + marker som VOICEMAIL
-      //   "fax"     → hangup + marker som VOICEMAIL (faxmaskine = ikke et menneske)
-      //   "unknown" → fallback: bridge til agent (bedre at lade agenten beslutte end at miste lead)
-      const result = String(payload.result ?? "").toLowerCase();
-      let amdResult: "human" | "machine" | "fax" | "unknown";
-      switch (result) {
-        case "human":
-        case "human_residence":
-        case "human_business":
-          amdResult = "human";
-          break;
-        case "machine":
-          amdResult = "machine";
-          break;
-        case "fax":
-        case "fax_detected":
-          amdResult = "fax";
-          break;
-        case "beep_detected":
-        case "no_beep_detected":
-        case "ended":
-          // Greeting-events fyrer KUN når AMD allerede har konkluderet machine.
-          // Vi behandler dem som "machine" så vi ikke bridger til en VM.
-          amdResult = "machine";
-          break;
-        default:
-          // silence | not_sure | uventet — usikker resultat → bridge alligevel
-          // (false negatives koster en agent 1-2 sek; false positives mister leads).
-          amdResult = "unknown";
-          break;
-      }
+      // Mappingen til 4 interne kategorier ligger i lib/telnyx-amd-result.ts
+      // (har enhedstests). "machine"/"fax" → VOICEMAIL, "human"/"unknown" →
+      // bridge til agent. Greeting-events fra premium AMD (ended/beep_detected)
+      // betragtes som machine.
+      const amdResult = mapTelnyxAmdResult(payload.result);
 
       await prisma.dialerCallLog.updateMany({
         where: { callControlId },
@@ -258,7 +230,7 @@ export async function POST(req: Request) {
           state:
             amdResult === "human"
               ? "human"
-              : amdResult === "machine" || amdResult === "fax"
+              : shouldMarkVoicemail(amdResult)
                 ? "machine"
                 : "answered",
         },
@@ -273,7 +245,7 @@ export async function POST(req: Request) {
       const isGreetingEndForMachine =
         (eventType === "call.machine.greeting.ended" ||
           eventType === "call.machine.premium.greeting.ended") &&
-        amdResult === "machine";
+        shouldMarkVoicemail(amdResult);
 
       if (
         clientState?.kind === "lead" &&
@@ -283,7 +255,7 @@ export async function POST(req: Request) {
       ) {
         const apiKey = process.env.TELNYX_API_KEY?.trim();
         if (apiKey) {
-          if (amdResult === "human" || amdResult === "unknown") {
+          if (shouldBridgeToAgent(amdResult)) {
             // Bridge til ledig agent — fire-and-forget for ikke at blokere webhook'en.
             queueMicrotask(() => {
               handleAmdHuman({
@@ -296,7 +268,7 @@ export async function POST(req: Request) {
                 console.error("[telnyx:webhook] handleAmdHuman fejlede:", err);
               });
             });
-          } else if (amdResult === "machine" || amdResult === "fax") {
+          } else if (shouldMarkVoicemail(amdResult)) {
             // Voicemail/fax → hangup leadet og marker som VOICEMAIL i databasen,
             // så det IKKE kan blive sendt til en agent senere.
             queueMicrotask(() => {

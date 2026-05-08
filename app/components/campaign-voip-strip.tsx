@@ -1372,6 +1372,41 @@ export function CampaignVoipStrip({
         return;
       }
 
+      // PREDICTIVE-mode placerer opkaldet server-side via Telnyx Call Control med
+      // premium AMD aktiveret — Telnyx detekterer voicemail og webhook-handleren
+      // sætter lead.status = VOICEMAIL via `handleAmdMachine`. Når AMD = human
+      // originater serveren tilbage til agentens SIP-URI med link_to, og
+      // `shouldAutoAnswer`-grenen i telnyx.notification besvarer det indkommende
+      // bridge automatisk. Vi skal IKKE køre client.newCall() her — det ville
+      // dial leadet uden AMD og bringe os tilbage i den gamle bug hvor voicemail
+      // blev klassificeret som NOT_HOME via 25-sek timeout.
+      if (effectiveDialMode === "PREDICTIVE") {
+        const res = await fetch("/api/telnyx/predictive-call/start", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ leadId, campaignId, toNumber: toE164 }),
+          credentials: "same-origin",
+        });
+        if (leadEpochRef.current !== leadEpochAtStart || currentLeadIdRef.current !== leadId) {
+          return;
+        }
+        if (!res.ok) {
+          const data = (await res.json().catch(() => null)) as
+            | { message?: string; error?: string }
+            | null;
+          const msg = data?.message || data?.error || `HTTP ${res.status}`;
+          throw new Error(msg);
+        }
+        // Bevar "connecting" indtil enten:
+        //   1) Telnyx leverer indkommende bridge (AMD=human) → onNotification
+        //      flytter os via shouldAutoAnswer til "ringing"/"live".
+        //   2) Lead-status skifter til VOICEMAIL (workspace-polling detekterer).
+        //   3) 25-sek `unansweredTimeoutMs` rammer → NOT_HOME-fallback.
+        setLineStatus("connecting");
+        setDetail(null);
+        return;
+      }
+
       const callOptions: Parameters<TelnyxClient["newCall"]>[0] = {
         destinationNumber: toE164,
         callerNumber: callerNumberRef.current || undefined,
@@ -1967,14 +2002,30 @@ export function CampaignVoipStrip({
                 </button>
               ))}
             </div>
-            <div className="mx-auto mt-2 flex max-w-[11rem] justify-center">
+            <div className="mx-auto mt-2 grid max-w-[11rem] grid-cols-3 gap-2">
+              <button
+                type="button"
+                onClick={() => sendDtmfDigit("*")}
+                className="rounded-lg border border-emerald-200/90 bg-white py-2.5 text-sm font-semibold text-stone-900 shadow-sm transition hover:bg-emerald-50 active:bg-emerald-100"
+                aria-label="Send stjerne"
+              >
+                *
+              </button>
               <button
                 type="button"
                 onClick={() => sendDtmfDigit("0")}
-                className="w-[calc((100%-0.5rem)/3)] min-w-[3rem] rounded-lg border border-emerald-200/90 bg-white py-2.5 text-sm font-semibold tabular-nums text-stone-900 shadow-sm transition hover:bg-emerald-50 active:bg-emerald-100"
+                className="rounded-lg border border-emerald-200/90 bg-white py-2.5 text-sm font-semibold tabular-nums text-stone-900 shadow-sm transition hover:bg-emerald-50 active:bg-emerald-100"
                 aria-label="Send tone 0"
               >
                 0
+              </button>
+              <button
+                type="button"
+                onClick={() => sendDtmfDigit("#")}
+                className="rounded-lg border border-emerald-200/90 bg-white py-2.5 text-sm font-semibold text-stone-900 shadow-sm transition hover:bg-emerald-50 active:bg-emerald-100"
+                aria-label="Send firkant"
+              >
+                #
               </button>
             </div>
           </div>

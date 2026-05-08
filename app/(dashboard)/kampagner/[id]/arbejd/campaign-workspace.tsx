@@ -3,7 +3,7 @@
 import Link from "next/link";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useSession } from "next-auth/react";
-import { LEAD_STATUSES, type LeadStatus } from "@/lib/lead-status";
+import { isLeadStatus, LEAD_STATUSES, type LeadStatus } from "@/lib/lead-status";
 import { parseCustomFields } from "@/lib/custom-fields";
 import type { BookingConfirmPayload } from "@/app/components/booking/booking-panel";
 import { LeadOutcomeStrip } from "@/app/components/lead-workspace/lead-outcome-strip";
@@ -462,6 +462,66 @@ export function CampaignWorkspace({ campaignId, preferredLeadId, voipSession = f
     onAssignedLead: handleAssignedLead,
     enableDispatch: isAutoDialModeForPresence && !autoDialPaused,
   });
+
+  /**
+   * PREDICTIVE-mode: server-side AMD kan markere det viste lead som VOICEMAIL
+   * (eller NOT_HOME) imens agentens strip står i "connecting"/"ringing". Vi
+   * poller `/api/leads/[id]/status` hvert 2. sek mens vi venter, og fyrer
+   * `onPredictiveAutoOutcome`-flowet så snart status skifter væk fra NEW —
+   * det erstatter den 25-sek WebRTC-timeout der tidligere klassificerede
+   * voicemail som NOT_HOME.
+   */
+  const predictivePollSeenStatusRef = useRef<string | null>(null);
+  const predictivePolledLeadIdRef = useRef<string | null>(null);
+  useEffect(() => {
+    if (campaignDialMode !== "PREDICTIVE") return;
+    if (autoDialPaused) return;
+    if (!activeLead) return;
+    if (voipLineStatus !== "connecting" && voipLineStatus !== "ringing") return;
+
+    const leadId = activeLead.id;
+    if (predictivePolledLeadIdRef.current !== leadId) {
+      predictivePolledLeadIdRef.current = leadId;
+      predictivePollSeenStatusRef.current = activeLead.status;
+    }
+    let cancelled = false;
+    const tick = async () => {
+      if (cancelled) return;
+      try {
+        const res = await fetch(`/api/leads/${leadId}/status`, {
+          method: "GET",
+          credentials: "same-origin",
+        });
+        if (cancelled) return;
+        if (!res.ok) return;
+        const data = (await res.json()) as { status?: string };
+        if (cancelled) return;
+        const next = typeof data?.status === "string" ? data.status : null;
+        if (!next) return;
+        const seen = predictivePollSeenStatusRef.current;
+        // Vi reagerer kun ved en transition væk fra NEW (eller første gang vi
+        // ser et terminal-udfald). Når AMD-handleren har sat VOICEMAIL/NOT_HOME
+        // server-side, skal workspace skifte til næste lead — uafhængigt af
+        // 25-sek WebRTC-fallback.
+        if (next !== seen && next !== "NEW" && isLeadStatus(next)) {
+          predictivePollSeenStatusRef.current = next;
+          if (activeLeadRef.current?.id !== leadId) return;
+          setStatus(next);
+          queueMicrotask(() => void onNextRef.current(undefined, undefined, next));
+        } else {
+          predictivePollSeenStatusRef.current = next;
+        }
+      } catch {
+        /* polling-fejl må ikke blokere UI'et */
+      }
+    };
+    void tick();
+    const handle = window.setInterval(tick, 2000);
+    return () => {
+      cancelled = true;
+      window.clearInterval(handle);
+    };
+  }, [campaignDialMode, autoDialPaused, activeLead, voipLineStatus]);
 
   useEffect(() => {
     if (!activeLead) return;
