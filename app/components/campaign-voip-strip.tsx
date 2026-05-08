@@ -1342,39 +1342,50 @@ export function CampaignVoipStrip({
         return;
       }
 
-      // PREDICTIVE-mode placerer opkaldet server-side via Telnyx Call Control med
-      // premium AMD aktiveret — Telnyx detekterer voicemail og webhook-handleren
-      // sætter lead.status = VOICEMAIL via `handleAmdMachine`. Når AMD = human
-      // originater serveren tilbage til agentens SIP-URI med link_to, og
-      // `shouldAutoAnswer`-grenen i telnyx.notification besvarer det indkommende
-      // bridge automatisk. Vi skal IKKE køre client.newCall() her — det ville
-      // dial leadet uden AMD og bringe os tilbage i den gamle bug hvor voicemail
-      // blev klassificeret som NOT_HOME via 25-sek timeout.
+      // Predictive bruger samme WebRTC-motor som Power: prepare → newCall med kind=manual
+      // (optagelse/webhooks). Obligatorisk prepare så kø-filter og clientState altid er på plads.
+      let clientStateForCall: string | undefined;
       if (effectiveDialMode === "PREDICTIVE") {
-        const res = await fetch("/api/telnyx/predictive-call/start", {
+        const prepRes = await fetch("/api/telnyx/manual-call/prepare", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ leadId, campaignId, toNumber: toE164 }),
+          body: JSON.stringify({ leadId, campaignId, voipApiContext }),
           credentials: "same-origin",
         });
         if (leadEpochRef.current !== leadEpochAtStart || currentLeadIdRef.current !== leadId) {
           return;
         }
-        if (!res.ok) {
-          const data = (await res.json().catch(() => null)) as
-            | { message?: string; error?: string }
-            | null;
-          const msg = data?.message || data?.error || `HTTP ${res.status}`;
-          throw new Error(msg);
+        if (!prepRes.ok) {
+          const data = (await prepRes.json().catch(() => null)) as { error?: string } | null;
+          throw new Error(data?.error || `Kunne ikke forberede opkald (HTTP ${prepRes.status}).`);
         }
-        // Bevar "connecting" indtil enten:
-        //   1) Telnyx leverer indkommende bridge (AMD=human) → onNotification
-        //      flytter os via shouldAutoAnswer til "ringing"/"live".
-        //   2) Lead-status skifter til VOICEMAIL (workspace-polling detekterer).
-        //   3) 25-sek `unansweredTimeoutMs` rammer → NOT_HOME-fallback.
-        setLineStatus("connecting");
-        setDetail(null);
-        return;
+        const prepData = (await prepRes.json()) as { clientState?: string };
+        if (typeof prepData?.clientState !== "string" || prepData.clientState.length === 0) {
+          throw new Error("Kunne ikke forberede opkald — mangler clientState.");
+        }
+        clientStateForCall = prepData.clientState;
+        manualClientStateRef.current = prepData.clientState;
+      } else {
+        clientStateForCall = manualClientStateRef.current ?? undefined;
+        if (!clientStateForCall) {
+          try {
+            const prepRes = await fetch("/api/telnyx/manual-call/prepare", {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({ leadId, voipApiContext }),
+              credentials: "same-origin",
+            });
+            if (prepRes.ok) {
+              const prepData = (await prepRes.json()) as { clientState?: string };
+              if (typeof prepData?.clientState === "string" && prepData.clientState.length > 0) {
+                clientStateForCall = prepData.clientState;
+                manualClientStateRef.current = prepData.clientState;
+              }
+            }
+          } catch {
+            /* optagelse/webhook-korrelation — opkald må fortsætte (power/adfærd uændret) */
+          }
+        }
       }
 
       const callOptions: Parameters<TelnyxClient["newCall"]>[0] = {
@@ -1392,29 +1403,6 @@ export function CampaignVoipStrip({
         callOptions.localStream = micMonitorStream.clone();
       } else {
         callOptions.micId = micId;
-      }
-      // Send clientState så Telnyx kan korrelere webhooks → leadId/userId/campaignId
-      // (auto-start recording, opret CALL_RECORDING-aktivitet i lead-historik).
-      // Sikrer clientState i klik-pathen: pre-fetch effect kan stadig køre, så ref kan være tom.
-      let clientStateForCall = manualClientStateRef.current;
-      if (!clientStateForCall) {
-        try {
-          const prepRes = await fetch("/api/telnyx/manual-call/prepare", {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ leadId, voipApiContext }),
-            credentials: "same-origin",
-          });
-          if (prepRes.ok) {
-            const prepData = (await prepRes.json()) as { clientState?: string };
-            if (typeof prepData?.clientState === "string" && prepData.clientState.length > 0) {
-              clientStateForCall = prepData.clientState;
-              manualClientStateRef.current = prepData.clientState;
-            }
-          }
-        } catch {
-          /* optagelse/webhook-korrelation — opkald må fortsætte */
-        }
       }
       if (clientStateForCall) {
         callOptions.clientState = clientStateForCall;
@@ -1527,9 +1515,9 @@ export function CampaignVoipStrip({
       })();
       return;
     }
-    // PREDICTIVE: lead-ben kører server-side uden `client.newCall()`, så `activeCallRef`
-    // er ofte null mens strippen viser connecting/ringing. Parent (`requestCallHangupBeforeAdvance`)
-    // øger hangupSignal ved «Gem og næste» — vi skal stadig nulstille UI og timer.
+    // PREDICTIVE: ved «Gem og næste» kan hangupSignalet komme mens SDK stadig opfatter
+    // connecting/ringing; kør hangUp også når activeCallRef er null (defensiv reset).
+    // Parent (`requestCallHangupBeforeAdvance`) øger hangupSignal.
     if (
       dialModeRef.current === "PREDICTIVE" &&
       (lineStatus === "connecting" || lineStatus === "ringing" || lineStatus === "live")
@@ -1576,9 +1564,8 @@ export function CampaignVoipStrip({
   }, [leadId, voipPhone, leadPhone, effectiveAutoStart, audioSetupReady, lineStatus]);
 
   /**
-   * Predictive-mode: hvis vi har ringet i for lang tid (modtageren tager den ikke),
-   * lægger vi automatisk på og signalerer workspace om at hente næste lead.
-   * Power Dialer er bevidst manuel — agenten styrer selv hvornår der gås videre.
+   * Predictive-mode: hvis modtageren ikke svarer inden timeout, lægges der på og
+   * workspace sætter VOICEMAIL og går videre til næste lead. Power bruger ikke denne effekt.
    */
   useEffect(() => {
     if (effectiveDialMode !== "PREDICTIVE") return;
