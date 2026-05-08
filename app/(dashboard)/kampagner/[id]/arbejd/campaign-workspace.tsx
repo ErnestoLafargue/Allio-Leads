@@ -919,8 +919,13 @@ export function CampaignWorkspace({ campaignId, preferredLeadId, voipSession = f
     (next: LeadStatus) => {
       clearPrefetchReservation();
       setStatus(next);
-      if (campaignDialMode !== "PREDICTIVE") return;
-      if (next === "NEW" || next === "MEETING_BOOKED" || next === "CALLBACK_SCHEDULED") return;
+      /** Power + Predictive: gem+skift uden «Gem og næste». Ikke NO_DIAL / CLICK_TO_CALL. */
+      const autoAdvanceOnOutcome =
+        (campaignDialMode === "POWER_DIALER" || campaignDialMode === "PREDICTIVE") &&
+        next !== "NEW" &&
+        next !== "MEETING_BOOKED" &&
+        next !== "CALLBACK_SCHEDULED";
+      if (!autoAdvanceOnOutcome) return;
       queueMicrotask(() => void onNextRef.current(undefined, undefined, next));
     },
     [campaignDialMode, clearPrefetchReservation],
