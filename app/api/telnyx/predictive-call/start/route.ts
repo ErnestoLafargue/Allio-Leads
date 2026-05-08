@@ -17,7 +17,6 @@ import {
 } from "@/lib/dialer-shared";
 import { assertLeadMatchesActiveCampaignQueueOr403 } from "@/lib/active-campaign-queue";
 import { classifyPredictiveDialFailure } from "@/lib/predictive-dial-errors";
-import { provisionTelnyxAgentsForUsers } from "@/lib/telnyx-provision-agents-server";
 
 /**
  * POST /api/telnyx/predictive-call/start
@@ -130,24 +129,10 @@ export async function POST(req: Request) {
   }
 
   const connectionId = getTelnyxConnectionId();
-  let user = await prisma.user.findUnique({
-    where: { id: session!.user.id },
-    select: { telnyxCredentialId: true },
-  });
-  // Lazy-provision: hvis agenten mangler credential connection, prøv at oprette den nu
-  // (kræver TELNYX_API_KEY i runtime). Det reducerer afhængighed af den fælles
-  // fallback-connection med lav channel limit.
-  if (!user?.telnyxCredentialId) {
-    await provisionTelnyxAgentsForUsers({ userIds: [session!.user.id], force: false }).catch(() => {});
-    user = await prisma.user.findUnique({
-      where: { id: session!.user.id },
-      select: { telnyxCredentialId: true },
-    });
-  }
-  // Primært: agentens egen credential connection (fordeler kapacitet pr. agent).
-  // Fallback: global TELNYX_CONNECTION_ID for brugere uden provisioneret credential.
-  const effectiveConnectionId = user?.telnyxCredentialId || connectionId;
-  if (!effectiveConnectionId) {
+  // Outbound predictive dials skal altid bruge den fælles Call Control Application.
+  // `User.telnyxCredentialId` er en telephony credential (UUID) til WebRTC login-token
+  // og må ikke bruges som call-control `connection_id`.
+  if (!connectionId) {
     return NextResponse.json(
       {
         ok: false,
@@ -221,7 +206,7 @@ export async function POST(req: Request) {
   const webhookUrl = process.env.TELNYX_CALL_WEBHOOK_URL?.trim() || undefined;
 
   const dial = await dialTelnyxOutbound({
-    connectionId: effectiveConnectionId,
+    connectionId,
     from: fromE164,
     to: toE164,
     apiKey,

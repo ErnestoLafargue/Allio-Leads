@@ -23,7 +23,6 @@ import {
   startTelnyxRecording,
 } from "@/lib/telnyx-call-control";
 import { encodeDialerClientState, PRESENCE_FRESH_WINDOW_MS } from "@/lib/dialer-shared";
-import { provisionTelnyxAgentsForUsers } from "@/lib/telnyx-provision-agents-server";
 
 /** Statusser hvor et sent AMD=machine stadig må sætte VOICEMAIL (leadet er stadig i «åben» dialer-pulje). */
 const AMD_VOICEMAIL_ALLOWED: ReadonlySet<LeadStatus> = new Set(["NEW", "NOT_HOME"]);
@@ -40,7 +39,7 @@ function leadStatusAllowsAmdVoicemail(status: string | null | undefined): boolea
  */
 export async function reserveReadyAgent(params: {
   campaignId: string;
-}): Promise<{ userId: string; sipUsername: string; sessionId: string; connectionId: string | null } | null> {
+}): Promise<{ userId: string; sipUsername: string; sessionId: string } | null> {
   const cutoff = new Date(Date.now() - PRESENCE_FRESH_WINDOW_MS);
   // Vi laver en transaktion: find første ready agent og marker den som "ringing"
   // i én atomic operation så ingen anden dispatcher tager samme agent.
@@ -65,14 +64,13 @@ export async function reserveReadyAgent(params: {
       if (updated.count === 1) {
         const user = await tx.user.findUnique({
           where: { id: session.userId },
-          select: { telnyxSipUsername: true, telnyxCredentialId: true },
+          select: { telnyxSipUsername: true },
         });
         if (user?.telnyxSipUsername) {
           return {
             userId: session.userId,
             sipUsername: user.telnyxSipUsername,
             sessionId: session.id,
-            connectionId: user.telnyxCredentialId ?? null,
           };
         }
         // Agent har ingen SIP — sæt tilbage til ready og prøv næste
@@ -187,19 +185,7 @@ export async function handleAmdHuman(params: {
     return { status: "no-agent" };
   }
 
-  // Primært: den valgte agents egen credential connection (spreder kapacitet).
-  // Fallback: global call-control app connection.
-  let effectiveAgentConnectionId = reserved.connectionId;
-  if (!effectiveAgentConnectionId) {
-    // Lazy-provision for agenten hvis credential mangler.
-    await provisionTelnyxAgentsForUsers({ userIds: [reserved.userId], force: false }).catch(() => {});
-    const refreshed = await prisma.user.findUnique({
-      where: { id: reserved.userId },
-      select: { telnyxCredentialId: true },
-    });
-    effectiveAgentConnectionId = refreshed?.telnyxCredentialId ?? null;
-  }
-  const connectionId = effectiveAgentConnectionId || getTelnyxConnectionId();
+  const connectionId = getTelnyxConnectionId();
   if (!connectionId) {
     await releaseAgentSession({ sessionId: reserved.sessionId, newStatus: "ready" });
     return { status: "failed", message: "TELNYX_CONNECTION_ID mangler — kan ikke bridge" };
