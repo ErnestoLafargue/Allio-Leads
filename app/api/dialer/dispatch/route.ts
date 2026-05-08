@@ -8,18 +8,20 @@ import {
   type AmdConfig,
 } from "@/lib/telnyx-call-control";
 import { campaignUsesVoipUi, normalizeCampaignDialMode } from "@/lib/dial-mode";
-import { normalizePhoneToE164ForDial } from "@/lib/phone-e164";
-import { encodeDialerClientState, PRESENCE_FRESH_WINDOW_MS, QUEUE_RESERVATION_TTL_MS } from "@/lib/dialer-shared";
+import { encodeDialerClientState, PRESENCE_FRESH_WINDOW_MS } from "@/lib/dialer-shared";
 import {
   DIALER_ABANDON_TARGET,
   MIN_PACING_SAMPLE_BEFORE_TUNE,
   PACING_WINDOW_MS,
   getTargetPacingRatioAndStats,
 } from "@/lib/dialer-pacing";
-import { getActiveCampaignLeads } from "@/lib/active-campaign-queue";
-import { sortLeadsForCampaignCallQueue } from "@/lib/lead-queue";
-import { getLeadIdsWithOutcomeLogToday } from "@/lib/lead-outcome-today";
-import { filterLeadsByCampaignProtectedSetting } from "@/lib/reklamebeskyttet-filter";
+import {
+  computeDispatchNewCallsNeeded,
+  MAX_IN_FLIGHT_PER_CAMPAIGN,
+  parseTelnyxOutboundChannelLimitFromEnv,
+  POWER_DIALER_LEADS_PER_READY_AGENT,
+} from "@/lib/dialer-dispatch-math";
+import { claimDispatchLeadBatch } from "@/lib/power-dialer-batch";
 
 /**
  * Server-side parallel dialer — placerer N udgående opkald baseret på antal ledige agenter
@@ -38,6 +40,8 @@ import { filterLeadsByCampaignProtectedSetting } from "@/lib/reklamebeskyttet-fi
  * placerer kun nye hvis der er kapacitet. DialerQueueItem.leadId er unique så samme
  * lead aldrig dispatches to gange samtidig.
  *
+ * In-flight ben afbrydes ikke når `readyCount` falder — kun færre *nye* dials startes.
+ *
  * Kaldes typisk fra workspace heartbeat (hver 5 sek) eller fra en cron-trigger.
  */
 
@@ -50,7 +54,7 @@ const DEFAULT_AMD: AmdConfig = {
 
 /**
  * Pacing-ratio: hvor mange opkald pr. ledig agent der må være i luften.
- * - POWER_DIALER: fast 1.0
+ * - POWER_DIALER: 5 (power dialer — parallel op til kundens svar)
  * - PREDICTIVE:   dynamisk 1.0–3.0 baseret på rullende 1h-vindue (bridges vs. no-agent abandons);
  *   sigter mod DIALER_ABANDON_TARGET (~3 %)
  */
@@ -70,7 +74,7 @@ async function targetPacingRatio(
   }
   if (dialMode === "POWER_DIALER") {
     return {
-      ratio: 1.0,
+      ratio: POWER_DIALER_LEADS_PER_READY_AGENT,
       abandonRate: null,
       sampleSize: 0,
       bridgeCount: 0,
@@ -91,7 +95,7 @@ async function targetPacingRatio(
 function pacingJson(
   mode: string,
   pacing: Awaited<ReturnType<typeof targetPacingRatio>>,
-  extras?: { targetTotal?: number },
+  extras?: { targetTotal?: number; telnyxChannelLimit?: number | null },
 ) {
   return {
     mode,
@@ -105,14 +109,11 @@ function pacingJson(
     noAgentAbandons1h: pacing.noAgentAbandonCount,
     heldLowSample: pacing.heldLowSample,
     ...(extras?.targetTotal !== undefined ? { targetTotal: extras.targetTotal } : {}),
+    ...(extras?.telnyxChannelLimit !== undefined
+      ? { telnyxChannelLimit: extras.telnyxChannelLimit }
+      : {}),
   };
 }
-
-/**
- * Hard cap på antal samtidige in-flight opkald pr. kampagne uanset agent-tæl.
- * Beskytter mod runaway-dispatch hvis presence-data er forkert. Kan tunes senere.
- */
-const MAX_IN_FLIGHT_PER_CAMPAIGN = 50;
 
 export async function POST(req: Request) {
   const { session, response } = await requireSession();
@@ -192,6 +193,10 @@ export async function POST(req: Request) {
   });
 
   const pacing = await targetPacingRatio(mode, campaignId);
+  const channelLimit = parseTelnyxOutboundChannelLimitFromEnv(
+    process.env.TELNYX_OUTBOUND_CHANNEL_LIMIT,
+  );
+
   if (readyCount === 0) {
     return NextResponse.json({
       ok: true,
@@ -200,11 +205,10 @@ export async function POST(req: Request) {
       ready: 0,
       inFlight: inFlightCalls,
       reason: "Ingen ledige agenter (provisioneret + ready + frisk heartbeat).",
-      pacing: pacingJson(mode, pacing),
+      pacing: pacingJson(mode, pacing, { telnyxChannelLimit: channelLimit }),
     });
   }
 
-  // 3) Beregn antal nye opkald
   const { ratio } = pacing;
   if (ratio <= 0) {
     return NextResponse.json({
@@ -212,17 +216,19 @@ export async function POST(req: Request) {
       dispatched: 0,
       attempted: 0,
       reason: `dialMode=${mode} understøtter ikke server-side dispatch`,
-      pacing: pacingJson(mode, pacing),
+      pacing: pacingJson(mode, pacing, { telnyxChannelLimit: channelLimit }),
     });
   }
-  const targetTotal = Math.min(
-    Math.floor(readyCount * ratio),
-    MAX_IN_FLIGHT_PER_CAMPAIGN,
-  );
-  let newCallsNeeded = Math.max(0, targetTotal - inFlightCalls);
-  if (maxNewCallsOverride !== null) {
-    newCallsNeeded = Math.min(newCallsNeeded, maxNewCallsOverride);
-  }
+
+  const { targetTotal, newCallsNeeded } = computeDispatchNewCallsNeeded({
+    readyCount,
+    ratio,
+    inFlightCalls,
+    maxInFlightCap: MAX_IN_FLIGHT_PER_CAMPAIGN,
+    maxNewCallsOverride,
+    channelLimit,
+  });
+
   if (newCallsNeeded === 0) {
     return NextResponse.json({
       ok: true,
@@ -230,121 +236,18 @@ export async function POST(req: Request) {
       attempted: 0,
       ready: readyCount,
       inFlight: inFlightCalls,
-      reason: `Allerede ${inFlightCalls}/${targetTotal} i luften — ingen nye nu.`,
-      pacing: pacingJson(mode, pacing, { targetTotal }),
+      reason:
+        channelLimit !== null && inFlightCalls >= channelLimit
+          ? `Telnyx channel-limit nået (${inFlightCalls}/${channelLimit}) — ingen nye nu.`
+          : `Allerede ${inFlightCalls}/${targetTotal} i luften — ingen nye nu.`,
+      pacing: pacingJson(mode, pacing, { targetTotal, telnyxChannelLimit: channelLimit }),
     });
   }
 
-  // 4) Find næste leads — ekskluder dem der allerede er i kø, låst, eller ikke i NEW status
-  // Vi bruger IKKE eksisterende lead-lock fordi det knytter til en specifik user, mens
-  // vores dispatch er campaign-niveau — i stedet bruger vi DialerQueueItem som "soft lock".
-  const queuedLeadIds = (
-    await prisma.dialerQueueItem.findMany({
-      where: { campaignId },
-      select: { leadId: true },
-    })
-  ).map((q) => q.leadId);
-
-  const candidatesRaw = await prisma.lead.findMany({
-    where: {
-      campaignId,
-      status: "NEW",
-      lockedByUserId: null,
-      id: queuedLeadIds.length > 0 ? { notIn: queuedLeadIds } : undefined,
-      // Ikke planlagt callback for andre brugere
-      callbackReservedByUserId: null,
-    },
-    select: {
-      id: true,
-      phone: true,
-      companyName: true,
-      industry: true,
-      customFields: true,
-      meetingScheduledFor: true,
-      importedAt: true,
-      lastOutcomeAt: true,
-      lastDialAttemptAt: true,
-    },
-    orderBy: [{ importedAt: "asc" }],
-    take: Math.min(500, Math.max(newCallsNeeded * 25, 50)),
+  const reserved = await claimDispatchLeadBatch(prisma, {
+    campaign,
+    newCallsNeeded,
   });
-
-  const fieldConfigJson = typeof campaign.fieldConfig === "string" ? campaign.fieldConfig : "{}";
-  const viewRaw = typeof campaign.activeQueueFilter === "string" ? campaign.activeQueueFilter : "{}";
-  let pool = getActiveCampaignLeads(
-    candidatesRaw.map((r) => ({
-      id: r.id,
-      industry: r.industry ?? "",
-      customFields: r.customFields,
-      meetingScheduledFor: r.meetingScheduledFor,
-    })),
-    fieldConfigJson,
-    viewRaw,
-  );
-  const idSet = new Set(pool.map((p) => p.id));
-  pool = filterLeadsByCampaignProtectedSetting(
-    candidatesRaw.filter((r) => idSet.has(r.id)),
-    campaign.includeProtectedBusinesses,
-  ).map((r) => ({
-    id: r.id,
-    industry: r.industry ?? "",
-    customFields: r.customFields,
-    meetingScheduledFor: r.meetingScheduledFor,
-  }));
-  // Samme sortering som kampagnekøen (undgå kun «ældst importeret»-orden).
-  const outcomeToday = await getLeadIdsWithOutcomeLogToday(pool.map((p) => p.id));
-  const byId = new Map(candidatesRaw.map((r) => [r.id, r]));
-  const queueOrdered = sortLeadsForCampaignCallQueue(
-    pool.map((p) => {
-      const r = byId.get(p.id);
-      return {
-        id: p.id,
-        status: "NEW" as const,
-        hasOutcomeLogToday: outcomeToday.has(p.id),
-        importedAt:
-          r?.importedAt instanceof Date ? r.importedAt.toISOString() : String(r?.importedAt ?? ""),
-        lastOutcomeAt:
-          r?.lastOutcomeAt instanceof Date ? r.lastOutcomeAt.toISOString() : undefined,
-        lastDialAttemptAt:
-          r?.lastDialAttemptAt instanceof Date ? r.lastDialAttemptAt.toISOString() : undefined,
-      };
-    }),
-  );
-  const candidates = queueOrdered
-    .map((row) => byId.get(row.id))
-    .filter((r): r is NonNullable<typeof r> => Boolean(r));
-
-  // 5) Reservér leads i DialerQueueItem (atomisk for at undgå race med samtidige dispatches)
-  const expiresAt = new Date(Date.now() + QUEUE_RESERVATION_TTL_MS);
-  const reserved: { leadId: string; phone: string; e164: string }[] = [];
-
-  for (const lead of candidates) {
-    if (reserved.length >= newCallsNeeded) break;
-    const e164 = normalizePhoneToE164ForDial(lead.phone);
-    if (!e164) continue; // ugyldigt nummer
-    try {
-      // Atomisk: opret kø-item OG bump lastDialAttemptAt så samme lead ikke
-      // re-vælges som "fresh" i næste heartbeat hvis dial-forsøget aldrig
-      // resulterer i et udfald (no_answer / originate_failed / timeout).
-      await prisma.$transaction([
-        prisma.dialerQueueItem.create({
-          data: {
-            campaignId,
-            leadId: lead.id,
-            expiresAt,
-          },
-        }),
-        prisma.lead.update({
-          where: { id: lead.id },
-          data: { lastDialAttemptAt: new Date() },
-        }),
-      ]);
-      reserved.push({ leadId: lead.id, phone: lead.phone, e164 });
-    } catch {
-      // Race: andet dispatch tog samme lead, prøv næste
-      continue;
-    }
-  }
 
   if (reserved.length === 0) {
     return NextResponse.json({
@@ -354,13 +257,13 @@ export async function POST(req: Request) {
       ready: readyCount,
       inFlight: inFlightCalls,
       reason: "Ingen flere ledige leads at dispatche (alle er allerede i kø, låst eller ugyldige numre).",
-      pacing: pacingJson(mode, pacing, { targetTotal }),
+      pacing: pacingJson(mode, pacing, { targetTotal, telnyxChannelLimit: channelLimit }),
     });
   }
 
-  // 6) Place outbound calls parallelt med AMD
   const webhookUrl = process.env.TELNYX_CALL_WEBHOOK_URL?.trim() || undefined;
   const dispatchId = `disp_${Date.now()}_${session!.user.id.slice(-4)}`;
+  const dialModeToken = mode === "PREDICTIVE" ? "PREDICTIVE" : "POWER_DIALER";
 
   const dialResults = await Promise.all(
     reserved.map(async (r) => {
@@ -372,11 +275,14 @@ export async function POST(req: Request) {
         return { leadId: r.leadId, ok: false as const, error: "TELNYX_FROM_NUMBER mangler" };
       }
       const clientState = encodeDialerClientState({
-        v: 1,
+        v: 2,
         kind: "lead",
         campaignId,
         leadId: r.leadId,
-        dispatchId,
+        queueItemId: r.queueItemId,
+        batchId: dispatchId,
+        dialMode: dialModeToken,
+        phoneE164: r.e164,
       });
       const dial = await dialTelnyxOutbound({
         connectionId,
@@ -402,45 +308,43 @@ export async function POST(req: Request) {
     }),
   );
 
-  // 7) Persistér resultater + cleanup fejlede reservationer
   const successes: typeof dialResults = [];
   const failures: { leadId: string; error: string }[] = [];
 
   for (const r of dialResults) {
     if (r.ok) {
       successes.push(r);
-      // Race-beskyttelse: webhook kan have oprettet DialerCallLog før vi når hertil
-      // (Telnyx svarer med call_control_id, vi opretter log, men AMD kan fyre i mellemtiden).
-      // Brug upsert så vi aldrig fejler på unique-constraint og altid sikrer agent/queue-data.
-      await prisma.$transaction([
-        prisma.dialerCallLog.upsert({
-          where: { callControlId: r.callControlId },
-          create: {
-            campaignId,
-            leadId: r.leadId,
-            callControlId: r.callControlId,
-            callSessionId: r.callSessionId ?? null,
-            direction: "outbound-lead",
-            state: "initiated",
-            fromNumber: r.from,
-            toNumber: r.to,
-          },
-          update: {
-            campaignId,
-            leadId: r.leadId,
-            callSessionId: r.callSessionId ?? null,
-            direction: "outbound-lead",
-            fromNumber: r.from,
-            toNumber: r.to,
-          },
-        }),
-        prisma.dialerQueueItem.update({
-          where: { leadId: r.leadId },
-          data: { activeCallControlId: r.callControlId, attempts: { increment: 1 } },
-        }),
-      ]).catch((err) => {
-        console.error("[dispatch] persist call log/queue failed", err);
-      });
+      await prisma
+        .$transaction([
+          prisma.dialerCallLog.upsert({
+            where: { callControlId: r.callControlId },
+            create: {
+              campaignId,
+              leadId: r.leadId,
+              callControlId: r.callControlId,
+              callSessionId: r.callSessionId ?? null,
+              direction: "outbound-lead",
+              state: "initiated",
+              fromNumber: r.from,
+              toNumber: r.to,
+            },
+            update: {
+              campaignId,
+              leadId: r.leadId,
+              callSessionId: r.callSessionId ?? null,
+              direction: "outbound-lead",
+              fromNumber: r.from,
+              toNumber: r.to,
+            },
+          }),
+          prisma.dialerQueueItem.update({
+            where: { leadId: r.leadId },
+            data: { activeCallControlId: r.callControlId, attempts: { increment: 1 } },
+          }),
+        ])
+        .catch((err) => {
+          console.error("[dispatch] persist call log/queue failed", err);
+        });
     } else {
       failures.push({ leadId: r.leadId, error: r.error });
       await prisma.dialerQueueItem.deleteMany({ where: { leadId: r.leadId } });
@@ -457,7 +361,7 @@ export async function POST(req: Request) {
     target: targetTotal,
     dispatchId,
     errors: failures.length > 0 ? failures : undefined,
-    pacing: pacingJson(mode, pacing, { targetTotal }),
+    pacing: pacingJson(mode, pacing, { targetTotal, telnyxChannelLimit: channelLimit }),
   });
 }
 

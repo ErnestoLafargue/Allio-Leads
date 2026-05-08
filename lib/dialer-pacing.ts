@@ -102,7 +102,7 @@ export function predictivePacingRatioFromRates(params: {
 
 /**
  * Mål: total in-flight = floor(readyAgents * ratio) for PREDICTIVE.
- * POWER_DIALER: fast 1.0 (én dial pr. klar agent ad gangen).
+ * POWER_DIALER bruger egen ratio (5) via dispatch — ikke denne hjælpers fallback.
  */
 export async function getTargetPacingRatioAndStats(
   db: DialerPacingDb,

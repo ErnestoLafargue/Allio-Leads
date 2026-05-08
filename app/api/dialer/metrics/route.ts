@@ -12,6 +12,7 @@ import {
   PACING_WINDOW_MS,
 } from "@/lib/dialer-pacing";
 import { normalizeCampaignDialMode } from "@/lib/dial-mode";
+import { POWER_DIALER_LEADS_PER_READY_AGENT } from "@/lib/dialer-dispatch-math";
 
 /**
  * GET ?campaignId=... — admin: aggregerede dialer-metrics til dashboard.
@@ -73,7 +74,7 @@ export async function GET(req: Request) {
     mode === "PREDICTIVE"
       ? await getTargetPacingRatioAndStats(prisma, { campaignId, dialMode: "PREDICTIVE" })
       : {
-          ratio: mode === "POWER_DIALER" ? 1.0 : 0,
+          ratio: mode === "POWER_DIALER" ? POWER_DIALER_LEADS_PER_READY_AGENT : 0,
           abandonRate: null as number | null,
           sampleSize: 0,
           bridgeCount: bridges1h,

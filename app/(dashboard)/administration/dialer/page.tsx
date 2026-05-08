@@ -93,7 +93,7 @@ export default function DialerMetricsPage() {
       <div>
         <h1 className="text-xl font-semibold text-stone-900">Dialer-metrics</h1>
         <p className="mt-1 text-sm text-stone-600">
-          Abandon-rate, pacing-ratio (mål ~3 % for predictive; power dialer bruger fast ratio 1)
+          Abandon-rate, pacing-ratio (mål ~3 % for predictive; Power Dialer bruger fast ratio 5 pr. ledig agent)
           og agentbelastning pr. kampagne. Kræver at agenter sender presence og at server-dispatch kører
           (Power/Predictive).
         </p>

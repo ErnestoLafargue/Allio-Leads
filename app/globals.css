@@ -17,3 +17,18 @@ body {
   color: var(--foreground);
   font-family: var(--font-geist-sans), system-ui, sans-serif;
 }
+
+/** Power Dialer venteskærm — 25s lineær loop uden tal */
+@keyframes power-dialer-wait-fill {
+  0% {
+    transform: scaleX(0);
+  }
+  100% {
+    transform: scaleX(1);
+  }
+}
+
+.animate-power-dialer-wait-fill {
+  animation: power-dialer-wait-fill 25s linear infinite;
+  transform-origin: left center;
+}

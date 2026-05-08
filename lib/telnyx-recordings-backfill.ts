@@ -235,7 +235,7 @@ async function findLeadIdForRecording(rec: TelnyxRecording): Promise<{
     return {
       leadId: cs.leadId,
       campaignId: cs.campaignId ?? null,
-      agentUserId: cs.userId ?? null,
+      agentUserId: cs.v === 1 ? cs.userId ?? null : null,
       source: "client_state",
     };
   }
@@ -244,7 +244,7 @@ async function findLeadIdForRecording(rec: TelnyxRecording): Promise<{
     callControlId: rec.callControlId,
     callSessionId: rec.callSessionId,
     clientStateLeadId: null,
-    clientStateUserId: cs?.userId ?? null,
+    clientStateUserId: cs?.v === 1 ? cs.userId ?? null : null,
     fromNumber: rec.fromNumber,
     toNumber: rec.toNumber,
   });

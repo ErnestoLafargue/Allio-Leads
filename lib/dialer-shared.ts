@@ -15,35 +15,61 @@ import { Buffer } from "node:buffer";
  * Telnyx returnerer det uændret på alle webhooks så vi kan korrelere
  * et call_control_id med vores lead/agent/dispatch-context.
  */
-export type DialerClientState = {
-  /// Versionsnummer — bumpes hvis schema ændres så gamle states kan ignoreres.
+export type DialerClientStateV1 = {
   v: 1;
-  /// "lead" = udgående mod et lead, "agent" = originate til agent SIP, "manual" = klick-til-call
   kind: "lead" | "agent" | "manual";
   campaignId: string;
-  /// Lead'et der ringes til (kun ved kind=lead/manual)
   leadId?: string;
-  /// Agent der har bedt om opkaldet (kun ved kind=manual) eller agent der bridges til (kind=agent)
   userId?: string;
-  /// Den anden legs call_control_id når kind=agent (lead'et vi skal bridge til)
   linkedCallControlId?: string;
-  /// Dispatcher-batch-id, hjælp til at gruppere events i logs/admin
   dispatchId?: string;
 };
 
+/** Lead-leg fra server-side dispatch — udvidet kontekst til logs, recording og idempotens. */
+export type DialerClientStateLeadV2 = {
+  v: 2;
+  kind: "lead";
+  campaignId: string;
+  leadId: string;
+  queueItemId: string;
+  batchId: string;
+  dialMode: "POWER_DIALER" | "PREDICTIVE";
+  phoneE164: string;
+};
+
+export type DialerClientState = DialerClientStateV1 | DialerClientStateLeadV2;
+
 export function encodeDialerClientState(state: DialerClientState): string {
   return Buffer.from(JSON.stringify(state), "utf8").toString("base64");
+}
+
+function parseV1(parsed: Record<string, unknown>): DialerClientStateV1 | null {
+  if (typeof parsed.campaignId !== "string" || parsed.campaignId.length === 0) return null;
+  if (parsed.kind !== "lead" && parsed.kind !== "agent" && parsed.kind !== "manual") return null;
+  return parsed as DialerClientStateV1;
+}
+
+function parseV2Lead(parsed: Record<string, unknown>): DialerClientStateLeadV2 | null {
+  if (parsed.kind !== "lead") return null;
+  if (typeof parsed.campaignId !== "string" || parsed.campaignId.length === 0) return null;
+  if (typeof parsed.leadId !== "string" || parsed.leadId.length === 0) return null;
+  if (typeof parsed.queueItemId !== "string" || parsed.queueItemId.length === 0) return null;
+  if (typeof parsed.batchId !== "string" || parsed.batchId.length === 0) return null;
+  if (parsed.dialMode !== "POWER_DIALER" && parsed.dialMode !== "PREDICTIVE") return null;
+  if (typeof parsed.phoneE164 !== "string" || parsed.phoneE164.length === 0) return null;
+  return parsed as DialerClientStateLeadV2;
 }
 
 export function decodeDialerClientState(raw: string | null | undefined): DialerClientState | null {
   if (!raw) return null;
   try {
     const decoded = Buffer.from(raw, "base64").toString("utf8");
-    const parsed = JSON.parse(decoded) as Partial<DialerClientState>;
-    if (parsed.v !== 1) return null;
-    if (typeof parsed.campaignId !== "string" || parsed.campaignId.length === 0) return null;
-    if (parsed.kind !== "lead" && parsed.kind !== "agent" && parsed.kind !== "manual") return null;
-    return parsed as DialerClientState;
+    const parsed = JSON.parse(decoded) as Record<string, unknown> | null;
+    if (!parsed || typeof parsed !== "object") return null;
+    const v = parsed.v;
+    if (v === 1) return parseV1(parsed);
+    if (v === 2) return parseV2Lead(parsed);
+    return null;
   } catch {
     return null;
   }

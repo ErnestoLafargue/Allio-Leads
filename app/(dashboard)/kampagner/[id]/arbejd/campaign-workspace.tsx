@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useSession } from "next-auth/react";
 import { LEAD_STATUSES, type LeadStatus } from "@/lib/lead-status";
 import { parseCustomFields } from "@/lib/custom-fields";
@@ -147,6 +147,8 @@ export function CampaignWorkspace({ campaignId, preferredLeadId, voipSession = f
   /** Undgå to samtidige baggrundsk PATCH-job for samme lead (fx gentagne klik når reserve-next fejler). */
   const backgroundPatchWorkerLeadIdsRef = useRef<Set<string>>(new Set());
   const onNextInFlightRef = useRef(false);
+  const [powerDialerQueueEmpty, setPowerDialerQueueEmpty] = useState(false);
+  const [powerDialerConnecting, setPowerDialerConnecting] = useState(false);
 
   const [companyName, setCompanyName] = useState("");
   const [phone, setPhone] = useState("");
@@ -269,12 +271,42 @@ export function CampaignWorkspace({ campaignId, preferredLeadId, voipSession = f
     setMeetingContactPhonePrivate(l.meetingContactPhonePrivate ?? "");
   }, [campaignSystemType]);
 
+  const resetFormForPowerWaiting = useCallback(() => {
+    setCompanyName("");
+    setPhone("");
+    setEmail("");
+    setCvr("");
+    setAddress("");
+    setPostalCode("");
+    setCity("");
+    setIndustry("");
+    setNotes("");
+    setCustom({});
+    setStatus("NEW");
+    setMeetingScheduledFor("");
+    setMeetingBookedAt(null);
+    setBookedByUser(null);
+    setMeetingContactName("");
+    setMeetingContactEmail("");
+    setMeetingContactPhonePrivate("");
+    setMeetingContactErrors({});
+  }, []);
+
+  const isPowerAutoDialSession = useMemo(() => {
+    if (campaignDialMode !== "POWER_DIALER" || !voipSession) return false;
+    const preferRaw =
+      typeof window !== "undefined" ? sessionStorage.getItem(preferStorageKey(campaignId)) : null;
+    const preferLeadId = preferredLeadId?.trim() || preferRaw?.trim() || "";
+    return !preferLeadId;
+  }, [campaignDialMode, voipSession, preferredLeadId, campaignId]);
+
   useEffect(() => {
     let cancelled = false;
     async function load() {
       setLoading(true);
       setError(null);
       setDone(false);
+      setPowerDialerQueueEmpty(false);
       const cRes = await fetch(`/api/campaigns/${campaignId}`);
       if (!cRes.ok) {
         if (!cancelled) {
@@ -288,6 +320,34 @@ export function CampaignWorkspace({ campaignId, preferredLeadId, voipSession = f
       const preferRaw =
         typeof window !== "undefined" ? sessionStorage.getItem(preferStorageKey(campaignId)) : null;
       const preferLeadId = preferredLeadId?.trim() || preferRaw?.trim() || undefined;
+      const dialMode = normalizeCampaignDialMode(c.dialMode);
+      const skipReserveForPowerAuto =
+        dialMode === "POWER_DIALER" && Boolean(voipSession) && !preferLeadId;
+
+      setCampaignName(c.name ?? "");
+      setCampaignDialMode(dialMode);
+      setCampaignSystemType(
+        typeof c.systemCampaignType === "string" && c.systemCampaignType.trim()
+          ? c.systemCampaignType.trim()
+          : null,
+      );
+      setFieldConfigJson(c.fieldConfig ?? "{}");
+      setCampaignLeadCount(total);
+
+      if (skipReserveForPowerAuto) {
+        if (!cancelled) {
+          setActiveLead(null);
+          resetFormForPowerWaiting();
+          try {
+            sessionStorage.removeItem(preferStorageKey(campaignId));
+          } catch {
+            /* ignore */
+          }
+          setLoading(false);
+        }
+        return;
+      }
+
       const rRes = await fetch(`/api/campaigns/${campaignId}/reserve-next`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -297,15 +357,6 @@ export function CampaignWorkspace({ campaignId, preferredLeadId, voipSession = f
         const j = await rRes.json().catch(() => ({}));
         if (!cancelled) {
           setError(typeof j.error === "string" ? j.error : "Kunne ikke reservere lead.");
-          setCampaignName(c.name ?? "");
-          setCampaignDialMode(normalizeCampaignDialMode(c.dialMode));
-          setCampaignSystemType(
-            typeof c.systemCampaignType === "string" && c.systemCampaignType.trim()
-              ? c.systemCampaignType.trim()
-              : null,
-          );
-          setFieldConfigJson(c.fieldConfig ?? "{}");
-          setCampaignLeadCount(total);
           setActiveLead(null);
           setLoading(false);
         }
@@ -313,15 +364,6 @@ export function CampaignWorkspace({ campaignId, preferredLeadId, voipSession = f
       }
       const rj = (await rRes.json()) as { lead: Lead | null };
       if (cancelled) return;
-      setCampaignName(c.name ?? "");
-      setCampaignDialMode(normalizeCampaignDialMode(c.dialMode));
-      setCampaignSystemType(
-        typeof c.systemCampaignType === "string" && c.systemCampaignType.trim()
-          ? c.systemCampaignType.trim()
-          : null,
-      );
-      setFieldConfigJson(c.fieldConfig ?? "{}");
-      setCampaignLeadCount(total);
       if (rj.lead) {
         setActiveLead(rj.lead);
         try {
@@ -343,7 +385,7 @@ export function CampaignWorkspace({ campaignId, preferredLeadId, voipSession = f
     return () => {
       cancelled = true;
     };
-  }, [campaignId, preferredLeadId]);
+  }, [campaignId, preferredLeadId, voipSession, resetFormForPowerWaiting]);
 
   useEffect(() => {
     if (!activeLead?.id) {
@@ -475,16 +517,82 @@ export function CampaignWorkspace({ campaignId, preferredLeadId, voipSession = f
 
   const handleAssignedLead = useCallback(
     async (lead: AssignedLead) => {
-      // Server har bridged et nyt lead til denne agent → naviger til lead'et hvis vi
-      // ikke allerede er på det. Bruges af parallel-dispatcher.
       if (typeof window === "undefined") return;
       await flushPendingLeadPatches();
+      if (campaignDialMode === "POWER_DIALER") {
+        setPowerDialerQueueEmpty(false);
+        setError(null);
+        setPowerDialerConnecting(true);
+        try {
+          const res = await fetch(`/api/leads/${encodeURIComponent(lead.id)}`);
+          if (!res.ok) {
+            setPowerDialerConnecting(false);
+            setError("Kunne ikke hente lead efter opkald.");
+            return;
+          }
+          const full = (await res.json()) as Lead & { campaignId?: string };
+          if (full.campaignId && full.campaignId !== campaignId) {
+            setPowerDialerConnecting(false);
+            setError("Lead tilhører en anden kampagne.");
+            return;
+          }
+          const lockRes = await fetch(`/api/leads/${encodeURIComponent(lead.id)}/lock`, {
+            method: "POST",
+          });
+          if (!lockRes.ok) {
+            setPowerDialerConnecting(false);
+            const j = await lockRes.json().catch(() => ({}));
+            setError(typeof j.error === "string" ? j.error : "Kunne ikke låse lead.");
+            return;
+          }
+          const lockedPayload = (await lockRes.json()) as { lead?: Lead };
+          const toShow = lockedPayload.lead ?? full;
+          setActiveLead(toShow);
+          try {
+            sessionStorage.setItem(preferStorageKey(campaignId), toShow.id);
+          } catch {
+            /* ignore */
+          }
+          setPowerDialerConnecting(false);
+          if (typeof window.history?.replaceState === "function") {
+            const q = new URLSearchParams(window.location.search);
+            q.set("leadId", toShow.id);
+            if (!q.has("voipSession")) q.set("voipSession", "1");
+            window.history.replaceState(null, "", `${window.location.pathname}?${q.toString()}`);
+          }
+        } catch {
+          setPowerDialerConnecting(false);
+          setError("Netværksfejl ved hentning af lead.");
+        }
+        return;
+      }
       const targetUrl = `/kampagner/${campaignId}/arbejd?leadId=${encodeURIComponent(lead.id)}&voipSession=1`;
       if (!window.location.pathname.endsWith("/arbejd") || activeLeadRef.current?.id !== lead.id) {
         window.location.assign(targetUrl);
       }
     },
-    [campaignId, flushPendingLeadPatches],
+    [campaignId, campaignDialMode, flushPendingLeadPatches],
+  );
+
+  const handleDispatchResult = useCallback(
+    (json: Record<string, unknown>) => {
+      if (campaignDialMode !== "POWER_DIALER") return;
+      if (json.ok !== true) return;
+      const reason = typeof json.reason === "string" ? json.reason : "";
+      const dispatched = typeof json.dispatched === "number" ? json.dispatched : 0;
+      const inFlight = typeof json.inFlight === "number" ? json.inFlight : 0;
+      if (
+        dispatched === 0 &&
+        inFlight === 0 &&
+        reason.includes("Ingen flere ledige leads at dispatche")
+      ) {
+        setPowerDialerQueueEmpty(true);
+      }
+      if (dispatched > 0 || inFlight > 0) {
+        setPowerDialerQueueEmpty(false);
+      }
+    },
+    [campaignDialMode],
   );
 
   const { stats: dialerStats, sipReady } = useDialerPresence({
@@ -492,6 +600,7 @@ export function CampaignWorkspace({ campaignId, preferredLeadId, voipSession = f
     status: presenceStatus,
     intervalMs: 5000,
     onAssignedLead: handleAssignedLead,
+    onDispatchResult: handleDispatchResult,
     enableDispatch: campaignDialMode === "POWER_DIALER" && !autoDialPaused,
   });
 
@@ -565,6 +674,19 @@ export function CampaignWorkspace({ campaignId, preferredLeadId, voipSession = f
   }
 
   async function advanceToNextReservedAfterSave(savedLeadId: string) {
+    if (isPowerAutoDialSession) {
+      await releaseLockHttp(savedLeadId);
+      setActiveLead(null);
+      resetFormForPowerWaiting();
+      setDone(false);
+      setPowerDialerQueueEmpty(false);
+      try {
+        sessionStorage.removeItem(preferStorageKey(campaignId));
+      } catch {
+        /* ignore */
+      }
+      return;
+    }
     await releaseLockHttp(savedLeadId);
     const excludedLeadIds = Array.from(new Set([
       savedLeadId,
@@ -704,6 +826,31 @@ export function CampaignWorkspace({ campaignId, preferredLeadId, voipSession = f
       ...buildCampaignLeadPatchBody(getFormSnapshot(predictiveOutcome)),
       ...(shouldBumpNewQueue ? { queueBump: true } : {}),
     };
+
+    if (isPowerAutoDialSession) {
+      setError(null);
+      if (onNextInFlightRef.current) return;
+      onNextInFlightRef.current = true;
+      setNextAdvanceBusy(true);
+      try {
+        clearPrefetchReservation();
+        queueBackgroundPatch(currentId, patchBody);
+        void releaseLockHttp(currentId);
+        setActiveLead(null);
+        resetFormForPowerWaiting();
+        setDone(false);
+        setPowerDialerQueueEmpty(false);
+        try {
+          sessionStorage.removeItem(preferStorageKey(campaignId));
+        } catch {
+          /* ignore */
+        }
+      } finally {
+        onNextInFlightRef.current = false;
+        setNextAdvanceBusy(false);
+      }
+      return;
+    }
 
     setError(null);
 
@@ -955,7 +1102,7 @@ export function CampaignWorkspace({ campaignId, preferredLeadId, voipSession = f
   }
 
   if (loading) {
-    return <div className="py-12 text-center text-stone-500">Henter kampagne og reserverer lead…</div>;
+    return <div className="py-12 text-center text-stone-500">Henter kampagne…</div>;
   }
 
   if (error && !campaignName && activeLead === null && !done) {
@@ -976,6 +1123,47 @@ export function CampaignWorkspace({ campaignId, preferredLeadId, voipSession = f
         <Link href="/kampagner" className="text-sm font-medium text-stone-700 underline-offset-2 hover:underline">
           ← Tilbage til kampagner
         </Link>
+      </div>
+    );
+  }
+
+  if (!done && !activeLead && isPowerAutoDialSession) {
+    return (
+      <div className="space-y-8 py-12">
+        <div>
+          <Link href="/kampagner" className="text-sm text-stone-500 hover:text-stone-800">
+            ← Kampagner
+          </Link>
+          <h1 className="mt-2 text-xl font-semibold text-stone-900">{campaignName}</h1>
+        </div>
+        <div className="mx-auto max-w-lg space-y-6 rounded-xl border border-stone-200 bg-white p-10 text-center shadow-sm">
+          {powerDialerQueueEmpty ? (
+            <div className="space-y-4">
+              <p className="text-stone-800">Ingen flere leads i køen til Power Dialer lige nu.</p>
+              <Link
+                href="/kampagner"
+                className="inline-block text-sm font-medium text-stone-700 underline-offset-2 hover:underline"
+              >
+                ← Tilbage til kampagner
+              </Link>
+            </div>
+          ) : (
+            <>
+              <p className="text-sm font-medium text-stone-700">
+                {powerDialerConnecting ? "Forbinder samtale…" : "Ringer op i baggrunden"}
+              </p>
+              <div className="h-1.5 w-full overflow-hidden rounded-full bg-stone-200">
+                <div className="h-full w-full rounded-full bg-emerald-600 animate-power-dialer-wait-fill" />
+              </div>
+              {sipReady === false ? (
+                <p className="text-xs text-amber-800">
+                  Telnyx WebRTC er ikke klar — tjek dine indstillinger eller genindlæs siden.
+                </p>
+              ) : null}
+              {error ? <p className="text-sm text-red-600">{error}</p> : null}
+            </>
+          )}
+        </div>
       </div>
     );
   }

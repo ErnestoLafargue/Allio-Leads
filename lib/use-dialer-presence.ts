@@ -46,6 +46,8 @@ export type UseDialerPresenceOptions = {
   /// Hvis aktiveret: kald /api/dialer/dispatch parallel med presence (kun når status=ready)
   /// for at få serveren til at placere parallelle udgående opkald.
   enableDispatch?: boolean;
+  /// Kaldes med JSON-body fra dispatch (200 OK) — til fx Power Dialer «kø tom»-detektion.
+  onDispatchResult?: (json: Record<string, unknown>) => void;
   /// Maks nye opkald pr. dispatch-kald (override af pacing — sjældent nødvendigt)
   dispatchMaxNewCalls?: number;
 };
@@ -58,6 +60,7 @@ export function useDialerPresence(options: UseDialerPresenceOptions) {
     onAssignedLead,
     enableDispatch = false,
     dispatchMaxNewCalls,
+    onDispatchResult,
   } = options;
 
   const [stats, setStats] = useState<DialerPresenceStats | null>(null);
@@ -68,13 +71,16 @@ export function useDialerPresence(options: UseDialerPresenceOptions) {
   // Track senest set assigned-leadId så vi kun kalder onAssignedLead ved ÆNDRING
   const lastAssignedRef = useRef<string | null>(null);
   const onAssignedRef = useRef(onAssignedLead);
+  const onDispatchRef = useRef(onDispatchResult);
   const statusRef = useRef(status);
-
   // Synk refs i useEffect (ikke under render) — React 19 advarer hvis vi muterer
   // refs direkte i komponentens body.
   useEffect(() => {
     onAssignedRef.current = onAssignedLead;
   }, [onAssignedLead]);
+  useEffect(() => {
+    onDispatchRef.current = onDispatchResult;
+  }, [onDispatchResult]);
   useEffect(() => {
     statusRef.current = status;
   }, [status]);
@@ -135,11 +141,16 @@ export function useDialerPresence(options: UseDialerPresenceOptions) {
     try {
       const body: Record<string, unknown> = { campaignId };
       if (typeof dispatchMaxNewCalls === "number") body.maxNewCalls = dispatchMaxNewCalls;
-      await fetch("/api/dialer/dispatch", {
+      const res = await fetch("/api/dialer/dispatch", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(body),
       });
+      const dispatchCb = onDispatchRef.current;
+      if (res.ok && dispatchCb) {
+        const json = (await res.json().catch(() => null)) as Record<string, unknown> | null;
+        if (json && typeof json === "object") dispatchCb(json);
+      }
     } catch {
       /* dispatch-fejl er ikke fatale — næste heartbeat prøver igen */
     }

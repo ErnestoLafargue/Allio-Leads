@@ -101,16 +101,18 @@ export async function POST(req: Request) {
 
   // Sørg for at en log eksisterer — vi tager direction fra client_state hvis det er nyt
   if (!existing && clientState) {
+    const v1UserId = clientState.v === 1 ? clientState.userId : undefined;
+    const v1Bridge = clientState.v === 1 ? clientState.linkedCallControlId : undefined;
     await prisma.dialerCallLog.create({
       data: {
         campaignId: clientState.campaignId,
         leadId: clientState.leadId ?? null,
-        agentUserId: clientState.userId ?? null,
+        agentUserId: v1UserId ?? null,
         callControlId,
         callSessionId: payload.call_session_id ?? null,
         direction: clientState.kind === "agent" ? "outbound-agent" : "outbound-lead",
         state: "initiated",
-        bridgeTargetId: clientState.linkedCallControlId ?? null,
+        bridgeTargetId: v1Bridge ?? null,
         fromNumber: payload.from ?? null,
         toNumber: payload.to ?? null,
         rawEventsJson,
@@ -138,7 +140,12 @@ export async function POST(req: Request) {
         data: { state: "answered", answeredAt: new Date() },
       });
       // Agent har svaret deres incoming SIP-leg → marker session som "talking"
-      if (clientState?.kind === "agent" && clientState.userId && clientState.campaignId) {
+      if (
+        clientState?.v === 1 &&
+        clientState.kind === "agent" &&
+        clientState.userId &&
+        clientState.campaignId
+      ) {
         await prisma.agentSession.updateMany({
           where: {
             userId: clientState.userId,
@@ -427,7 +434,7 @@ export async function POST(req: Request) {
         callControlId,
         callSessionId: sessionIdForRec,
         clientStateLeadId: clientState?.leadId ?? null,
-        clientStateUserId: clientState?.userId ?? null,
+        clientStateUserId: clientState?.v === 1 ? clientState.userId ?? null : null,
         fromNumber: typeof payload.from === "string" ? payload.from : null,
         toNumber: typeof payload.to === "string" ? payload.to : null,
       });
