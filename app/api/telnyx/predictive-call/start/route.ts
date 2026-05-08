@@ -16,6 +16,8 @@ import {
   QUEUE_RESERVATION_TTL_MS,
 } from "@/lib/dialer-shared";
 import { assertLeadMatchesActiveCampaignQueueOr403 } from "@/lib/active-campaign-queue";
+import { classifyPredictiveDialFailure } from "@/lib/predictive-dial-errors";
+import { provisionTelnyxAgentsForUsers } from "@/lib/telnyx-provision-agents-server";
 
 /**
  * POST /api/telnyx/predictive-call/start
@@ -128,7 +130,24 @@ export async function POST(req: Request) {
   }
 
   const connectionId = getTelnyxConnectionId();
-  if (!connectionId) {
+  let user = await prisma.user.findUnique({
+    where: { id: session!.user.id },
+    select: { telnyxCredentialId: true },
+  });
+  // Lazy-provision: hvis agenten mangler credential connection, prøv at oprette den nu
+  // (kræver TELNYX_API_KEY i runtime). Det reducerer afhængighed af den fælles
+  // fallback-connection med lav channel limit.
+  if (!user?.telnyxCredentialId) {
+    await provisionTelnyxAgentsForUsers({ userIds: [session!.user.id], force: false }).catch(() => {});
+    user = await prisma.user.findUnique({
+      where: { id: session!.user.id },
+      select: { telnyxCredentialId: true },
+    });
+  }
+  // Primært: agentens egen credential connection (fordeler kapacitet pr. agent).
+  // Fallback: global TELNYX_CONNECTION_ID for brugere uden provisioneret credential.
+  const effectiveConnectionId = user?.telnyxCredentialId || connectionId;
+  if (!effectiveConnectionId) {
     return NextResponse.json(
       {
         ok: false,
@@ -202,7 +221,7 @@ export async function POST(req: Request) {
   const webhookUrl = process.env.TELNYX_CALL_WEBHOOK_URL?.trim() || undefined;
 
   const dial = await dialTelnyxOutbound({
-    connectionId,
+    connectionId: effectiveConnectionId,
     from: fromE164,
     to: toE164,
     apiKey,
@@ -215,6 +234,8 @@ export async function POST(req: Request) {
   if (!dial.ok) {
     // Frigør queue-reservationen så agenten kan prøve igen / dispatcheren kan tage leadet.
     await prisma.dialerQueueItem.deleteMany({ where: { leadId } }).catch(() => {});
+    const code = classifyPredictiveDialFailure(dial);
+    const isChannelLimit = code === "TELNYX_CHANNEL_LIMIT";
     const phoneLabel = formatPhoneForActivitySummary(toE164);
     await prisma.leadActivityEvent
       .create({
@@ -222,7 +243,9 @@ export async function POST(req: Request) {
           leadId,
           userId: session!.user.id,
           kind: LEAD_ACTIVITY_KIND.CALL_ATTEMPT,
-          summary: `Predictive-opkald til ${phoneLabel} ikke startet — Telnyx: ${dial.message}`,
+          summary: isChannelLimit
+            ? `Predictive-opkald til ${phoneLabel} afvist: Telnyx channel limit nået.`
+            : `Predictive-opkald til ${phoneLabel} ikke startet — Telnyx: ${dial.message}`,
         },
       })
       .catch(() => {});
@@ -230,7 +253,7 @@ export async function POST(req: Request) {
     return NextResponse.json(
       {
         ok: false,
-        code: "TELNYX_DIAL_FAILED",
+        code,
         message: dial.message,
         dialMode: mode,
       },

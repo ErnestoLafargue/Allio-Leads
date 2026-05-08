@@ -121,6 +121,15 @@ function formatTelnyxError(json: unknown): string | null {
   return parts.length ? parts.join(" — ") : null;
 }
 
+/**
+ * Klassificerer Telnyx-kapacitetsfejl (for få samtidige kanaler på connection/app).
+ * Bruges til typed fejlretur i API-routes og bridge-flow.
+ */
+export function isTelnyxChannelLimitError(input: unknown): boolean {
+  const text = typeof input === "string" ? input : JSON.stringify(input ?? "");
+  return /channel\s+limit\s+exceeded|concurrent\s+calls.*connection|error\s*d3/i.test(text);
+}
+
 export type DialResult =
   | { ok: true; callControlId: string; callSessionId?: string; raw: unknown }
   | { ok: false; status: number; message: string; telnyx?: unknown };
