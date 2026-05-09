@@ -1,6 +1,7 @@
 "use client";
 
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useSession } from "next-auth/react";
 import { LEAD_STATUSES, type LeadStatus } from "@/lib/lead-status";
@@ -76,6 +77,15 @@ function preferStorageKey(campaignId: string) {
   return `kampagne-arbejd-prefer:${campaignId}`;
 }
 
+/** Power Dialer: stop kun nye dispatch-batches — ikke offline (AgentSession skal bestå for bridge). */
+function powerDialerBatchPauseKey(campaignId: string) {
+  return `allio-power-dialer-batch-paused:${campaignId}`;
+}
+
+function powerDialerPauseDrainKey(campaignId: string) {
+  return `allio-power-dialer-pause-drain:${campaignId}`;
+}
+
 async function releaseLockHttp(leadId: string) {
   await fetch(`/api/leads/${leadId}/lock`, { method: "DELETE", keepalive: true }).catch(() => {});
 }
@@ -110,6 +120,7 @@ async function patchLeadDocument(
 }
 
 export function CampaignWorkspace({ campaignId, preferredLeadId, voipSession = false }: Props) {
+  const router = useRouter();
   const { data: session } = useSession();
   const sessionUserId = session?.user?.id ?? "";
   const isAdmin = session?.user?.role === "ADMIN";
@@ -125,6 +136,10 @@ export function CampaignWorkspace({ campaignId, preferredLeadId, voipSession = f
       return false;
     }
   });
+  /** Kun Power auto-dial: bloker nye batches; agent forbliver «ready» så in-flight kan bridges. */
+  const [powerDialerBatchPaused, setPowerDialerBatchPaused] = useState(false);
+  /** Efter pause: afslut session når inFlight=0 (eller straks hvis allerede 0). */
+  const [powerDialerPauseDrainActive, setPowerDialerPauseDrainActive] = useState(false);
   const [fieldConfigJson, setFieldConfigJson] = useState("{}");
   const [campaignLeadCount, setCampaignLeadCount] = useState<number | null>(null);
   const [activeLead, setActiveLead] = useState<Lead | null>(null);
@@ -308,6 +323,58 @@ export function CampaignWorkspace({ campaignId, preferredLeadId, voipSession = f
     if (powerDialerConnecting) return "connecting_human";
     return "waiting_for_calls";
   }, [isPowerAutoDialSession, powerDialerQueueEmpty, powerDialerConnecting]);
+
+  useEffect(() => {
+    setPowerDialerBatchPaused(false);
+    setPowerDialerPauseDrainActive(false);
+  }, [campaignId]);
+
+  const exitPowerDialerPausedToCampaigns = useCallback(() => {
+    if (typeof window === "undefined") return;
+    try {
+      sessionStorage.setItem("allio-power-dialer-flash", "Power Dialer sat på pause");
+      sessionStorage.removeItem(powerDialerBatchPauseKey(campaignId));
+      sessionStorage.removeItem(powerDialerPauseDrainKey(campaignId));
+    } catch {
+      /* ignore */
+    }
+    setPowerDialerBatchPaused(false);
+    setPowerDialerPauseDrainActive(false);
+    router.push("/kampagner");
+  }, [campaignId, router]);
+
+  useEffect(() => {
+    if (!isPowerAutoDialSession) return;
+    try {
+      if (sessionStorage.getItem(powerDialerBatchPauseKey(campaignId)) === "1") {
+        setPowerDialerBatchPaused(true);
+      }
+      if (sessionStorage.getItem(powerDialerPauseDrainKey(campaignId)) === "1") {
+        setPowerDialerPauseDrainActive(true);
+      }
+    } catch {
+      /* ignore */
+    }
+  }, [isPowerAutoDialSession, campaignId]);
+
+  useEffect(() => {
+    if (typeof sessionStorage === "undefined") return;
+    if (!isPowerAutoDialSession) return;
+    try {
+      if (powerDialerBatchPaused) {
+        sessionStorage.setItem(powerDialerBatchPauseKey(campaignId), "1");
+      } else {
+        sessionStorage.removeItem(powerDialerBatchPauseKey(campaignId));
+      }
+      if (powerDialerPauseDrainActive) {
+        sessionStorage.setItem(powerDialerPauseDrainKey(campaignId), "1");
+      } else {
+        sessionStorage.removeItem(powerDialerPauseDrainKey(campaignId));
+      }
+    } catch {
+      /* ignore */
+    }
+  }, [isPowerAutoDialSession, campaignId, powerDialerBatchPaused, powerDialerPauseDrainActive]);
 
   useEffect(() => {
     let cancelled = false;
@@ -610,8 +677,27 @@ export function CampaignWorkspace({ campaignId, preferredLeadId, voipSession = f
     intervalMs: 5000,
     onAssignedLead: handleAssignedLead,
     onDispatchResult: handleDispatchResult,
-    enableDispatch: campaignDialMode === "POWER_DIALER" && !autoDialPaused,
+    enableDispatch:
+      campaignDialMode === "POWER_DIALER" && !autoDialPaused && !powerDialerBatchPaused,
   });
+
+  useEffect(() => {
+    if (!isPowerAutoDialSession) return;
+    if (!powerDialerBatchPaused || !powerDialerPauseDrainActive) return;
+    if (activeLead) return;
+    if (powerDialerConnecting) return;
+    const inFlight = dialerStats?.inFlightCalls ?? 0;
+    if (inFlight > 0) return;
+    exitPowerDialerPausedToCampaigns();
+  }, [
+    isPowerAutoDialSession,
+    powerDialerBatchPaused,
+    powerDialerPauseDrainActive,
+    activeLead,
+    powerDialerConnecting,
+    dialerStats?.inFlightCalls,
+    exitPowerDialerPausedToCampaigns,
+  ]);
 
   useEffect(() => {
     if (!activeLead) return;
@@ -693,6 +779,9 @@ export function CampaignWorkspace({ campaignId, preferredLeadId, voipSession = f
         sessionStorage.removeItem(preferStorageKey(campaignId));
       } catch {
         /* ignore */
+      }
+      if (powerDialerBatchPaused) {
+        exitPowerDialerPausedToCampaigns();
       }
       return;
     }
@@ -853,6 +942,9 @@ export function CampaignWorkspace({ campaignId, preferredLeadId, voipSession = f
           sessionStorage.removeItem(preferStorageKey(campaignId));
         } catch {
           /* ignore */
+        }
+        if (powerDialerBatchPaused) {
+          exitPowerDialerPausedToCampaigns();
         }
       } finally {
         onNextInFlightRef.current = false;
@@ -1162,6 +1254,26 @@ export function CampaignWorkspace({ campaignId, preferredLeadId, voipSession = f
             <div className="h-full w-full rounded-full bg-emerald-600 animate-power-dialer-wait-fill" />
           </div>
         </div>
+        {powerDialerUiState === "waiting_for_calls" ? (
+          <div className="mt-4 flex flex-col items-center gap-2 px-2">
+            <button
+              type="button"
+              disabled={powerDialerBatchPaused}
+              onClick={() => {
+                setPowerDialerBatchPaused(true);
+                setPowerDialerPauseDrainActive(true);
+              }}
+              className="rounded-lg border border-stone-300 bg-white px-4 py-2 text-sm font-medium text-stone-800 shadow-sm hover:bg-stone-50 disabled:cursor-not-allowed disabled:opacity-70"
+            >
+              {powerDialerBatchPaused ? "Pauser…" : "Pause"}
+            </button>
+            {powerDialerBatchPaused ? (
+              <p className="max-w-sm text-center text-xs text-stone-600">
+                Afslutter nuværende opkald – starter ikke nye.
+              </p>
+            ) : null}
+          </div>
+        ) : null}
         {powerDialerUiState === "connecting_human" ? (
           <p className="mt-3 text-center text-xs text-stone-500">Forbinder…</p>
         ) : null}

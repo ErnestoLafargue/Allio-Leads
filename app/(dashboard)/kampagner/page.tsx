@@ -122,6 +122,19 @@ export default function StartPage() {
   const [loadError, setLoadError] = useState<string | null>(null);
   const [loadErrorHint, setLoadErrorHint] = useState<"migrate" | "retry_later" | null>(null);
   const [search, setSearch] = useState("");
+  const [powerDialerPauseFlash, setPowerDialerPauseFlash] = useState<string | null>(() => {
+    if (typeof window === "undefined") return null;
+    try {
+      const msg = sessionStorage.getItem("allio-power-dialer-flash");
+      if (msg) {
+        sessionStorage.removeItem("allio-power-dialer-flash");
+        return msg;
+      }
+    } catch {
+      /* ignore */
+    }
+    return null;
+  });
 
   const isAdmin = session?.user.role === "ADMIN";
 
@@ -229,6 +242,22 @@ export default function StartPage() {
   return (
     <div className="space-y-5">
       <DashboardTabs />
+
+      {powerDialerPauseFlash ? (
+        <div
+          role="status"
+          className="flex flex-wrap items-center justify-between gap-3 rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-950"
+        >
+          <span>{powerDialerPauseFlash}</span>
+          <button
+            type="button"
+            onClick={() => setPowerDialerPauseFlash(null)}
+            className="shrink-0 rounded-md border border-amber-300 bg-white px-2 py-1 text-xs font-medium text-amber-900 hover:bg-amber-100"
+          >
+            Luk
+          </button>
+        </div>
+      ) : null}
 
       <header className="flex flex-wrap items-center justify-between gap-3">
         <div>
