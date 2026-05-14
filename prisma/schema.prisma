@@ -75,6 +75,8 @@ model Campaign {
   activeQueueFilter          String   @default("{}")
   /// true = alle leads i kampagne; false = skjul hvor customFields.reklamebeskyttet (case-ins.) er «ja»
   includeProtectedBusinesses Boolean  @default(false)
+  /// true = alle leads; false = kun leads hvor phone (trimmet) ikke er tom
+  includeLeadsWithoutPhone   Boolean  @default(true)
   /// Systemkampagner (mødeflow m.m.) — visse typer kan ikke slettes.
   isSystemCampaign           Boolean  @default(false)
   /// upcoming_meetings | rebooking | active_customers | direct_booking | null

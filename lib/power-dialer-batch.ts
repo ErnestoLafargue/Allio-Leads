@@ -9,6 +9,7 @@ import { getActiveCampaignLeads } from "@/lib/active-campaign-queue";
 import { sortLeadsForCampaignCallQueue } from "@/lib/lead-queue";
 import { getLeadIdsWithOutcomeLogToday } from "@/lib/lead-outcome-today";
 import { filterLeadsByCampaignProtectedSetting } from "@/lib/reklamebeskyttet-filter";
+import { filterLeadsByCampaignPhoneSetting } from "@/lib/lead-phone-filter";
 import { normalizePhoneToE164ForDial } from "@/lib/phone-e164";
 import { QUEUE_RESERVATION_TTL_MS } from "@/lib/dialer-shared";
 
@@ -34,6 +35,7 @@ type CampaignQueueFields = {
   fieldConfig: string;
   activeQueueFilter: string;
   includeProtectedBusinesses: boolean;
+  includeLeadsWithoutPhone: boolean;
 };
 
 /**
@@ -99,9 +101,12 @@ export async function claimDispatchLeadBatch(
     viewRaw,
   );
   const idSet = new Set(pool.map((p) => p.id));
-  pool = filterLeadsByCampaignProtectedSetting(
-    candidatesRaw.filter((r) => idSet.has(r.id)),
-    campaign.includeProtectedBusinesses,
+  pool = filterLeadsByCampaignPhoneSetting(
+    filterLeadsByCampaignProtectedSetting(
+      candidatesRaw.filter((r) => idSet.has(r.id)),
+      campaign.includeProtectedBusinesses,
+    ),
+    campaign.includeLeadsWithoutPhone,
   ).map((r) => ({
     id: r.id,
     industry: r.industry ?? "",

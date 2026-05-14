@@ -3,6 +3,7 @@ import { prisma } from "@/lib/prisma";
 import { requireSession } from "@/lib/api-auth";
 import { applyLeadCooldownResets, markCallbackSeenByAssignee } from "@/lib/lead-cooldown";
 import { filterLeadsByCampaignProtectedSetting } from "@/lib/reklamebeskyttet-filter";
+import { filterLeadsByCampaignPhoneSetting } from "@/lib/lead-phone-filter";
 import { getLeadIdsWithOutcomeLogToday } from "@/lib/lead-outcome-today";
 import { isLeadInRebookingDialerPool, sortLeadsForCampaignCallQueue } from "@/lib/lead-queue";
 import { MEETING_OUTCOME_REBOOK, normalizeMeetingOutcomeStatus } from "@/lib/meeting-outcome";
@@ -72,6 +73,7 @@ export async function POST(req: Request, { params }: Params) {
         id: true,
         dialMode: true,
         includeProtectedBusinesses: true,
+        includeLeadsWithoutPhone: true,
         systemCampaignType: true,
         fieldConfig: true,
         activeQueueFilter: true,
@@ -201,6 +203,7 @@ export async function POST(req: Request, { params }: Params) {
         lastOutcomeAt: true,
         lastDialAttemptAt: true,
         customFields: true,
+        phone: true,
         meetingScheduledFor: true,
         industry: true,
       },
@@ -215,6 +218,7 @@ export async function POST(req: Request, { params }: Params) {
       id: r.id,
       industry: r.industry,
       customFields: r.customFields,
+      phone: r.phone,
       meetingScheduledFor: r.meetingScheduledFor,
       status: r.status,
       meetingOutcomeStatus: r.meetingOutcomeStatus,
@@ -226,15 +230,17 @@ export async function POST(req: Request, { params }: Params) {
       ? getActiveCampaignLeads(mapped, fieldConfigJson, campaign.activeQueueFilter)
       : filterLeadsByWorkspaceStartDate(mapped, fieldConfigJson, workspaceStartFilter);
 
-    const filtered =
+    const filtered = filterLeadsByCampaignPhoneSetting(
       campaign.systemCampaignType === "rebooking"
         ? afterStartDate
             .filter((r) => isLeadInRebookingDialerPool(r))
-            .map((r) => ({ ...r, customFields: r.customFields }))
+            .map((r) => ({ ...r, customFields: r.customFields, phone: r.phone }))
         : filterLeadsByCampaignProtectedSetting(
-            afterStartDate.map((r) => ({ ...r, customFields: r.customFields })),
+            afterStartDate.map((r) => ({ ...r, customFields: r.customFields, phone: r.phone })),
             campaign.includeProtectedBusinesses,
-          );
+          ),
+      campaign.includeLeadsWithoutPhone,
+    );
     const outcomeToday = await getLeadIdsWithOutcomeLogToday(filtered.map((r) => r.id));
     const sorted = sortLeadsForCampaignCallQueue(
       filtered.map((r) => ({

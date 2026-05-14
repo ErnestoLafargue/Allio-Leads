@@ -25,6 +25,7 @@ import {
 } from "@/lib/lead-status";
 import { LeadsBulkPanel } from "@/app/components/leads-bulk-panel";
 import { CampaignProtectedSwitch } from "@/app/components/campaign-protected-switch";
+import { CampaignPhoneSwitch } from "@/app/components/campaign-phone-switch";
 import { CampaignDeleteFlow } from "@/app/components/campaign-delete-flow";
 import { CampaignEnrichmentPanel } from "@/app/components/campaign-enrichment-panel";
 import {
@@ -35,6 +36,10 @@ import {
   getReklamebeskyttetNormalized,
   leadIncludedForCampaignProtectedSetting,
 } from "@/lib/reklamebeskyttet-filter";
+import {
+  hasLeadPhone,
+  leadIncludedForCampaignPhoneSetting,
+} from "@/lib/lead-phone-filter";
 import {
   DIAL_MODES,
   DIAL_MODE_LABELS,
@@ -59,6 +64,7 @@ export default function RedigerKampagnePage() {
   const { data: session, status } = useSession();
   const [name, setName] = useState("");
   const [includeProtectedBusinesses, setIncludeProtectedBusinesses] = useState(false);
+  const [includeLeadsWithoutPhone, setIncludeLeadsWithoutPhone] = useState(true);
   const [ext, setExt] = useState<Record<FieldGroupKey, Row[]>>(() => ({
     companyName: [],
     phone: [],
@@ -81,8 +87,13 @@ export default function RedigerKampagnePage() {
   const [outcomeStats, setOutcomeStats] = useState<{
     byStatus: Record<LeadStatus, number>;
     protectedCount: number;
+    withoutPhoneCount: number;
     /** «Ny» der medtages når reklamebeskyttede er filtreret fra (ikke eksplicit ja + uden udfald = status NEW). */
     newCountWhenExcludingProtected: number;
+    /** «Ny» der medtages når leads uden telefon er filtreret fra. */
+    newCountWhenExcludingPhone: number;
+    /** «Ny» der medtages når begge filtre er slået fra. */
+    newCountWhenExcludingBoth: number;
   } | null>(null);
 
   const [exportFormat, setExportFormat] = useState<"csv" | "xlsx">("xlsx");
@@ -121,6 +132,7 @@ export default function RedigerKampagnePage() {
             : null,
       });
       setIncludeProtectedBusinesses(Boolean(c.includeProtectedBusinesses));
+      setIncludeLeadsWithoutPhone(c.includeLeadsWithoutPhone !== false);
       setDialMode(normalizeCampaignDialMode(c.dialMode));
       const cfg = parseFieldConfig(c.fieldConfig);
       const next: Record<FieldGroupKey, Row[]> = {
@@ -167,30 +179,47 @@ export default function RedigerKampagnePage() {
           setOutcomeStats({
             byStatus: emptyAcc,
             protectedCount: 0,
+            withoutPhoneCount: 0,
             newCountWhenExcludingProtected: 0,
+            newCountWhenExcludingPhone: 0,
+            newCountWhenExcludingBoth: 0,
           });
         }
         return;
       }
-      const rows: { status: string; customFields: string }[] = await res.json();
+      const rows: { status: string; customFields: string; phone: string }[] = await res.json();
       const acc: Record<LeadStatus, number> = { ...emptyAcc };
       let protectedCount = 0;
+      let withoutPhoneCount = 0;
       let newCountWhenExcludingProtected = 0;
+      let newCountWhenExcludingPhone = 0;
+      let newCountWhenExcludingBoth = 0;
       for (const r of rows) {
         if (getReklamebeskyttetNormalized(r.customFields) === "ja") {
           protectedCount += 1;
         }
+        if (!hasLeadPhone(r.phone ?? "")) {
+          withoutPhoneCount += 1;
+        }
         const st = String(r.status ?? "").trim().toUpperCase();
         if (isLeadStatus(st)) acc[st] += 1;
-        if (
-          st === "NEW" &&
-          leadIncludedForCampaignProtectedSetting(r.customFields, false)
-        ) {
-          newCountWhenExcludingProtected += 1;
+        if (st === "NEW") {
+          const passesProtected = leadIncludedForCampaignProtectedSetting(r.customFields, false);
+          const passesPhone = leadIncludedForCampaignPhoneSetting(r.phone ?? "", false);
+          if (passesProtected) newCountWhenExcludingProtected += 1;
+          if (passesPhone) newCountWhenExcludingPhone += 1;
+          if (passesProtected && passesPhone) newCountWhenExcludingBoth += 1;
         }
       }
       if (!cancelled) {
-        setOutcomeStats({ byStatus: acc, protectedCount, newCountWhenExcludingProtected });
+        setOutcomeStats({
+          byStatus: acc,
+          protectedCount,
+          withoutPhoneCount,
+          newCountWhenExcludingProtected,
+          newCountWhenExcludingPhone,
+          newCountWhenExcludingBoth,
+        });
       }
     }
     void loadOutcomes();
@@ -291,6 +320,7 @@ export default function RedigerKampagnePage() {
         name: name.trim(),
         fieldConfig: serializeFieldConfig({ extensions }),
         includeProtectedBusinesses,
+        includeLeadsWithoutPhone,
         dialMode,
       }),
     });
@@ -364,6 +394,13 @@ export default function RedigerKampagnePage() {
               disabled={saving}
             />
           </div>
+          <div className="mt-8 max-w-md border-t border-stone-100 pt-6">
+            <CampaignPhoneSwitch
+              includeWithoutPhone={includeLeadsWithoutPhone}
+              onChange={setIncludeLeadsWithoutPhone}
+              disabled={saving}
+            />
+          </div>
         </div>
       </section>
 
@@ -424,22 +461,27 @@ export default function RedigerKampagnePage() {
             Udfald på kampagne (alle leads)
           </h2>
           <p className="mt-1 text-xs text-stone-600">
-            Øvrige udfald er alle leads i kampagnen. «Ny» følger «Medtag reklamebeskyttede»:{' '}
-            <span className="font-medium text-stone-800">Ja</span> = alle med status Ny;{' '}
-            <span className="font-medium text-stone-800">Nej</span> = kun Ny som ikke er markeret
-            reklamebeskyttet (ja), samme logik som opkaldskøen.
+            Øvrige udfald er alle leads i kampagnen. «Ny» følger begge filtre (reklamebeskyttelse og
+            telefonnummer) — samme logik som opkaldskøen.
           </p>
           <p className="mt-2 text-xs text-stone-600">
             <span className="font-medium text-stone-800">Reklamebeskyttet (ja):</span>{' '}
             <span className="tabular-nums">{outcomeStats.protectedCount}</span> leads
+            <span className="mx-2 text-stone-400">·</span>
+            <span className="font-medium text-stone-800">Uden telefonnummer:</span>{' '}
+            <span className="tabular-nums">{outcomeStats.withoutPhoneCount}</span> leads
           </p>
           <div className="mt-4 flex flex-wrap gap-2">
             {LEAD_STATUS_STATS_ORDER.map((s) => {
               const n =
                 s === "NEW"
-                  ? includeProtectedBusinesses
+                  ? includeProtectedBusinesses && includeLeadsWithoutPhone
                     ? outcomeStats.byStatus.NEW
-                    : outcomeStats.newCountWhenExcludingProtected
+                    : includeProtectedBusinesses
+                      ? outcomeStats.newCountWhenExcludingPhone
+                      : includeLeadsWithoutPhone
+                        ? outcomeStats.newCountWhenExcludingProtected
+                        : outcomeStats.newCountWhenExcludingBoth
                   : outcomeStats.byStatus[s];
               return (
                 <span

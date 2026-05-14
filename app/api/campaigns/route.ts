@@ -31,6 +31,7 @@ export async function GET() {
         name: true,
         fieldConfig: true,
         includeProtectedBusinesses: true,
+        includeLeadsWithoutPhone: true,
         isSystemCampaign: true,
         systemCampaignType: true,
         dialMode: true,
@@ -107,6 +108,7 @@ export async function GET() {
 
     const migrationHint =
       msg.includes("includeProtectedBusinesses") ||
+      msg.includes("includeLeadsWithoutPhone") ||
       msg.includes("isSystemCampaign") ||
       msg.includes("systemCampaignType") ||
       msg.includes("dialMode") ||

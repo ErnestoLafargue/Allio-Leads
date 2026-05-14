@@ -6,6 +6,7 @@ import { meetingContactEmailValid } from "@/lib/meeting-contact-validation";
 import { pickLeadCreateData } from "@/lib/prisma-lead-write";
 import { applyLeadCooldownResets } from "@/lib/lead-cooldown";
 import { filterLeadsByCampaignProtectedSetting } from "@/lib/reklamebeskyttet-filter";
+import { filterLeadsByCampaignPhoneSetting } from "@/lib/lead-phone-filter";
 import { releaseExpiredLocksEverywhere } from "@/lib/lead-lock";
 import { getLeadIdsWithOutcomeLogToday } from "@/lib/lead-outcome-today";
 import { copenhagenDayBoundsUtc, copenhagenDayBoundsUtcFromDayKey } from "@/lib/copenhagen-day";
@@ -51,7 +52,7 @@ export async function GET(req: Request) {
       }
       const rowsRaw = await prisma.lead.findMany({
         where: { campaignId },
-        select: { status: true, customFields: true, callbackReservedByUserId: true },
+        select: { status: true, customFields: true, phone: true, callbackReservedByUserId: true },
         orderBy: [{ lastOutcomeAt: "asc" }, { importedAt: "desc" }],
       });
       const rows =
@@ -65,15 +66,22 @@ export async function GET(req: Request) {
     }
 
     let includeProtectedBusinesses = false;
+    let includeLeadsWithoutPhone = true;
     let campaignFieldConfig = "{}";
     let campaignActiveQueue: string | null = null;
     if (campaignId) {
       const camp = await prisma.campaign.findUnique({
         where: { id: campaignId },
-        select: { includeProtectedBusinesses: true, fieldConfig: true, activeQueueFilter: true },
+        select: {
+          includeProtectedBusinesses: true,
+          includeLeadsWithoutPhone: true,
+          fieldConfig: true,
+          activeQueueFilter: true,
+        },
       });
       if (camp) {
         includeProtectedBusinesses = camp.includeProtectedBusinesses;
+        includeLeadsWithoutPhone = camp.includeLeadsWithoutPhone;
         campaignFieldConfig = typeof camp.fieldConfig === "string" ? camp.fieldConfig : "{}";
         campaignActiveQueue = typeof camp.activeQueueFilter === "string" ? camp.activeQueueFilter : null;
       }
@@ -159,7 +167,10 @@ export async function GET(req: Request) {
     });
 
     let out = campaignId
-      ? filterLeadsByCampaignProtectedSetting(leads, includeProtectedBusinesses)
+      ? filterLeadsByCampaignPhoneSetting(
+          filterLeadsByCampaignProtectedSetting(leads, includeProtectedBusinesses),
+          includeLeadsWithoutPhone,
+        )
       : leads;
 
     if (

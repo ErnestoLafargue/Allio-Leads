@@ -24,6 +24,7 @@ export async function GET(_req: Request, { params }: Params) {
       fieldConfig: true,
       activeQueueFilter: true,
       includeProtectedBusinesses: true,
+      includeLeadsWithoutPhone: true,
       isSystemCampaign: true,
       systemCampaignType: true,
       dialMode: true,
@@ -101,6 +102,11 @@ export async function PATCH(req: Request, { params }: Params) {
     includeProtectedBusinesses = body.includeProtectedBusinesses;
   }
 
+  let includeLeadsWithoutPhone = existing.includeLeadsWithoutPhone;
+  if (typeof body?.includeLeadsWithoutPhone === "boolean") {
+    includeLeadsWithoutPhone = body.includeLeadsWithoutPhone;
+  }
+
   let dialMode: CampaignDialMode = normalizeCampaignDialMode(existing.dialMode);
   if (typeof body?.dialMode === "string") {
     const next = normalizeCampaignDialMode(body.dialMode);
@@ -125,12 +131,19 @@ export async function PATCH(req: Request, { params }: Params) {
 
   const campaign = await prisma.campaign.update({
     where: { id },
-    data: { name, fieldConfig: fieldConfigStr, includeProtectedBusinesses, dialMode },
+    data: {
+      name,
+      fieldConfig: fieldConfigStr,
+      includeProtectedBusinesses,
+      includeLeadsWithoutPhone,
+      dialMode,
+    },
     select: {
       id: true,
       name: true,
       fieldConfig: true,
       includeProtectedBusinesses: true,
+      includeLeadsWithoutPhone: true,
       dialMode: true,
       updatedAt: true,
     },
