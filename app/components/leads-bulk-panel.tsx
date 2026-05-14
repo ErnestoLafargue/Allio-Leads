@@ -28,6 +28,7 @@ import {
 } from "@/lib/active-campaign-queue";
 import { isLeadInPowerPredictiveCampaignTable } from "@/lib/lead-queue";
 import type { CampaignDialMode } from "@/lib/dial-mode";
+import { buildIndustryFilterLabelMap } from "@/lib/industry-display";
 
 type CampaignLeadViewPrefs = {
   filterMeetingStart: boolean;
@@ -587,6 +588,11 @@ export function LeadsBulkPanel({
     [dynamicSortFields, dynamicSortFieldId],
   );
 
+  const campaignIndustryOptionLabels = useMemo(
+    () => buildIndustryFilterLabelMap(campaignIndustryOptions),
+    [campaignIndustryOptions],
+  );
+
   const sortedLeads = useMemo(() => {
     const getDynamicValue = (l: LeadRow, fieldId: string): string => {
       if (fieldId.startsWith("custom:")) {
@@ -998,7 +1004,7 @@ export function LeadsBulkPanel({
                               disabled={!filterMeetingStart}
                               className="rounded border-stone-300"
                             />
-                            {industry}
+                            <span className="tabular-nums">{campaignIndustryOptionLabels.get(industry) ?? industry}</span>
                           </label>
                         );
                       })}
