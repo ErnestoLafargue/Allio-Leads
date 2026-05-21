@@ -1,6 +1,10 @@
 import type { Lead } from "@prisma/client";
 import type { LeadStatus } from "@/lib/lead-status";
 import { copenhagenDayKey } from "@/lib/copenhagen-day";
+import {
+  isFutureMeetingTime,
+  isNewMeetingBookingConfirm,
+} from "@/lib/lead-meeting-archive";
 import { MEETING_OUTCOME_PENDING } from "@/lib/meeting-outcome";
 import { pickLeadUpdateData } from "@/lib/prisma-lead-write";
 
@@ -35,12 +39,23 @@ export function buildLeadOutcomeOnlyUpdate(
       return { ok: false, error: "Angiv hvornår mødet er (dato/tid)" };
     }
 
-    if (existing.status !== "MEETING_BOOKED" || !existing.meetingBookedAt) {
+    const newMeetingConfirm =
+      isNewMeetingBookingConfirm(existing, meetingScheduledFor) &&
+      meetingScheduledFor != null &&
+      isFutureMeetingTime(meetingScheduledFor);
+
+    if (!existing.meetingBookedAt) {
+      meetingBookedAt = new Date();
+      bookedByUserId = userId;
+      meetingOutcomeStatus = MEETING_OUTCOME_PENDING;
+      meetingCommissionDayKey = copenhagenDayKey(meetingBookedAt);
+    } else if (newMeetingConfirm) {
       meetingBookedAt = new Date();
       bookedByUserId = userId;
       meetingOutcomeStatus = MEETING_OUTCOME_PENDING;
       meetingCommissionDayKey = copenhagenDayKey(meetingBookedAt);
     } else {
+      bookedByUserId = existing.bookedByUserId;
       if (!meetingCommissionDayKey.trim() && meetingBookedAt) {
         meetingCommissionDayKey = copenhagenDayKey(meetingBookedAt);
       }

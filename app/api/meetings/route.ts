@@ -9,9 +9,9 @@ export async function GET(req: Request) {
   const { searchParams } = new URL(req.url);
   const rawType = searchParams.get("type")?.trim().toLowerCase() ?? "all";
   const type: MeetingsType = rawType === "upcoming" || rawType === "past" || rawType === "all" ? rawType : "all";
-  const showAll = searchParams.get("showAll") === "true";
+  const activeOnly = searchParams.get("activeOnly") === "true";
 
-  const meetings = await getMeetings(type, { showAll });
+  const meetings = await getMeetings(type, { activeOnly });
 
   return NextResponse.json(meetings);
 }

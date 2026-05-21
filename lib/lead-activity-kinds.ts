@@ -18,6 +18,12 @@ export const LEAD_ACTIVITY_KIND = {
   MEETING_ASSIGNEE_SET: "MEETING_ASSIGNEE_SET",
   /** System sendte SMS reminder for kommende møde */
   MEETING_REMINDER_SMS: "MEETING_REMINDER_SMS",
+  /** Admin sendte mødet til genbooking-kampagnen */
+  MEETING_SENT_TO_REBOOKING: "MEETING_SENT_TO_REBOOKING",
+  /** Admin ændrede hvem der bookede mødet */
+  MEETING_BOOKER_CHANGED: "MEETING_BOOKER_CHANGED",
+  /** Tidligere møde arkiveret (fx ved genbooking) */
+  MEETING_ARCHIVED: "MEETING_ARCHIVED",
 } as const;
 
 export type LeadActivityKind = (typeof LEAD_ACTIVITY_KIND)[keyof typeof LEAD_ACTIVITY_KIND];

@@ -20,26 +20,106 @@ function normOutcome(s: string | null | undefined) {
   return String(s ?? "").trim().toUpperCase() || MEETING_OUTCOME_PENDING;
 }
 
+type CommissionMeetingRow = {
+  meetingOutcomeStatus: string;
+  bookedFromRebookingCampaign: boolean;
+};
+
+type SalesLeadRow = {
+  id: string;
+  leadId: string;
+  companyName: string;
+  meetingScheduledFor: string | null;
+  meetingBookedAt: string | null;
+  meetingOutcomeStatus?: string;
+  meetingCommissionDayKey?: string;
+  archived?: boolean;
+  campaign?: { name: string };
+};
+
 export async function GET() {
   const { session, response } = await requireSession();
   if (response) return response;
   const userId = session!.user.id;
 
   try {
-    const rows = await prisma.lead.findMany({
-      where: { status: "MEETING_BOOKED", bookedByUserId: userId },
-      orderBy: [{ meetingScheduledFor: "asc" }],
-      include: {
-        campaign: { select: { id: true, name: true } },
-        bookedByUser: { select: { id: true, name: true, username: true } },
-      },
+    const [activeLeads, archivedRecords] = await Promise.all([
+      prisma.lead.findMany({
+        where: { bookedByUserId: userId, meetingBookedAt: { not: null } },
+        orderBy: [{ meetingScheduledFor: "asc" }],
+        include: {
+          campaign: { select: { id: true, name: true } },
+          bookedByUser: { select: { id: true, name: true, username: true } },
+        },
+      }),
+      prisma.leadMeetingRecord.findMany({
+        where: { bookedByUserId: userId },
+        orderBy: [{ meetingScheduledFor: "asc" }],
+        include: {
+          lead: {
+            select: {
+              id: true,
+              companyName: true,
+              campaign: { select: { id: true, name: true } },
+            },
+          },
+        },
+      }),
+    ]);
+
+    const commissionSources: (CommissionMeetingRow & { dayKey: string })[] = [];
+    const leads: SalesLeadRow[] = [];
+
+    for (const r of archivedRecords) {
+      const dayKey = r.meetingCommissionDayKey.trim() || "UKENDT";
+      commissionSources.push({
+        meetingOutcomeStatus: r.meetingOutcomeStatus,
+        bookedFromRebookingCampaign: r.bookedFromRebookingCampaign,
+        dayKey,
+      });
+      leads.push({
+        id: `archived:${r.id}`,
+        leadId: r.leadId,
+        companyName: r.lead.companyName,
+        meetingScheduledFor: r.meetingScheduledFor.toISOString(),
+        meetingBookedAt: r.meetingBookedAt.toISOString(),
+        meetingOutcomeStatus: r.meetingOutcomeStatus,
+        meetingCommissionDayKey: r.meetingCommissionDayKey,
+        archived: true,
+        campaign: r.lead.campaign ? { name: r.lead.campaign.name } : undefined,
+      });
+    }
+
+    for (const r of activeLeads) {
+      const dayKey = resolveLeadCommissionDayKey(r) || "UKENDT";
+      commissionSources.push({
+        meetingOutcomeStatus: r.meetingOutcomeStatus,
+        bookedFromRebookingCampaign: r.bookedFromRebookingCampaign,
+        dayKey,
+      });
+      leads.push({
+        id: r.id,
+        leadId: r.id,
+        companyName: r.companyName,
+        meetingScheduledFor: r.meetingScheduledFor?.toISOString() ?? null,
+        meetingBookedAt: r.meetingBookedAt?.toISOString() ?? null,
+        meetingOutcomeStatus: r.meetingOutcomeStatus,
+        meetingCommissionDayKey: r.meetingCommissionDayKey,
+        archived: false,
+        campaign: r.campaign ? { name: r.campaign.name } : undefined,
+      });
+    }
+
+    leads.sort((a, b) => {
+      const ta = a.meetingScheduledFor ? new Date(a.meetingScheduledFor).getTime() : 0;
+      const tb = b.meetingScheduledFor ? new Date(b.meetingScheduledFor).getTime() : 0;
+      return ta - tb;
     });
 
-    const byDay = new Map<string, typeof rows>();
-    for (const r of rows) {
-      const key = resolveLeadCommissionDayKey(r) || "UKENDT";
-      if (!byDay.has(key)) byDay.set(key, []);
-      byDay.get(key)!.push(r);
+    const byDay = new Map<string, CommissionMeetingRow[]>();
+    for (const row of commissionSources) {
+      if (!byDay.has(row.dayKey)) byDay.set(row.dayKey, []);
+      byDay.get(row.dayKey)!.push(row);
     }
 
     let tilUdbetalingKr = 0;
@@ -106,17 +186,25 @@ export async function GET() {
       })
       .sort((a, b) => a.dayKey.localeCompare(b.dayKey));
 
+    const allForStats = commissionSources.map((m) => ({
+      meetingOutcomeStatus: m.meetingOutcomeStatus,
+    }));
+
     const stats = {
-      totalBooked: rows.length,
-      pending: rows.filter((r) => normOutcome(r.meetingOutcomeStatus) === MEETING_OUTCOME_PENDING).length,
-      held: rows.filter((r) => normOutcome(r.meetingOutcomeStatus) === MEETING_OUTCOME_HELD).length,
-      rebook: rows.filter((r) => normOutcome(r.meetingOutcomeStatus) === MEETING_OUTCOME_REBOOK).length,
-      sale: rows.filter((r) => normOutcome(r.meetingOutcomeStatus) === MEETING_OUTCOME_SALE).length,
-      cancelled: rows.filter((r) => normOutcome(r.meetingOutcomeStatus) === MEETING_OUTCOME_CANCELLED).length,
+      totalBooked: commissionSources.length,
+      pending: allForStats.filter((r) => normOutcome(r.meetingOutcomeStatus) === MEETING_OUTCOME_PENDING)
+        .length,
+      held: allForStats.filter((r) => normOutcome(r.meetingOutcomeStatus) === MEETING_OUTCOME_HELD).length,
+      rebook: allForStats.filter((r) => normOutcome(r.meetingOutcomeStatus) === MEETING_OUTCOME_REBOOK)
+        .length,
+      sale: allForStats.filter((r) => normOutcome(r.meetingOutcomeStatus) === MEETING_OUTCOME_SALE).length,
+      cancelled: allForStats.filter(
+        (r) => normOutcome(r.meetingOutcomeStatus) === MEETING_OUTCOME_CANCELLED,
+      ).length,
     };
 
     return NextResponse.json({
-      leads: rows,
+      leads,
       daySummaries,
       tilUdbetalingKr,
       forventetProvisionKr,

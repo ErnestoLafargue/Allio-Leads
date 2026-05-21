@@ -3,9 +3,11 @@
 import Link from "next/link";
 import { useSession } from "next-auth/react";
 import { useCallback, useEffect, useMemo, useState } from "react";
+import { MeetingNoShowRebookDialog } from "@/app/components/meeting-no-show-rebook-dialog";
 import { MeetingOutcomeSelect } from "@/app/components/meeting-outcome-select";
 import {
   meetingOutcomeBadgeClass,
+  MEETING_OUTCOME_CANCELLED,
   MEETING_OUTCOME_LABELS,
   MEETING_OUTCOME_PENDING,
 } from "@/lib/meeting-outcome";
@@ -20,6 +22,7 @@ type MeetingRow = {
   meetingOutcomeStatus?: string | null;
   bookedByUser: { id: string; name: string; username: string } | null;
   assignedUser?: { id: string; name: string; username: string; phone: string | null } | null;
+  campaign?: { id: string; name: string; systemCampaignType?: string | null } | null;
 };
 
 type Assignee = {
@@ -27,6 +30,12 @@ type Assignee = {
   name: string;
   username: string;
   phone: string | null;
+};
+
+type SellerOption = {
+  id: string;
+  name: string;
+  username: string;
 };
 
 function outcomeLabel(raw?: string | null) {
@@ -45,17 +54,21 @@ export function MeetingsList({ type }: { type: "upcoming" | "past" }) {
   const [defaultAssigneeId, setDefaultAssigneeId] = useState<string | null>(null);
   const [savingAssigneeById, setSavingAssigneeById] = useState<Record<string, boolean>>({});
   const [savedHintById, setSavedHintById] = useState<Record<string, boolean>>({});
+  const [savingSellerById, setSavingSellerById] = useState<Record<string, boolean>>({});
+  const [savedSellerHintById, setSavedSellerHintById] = useState<Record<string, boolean>>({});
+  const [sellers, setSellers] = useState<SellerOption[]>([]);
+  const [noShowDialog, setNoShowDialog] = useState<{ leadId: string } | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  /** Når true: hent også tidligere møder hvor lead-status sidenhen er ændret. */
-  const [showAllPast, setShowAllPast] = useState(false);
+  /** Når true: vis kun tidligere møder med status MEETING_BOOKED. */
+  const [activeOnlyPast, setActiveOnlyPast] = useState(false);
 
   const title = useMemo(() => (type === "upcoming" ? "Kommende møder" : "Tidligere møder"), [type]);
 
   const load = useCallback(async () => {
     setLoading(true);
     const params = new URLSearchParams({ type });
-    if (type === "past" && showAllPast) params.set("showAll", "true");
+    if (type === "past" && activeOnlyPast) params.set("activeOnly", "true");
     const res = await fetch(`/api/meetings?${params.toString()}`);
     if (!res.ok) {
       setError("Kunne ikke hente møder");
@@ -66,11 +79,26 @@ export function MeetingsList({ type }: { type: "upcoming" | "past" }) {
     setRows(data);
     setLoading(false);
     setError(null);
-  }, [type, showAllPast]);
+  }, [type, activeOnlyPast]);
 
   useEffect(() => {
     void load();
   }, [load]);
+
+  useEffect(() => {
+    if (!isAdmin) return;
+    let cancelled = false;
+    async function loadSellers() {
+      const res = await fetch("/api/users/for-assignment");
+      if (!res.ok) return;
+      const data = (await res.json()) as SellerOption[];
+      if (!cancelled) setSellers(Array.isArray(data) ? data : []);
+    }
+    void loadSellers();
+    return () => {
+      cancelled = true;
+    };
+  }, [isAdmin]);
 
   useEffect(() => {
     if (type !== "upcoming") return;
@@ -90,18 +118,58 @@ export function MeetingsList({ type }: { type: "upcoming" | "past" }) {
     };
   }, [type]);
 
-  async function patchOutcome(id: string, meetingOutcomeStatus: string) {
+  async function patchOutcome(
+    id: string,
+    meetingOutcomeStatus: string,
+    options?: { sendToRebooking?: boolean },
+  ) {
     const res = await fetch(`/api/leads/${id}`, {
       method: "PATCH",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ meetingOutcomeStatus }),
+      body: JSON.stringify({
+        meetingOutcomeStatus,
+        ...(options?.sendToRebooking !== undefined
+          ? { sendToRebooking: options.sendToRebooking }
+          : {}),
+      }),
     });
     if (!res.ok) {
       const j = await res.json().catch(() => ({}));
       setError(typeof j.error === "string" ? j.error : "Kunne ikke opdatere udfald");
       return;
     }
+    setError(null);
     await load();
+  }
+
+  function handleOutcomeChange(id: string, value: string) {
+    if (value === MEETING_OUTCOME_CANCELLED) {
+      setNoShowDialog({ leadId: id });
+      return;
+    }
+    void patchOutcome(id, value);
+  }
+
+  async function patchSeller(id: string, bookedByUserId: string) {
+    setSavingSellerById((prev) => ({ ...prev, [id]: true }));
+    setSavedSellerHintById((prev) => ({ ...prev, [id]: false }));
+    const res = await fetch(`/api/leads/${id}`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ bookedByUserId }),
+    });
+    setSavingSellerById((prev) => ({ ...prev, [id]: false }));
+    if (!res.ok) {
+      const j = await res.json().catch(() => ({}));
+      setError(typeof j.error === "string" ? j.error : "Kunne ikke gemme sælger");
+      return;
+    }
+    setError(null);
+    await load();
+    setSavedSellerHintById((prev) => ({ ...prev, [id]: true }));
+    window.setTimeout(() => {
+      setSavedSellerHintById((prev) => ({ ...prev, [id]: false }));
+    }, 1200);
   }
 
   async function patchAssignee(id: string, assignedUserId: string) {
@@ -143,29 +211,29 @@ export function MeetingsList({ type }: { type: "upcoming" | "past" }) {
           <p className="mt-1 text-sm text-stone-600">
             {type === "upcoming"
               ? "Viser alle møder fra i dag og frem."
-              : showAllPast
-                ? `Viser alle tidligere møder uanset udfald. Udfald kan kun ændres så længe mødetidspunktet er inden for ${MEETING_OUTCOME_LOCK_DAYS} dage tilbage.`
-                : "Viser alle møder før dags dato (kalenderdag i København)."}
+              : activeOnlyPast
+                ? "Viser kun tidligere møder hvor leadet stadig har status Møde booket."
+                : `Viser alle tidligere møder uanset lead-status. Udfald kan ændres så længe mødetidspunktet er inden for ${MEETING_OUTCOME_LOCK_DAYS} dage.`}
           </p>
         </div>
         {type === "past" ? (
           <button
             type="button"
-            onClick={() => setShowAllPast((v) => !v)}
-            aria-pressed={showAllPast}
+            onClick={() => setActiveOnlyPast((v) => !v)}
+            aria-pressed={activeOnlyPast}
             className={[
               "inline-flex items-center gap-1.5 rounded-lg border px-3 py-1.5 text-xs font-semibold shadow-sm transition",
-              showAllPast
+              activeOnlyPast
                 ? "border-stone-900 bg-stone-900 text-white hover:bg-stone-800"
                 : "border-stone-300 bg-white text-stone-700 hover:bg-stone-50",
             ].join(" ")}
             title={
-              showAllPast
-                ? "Vis kun møder med aktiv MEETING_BOOKED-status"
-                : "Vis også tidligere møder hvor lead-status er ændret efterfølgende"
+              activeOnlyPast
+                ? "Vis alle tidligere møder uanset lead-status"
+                : "Vis kun møder med aktiv Møde booket-status"
             }
           >
-            {showAllPast ? "Vis kun aktive" : "Vis alle tidligere møder"}
+            {activeOnlyPast ? "Vis alle tidligere møder" : "Vis kun aktive"}
           </button>
         ) : null}
       </div>
@@ -259,15 +327,51 @@ export function MeetingsList({ type }: { type: "upcoming" | "past" }) {
                   <td className="px-4 py-3 text-stone-600">
                     {m.meetingBookedAt ? new Date(m.meetingBookedAt).toLocaleString("da-DK") : "—"}
                   </td>
-                  <td className="px-4 py-3 text-stone-700">{m.bookedByUser ? `${m.bookedByUser.name}` : "—"}</td>
+                  <td className="px-4 py-3 text-stone-700">
+                    {isAdmin && type === "past" && sellers.length > 0 ? (
+                      <div className="flex items-center gap-2">
+                        <select
+                          value={m.bookedByUser?.id ?? ""}
+                          onChange={(e) => void patchSeller(m.id, e.target.value)}
+                          disabled={savingSellerById[m.id] || !m.bookedByUser?.id}
+                          className="rounded-md border border-stone-300 bg-white px-2.5 py-1.5 text-xs font-medium text-stone-800 shadow-sm outline-none ring-stone-400 focus:ring-2 disabled:opacity-60"
+                        >
+                          {!m.bookedByUser?.id ? (
+                            <option value="" disabled>
+                              —
+                            </option>
+                          ) : null}
+                          {sellers.map((u) => (
+                            <option key={u.id} value={u.id}>
+                              {u.name}
+                            </option>
+                          ))}
+                        </select>
+                        {savedSellerHintById[m.id] ? (
+                          <span className="text-xs text-emerald-700">Gemt</span>
+                        ) : null}
+                      </div>
+                    ) : m.bookedByUser ? (
+                      `${m.bookedByUser.name}`
+                    ) : (
+                      "—"
+                    )}
+                  </td>
                   <td className="px-4 py-3">
-                    <span
-                      className={`inline-flex rounded-full px-2 py-0.5 text-xs font-semibold ${meetingOutcomeBadgeClass(
-                        m.meetingOutcomeStatus,
-                      )}`}
-                    >
-                      {outcomeLabel(m.meetingOutcomeStatus)}
-                    </span>
+                    <div className="flex flex-wrap items-center gap-1.5">
+                      <span
+                        className={`inline-flex rounded-full px-2 py-0.5 text-xs font-semibold ${meetingOutcomeBadgeClass(
+                          m.meetingOutcomeStatus,
+                        )}`}
+                      >
+                        {outcomeLabel(m.meetingOutcomeStatus)}
+                      </span>
+                      {m.campaign?.systemCampaignType === "rebooking" ? (
+                        <span className="inline-flex rounded-full bg-amber-100 px-2 py-0.5 text-xs font-medium text-amber-900">
+                          Genbooking
+                        </span>
+                      ) : null}
+                    </div>
                   </td>
                   {isAdmin && (
                     <td className="px-4 py-3">
@@ -285,7 +389,7 @@ export function MeetingsList({ type }: { type: "upcoming" | "past" }) {
                       ) : (
                         <MeetingOutcomeSelect
                           value={String(m.meetingOutcomeStatus ?? "").trim().toUpperCase() || MEETING_OUTCOME_PENDING}
-                          onChange={(value) => void patchOutcome(m.id, value)}
+                          onChange={(value) => handleOutcomeChange(m.id, value)}
                         />
                       )}
                     </td>
@@ -296,6 +400,16 @@ export function MeetingsList({ type }: { type: "upcoming" | "past" }) {
           </tbody>
         </table>
       </div>
+
+      <MeetingNoShowRebookDialog
+        open={noShowDialog != null}
+        onClose={() => setNoShowDialog(null)}
+        onConfirm={(sendToRebooking) => {
+          const id = noShowDialog?.leadId;
+          setNoShowDialog(null);
+          if (id) void patchOutcome(id, MEETING_OUTCOME_CANCELLED, { sendToRebooking });
+        }}
+      />
     </div>
   );
 }

@@ -5,11 +5,10 @@ export type MeetingsType = "upcoming" | "past" | "all";
 
 type GetMeetingsOptions = {
   /**
-   * Hvis true: drop kravet om status="MEETING_BOOKED". Bruges på "Vis alle tidligere møder"
-   * for også at finde leads, der har haft et booket møde, men hvor lead-status sidenhen
-   * er ændret (typisk i rebooking-flow). Påvirker kun "past".
+   * Kun for "past": hvis true, vis kun leads der stadig har status MEETING_BOOKED.
+   * Default (false/undefined) viser alle leads med en tidligere mødetid.
    */
-  showAll?: boolean;
+  activeOnly?: boolean;
 };
 
 export async function getMeetings(type: MeetingsType, options: GetMeetingsOptions = {}) {
@@ -25,8 +24,7 @@ export async function getMeetings(type: MeetingsType, options: GetMeetingsOption
   const where: Record<string, unknown> = {
     meetingScheduledFor: meetingScheduledForClause,
   };
-  // Default: kun aktive booking-leads. showAll for "past" giver hele historikken.
-  if (!(type === "past" && options.showAll === true)) {
+  if (type === "past" && options.activeOnly === true) {
     where.status = "MEETING_BOOKED";
   }
 
@@ -36,7 +34,7 @@ export async function getMeetings(type: MeetingsType, options: GetMeetingsOption
     include: {
       bookedByUser: { select: { id: true, name: true, username: true } },
       assignedUser: { select: { id: true, name: true, username: true, phone: true } },
-      campaign: { select: { id: true, name: true } },
+      campaign: { select: { id: true, name: true, systemCampaignType: true } },
     },
   });
 }

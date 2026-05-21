@@ -30,6 +30,7 @@ model User {
   telnyxCredentialConnectionId String?
 
   bookedMeetings            Lead[]                    @relation("LeadBookedBy")
+  archivedMeetingRecords    LeadMeetingRecord[]       @relation("LeadMeetingRecordBookedBy")
   assignedMeetings          Lead[]                    @relation("LeadMeetingAssignedTo")
   /// Aktivt lead-lås under opkald/kampagne (timeouts ryddes i appen)
   lockedLeads               Lead[]                    @relation("LeadLockedBy")
@@ -172,6 +173,7 @@ model Lead {
   outcomeLogs    LeadOutcomeLog[]
   visitHistory   LeadVisitHistory[]
   activityEvents LeadActivityEvent[]
+  meetingRecords LeadMeetingRecord[]
 
   dialerCallLogs  DialerCallLog[]
   dialerQueueItem DialerQueueItem?
@@ -183,6 +185,31 @@ model Lead {
   @@index([lastOutcomeAt])
   @@index([campaignId, status, lastDialAttemptAt])
   @@index([campaignId, powerDialerEligibleAfter])
+}
+
+/// Arkiveret møde-snapshot (historik til Mine salg / provision når lead får nyt møde).
+model LeadMeetingRecord {
+  id                          String   @id @default(cuid())
+  leadId                      String
+  bookedByUserId              String
+  meetingBookedAt             DateTime
+  meetingScheduledFor         DateTime
+  meetingOutcomeStatus        String
+  meetingCommissionDayKey     String   @default("")
+  bookedFromRebookingCampaign Boolean  @default(false)
+  meetingContactName          String   @default("")
+  meetingContactEmail         String   @default("")
+  meetingContactPhonePrivate  String   @default("")
+  /// rebooked | admin_seller_change
+  archivedReason              String   @default("rebooked")
+  archivedAt                  DateTime @default(now())
+
+  lead         Lead @relation(fields: [leadId], references: [id], onDelete: Cascade)
+  bookedByUser User @relation("LeadMeetingRecordBookedBy", fields: [bookedByUserId], references: [id], onDelete: Restrict)
+
+  @@index([bookedByUserId, meetingCommissionDayKey])
+  @@index([leadId, archivedAt])
+  @@index([bookedByUserId, meetingScheduledFor])
 }
 
 /// Idempotens-log for daglig SMS-reminder pr. bruger.

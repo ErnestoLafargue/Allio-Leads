@@ -13,11 +13,13 @@ import { DashboardTabs } from "@/app/components/dashboard-tabs";
 
 type LeadRow = {
   id: string;
+  leadId?: string;
   companyName: string;
   meetingScheduledFor: string | null;
   meetingBookedAt: string | null;
   meetingOutcomeStatus?: string;
   meetingCommissionDayKey?: string;
+  archived?: boolean;
   campaign?: { name: string };
 };
 
@@ -300,12 +302,13 @@ export default function MineSalgPage() {
                 <th className="px-3 py-2 font-medium">Booket</th>
                 <th className="px-3 py-2 font-medium">Kampagne</th>
                 <th className="px-3 py-2 font-medium">Udfald</th>
+                <th className="px-3 py-2 font-medium">Type</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-stone-100">
               {leads.length === 0 ? (
                 <tr>
-                  <td colSpan={5} className="px-3 py-6 text-center text-stone-500">
+                  <td colSpan={6} className="px-3 py-6 text-center text-stone-500">
                     Du har ikke booket møder endnu.
                   </td>
                 </tr>
@@ -313,7 +316,10 @@ export default function MineSalgPage() {
                 leads.map((l) => (
                   <tr key={l.id}>
                     <td className="px-3 py-2">
-                      <Link href={`/leads/${l.id}`} className="font-medium text-stone-900 hover:underline">
+                      <Link
+                        href={`/leads/${l.leadId ?? l.id}`}
+                        className="font-medium text-stone-900 hover:underline"
+                      >
                         {l.companyName}
                       </Link>
                     </td>
@@ -332,6 +338,15 @@ export default function MineSalgPage() {
                       >
                         {outcomeLabel(l.meetingOutcomeStatus)}
                       </span>
+                    </td>
+                    <td className="px-3 py-2 text-stone-600">
+                      {l.archived ? (
+                        <span className="inline-flex rounded-full bg-stone-100 px-2 py-0.5 text-xs font-medium text-stone-700">
+                          Tidligere møde
+                        </span>
+                      ) : (
+                        "Aktuelt"
+                      )}
                     </td>
                   </tr>
                 ))

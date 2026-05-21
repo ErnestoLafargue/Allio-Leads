@@ -22,7 +22,13 @@ import {
 } from "@/lib/meeting-outcome";
 import { isMeetingOutcomeLocked, MEETING_OUTCOME_LOCK_DAYS } from "@/lib/meetings";
 import { campaignIdForBookedMeetingOutcome } from "@/lib/meeting-campaign-routing";
+import { resolveAdminMeetingOutcomeRouting } from "@/lib/admin-meeting-outcome-patch";
 import { ensureStandardCampaignId } from "@/lib/ensure-system-campaigns";
+import {
+  isFutureMeetingTime,
+  isNewMeetingBookingConfirm,
+  leadMeetingRecordCreateInput,
+} from "@/lib/lead-meeting-archive";
 import { releaseExpiredLocksEverywhere, sellerMayEditLead } from "@/lib/lead-lock";
 import { findLeadBookingOverlapInDb } from "@/lib/booking/overlap-db";
 import { LEAD_ACTIVITY_KIND } from "@/lib/lead-activity-kinds";
@@ -197,6 +203,29 @@ export async function PATCH(req: Request, { params }: Params) {
     adminMeetingOutcome = o;
   }
 
+  const sendToRebooking = body?.sendToRebooking === true;
+
+  let adminBookedByUserId: string | undefined;
+  if (body && "bookedByUserId" in body) {
+    if (session!.user.role !== "ADMIN") {
+      return NextResponse.json({ error: "Kun administrator kan ændre sælger på mødet." }, { status: 403 });
+    }
+    if (typeof body.bookedByUserId !== "string" || !body.bookedByUserId.trim()) {
+      return NextResponse.json({ error: "Ugyldig sælger." }, { status: 400 });
+    }
+    if (!existing.meetingBookedAt) {
+      return NextResponse.json({ error: "Leadet har ikke et booket møde." }, { status: 400 });
+    }
+    const assignee = await prisma.user.findUnique({
+      where: { id: body.bookedByUserId.trim() },
+      select: { id: true },
+    });
+    if (!assignee) {
+      return NextResponse.json({ error: "Brugeren findes ikke." }, { status: 400 });
+    }
+    adminBookedByUserId = assignee.id;
+  }
+
   const companyName =
     typeof body?.companyName === "string" ? body.companyName.trim() : existing.companyName;
   const phone =
@@ -254,6 +283,7 @@ export async function PATCH(req: Request, { params }: Params) {
 
   let meetingOutcomeStatus = existing.meetingOutcomeStatus ?? MEETING_OUTCOME_PENDING;
   let meetingCommissionDayKey = existing.meetingCommissionDayKey ?? "";
+  let shouldArchiveMeetingBeforeUpdate = false;
 
   if (status === "MEETING_BOOKED") {
     const scheduledRaw = body?.meetingScheduledFor;
@@ -293,14 +323,40 @@ export async function PATCH(req: Request, { params }: Params) {
       return NextResponse.json({ error: "Ugyldig e-mail til mødekontakten." }, { status: 400 });
     }
 
-    if (existing.status !== "MEETING_BOOKED" || !existing.meetingBookedAt) {
+    const newMeetingConfirm =
+      isNewMeetingBookingConfirm(existing, meetingScheduledFor) &&
+      meetingScheduledFor != null &&
+      isFutureMeetingTime(meetingScheduledFor);
+
+    if (!existing.meetingBookedAt) {
       meetingBookedAt = new Date();
       bookedByUserId = userId;
       meetingOutcomeStatus = MEETING_OUTCOME_PENDING;
       meetingCommissionDayKey = copenhagenDayKey(meetingBookedAt);
-    } else if (!meetingCommissionDayKey.trim() && meetingBookedAt) {
+    } else if (newMeetingConfirm) {
+      shouldArchiveMeetingBeforeUpdate = true;
+      meetingBookedAt = new Date();
+      bookedByUserId = userId;
+      meetingOutcomeStatus = MEETING_OUTCOME_PENDING;
       meetingCommissionDayKey = copenhagenDayKey(meetingBookedAt);
+    } else {
+      bookedByUserId = existing.bookedByUserId;
+      if (!meetingCommissionDayKey.trim() && meetingBookedAt) {
+        meetingCommissionDayKey = copenhagenDayKey(meetingBookedAt);
+      }
     }
+  } else if (
+    adminMeetingOutcome !== undefined ||
+    adminBookedByUserId !== undefined
+  ) {
+    meetingBookedAt = existing.meetingBookedAt;
+    meetingScheduledFor = existing.meetingScheduledFor;
+    bookedByUserId = existing.bookedByUserId;
+    meetingCommissionDayKey = existing.meetingCommissionDayKey ?? "";
+    meetingContactName = existing.meetingContactName ?? "";
+    meetingContactEmail = existing.meetingContactEmail ?? "";
+    meetingContactPhonePrivate = existing.meetingContactPhonePrivate ?? "";
+    meetingOutcomeStatus = existing.meetingOutcomeStatus ?? MEETING_OUTCOME_PENDING;
   } else {
     const preserveMeetingWhenRebooking =
       existing.campaign?.systemCampaignType === "rebooking";
@@ -343,13 +399,17 @@ export async function PATCH(req: Request, { params }: Params) {
   }
 
   if (adminMeetingOutcome !== undefined) {
-    if (status !== "MEETING_BOOKED") {
+    if (!existing.meetingScheduledFor) {
       return NextResponse.json(
-        { error: "Mødeudfald kan kun sættes når leadet har status «Møde booket»." },
+        { error: "Leadet har ingen mødetid — mødeudfald kan ikke sættes." },
         { status: 400 },
       );
     }
     meetingOutcomeStatus = adminMeetingOutcome;
+  }
+
+  if (adminBookedByUserId !== undefined) {
+    bookedByUserId = adminBookedByUserId;
   }
 
   const meetingTimeChangedForOverlap =
@@ -423,8 +483,12 @@ export async function PATCH(req: Request, { params }: Params) {
   const clearLeadLock = status !== "NEW";
 
   let bookedFromRebookingCampaign = existing.bookedFromRebookingCampaign ?? false;
+  const isAdminMeetingOnlyPatch =
+    adminMeetingOutcome !== undefined || adminBookedByUserId !== undefined;
   if (status !== "MEETING_BOOKED") {
-    bookedFromRebookingCampaign = false;
+    if (!isAdminMeetingOnlyPatch) {
+      bookedFromRebookingCampaign = false;
+    }
   } else if (existing.status !== "MEETING_BOOKED" || !existing.meetingBookedAt) {
     bookedFromRebookingCampaign = existing.campaign?.systemCampaignType === "rebooking";
   }
@@ -434,8 +498,32 @@ export async function PATCH(req: Request, { params }: Params) {
   const logMeetingOutcomeActivity =
     adminMeetingOutcome !== undefined && prevMeetingOutcomeNorm !== finalMeetingOutcomeNorm;
 
+  const prevBookedByUserId = existing.bookedByUserId;
+  const logBookerChangedActivity =
+    adminBookedByUserId !== undefined && prevBookedByUserId !== bookedByUserId;
+
+  let logSentToRebooking = false;
+  let adminOutcomeRouting: Awaited<ReturnType<typeof resolveAdminMeetingOutcomeRouting>> | null =
+    null;
+
+  if (adminMeetingOutcome !== undefined) {
+    adminOutcomeRouting = await resolveAdminMeetingOutcomeRouting(
+      adminMeetingOutcome,
+      sendToRebooking,
+      status,
+      meetingOutcomeStatus,
+      status === "MEETING_BOOKED" && meetingScheduledFor != null,
+    );
+    if (adminOutcomeRouting.statusOverride) {
+      status = adminOutcomeRouting.statusOverride;
+    }
+    logSentToRebooking = adminOutcomeRouting.logSentToRebooking;
+  }
+
   let campaignIdToSet: string | null | undefined;
-  if (status === "MEETING_BOOKED" && meetingScheduledFor) {
+  if (adminOutcomeRouting) {
+    campaignIdToSet = adminOutcomeRouting.campaignIdToSet;
+  } else if (status === "MEETING_BOOKED" && meetingScheduledFor) {
     campaignIdToSet = await campaignIdForBookedMeetingOutcome(meetingOutcomeStatus);
   } else if (existing.status === "MEETING_BOOKED" && status !== "MEETING_BOOKED") {
     /** I «Genbook møde» skal opkald-udfald (Ny, voicemail m.m.) blive i kampagnen — ellers forsvinder leadet fra genbook-køen. */
@@ -447,6 +535,25 @@ export async function PATCH(req: Request, { params }: Params) {
   }
 
   const lead = await prisma.$transaction(async (tx) => {
+    if (shouldArchiveMeetingBeforeUpdate) {
+      await tx.leadMeetingRecord.create({
+        data: leadMeetingRecordCreateInput(existing, "rebooked"),
+      });
+      const actor = await tx.user.findUnique({
+        where: { id: userId },
+        select: { name: true },
+      });
+      const label = actor?.name?.trim() || "Bruger";
+      await tx.leadActivityEvent.create({
+        data: {
+          leadId: id,
+          userId,
+          kind: LEAD_ACTIVITY_KIND.MEETING_ARCHIVED,
+          summary: `${label} arkiverede tidligere møde ved ny booking`,
+        },
+      });
+    }
+
     const updated = await tx.lead.update({
       where: { id },
       data: {
@@ -556,6 +663,47 @@ export async function PATCH(req: Request, { params }: Params) {
         },
       });
     }
+
+    if (logSentToRebooking) {
+      const actor = await tx.user.findUnique({
+        where: { id: userId },
+        select: { name: true },
+      });
+      const label = actor?.name?.trim() || "Bruger";
+      await tx.leadActivityEvent.create({
+        data: {
+          leadId: id,
+          userId,
+          kind: LEAD_ACTIVITY_KIND.MEETING_SENT_TO_REBOOKING,
+          summary: `${label} sendte mødet til genbooking`,
+        },
+      });
+    }
+
+    if (logBookerChangedActivity) {
+      const actor = await tx.user.findUnique({
+        where: { id: userId },
+        select: { name: true },
+      });
+      const label = actor?.name?.trim() || "Bruger";
+      const prevUser = prevBookedByUserId
+        ? await tx.user.findUnique({ where: { id: prevBookedByUserId }, select: { name: true } })
+        : null;
+      const nextUser = bookedByUserId
+        ? await tx.user.findUnique({ where: { id: bookedByUserId }, select: { name: true } })
+        : null;
+      const fromName = prevUser?.name?.trim() || "—";
+      const toName = nextUser?.name?.trim() || "—";
+      await tx.leadActivityEvent.create({
+        data: {
+          leadId: id,
+          userId,
+          kind: LEAD_ACTIVITY_KIND.MEETING_BOOKER_CHANGED,
+          summary: `${label} ændrede sælger fra ${fromName} til ${toName}`,
+        },
+      });
+    }
+
     return updated;
   });
 
