@@ -119,7 +119,7 @@ export function getIsoWeekNumberDa(dayKey: string): number {
     week: "isoWeek",
   } as Intl.DateTimeFormatOptions);
   const parts = fmt.formatToParts(start);
-  const w = parts.find((p) => p.type === "week")?.value;
+  const w = parts.find((p) => (p.type as string) === "week")?.value;
   if (w) return parseInt(w, 10);
   const thursday = addDaysToDayKey(dayKey, 3);
   const { y } = parseDayKey(thursday);

@@ -13,19 +13,6 @@ type Credential = {
   createdAt: string | null;
 };
 
-type PowerDialerDeploymentInfo = {
-  expectedWebhookPath: string;
-  envWebhookOverride: string | null;
-  telnyxWebhookEventUrl: string | null;
-  telnyxWebhookError: string | null;
-  effectiveWebhookUrl: string | null;
-  webhookPathMatchesExpected: boolean | null;
-  envOutboundChannelLimit: number | null;
-  telnyxPowerProfileName: string | null;
-  telnyxPowerProfileChannelLimit: number | null;
-  leadsPerReadyAgent: number;
-};
-
 type ListResponse = {
   ok?: boolean;
   credentials?: Credential[];
@@ -34,7 +21,6 @@ type ListResponse = {
   allioCredentialConnectionName?: string | null;
   currentCredentialId?: string | null;
   currentCredentialIdHint?: string | null;
-  powerDialerDeployment?: PowerDialerDeploymentInfo;
   error?: string;
   code?: string;
   telnyxStatus?: number;
@@ -147,7 +133,6 @@ export function TelnyxCredentialsAdminPanel() {
   const voiceApiApplicationId = data?.voiceApiApplicationId ?? null;
   const allioCredentialConnectionId = data?.allioCredentialConnectionId ?? null;
   const creds = data?.credentials ?? [];
-  const deployment = data?.powerDialerDeployment ?? null;
 
   return (
     <div className="space-y-6">
@@ -208,70 +193,6 @@ export function TelnyxCredentialsAdminPanel() {
           <p className="mt-3 rounded-md bg-red-50 px-3 py-2 text-sm text-red-700">{error}</p>
         )}
       </div>
-
-      {deployment && (
-        <div className="rounded-lg border border-stone-200 bg-white p-5 shadow-sm">
-          <h2 className="text-lg font-semibold text-stone-900">Power Dialer — deployment</h2>
-          <p className="mt-1 text-sm text-stone-500">
-            Bekræft webhook-sti og kanalgrænser for aktiv deployment (miljø + Telnyx-portal).
-          </p>
-          <div className="mt-4 grid gap-3 text-sm text-stone-600 sm:grid-cols-2">
-            <div className="sm:col-span-2">
-              <span className="text-stone-500">Forventet webhook-sti:</span>{" "}
-              <span className="font-mono text-stone-800">{deployment.expectedWebhookPath}</span>
-            </div>
-            <div className="sm:col-span-2">
-              <span className="text-stone-500">Effektiv webhook URL:</span>{" "}
-              <span className="inline-flex items-center gap-2 font-mono text-stone-800 break-all">
-                <StatusDot
-                  ok={deployment.webhookPathMatchesExpected === true}
-                  title={
-                    deployment.webhookPathMatchesExpected === true
-                      ? "Sti matcher"
-                      : deployment.webhookPathMatchesExpected === false
-                        ? "Sti matcher ikke"
-                        : "Ingen URL konfigureret"
-                  }
-                />
-                {deployment.effectiveWebhookUrl ?? "–"}
-              </span>
-            </div>
-            {deployment.envWebhookOverride && (
-              <div className="sm:col-span-2">
-                <span className="text-stone-500">TELNYX_CALL_WEBHOOK_URL (override):</span>{" "}
-                <span className="font-mono text-stone-800 break-all">
-                  {deployment.envWebhookOverride}
-                </span>
-              </div>
-            )}
-            <div>
-              <span className="text-stone-500">Telnyx app webhook:</span>{" "}
-              <span className="font-mono text-stone-800 break-all">
-                {deployment.telnyxWebhookEventUrl ?? deployment.telnyxWebhookError ?? "–"}
-              </span>
-            </div>
-            <div>
-              <span className="text-stone-500">TELNYX_OUTBOUND_CHANNEL_LIMIT:</span>{" "}
-              <span className="font-mono text-stone-800">
-                {deployment.envOutboundChannelLimit ?? "ikke sat (ingen env-cap)"}
-              </span>
-            </div>
-            <div>
-              <span className="text-stone-500">Telnyx Outbound Profile:</span>{" "}
-              <span className="font-mono text-stone-800">
-                {deployment.telnyxPowerProfileName ?? "–"}
-                {deployment.telnyxPowerProfileChannelLimit != null
-                  ? ` (${deployment.telnyxPowerProfileChannelLimit} kanaler)`
-                  : ""}
-              </span>
-            </div>
-            <div>
-              <span className="text-stone-500">Leads pr. ledig agent:</span>{" "}
-              <span className="font-mono text-stone-800">{deployment.leadsPerReadyAgent}</span>
-            </div>
-          </div>
-        </div>
-      )}
 
       <div className="overflow-hidden rounded-lg border border-stone-200 bg-white shadow-sm">
         <table className="w-full text-left text-sm">

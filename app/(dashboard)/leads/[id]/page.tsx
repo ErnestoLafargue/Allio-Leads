@@ -295,9 +295,10 @@ function LeadDetailInner() {
       setQueue(null);
       return;
     }
+    const cid = campaignIdForQueue;
     let cancelled = false;
     async function loadQueue() {
-      const res = await fetch(`/api/leads?campaignId=${encodeURIComponent(campaignIdForQueue)}`);
+      const res = await fetch(`/api/leads?campaignId=${encodeURIComponent(cid)}`);
       if (!res.ok || cancelled) return;
       const rows: {
         id: string;
