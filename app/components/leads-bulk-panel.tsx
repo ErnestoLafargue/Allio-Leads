@@ -3,6 +3,11 @@
 import Link from "next/link";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { useSession } from "next-auth/react";
+import {
+  confirmBulkDeleteSelection,
+  formatBulkDeleteSummaryMessage,
+  type BulkDeleteApiSummary,
+} from "@/lib/bulk-delete-client";
 import { LEAD_STATUSES, LEAD_STATUS_LABELS, type LeadStatus } from "@/lib/lead-status";
 import { LeadOutcomeModal } from "@/app/components/lead-outcome-modal";
 import { isLockActive } from "@/lib/lead-lock";
@@ -305,6 +310,7 @@ export function LeadsBulkPanel({
   const [leads, setLeads] = useState<LeadRow[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [notice, setNotice] = useState<string | null>(null);
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [sortKey, setSortKey] = useState<SortColumn | null>(null);
   const [sortDir, setSortDir] = useState<"asc" | "desc">("desc");
@@ -785,23 +791,30 @@ export function LeadsBulkPanel({
   const selectedIdsInView = sortedLeads.filter((l) => selected.has(l.id)).map((l) => l.id);
   async function onDeleteSelected() {
     if (!isAdmin || deleting || selectedIdsInView.length === 0) return;
-    const confirmed = window.confirm(
-      `Er du sikker på, at du vil slette ${selectedIdsInView.length} lead${selectedIdsInView.length > 1 ? "s" : ""}? Dette kan ikke fortrydes.`,
-    );
-    if (!confirmed) return;
+    const selectedLeads = sortedLeads
+      .filter((l) => selected.has(l.id))
+      .map((l) => ({ id: l.id, notes: l.notes }));
+    const confirmResult = confirmBulkDeleteSelection(selectedLeads);
+    if (confirmResult.cancelled) return;
     setDeleting(true);
     setError(null);
+    setNotice(null);
     const res = await fetch("/api/leads/bulk-delete", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ ids: selectedIdsInView }),
+      body: JSON.stringify({
+        ids: selectedIdsInView,
+        includeLeadsWithNotes: confirmResult.includeLeadsWithNotes,
+      }),
     });
     setDeleting(false);
+    const j = (await res.json().catch(() => ({}))) as BulkDeleteApiSummary & { error?: string };
     if (!res.ok) {
-      const j = await res.json().catch(() => ({}));
       setError(typeof j.error === "string" ? j.error : "Kunne ikke slette leads");
       return;
     }
+    const summaryMsg = formatBulkDeleteSummaryMessage(j);
+    if (summaryMsg) setNotice(summaryMsg);
     setSelected(new Set());
     setRefreshNonce((n) => n + 1);
   }
@@ -1243,6 +1256,7 @@ export function LeadsBulkPanel({
         </div>
       )}
 
+      {notice && <p className="text-sm text-emerald-800">{notice}</p>}
       {error && <p className="text-sm text-red-600">{error}</p>}
 
       {campaignId && (dialMode === "PREDICTIVE" || dialMode === "POWER_DIALER") && (

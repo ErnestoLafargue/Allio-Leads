@@ -13,6 +13,11 @@ import {
   type LeadStatus,
 } from "@/lib/lead-status";
 import {
+  confirmBulkDeleteSelection,
+  formatBulkDeleteSummaryMessage,
+  type BulkDeleteApiSummary,
+} from "@/lib/bulk-delete-client";
+import {
   filterDuplicateGroupsByCampaigns,
   type DuplicateGroup,
   type DuplicateGroupsResult,
@@ -51,6 +56,7 @@ export function LeadsDuplicatesPanel() {
   const [data, setData] = useState<DuplicateGroupsResult | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [notice, setNotice] = useState<string | null>(null);
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [deleting, setDeleting] = useState(false);
   const [filterOpen, setFilterOpen] = useState(false);
@@ -107,6 +113,16 @@ export function LeadsDuplicatesPanel() {
     [filteredGroups],
   );
 
+  const leadById = useMemo(() => {
+    const map = new Map<string, { id: string; notes: string }>();
+    for (const g of filteredGroups) {
+      for (const l of g.leads) {
+        map.set(l.id, { id: l.id, notes: l.notes });
+      }
+    }
+    return map;
+  }, [filteredGroups]);
+
   const allSelected =
     visibleLeadIds.length > 0 && visibleLeadIds.every((id) => selected.has(id));
 
@@ -156,25 +172,30 @@ export function LeadsDuplicatesPanel() {
   async function onDeleteSelected() {
     const ids = [...selected];
     if (!isAdmin || deleting || ids.length === 0) return;
-    if (
-      !window.confirm(
-        `Er du sikker på, at du vil slette ${ids.length} lead${ids.length > 1 ? "s" : ""}? Dette kan ikke fortrydes.`,
-      )
-    ) {
-      return;
-    }
+    const selectedLeads = ids
+      .map((id) => leadById.get(id))
+      .filter((l): l is { id: string; notes: string } => l != null);
+    const confirmResult = confirmBulkDeleteSelection(selectedLeads);
+    if (confirmResult.cancelled) return;
     setDeleting(true);
+    setError(null);
+    setNotice(null);
     const res = await fetch("/api/leads/bulk-delete", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ ids }),
+      body: JSON.stringify({
+        ids,
+        includeLeadsWithNotes: confirmResult.includeLeadsWithNotes,
+      }),
     });
     setDeleting(false);
+    const j = (await res.json().catch(() => ({}))) as BulkDeleteApiSummary & { error?: string };
     if (!res.ok) {
-      const j = await res.json().catch(() => ({}));
       setError(typeof j.error === "string" ? j.error : "Kunne ikke slette leads");
       return;
     }
+    const summaryMsg = formatBulkDeleteSummaryMessage(j);
+    if (summaryMsg) setNotice(summaryMsg);
     setSelected(new Set());
     await load();
   }
@@ -312,6 +333,7 @@ export function LeadsDuplicatesPanel() {
         </div>
       )}
 
+      {notice && <p className="text-sm text-emerald-800">{notice}</p>}
       {error && <p className="text-sm text-red-600">{error}</p>}
 
       {loading && !data && (

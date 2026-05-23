@@ -1,12 +1,16 @@
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { requireAdmin } from "@/lib/api-auth";
+import { filterLeadIdsForBulkDelete } from "@/lib/lead-delete-guards";
 
 export async function POST(req: Request) {
   const { response } = await requireAdmin();
   if (response) return response;
 
-  const body = (await req.json().catch(() => null)) as { ids?: unknown } | null;
+  const body = (await req.json().catch(() => null)) as {
+    ids?: unknown;
+    includeLeadsWithNotes?: unknown;
+  } | null;
   const idsRaw = Array.isArray(body?.ids) ? body.ids : [];
   const ids = Array.from(
     new Set(
@@ -19,8 +23,39 @@ export async function POST(req: Request) {
     return NextResponse.json({ error: "Vælg mindst ét lead" }, { status: 400 });
   }
 
-  const result = await prisma.lead.deleteMany({
+  const includeLeadsWithNotes = body?.includeLeadsWithNotes === true;
+
+  const leads = await prisma.lead.findMany({
     where: { id: { in: ids } },
+    select: { id: true, status: true, notes: true },
   });
-  return NextResponse.json({ deletedCount: result.count });
+
+  const { deletableIds, skipped } = filterLeadIdsForBulkDelete(leads, ids, {
+    includeLeadsWithNotes,
+  });
+
+  if (deletableIds.length === 0) {
+    return NextResponse.json(
+      {
+        error:
+          "Ingen af de valgte leads kan slettes. Møde booket, andet udfald end «Ny» og leads med noter (hvis du valgte det) er beskyttet.",
+        skippedMeetingBooked: skipped.meetingBooked,
+        skippedWithOutcome: skipped.hasOutcome,
+        skippedWithNotes: skipped.hasNotes,
+        deletedCount: 0,
+      },
+      { status: 400 },
+    );
+  }
+
+  const result = await prisma.lead.deleteMany({
+    where: { id: { in: deletableIds } },
+  });
+
+  return NextResponse.json({
+    deletedCount: result.count,
+    skippedMeetingBooked: skipped.meetingBooked,
+    skippedWithOutcome: skipped.hasOutcome,
+    skippedWithNotes: skipped.hasNotes,
+  });
 }

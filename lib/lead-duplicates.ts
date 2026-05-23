@@ -9,6 +9,7 @@ export type DuplicateLeadInput = {
   cvr: string;
   phone: string;
   status: string;
+  notes?: string | null;
   importedAt: Date | string;
   lastOutcomeAt: Date | string | null;
   campaign?: { id: string; name: string } | null;
@@ -21,6 +22,7 @@ export type DuplicateLeadRow = {
   cvr: string;
   phone: string;
   status: string;
+  notes: string;
   importedAt: string;
   lastOutcomeAt: string | null;
   campaignId: string | null;
@@ -86,6 +88,7 @@ function toRow(lead: DuplicateLeadInput): DuplicateLeadRow {
     cvr: lead.cvr,
     phone: lead.phone,
     status: lead.status,
+    notes: lead.notes?.trim() ?? "",
     importedAt:
       lead.importedAt instanceof Date ? lead.importedAt.toISOString() : String(lead.importedAt),
     lastOutcomeAt: lead.lastOutcomeAt
