@@ -104,7 +104,8 @@ export default function ImportPage() {
   const [importProgressProcessedRows, setImportProgressProcessedRows] = useState(0);
   const [importProgressTotalRows, setImportProgressTotalRows] = useState(0);
   const [importConfirmOpen, setImportConfirmOpen] = useState(false);
-  const [includeExistingCvrs, setIncludeExistingCvrs] = useState(false);
+  const [attachExistingCvrsToCampaign, setAttachExistingCvrsToCampaign] = useState(false);
+  const [importDuplicateCvrs, setImportDuplicateCvrs] = useState(false);
   const [overwriteExistingCvrs, setOverwriteExistingCvrs] = useState(false);
   const [allowMissingCvr, setAllowMissingCvr] = useState(false);
   const [allowMissingCompanyName, setAllowMissingCompanyName] = useState(false);
@@ -292,7 +293,8 @@ export default function ImportPage() {
     fd.append("file", file);
     fd.append("campaignId", campaignId);
     fd.append("mapping", JSON.stringify(mapping));
-    fd.append("includeExistingCvrs", includeExistingCvrs ? "1" : "0");
+    fd.append("attachExistingCvrsToCampaign", attachExistingCvrsToCampaign ? "1" : "0");
+    fd.append("importDuplicateCvrs", importDuplicateCvrs ? "1" : "0");
     fd.append("overwriteExistingCvrs", overwriteExistingCvrs ? "1" : "0");
     fd.append("allowMissingCvr", allowMissingCvr ? "1" : "0");
     fd.append("allowMissingCompanyName", allowMissingCompanyName ? "1" : "0");
@@ -695,15 +697,30 @@ export default function ImportPage() {
               <label className="flex items-start gap-3 rounded-md border border-stone-200 bg-stone-50 px-3 py-2 text-sm text-stone-800">
                 <input
                   type="checkbox"
-                  checked={includeExistingCvrs}
-                  onChange={(e) => setIncludeExistingCvrs(e.target.checked)}
+                  checked={attachExistingCvrsToCampaign}
+                  onChange={(e) => setAttachExistingCvrsToCampaign(e.target.checked)}
+                  className="mt-0.5 h-4 w-4 rounded border-stone-300 text-stone-900 focus:ring-stone-400"
+                />
+                <span>
+                  Tilknyt eksisterende CVR-numre til kampagne
+                  <span className="mt-0.5 block text-xs text-stone-600">
+                    Flytter leads med matchende CVR fra andre kampagner til den valgte kampagne (opdaterer ikke data fra
+                    filen). Leads med udfald Ikke interesseret eller Ukvalificeret tilknyttes ikke.
+                  </span>
+                </span>
+              </label>
+              <label className="flex items-start gap-3 rounded-md border border-stone-200 bg-stone-50 px-3 py-2 text-sm text-stone-800">
+                <input
+                  type="checkbox"
+                  checked={importDuplicateCvrs}
+                  onChange={(e) => setImportDuplicateCvrs(e.target.checked)}
                   className="mt-0.5 h-4 w-4 rounded border-stone-300 text-stone-900 focus:ring-stone-400"
                 />
                 <span>
                   Medtag allerede eksisterende CVR-numre
                   <span className="mt-0.5 block text-xs text-stone-600">
-                    Slå til for at knytte eksisterende leads til den valgte kampagne. Leads med udfald Ikke interesseret
-                    eller Ukvalificeret medtages stadig ikke.
+                    Importerer rækken som et nyt lead, selv om CVR allerede findes — også i samme kampagne. Flytter
+                    ikke leads fra andre kampagner (brug «Tilknyt» til det).
                   </span>
                 </span>
               </label>
@@ -822,9 +839,13 @@ export default function ImportPage() {
               Bekræft import
             </h3>
             <p className="mt-2 text-sm text-stone-600">
-              Leads med samme CVR (8 cifre) oprettes ikke igen. {includeExistingCvrs
-                ? "Eksisterende leads knyttes til kampagnen, hvis de ligger et andet sted."
-                : "Eksisterende leads springes over."}{" "}
+              Leads med samme CVR (8 cifre) springes over som standard.{" "}
+              {attachExistingCvrsToCampaign
+                ? "Leads med matchende CVR flyttes fra andre kampagner til denne kampagne. "
+                : ""}
+              {importDuplicateCvrs
+                ? "Rækker med CVR der allerede findes importeres også som nye leads (dublet-CVR tilladt). "
+                : ""}
               {overwriteExistingCvrs
                 ? "Ved overskrivning slettes kun leads uden noter og uden beskyttede udfald; beskyttede CVR'er springes over."
                 : ""}{" "}

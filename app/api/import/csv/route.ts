@@ -44,7 +44,12 @@ export async function POST(req: Request) {
   const campaignIdRaw = form.get("campaignId");
   const campaignId = typeof campaignIdRaw === "string" ? campaignIdRaw.trim() : "";
   const mappingRaw = form.get("mapping");
-  const includeExistingCvrs = form.get("includeExistingCvrs") === "1";
+  const attachExistingCvrsToCampaign = form.get("attachExistingCvrsToCampaign") === "1";
+  const importDuplicateCvrs = form.get("importDuplicateCvrs") === "1";
+  // Legacy alias (gamle links/scripts)
+  const legacyInclude =
+    form.get("includeExistingCvrs") === "1" && !attachExistingCvrsToCampaign && !importDuplicateCvrs;
+  const attachExistingCvrs = attachExistingCvrsToCampaign || legacyInclude;
   const overwriteExistingCvrs = form.get("overwriteExistingCvrs") === "1";
   const allowMissingCvr = form.get("allowMissingCvr") === "1";
   const allowMissingCompanyName = form.get("allowMissingCompanyName") === "1";
@@ -205,27 +210,67 @@ export async function POST(req: Request) {
                   reason: "invalid_row",
                   note: "Findes allerede med udfald Ikke interesseret/Ukvalificeret",
                 });
-              } else if (!includeExistingCvrs) {
-                summary.skippedAlreadyInCampaign += 1;
-                handledCvrsInFile.add(cvrNorm);
-                pushDetail({
-                  dataRow,
-                  cvr: cvrNorm,
-                  reason: "already_in_campaign",
-                  note: "Findes allerede i systemet",
-                });
-              } else if (existing.campaignId === campaignId) {
-                summary.skippedAlreadyInCampaign += 1;
-                handledCvrsInFile.add(cvrNorm);
-                pushDetail({ dataRow, cvr: cvrNorm, reason: "already_in_campaign" });
               } else {
-                await prisma.lead.update({
-                  where: { id: existing.id },
-                  data: { campaignId },
-                });
-                cvrToLead.set(cvrNorm, { id: existing.id, campaignId, status: existing.status });
-                summary.existingAttached += 1;
-                handledCvrsInFile.add(cvrNorm);
+                let attached = false;
+                if (attachExistingCvrs && existing.campaignId !== campaignId) {
+                  await prisma.lead.update({
+                    where: { id: existing.id },
+                    data: { campaignId },
+                  });
+                  cvrToLead.set(cvrNorm, { id: existing.id, campaignId, status: existing.status });
+                  summary.existingAttached += 1;
+                  attached = true;
+                }
+
+                if (importDuplicateCvrs) {
+                  if (!base.companyName?.trim() && !allowMissingCompanyName) {
+                    summary.skippedInvalid += 1;
+                    pushDetail({
+                      dataRow,
+                      cvr: cvrNorm,
+                      reason: "invalid_row",
+                      note: "Virksomhedsnavn mangler (påkrævet for nye leads)",
+                    });
+                  } else {
+                    const custom = collectCustomFromRow(n, fieldCfg);
+                    const created = await prisma.lead.create({
+                      data: pickLeadCreateData({
+                        campaignId,
+                        companyName: base.companyName?.trim() || "(Uden virksomhedsnavn)",
+                        phone: base.phone,
+                        email: base.email,
+                        cvr: cvrNorm,
+                        address: base.address,
+                        postalCode: base.postalCode,
+                        city: base.city,
+                        industry: base.industry,
+                        notes: base.notes,
+                        customFields: stringifyCustomFields(custom),
+                        status: "NEW",
+                      }),
+                    });
+                    cvrToLead.set(cvrNorm, { id: created.id, campaignId, status: "NEW" });
+                    const arr = campaignLeadsByCvr.get(cvrNorm) ?? [];
+                    arr.push({ id: created.id, status: "NEW", notes: "", campaignId });
+                    campaignLeadsByCvr.set(cvrNorm, arr);
+                    summary.newLeadsImported += 1;
+                  }
+                  handledCvrsInFile.add(cvrNorm);
+                } else if (attached) {
+                  handledCvrsInFile.add(cvrNorm);
+                } else {
+                  summary.skippedAlreadyInCampaign += 1;
+                  handledCvrsInFile.add(cvrNorm);
+                  pushDetail({
+                    dataRow,
+                    cvr: cvrNorm,
+                    reason: "already_in_campaign",
+                    note:
+                      existing.campaignId === campaignId
+                        ? "Findes allerede i kampagnen"
+                        : "Findes allerede i systemet",
+                  });
+                }
               }
             } else if (!base.companyName?.trim() && !allowMissingCompanyName) {
               summary.skippedInvalid += 1;
