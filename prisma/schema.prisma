@@ -51,6 +51,7 @@ model User {
   ticketsAssigned Ticket[] @relation("TicketAssignedTo")
   ticketsCreated  Ticket[] @relation("TicketCreatedBy")
   campaignEnrichmentLogs CampaignEnrichmentLog[]
+  campaignImportLogs     CampaignImportLog[]
 
   blockedTimes         BlockedTime[] @relation("BlockedTimeUser")
   blockedTimesCreated  BlockedTime[] @relation("BlockedTimeCreatedBy")
@@ -93,6 +94,7 @@ model Campaign {
   leads        Lead[]
   visitHistory LeadVisitHistory[]
   enrichmentLogs CampaignEnrichmentLog[]
+  importLogs     CampaignImportLog[]
 
   agentSessions    AgentSession[]
   dialerCallLogs   DialerCallLog[]
@@ -446,6 +448,35 @@ model CampaignEnrichmentLog {
   unmatchedRows      Int
   duplicateUploadRows Int     @default(0)
   createdAt          DateTime @default(now())
+
+  campaign Campaign @relation(fields: [campaignId], references: [id], onDelete: Cascade)
+  user     User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([campaignId, createdAt])
+  @@index([userId, createdAt])
+}
+
+/// Log over CSV/Excel-import af leads til kampagne.
+model CampaignImportLog {
+  id                        String   @id @default(cuid())
+  campaignId                String
+  userId                    String
+  filename                  String
+  totalRows                 Int
+  newLeadsImported          Int
+  existingAttached          Int
+  overwriteMatchedCvrs      Int      @default(0)
+  protectedCvrsSkipped      Int      @default(0)
+  replacedLeadsDeleted      Int      @default(0)
+  skippedDuplicateInFile    Int      @default(0)
+  skippedAlreadyInCampaign  Int      @default(0)
+  skippedInvalid            Int      @default(0)
+  attachExistingCvrsToCampaign Boolean @default(false)
+  importDuplicateCvrs       Boolean  @default(false)
+  overwriteExistingCvrs     Boolean  @default(false)
+  allowMissingCvr           Boolean  @default(false)
+  allowMissingCompanyName   Boolean  @default(false)
+  createdAt                 DateTime @default(now())
 
   campaign Campaign @relation(fields: [campaignId], references: [id], onDelete: Cascade)
   user     User     @relation(fields: [userId], references: [id], onDelete: Cascade)

@@ -29,6 +29,7 @@ import { CampaignProtectedSwitch } from "@/app/components/campaign-protected-swi
 import { CampaignPhoneSwitch } from "@/app/components/campaign-phone-switch";
 import { CampaignDeleteFlow } from "@/app/components/campaign-delete-flow";
 import { CampaignEnrichmentPanel } from "@/app/components/campaign-enrichment-panel";
+import { CampaignImportLogsPanel } from "@/app/components/campaign-import-logs-panel";
 import {
   canDeleteCampaign,
   PROTECTED_CAMPAIGN_DELETE_MESSAGE,
@@ -534,6 +535,9 @@ export default function RedigerKampagnePage() {
               {exporting ? "Eksporterer…" : "Eksporter kampagne"}
             </button>
           </div>
+        </div>
+        <div className="mt-4">
+          <CampaignImportLogsPanel campaignId={id} />
         </div>
         {exportMessage && (
           <p className="mt-2 text-xs text-stone-600" role="status">

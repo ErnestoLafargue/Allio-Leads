@@ -36,7 +36,7 @@ export type CsvImportResponse = {
 };
 
 export async function POST(req: Request) {
-  const { response } = await requireAdmin();
+  const { session, response } = await requireAdmin();
   if (response) return response;
 
   const form = await req.formData();
@@ -314,6 +314,28 @@ export async function POST(req: Request) {
             pushProgress(processed);
           }
         }
+
+        await prisma.campaignImportLog.create({
+          data: {
+            campaignId,
+            userId: session!.user.id,
+            filename: uploadName,
+            totalRows: summary.totalRows,
+            newLeadsImported: summary.newLeadsImported,
+            existingAttached: summary.existingAttached,
+            overwriteMatchedCvrs: summary.overwriteMatchedCvrs,
+            protectedCvrsSkipped: summary.protectedCvrsSkipped,
+            replacedLeadsDeleted: summary.replacedLeadsDeleted,
+            skippedDuplicateInFile: summary.skippedDuplicateInFile,
+            skippedAlreadyInCampaign: summary.skippedAlreadyInCampaign,
+            skippedInvalid: summary.skippedInvalid,
+            attachExistingCvrsToCampaign: attachExistingCvrs,
+            importDuplicateCvrs,
+            overwriteExistingCvrs,
+            allowMissingCvr,
+            allowMissingCompanyName,
+          },
+        });
 
         controller.enqueue(eventLine({ type: "result", result: summary }));
       } catch (e) {

@@ -9,6 +9,7 @@ import {
   parseFieldConfig,
   type FieldGroupKey,
 } from "@/lib/campaign-fields";
+import { CampaignImportLogsPanel } from "@/app/components/campaign-import-logs-panel";
 import { STANDARD_MAPPING_OPTIONS } from "@/lib/import-mapping";
 
 type Campaign = { id: string; name: string; fieldConfig: string };
@@ -114,6 +115,7 @@ export default function ImportPage() {
   const [showAllInCampaignError, setShowAllInCampaignError] = useState<string | null>(null);
   /** Nulstiller fil-input når import er færdig, så «forsiden» er tydelig */
   const [fileInputKey, setFileInputKey] = useState(0);
+  const [importLogRefreshKey, setImportLogRefreshKey] = useState(0);
 
   const [addFieldColumn, setAddFieldColumn] = useState<string | null>(null);
   const [addFieldLabel, setAddFieldLabel] = useState("");
@@ -319,6 +321,7 @@ export default function ImportPage() {
     if (!contentType.includes("application/x-ndjson") || !res.body) {
       const data: ImportResult = await res.json();
       setResult(data);
+      setImportLogRefreshKey((k) => k + 1);
       setLoadingImport(false);
       setStep(1);
       setColumns([]);
@@ -354,6 +357,7 @@ export default function ImportPage() {
           setImportProgressTotalRows(evt.totalRows);
         } else if (evt.type === "result") {
           setResult(evt.result);
+          setImportLogRefreshKey((k) => k + 1);
           gotResult = true;
         } else if (evt.type === "error") {
           setError([evt.error, evt.details].filter(Boolean).join(": ") || "Import fejlede");
@@ -564,6 +568,10 @@ export default function ImportPage() {
               )}
             </select>
           </div>
+
+          {campaignId && (
+            <CampaignImportLogsPanel campaignId={campaignId} refreshKey={importLogRefreshKey} />
+          )}
 
           <div>
             <label className="block text-sm font-medium text-stone-700">Fil (.csv, .xlsx, .xls)</label>
