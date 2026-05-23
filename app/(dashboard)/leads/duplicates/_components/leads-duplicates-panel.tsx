@@ -13,10 +13,9 @@ import {
   type LeadStatus,
 } from "@/lib/lead-status";
 import {
-  confirmBulkDeleteSelection,
   formatBulkDeleteSummaryMessage,
-  type BulkDeleteApiSummary,
-} from "@/lib/bulk-delete-client";
+  useBulkDeleteConfirm,
+} from "@/app/components/bulk-delete-confirm-dialogs";
 import {
   filterDuplicateGroupsByCampaigns,
   type DuplicateGroup,
@@ -58,7 +57,16 @@ export function LeadsDuplicatesPanel() {
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
   const [selected, setSelected] = useState<Set<string>>(new Set());
-  const [deleting, setDeleting] = useState(false);
+
+  const bulkDelete = useBulkDeleteConfirm({
+    onComplete: (summary) => {
+      const summaryMsg = formatBulkDeleteSummaryMessage(summary);
+      if (summaryMsg) setNotice(summaryMsg);
+      setSelected(new Set());
+      void load();
+    },
+    onError: (message) => setError(message),
+  });
   const [filterOpen, setFilterOpen] = useState(false);
   const [selectedCampaignIds, setSelectedCampaignIds] = useState<Set<string>>(new Set());
 
@@ -169,39 +177,20 @@ export function LeadsDuplicatesPanel() {
     }
   }
 
-  async function onDeleteSelected() {
+  function onDeleteSelected() {
     const ids = [...selected];
-    if (!isAdmin || deleting || ids.length === 0) return;
+    if (!isAdmin || bulkDelete.deleting || ids.length === 0) return;
+    setError(null);
+    setNotice(null);
     const selectedLeads = ids
       .map((id) => leadById.get(id))
       .filter((l): l is { id: string; notes: string } => l != null);
-    const confirmResult = confirmBulkDeleteSelection(selectedLeads);
-    if (confirmResult.cancelled) return;
-    setDeleting(true);
-    setError(null);
-    setNotice(null);
-    const res = await fetch("/api/leads/bulk-delete", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        ids,
-        includeLeadsWithNotes: confirmResult.includeLeadsWithNotes,
-      }),
-    });
-    setDeleting(false);
-    const j = (await res.json().catch(() => ({}))) as BulkDeleteApiSummary & { error?: string };
-    if (!res.ok) {
-      setError(typeof j.error === "string" ? j.error : "Kunne ikke slette leads");
-      return;
-    }
-    const summaryMsg = formatBulkDeleteSummaryMessage(j);
-    if (summaryMsg) setNotice(summaryMsg);
-    setSelected(new Set());
-    await load();
+    bulkDelete.startDelete({ ids, selected: selectedLeads });
   }
 
   return (
     <div className="space-y-6">
+      {bulkDelete.dialog}
       <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
         <div>
           <Link href="/leads" className="text-sm font-medium text-stone-500 hover:text-stone-800">
@@ -245,10 +234,10 @@ export function LeadsDuplicatesPanel() {
             <button
               type="button"
               onClick={() => void onDeleteSelected()}
-              disabled={deleting}
+              disabled={bulkDelete.deleting}
               className="rounded-md border border-red-200 bg-red-50 px-3 py-2 text-sm font-medium text-red-800 shadow-sm hover:bg-red-100 disabled:opacity-60"
             >
-              {deleting ? "Sletter…" : `Slet valgte (${selected.size})`}
+              {bulkDelete.deleting ? "Sletter…" : `Slet valgte (${selected.size})`}
             </button>
           )}
         </div>

@@ -3,32 +3,6 @@ export type BulkDeleteLeadSelection = {
   notes?: string | null;
 };
 
-export type BulkDeleteConfirmResult =
-  | { cancelled: true }
-  | { cancelled: false; includeLeadsWithNotes: boolean };
-
-/** Browser-bekræftelse før bulk-delete API-kald. */
-export function confirmBulkDeleteSelection(
-  selected: BulkDeleteLeadSelection[],
-): BulkDeleteConfirmResult {
-  if (selected.length === 0) return { cancelled: true };
-
-  const confirmed = window.confirm(
-    `Er du sikker på, at du vil slette ${selected.length} lead${selected.length > 1 ? "s" : ""}? Dette kan ikke fortrydes.`,
-  );
-  if (!confirmed) return { cancelled: true };
-
-  const withNotes = selected.filter((l) => Boolean(l.notes?.trim()));
-  if (withNotes.length === 0) {
-    return { cancelled: false, includeLeadsWithNotes: false };
-  }
-
-  const includeNotes = window.confirm(
-    `${withNotes.length} af de valgte leads har noter. Vil du også slette leads med noter?\n\nVælg «OK» for at inkludere dem, eller «Annuller» for kun at slette leads uden noter og med udfald «Ny».`,
-  );
-  return { cancelled: false, includeLeadsWithNotes: includeNotes };
-}
-
 export type BulkDeleteApiSummary = {
   deletedCount: number;
   skippedMeetingBooked: number;

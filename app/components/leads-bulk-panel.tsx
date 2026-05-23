@@ -4,10 +4,9 @@ import Link from "next/link";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { useSession } from "next-auth/react";
 import {
-  confirmBulkDeleteSelection,
   formatBulkDeleteSummaryMessage,
-  type BulkDeleteApiSummary,
-} from "@/lib/bulk-delete-client";
+  useBulkDeleteConfirm,
+} from "@/app/components/bulk-delete-confirm-dialogs";
 import { LEAD_STATUSES, LEAD_STATUS_LABELS, type LeadStatus } from "@/lib/lead-status";
 import { LeadOutcomeModal } from "@/app/components/lead-outcome-modal";
 import { isLockActive } from "@/lib/lead-lock";
@@ -311,12 +310,21 @@ export function LeadsBulkPanel({
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
+
+  const bulkDelete = useBulkDeleteConfirm({
+    onComplete: (summary) => {
+      const summaryMsg = formatBulkDeleteSummaryMessage(summary);
+      if (summaryMsg) setNotice(summaryMsg);
+      setSelected(new Set());
+      setRefreshNonce((n) => n + 1);
+    },
+    onError: (message) => setError(message),
+  });
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [sortKey, setSortKey] = useState<SortColumn | null>(null);
   const [sortDir, setSortDir] = useState<"asc" | "desc">("desc");
   const [refreshNonce, setRefreshNonce] = useState(0);
   const [outcomeForIds, setOutcomeForIds] = useState<string[] | null>(null);
-  const [deleting, setDeleting] = useState(false);
   const [addedToday, setAddedToday] = useState(false);
   const [fromDate, setFromDate] = useState("");
   const [toDate, setToDate] = useState("");
@@ -789,34 +797,16 @@ export function LeadsBulkPanel({
 
   const selectedOne = selected.size === 1 ? leads.find((l) => l.id === [...selected][0]) : undefined;
   const selectedIdsInView = sortedLeads.filter((l) => selected.has(l.id)).map((l) => l.id);
-  async function onDeleteSelected() {
-    if (!isAdmin || deleting || selectedIdsInView.length === 0) return;
-    const selectedLeads = sortedLeads
-      .filter((l) => selected.has(l.id))
-      .map((l) => ({ id: l.id, notes: l.notes }));
-    const confirmResult = confirmBulkDeleteSelection(selectedLeads);
-    if (confirmResult.cancelled) return;
-    setDeleting(true);
+  function onDeleteSelected() {
+    if (!isAdmin || bulkDelete.deleting || selectedIdsInView.length === 0) return;
     setError(null);
     setNotice(null);
-    const res = await fetch("/api/leads/bulk-delete", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        ids: selectedIdsInView,
-        includeLeadsWithNotes: confirmResult.includeLeadsWithNotes,
-      }),
+    bulkDelete.startDelete({
+      ids: selectedIdsInView,
+      selected: sortedLeads
+        .filter((l) => selected.has(l.id))
+        .map((l) => ({ id: l.id, notes: l.notes })),
     });
-    setDeleting(false);
-    const j = (await res.json().catch(() => ({}))) as BulkDeleteApiSummary & { error?: string };
-    if (!res.ok) {
-      setError(typeof j.error === "string" ? j.error : "Kunne ikke slette leads");
-      return;
-    }
-    const summaryMsg = formatBulkDeleteSummaryMessage(j);
-    if (summaryMsg) setNotice(summaryMsg);
-    setSelected(new Set());
-    setRefreshNonce((n) => n + 1);
   }
   function leadOpenHref(lead: LeadRow): string {
     if (campaignId) {
@@ -839,6 +829,7 @@ export function LeadsBulkPanel({
 
   return (
     <div className="space-y-3">
+      {bulkDelete.dialog}
       <div className="flex flex-col gap-3 sm:flex-row sm:flex-wrap sm:items-center sm:justify-between">
         {showSearchField && (
           <input
@@ -873,11 +864,11 @@ export function LeadsBulkPanel({
           {isAdmin && selected.size >= 1 && (
             <button
               type="button"
-              onClick={() => void onDeleteSelected()}
-              disabled={deleting}
+              onClick={onDeleteSelected}
+              disabled={bulkDelete.deleting}
               className="rounded-md border border-red-200 bg-red-50 px-3 py-1.5 text-sm font-medium text-red-700 shadow-sm hover:bg-red-100 disabled:cursor-not-allowed disabled:opacity-60"
             >
-              {deleting ? "Sletter…" : `Slet leads${selected.size > 1 ? ` (${selected.size})` : ""}`}
+              {bulkDelete.deleting ? "Sletter…" : `Slet leads${selected.size > 1 ? ` (${selected.size})` : ""}`}
             </button>
           )}
         </div>
