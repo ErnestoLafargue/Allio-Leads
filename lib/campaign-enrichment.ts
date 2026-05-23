@@ -70,7 +70,7 @@ export type PreparedEnrichment = {
 };
 
 const EMPTY_COMPANY_PLACEHOLDER = "(uden virksomhedsnavn)";
-const DOMAIN_CUSTOM_KEYS = ["domain", "hjemmeside", "website", "url", "webside"];
+const DOMAIN_CUSTOM_KEYS = ["domaene", "domain", "hjemmeside", "website", "url", "webside"];
 
 function normalizeText(v: string): string {
   return v.trim().toLowerCase();

@@ -15,6 +15,7 @@ import {
   MEETING_OUTCOME_REBOOK,
   MEETING_OUTCOME_SALE,
 } from "@/lib/meeting-outcome";
+import { resolveMineSalgSalesUserId } from "@/lib/mine-salg-view-user";
 
 function normOutcome(s: string | null | undefined) {
   return String(s ?? "").trim().toUpperCase() || MEETING_OUTCOME_PENDING;
@@ -37,15 +38,41 @@ type SalesLeadRow = {
   campaign?: { name: string };
 };
 
-export async function GET() {
+export async function GET(req: Request) {
   const { session, response } = await requireSession();
   if (response) return response;
-  const userId = session!.user.id;
+
+  const requestedUserId = new URL(req.url).searchParams.get("userId")?.trim() ?? "";
+  const requestedUserExists = requestedUserId
+    ? !!(await prisma.user.findUnique({
+        where: { id: requestedUserId },
+        select: { id: true },
+      }))
+    : false;
+
+  const resolved = resolveMineSalgSalesUserId({
+    sessionUserId: session!.user.id,
+    sessionRole: session!.user.role,
+    requestedUserId,
+    requestedUserExists,
+  });
+  if (!resolved.ok) {
+    return NextResponse.json({ error: resolved.error }, { status: resolved.status });
+  }
+  const salesUserId = resolved.salesUserId;
+
+  const viewingUser = await prisma.user.findUnique({
+    where: { id: salesUserId },
+    select: { id: true, name: true, username: true },
+  });
+  if (!viewingUser) {
+    return NextResponse.json({ error: "Bruger findes ikke." }, { status: 400 });
+  }
 
   try {
     const [activeLeads, archivedRecords] = await Promise.all([
       prisma.lead.findMany({
-        where: { bookedByUserId: userId, meetingBookedAt: { not: null } },
+        where: { bookedByUserId: salesUserId, meetingBookedAt: { not: null } },
         orderBy: [{ meetingScheduledFor: "asc" }],
         include: {
           campaign: { select: { id: true, name: true } },
@@ -53,7 +80,7 @@ export async function GET() {
         },
       }),
       prisma.leadMeetingRecord.findMany({
-        where: { bookedByUserId: userId },
+        where: { bookedByUserId: salesUserId },
         orderBy: [{ meetingScheduledFor: "asc" }],
         include: {
           lead: {
@@ -209,6 +236,7 @@ export async function GET() {
       tilUdbetalingKr,
       forventetProvisionKr,
       stats,
+      viewingUser,
     });
   } catch (e) {
     const msg = e instanceof Error ? e.message : String(e);

@@ -2,9 +2,10 @@
 
 import { useRouter } from "next/navigation";
 import { useSession } from "next-auth/react";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { BookingPanel, type BookingConfirmPayload } from "@/app/components/booking/booking-panel";
 import { MeetingContactFields } from "@/app/components/booking/meeting-contact-fields";
+import { buildLeadDetailHref, KNOWN_LEAD_SOURCES } from "@/lib/lead-navigation";
 
 type Props = {
   className?: string;
@@ -22,6 +23,20 @@ export function StandaloneMeetingBooker({ className = "", onBooked }: Props) {
   const [meetingContactPhonePrivate, setMeetingContactPhonePrivate] = useState("");
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [calendarUserId, setCalendarUserId] = useState<string | undefined>();
+
+  useEffect(() => {
+    let cancelled = false;
+    void (async () => {
+      const res = await fetch("/api/users/meeting-assignees");
+      if (!res.ok || cancelled) return;
+      const data = (await res.json()) as { defaultUserId: string | null };
+      if (!cancelled) setCalendarUserId(data.defaultUserId ?? undefined);
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   async function onConfirmBooking(detail: BookingConfirmPayload) {
     setError(null);
@@ -58,7 +73,7 @@ export function StandaloneMeetingBooker({ className = "", onBooked }: Props) {
     }
     const lead = (await res.json()) as { id: string };
     onBooked?.(lead.id);
-    router.push(`/leads/${lead.id}`);
+    router.push(buildLeadDetailHref(lead.id, KNOWN_LEAD_SOURCES.meetingsNew));
     router.refresh();
   }
 
@@ -100,6 +115,7 @@ export function StandaloneMeetingBooker({ className = "", onBooked }: Props) {
       </div>
 
       <BookingPanel
+        calendarUserId={calendarUserId}
         allowMeetingConfirm
         allowAdminAvailabilityOverride={isAdmin}
         isSubmitting={submitting}

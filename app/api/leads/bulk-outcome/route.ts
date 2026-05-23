@@ -10,7 +10,10 @@ import {
   shouldLogOutcomeForLeaderboard,
 } from "@/lib/lead-outcome-log";
 import { isLockedByOtherUser, releaseExpiredLocksEverywhere } from "@/lib/lead-lock";
+import { blockedTimeConflictMessage } from "@/lib/booking/availability";
+import { findBlockedTimeConflictInDb } from "@/lib/booking/meeting-slots";
 import { findLeadBookingOverlapInDb } from "@/lib/booking/overlap-db";
+import { getDefaultMeetingAssigneeId } from "@/lib/meeting-assignee";
 import { campaignIdForBookedMeetingOutcome } from "@/lib/meeting-campaign-routing";
 import { ensureStandardCampaignId } from "@/lib/ensure-system-campaigns";
 import { findBookingTimeConflict } from "@/lib/booking/availability";
@@ -132,6 +135,7 @@ export async function POST(req: Request) {
           proposals.push({ id: u.id, start: sf });
         }
       }
+      const defaultAssigneeId = await getDefaultMeetingAssigneeId();
       for (const p of proposals) {
         const clash = await findLeadBookingOverlapInDb(p.start, { excludeLeadIds: idList });
         if (clash) {
@@ -142,6 +146,17 @@ export async function POST(req: Request) {
             },
             { status: 409 },
           );
+        }
+        const existing = existingRows.find((r) => r.id === p.id);
+        const calendarUserId = existing?.assignedUserId ?? defaultAssigneeId;
+        if (calendarUserId) {
+          const blocked = await findBlockedTimeConflictInDb(calendarUserId, p.start);
+          if (blocked) {
+            return NextResponse.json(
+              { error: blockedTimeConflictMessage(blocked.title) },
+              { status: 409 },
+            );
+          }
         }
       }
       for (let i = 0; i < proposals.length; i++) {

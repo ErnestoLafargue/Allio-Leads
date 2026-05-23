@@ -7,6 +7,8 @@ import { ensureSystemCampaignId } from "@/lib/ensure-system-campaigns";
 import { copenhagenDayKey } from "@/lib/copenhagen-day";
 import { MEETING_OUTCOME_PENDING } from "@/lib/meeting-outcome";
 import { shouldLogOutcomeForLeaderboard } from "@/lib/lead-outcome-log";
+import { blockedTimeConflictMessage } from "@/lib/booking/availability";
+import { findBlockedTimeConflictInDb } from "@/lib/booking/meeting-slots";
 import { findLeadBookingOverlapInDb } from "@/lib/booking/overlap-db";
 import { requireDefaultMeetingAssigneeId } from "@/lib/meeting-assignee";
 import { canonicalLeadPhoneForStorage } from "@/lib/phone-e164";
@@ -61,6 +63,8 @@ export async function POST(req: Request) {
 
   const adminSkipBookingOverlap =
     session!.user.role === "ADMIN" && body?.adminSkipBookingOverlap === true;
+  const assignedUserId = await requireDefaultMeetingAssigneeId();
+
   if (!adminSkipBookingOverlap) {
     const overlap = await findLeadBookingOverlapInDb(meetingScheduledFor);
     if (overlap) {
@@ -72,11 +76,17 @@ export async function POST(req: Request) {
         { status: 409 },
       );
     }
+    const blocked = await findBlockedTimeConflictInDb(assignedUserId, meetingScheduledFor);
+    if (blocked) {
+      return NextResponse.json(
+        { error: blockedTimeConflictMessage(blocked.title) },
+        { status: 409 },
+      );
+    }
   }
 
   const campaignId = await ensureSystemCampaignId("upcoming_meetings");
   const meetingBookedAt = new Date();
-  const assignedUserId = await requireDefaultMeetingAssigneeId();
 
   try {
     const lead = await prisma.$transaction(async (tx) => {

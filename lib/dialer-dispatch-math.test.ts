@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   computeDispatchNewCallsNeeded,
+  computePowerDialerReplenishNewCalls,
   parseTelnyxOutboundChannelLimitFromEnv,
 } from "@/lib/dialer-dispatch-math";
 
@@ -31,6 +32,29 @@ describe("dialer-dispatch-math", () => {
 
   it("computeDispatchNewCallsNeeded: channelLimit begrænser headroom", () => {
     const { newCallsNeeded } = computeDispatchNewCallsNeeded({
+      readyCount: 2,
+      ratio: 5,
+      inFlightCalls: 4,
+      maxNewCallsOverride: null,
+      channelLimit: 8,
+    });
+    expect(newCallsNeeded).toBe(4);
+  });
+
+  it("computePowerDialerReplenishNewCalls: 1 ledig agent + 4 in-flight ⇒ 5 nye", () => {
+    const { replenishBudget, newCallsNeeded } = computePowerDialerReplenishNewCalls({
+      readyCount: 1,
+      ratio: 5,
+      inFlightCalls: 4,
+      maxNewCallsOverride: null,
+      channelLimit: null,
+    });
+    expect(replenishBudget).toBe(5);
+    expect(newCallsNeeded).toBe(5);
+  });
+
+  it("computePowerDialerReplenishNewCalls: channelLimit klipper replenishment", () => {
+    const { newCallsNeeded } = computePowerDialerReplenishNewCalls({
       readyCount: 2,
       ratio: 5,
       inFlightCalls: 4,

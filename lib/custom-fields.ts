@@ -16,3 +16,22 @@ export function parseCustomFields(raw: string | null | undefined): Record<string
 export function stringifyCustomFields(obj: Record<string, string>): string {
   return JSON.stringify(obj ?? {});
 }
+
+const LEAD_DOMAIN_FIELD_KEYS = [
+  "domaene",
+  "domain",
+  "hjemmeside",
+  "website",
+  "url",
+  "webside",
+] as const;
+
+/** Første ikke-tomme domæne/hjemmeside fra leadets customFields. */
+export function leadDomainFromCustomFields(raw: string | null | undefined): string {
+  const custom = parseCustomFields(raw);
+  for (const key of LEAD_DOMAIN_FIELD_KEYS) {
+    const v = custom[key]?.trim();
+    if (v) return v;
+  }
+  return "";
+}

@@ -5,7 +5,7 @@ import { usePathname } from "next/navigation";
 import { signOut } from "next-auth/react";
 import { useCallback, useEffect, useMemo, useState } from "react";
 
-type LeafItem = { href: string; label: string };
+type LeafItem = { href: string; label: string; adminOnly?: boolean };
 
 type SidebarSection =
   | {
@@ -214,8 +214,8 @@ const SIDEBAR_SECTIONS: SidebarSection[] = [
     icon: MeetingsIcon,
     items: [
       { href: "/meetings/new", label: "Nyt møde" },
-      { href: "/meetings/upcoming", label: "Kommende møder" },
-      { href: "/meetings/past", label: "Tidligere møder" },
+      { href: "/meetings/upcoming", label: "Kommende møder", adminOnly: true },
+      { href: "/meetings/past", label: "Tidligere møder", adminOnly: true },
     ],
   },
   {
@@ -262,6 +262,11 @@ export function AppSidebar({
   const isAdmin = role === "ADMIN";
   const visibleSections = useMemo(
     () => SIDEBAR_SECTIONS.filter((s) => (s.kind === "link" ? true : !s.adminOnly || isAdmin)),
+    [isAdmin],
+  );
+
+  const visibleGroupItems = useCallback(
+    (items: LeafItem[]) => items.filter((it) => !it.adminOnly || isAdmin),
     [isAdmin],
   );
 
@@ -406,7 +411,7 @@ export function AppSidebar({
                     </button>
                     {open ? (
                       <ul className="mb-1 mt-1 ml-3 space-y-0.5 border-l border-white/10 pl-3">
-                        {s.items.map((it) => {
+                        {visibleGroupItems(s.items).map((it) => {
                           const active = linkActive(it.href);
                           return (
                             <li key={it.href}>
@@ -616,7 +621,7 @@ export function AppSidebar({
                 >
                   <div className="overflow-hidden">
                     <ul className="mb-1 ml-3 mt-1 space-y-0.5 border-l border-white/10 pl-3">
-                      {s.items.map((it) => {
+                      {visibleGroupItems(s.items).map((it) => {
                         const active = linkActive(it.href);
                         return (
                           <li key={it.href}>

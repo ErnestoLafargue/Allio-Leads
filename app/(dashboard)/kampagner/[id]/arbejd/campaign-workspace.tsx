@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { useRouter } from "next/navigation";
+import { useRouter, useSearchParams } from "next/navigation";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useSession } from "next-auth/react";
 import { LEAD_STATUSES, type LeadStatus } from "@/lib/lead-status";
@@ -32,6 +32,8 @@ import {
   type DialerPresenceStatus,
 } from "@/lib/use-dialer-presence";
 import { useActivityRecordingPoll } from "@/lib/use-activity-recording-poll";
+import { scrollWorkspaceToTop } from "@/lib/scroll-workspace-to-top";
+import { KNOWN_LEAD_SOURCES, parseLeadNavigation } from "@/lib/lead-navigation";
 
 type Lead = {
   id: string;
@@ -62,6 +64,7 @@ type Lead = {
   callbackScheduledFor?: string | null;
   callbackReservedByUserId?: string | null;
   callbackStatus?: string | null;
+  assignedUserId?: string | null;
 };
 
 type Props = {
@@ -121,6 +124,16 @@ async function patchLeadDocument(
 
 export function CampaignWorkspace({ campaignId, preferredLeadId, voipSession = false }: Props) {
   const router = useRouter();
+  const searchParams = useSearchParams();
+  const leadNavigation = useMemo(
+    () =>
+      parseLeadNavigation(searchParams, {
+        campaignIdForLegacy: campaignId,
+        defaultPath: KNOWN_LEAD_SOURCES.kampagner.path,
+      }),
+    [searchParams, campaignId],
+  );
+  const returnPath = leadNavigation.openedFrom.path;
   const { data: session } = useSession();
   const sessionUserId = session?.user?.id ?? "";
   const isAdmin = session?.user?.role === "ADMIN";
@@ -144,6 +157,8 @@ export function CampaignWorkspace({ campaignId, preferredLeadId, voipSession = f
   const [campaignLeadCount, setCampaignLeadCount] = useState<number | null>(null);
   const [activeLead, setActiveLead] = useState<Lead | null>(null);
   const activeLeadRef = useRef<Lead | null>(null);
+  const workspaceRootRef = useRef<HTMLDivElement | null>(null);
+  const pendingScrollToTopRef = useRef(false);
   const [prefetchedLead, setPrefetchedLead] = useState<Lead | null>(null);
   const prefetchedLeadRef = useRef<Lead | null>(null);
   const prefetchInFlightRef = useRef(false);
@@ -164,6 +179,14 @@ export function CampaignWorkspace({ campaignId, preferredLeadId, voipSession = f
   const onNextInFlightRef = useRef(false);
   const [powerDialerQueueEmpty, setPowerDialerQueueEmpty] = useState(false);
   const [powerDialerConnecting, setPowerDialerConnecting] = useState(false);
+  const [powerDialerLastDispatch, setPowerDialerLastDispatch] = useState<{
+    dispatched: number;
+    inFlight: number;
+    target: number;
+    ready: number;
+    at: number;
+    reason?: string;
+  } | null>(null);
 
   const [companyName, setCompanyName] = useState("");
   const [phone, setPhone] = useState("");
@@ -190,6 +213,7 @@ export function CampaignWorkspace({ campaignId, preferredLeadId, voipSession = f
   const [callbackDialogOpen, setCallbackDialogOpen] = useState(false);
   const [callbackSubmitError, setCallbackSubmitError] = useState<string | null>(null);
   const [mailDialogOpen, setMailDialogOpen] = useState(false);
+  const [defaultMeetingAssigneeId, setDefaultMeetingAssigneeId] = useState<string | undefined>();
   const [mailSending, setMailSending] = useState(false);
   const [mailError, setMailError] = useState<string | null>(null);
   const [mailSuccess, setMailSuccess] = useState<string | null>(null);
@@ -221,10 +245,37 @@ export function CampaignWorkspace({ campaignId, preferredLeadId, voipSession = f
   }, [prefetchedLead]);
 
   useEffect(() => {
+    let cancelled = false;
+    void (async () => {
+      const res = await fetch("/api/users/meeting-assignees");
+      if (!res.ok || cancelled) return;
+      const data = (await res.json()) as { defaultUserId: string | null };
+      if (!cancelled) setDefaultMeetingAssigneeId(data.defaultUserId ?? undefined);
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  useEffect(() => {
     setMailSuccess(null);
     setMailError(null);
     setActivityOpen(false);
   }, [activeLead?.id]);
+
+  useEffect(() => {
+    if (!pendingScrollToTopRef.current || !activeLead?.id) return;
+    pendingScrollToTopRef.current = false;
+    requestAnimationFrame(() => {
+      requestAnimationFrame(() => {
+        scrollWorkspaceToTop(workspaceRootRef.current);
+      });
+    });
+  }, [activeLead?.id]);
+
+  function requestScrollToTopAfterLeadChange() {
+    pendingScrollToTopRef.current = true;
+  }
 
   backgroundLockLeadIdsRef.current = backgroundLockLeadIds;
 
@@ -340,8 +391,8 @@ export function CampaignWorkspace({ campaignId, preferredLeadId, voipSession = f
     }
     setPowerDialerBatchPaused(false);
     setPowerDialerPauseDrainActive(false);
-    router.push("/kampagner");
-  }, [campaignId, router]);
+    router.push(returnPath);
+  }, [campaignId, router, returnPath]);
 
   useEffect(() => {
     if (!isPowerAutoDialSession) return;
@@ -642,7 +693,14 @@ export function CampaignWorkspace({ campaignId, preferredLeadId, voipSession = f
         }
         return;
       }
-      const targetUrl = `/kampagner/${campaignId}/arbejd?leadId=${encodeURIComponent(lead.id)}&voipSession=1`;
+      const q = new URLSearchParams(
+        typeof window !== "undefined" ? window.location.search : "",
+      );
+      q.set("leadId", lead.id);
+      q.set("voipSession", "1");
+      if (!q.has("from")) q.set("from", KNOWN_LEAD_SOURCES.kampagner.path);
+      if (!q.has("source")) q.set("source", "dialer");
+      const targetUrl = `/kampagner/${campaignId}/arbejd?${q.toString()}`;
       if (!window.location.pathname.endsWith("/arbejd") || activeLeadRef.current?.id !== lead.id) {
         window.location.assign(targetUrl);
       }
@@ -654,13 +712,23 @@ export function CampaignWorkspace({ campaignId, preferredLeadId, voipSession = f
     (json: Record<string, unknown>) => {
       if (campaignDialMode !== "POWER_DIALER") return;
       if (json.ok !== true) return;
-      const reason = typeof json.reason === "string" ? json.reason : "";
+      const reason = typeof json.reason === "string" ? json.reason : undefined;
       const dispatched = typeof json.dispatched === "number" ? json.dispatched : 0;
       const inFlight = typeof json.inFlight === "number" ? json.inFlight : 0;
+      const target = typeof json.target === "number" ? json.target : 0;
+      const ready = typeof json.ready === "number" ? json.ready : 0;
+      setPowerDialerLastDispatch({
+        dispatched,
+        inFlight,
+        target,
+        ready,
+        at: Date.now(),
+        reason,
+      });
       if (
         dispatched === 0 &&
         inFlight === 0 &&
-        reason.includes("Ingen flere ledige leads at dispatche")
+        reason?.includes("Ingen flere ledige leads at dispatche")
       ) {
         setPowerDialerQueueEmpty(true);
       }
@@ -811,6 +879,7 @@ export function CampaignWorkspace({ campaignId, preferredLeadId, voipSession = f
     }
     const rj = (await rRes.json()) as { lead: Lead | null };
     if (rj.lead) {
+      requestScrollToTopAfterLeadChange();
       setActiveLead(rj.lead);
       try {
         sessionStorage.setItem(preferStorageKey(campaignId), rj.lead.id);
@@ -975,6 +1044,7 @@ export function CampaignWorkspace({ campaignId, preferredLeadId, voipSession = f
           }
           return;
         }
+        requestScrollToTopAfterLeadChange();
         setActiveLead(next);
         loadFormFromLead(next);
         try {
@@ -1210,8 +1280,8 @@ export function CampaignWorkspace({ campaignId, preferredLeadId, voipSession = f
     return (
       <div className="space-y-4">
         <p className="text-sm text-red-600">{error}</p>
-        <Link href="/kampagner" className="text-sm font-medium text-stone-700 underline-offset-2 hover:underline">
-          ← Tilbage til kampagner
+        <Link href={returnPath} className="text-sm font-medium text-stone-700 underline-offset-2 hover:underline">
+          ← Tilbage
         </Link>
       </div>
     );
@@ -1221,8 +1291,8 @@ export function CampaignWorkspace({ campaignId, preferredLeadId, voipSession = f
     return (
       <div className="space-y-4 rounded-xl border border-stone-200 bg-white p-8 shadow-sm">
         <h1 className="text-lg font-semibold text-stone-900">Ingen leads i denne kampagne</h1>
-        <Link href="/kampagner" className="text-sm font-medium text-stone-700 underline-offset-2 hover:underline">
-          ← Tilbage til kampagner
+        <Link href={returnPath} className="text-sm font-medium text-stone-700 underline-offset-2 hover:underline">
+          ← Tilbage
         </Link>
       </div>
     );
@@ -1239,8 +1309,8 @@ export function CampaignWorkspace({ campaignId, preferredLeadId, voipSession = f
           </div>
           <p className="text-center text-sm text-stone-700">Ingen flere leads i køen til Power Dialer lige nu.</p>
           <p className="text-center">
-            <Link href="/kampagner" className="text-sm font-medium text-stone-700 underline-offset-2 hover:underline">
-              Tilbage til kampagner
+            <Link href={returnPath} className="text-sm font-medium text-stone-700 underline-offset-2 hover:underline">
+              ← Tilbage
             </Link>
           </p>
         </div>
@@ -1249,11 +1319,59 @@ export function CampaignWorkspace({ campaignId, preferredLeadId, voipSession = f
 
     return (
       <div className="min-h-[50vh] px-4 py-4">
+        <CampaignVoipStrip
+          leadId={`__power_standby_${campaignId}`}
+          campaignId={campaignId}
+          leadPhone=""
+          dialMode="POWER_DIALER"
+          autoStartCall={!autoDialPaused && !powerDialerBatchPaused}
+          standbyInboundOnly
+          onLineStatusChange={setVoipLineStatus}
+        />
         <div className="sticky top-0 z-10 -mx-4 bg-stone-50/90 px-4 pb-3 pt-2 backdrop-blur-sm">
           <div className="h-1.5 w-full overflow-hidden rounded-full bg-stone-200">
             <div className="h-full w-full rounded-full bg-emerald-600 animate-power-dialer-wait-fill" />
           </div>
         </div>
+        <p className="mt-4 text-center text-sm font-medium text-stone-800">
+          Power Dialer ringer flere numre parallelt — lead åbnes når nogen svarer.
+        </p>
+        {dialerStats || powerDialerLastDispatch ? (
+          <div
+            className="mx-auto mt-3 flex max-w-md flex-wrap items-center justify-center gap-x-2 gap-y-1 rounded-lg border border-stone-200 bg-white/90 px-3 py-2 text-xs text-stone-700"
+            aria-live="polite"
+          >
+            {dialerStats ? (
+              <>
+                <span>
+                  <span className="font-semibold text-emerald-800 tabular-nums">
+                    {dialerStats.inFlightCalls}
+                  </span>{" "}
+                  i luften
+                </span>
+                <span className="text-stone-300">·</span>
+                <span>
+                  <span className="font-semibold tabular-nums">{dialerStats.ringing}</span> ringer
+                </span>
+                <span className="text-stone-300">·</span>
+                <span>
+                  mål{" "}
+                  <span className="font-semibold tabular-nums">
+                    {(dialerStats.readyForDispatch ?? dialerStats.ready) * 5}
+                  </span>
+                </span>
+              </>
+            ) : null}
+            {powerDialerLastDispatch ? (
+              <>
+                {dialerStats ? <span className="text-stone-300">·</span> : null}
+                <span>
+                  sidst +<span className="tabular-nums">{powerDialerLastDispatch.dispatched}</span>
+                </span>
+              </>
+            ) : null}
+          </div>
+        ) : null}
         {powerDialerUiState === "waiting_for_calls" ? (
           <div className="mt-4 flex flex-col items-center gap-2 px-2">
             <button
@@ -1284,8 +1402,8 @@ export function CampaignWorkspace({ campaignId, preferredLeadId, voipSession = f
         ) : null}
         {error ? <p className="mt-3 text-center text-sm text-red-600">{error}</p> : null}
         <p className="mt-10 text-center">
-          <Link href="/kampagner" className="text-xs text-stone-500 underline-offset-2 hover:text-stone-800 hover:underline">
-            Kampagner
+          <Link href={returnPath} className="text-xs text-stone-500 underline-offset-2 hover:text-stone-800 hover:underline">
+            ← Tilbage
           </Link>
         </p>
       </div>
@@ -1296,8 +1414,8 @@ export function CampaignWorkspace({ campaignId, preferredLeadId, voipSession = f
     return (
       <div className="space-y-6">
         <div>
-          <Link href="/kampagner" className="text-sm text-stone-500 hover:text-stone-800">
-            ← Kampagner
+          <Link href={returnPath} className="text-sm text-stone-500 hover:text-stone-800">
+            ← Tilbage
           </Link>
           <h1 className="mt-2 text-xl font-semibold text-stone-900">{campaignName}</h1>
         </div>
@@ -1357,10 +1475,10 @@ export function CampaignWorkspace({ campaignId, preferredLeadId, voipSession = f
           </button>
           <div>
             <Link
-              href="/kampagner"
+              href={returnPath}
               className="inline-block text-sm font-medium text-stone-800 underline-offset-2 hover:underline"
             >
-              ← Tilbage til kampagner
+              ← Tilbage
             </Link>
           </div>
         </div>
@@ -1376,10 +1494,10 @@ export function CampaignWorkspace({ campaignId, preferredLeadId, voipSession = f
           Der er ikke flere ledige «Ny»-leads i «{campaignName}» lige nu (med dit arbejdsflow).
         </p>
         <Link
-          href="/kampagner"
+          href={returnPath}
           className="inline-block rounded-md bg-emerald-800 px-5 py-2.5 text-sm font-medium text-white hover:bg-emerald-900"
         >
-          Tilbage til kampagner
+          ← Tilbage
         </Link>
       </div>
     );
@@ -1409,6 +1527,7 @@ export function CampaignWorkspace({ campaignId, preferredLeadId, voipSession = f
     "rounded-xl bg-stone-900 px-6 py-3 text-sm font-semibold text-white shadow-md transition hover:bg-stone-800 disabled:opacity-60 shrink-0";
 
   function renderNextButton() {
+    if (isPowerAutoDialSession) return null;
     if (!showNextForMeeting) return null;
     return (
       <button
@@ -1423,9 +1542,12 @@ export function CampaignWorkspace({ campaignId, preferredLeadId, voipSession = f
   }
 
   return (
-    <div className="relative flex min-h-[calc(100dvh-5.5rem)] flex-col gap-4 pb-4">
+    <div
+      ref={workspaceRootRef}
+      className="relative flex min-h-[calc(100dvh-5.5rem)] flex-col gap-4 pb-4"
+    >
       <div className="shrink-0">
-        <Link href="/kampagner" className="text-sm text-stone-500 hover:text-stone-800">
+        <Link href={returnPath} className="text-sm text-stone-500 hover:text-stone-800">
           ← Kampagner
         </Link>
         <div className="mt-2 flex flex-wrap items-center gap-3">
@@ -1709,6 +1831,7 @@ export function CampaignWorkspace({ campaignId, preferredLeadId, voipSession = f
         booking={{
           campaignId,
           leadId: current.id,
+          calendarUserId: current.assignedUserId ?? defaultMeetingAssigneeId,
           initialMeetingLocal: status === "MEETING_BOOKED" ? meetingScheduledFor || undefined : undefined,
           isSubmitting: saving,
           allowMeetingConfirm: status === "MEETING_BOOKED",

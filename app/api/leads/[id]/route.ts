@@ -30,7 +30,10 @@ import {
   leadMeetingRecordCreateInput,
 } from "@/lib/lead-meeting-archive";
 import { releaseExpiredLocksEverywhere, sellerMayEditLead } from "@/lib/lead-lock";
+import { blockedTimeConflictMessage } from "@/lib/booking/availability";
+import { findBlockedTimeConflictInDb } from "@/lib/booking/meeting-slots";
 import { findLeadBookingOverlapInDb } from "@/lib/booking/overlap-db";
+import { getDefaultMeetingAssigneeId } from "@/lib/meeting-assignee";
 import { LEAD_ACTIVITY_KIND } from "@/lib/lead-activity-kinds";
 import { hangupActiveOutboundLeadLegsForLead } from "@/lib/dialer-bridge";
 import { canonicalLeadPhoneForStorage } from "@/lib/phone-e164";
@@ -431,6 +434,17 @@ export async function PATCH(req: Request, { params }: Params) {
         },
         { status: 409 },
       );
+    }
+    const calendarUserId =
+      existing.assignedUserId ?? (await getDefaultMeetingAssigneeId());
+    if (calendarUserId) {
+      const blocked = await findBlockedTimeConflictInDb(calendarUserId, meetingScheduledFor);
+      if (blocked) {
+        return NextResponse.json(
+          { error: blockedTimeConflictMessage(blocked.title) },
+          { status: 409 },
+        );
+      }
     }
   }
 

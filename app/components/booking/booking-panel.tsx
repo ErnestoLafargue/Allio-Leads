@@ -26,6 +26,8 @@ export type BookingConfirmPayload = {
 export type BookingPanelProps = {
   campaignId?: string;
   leadId?: string;
+  /** Mødeansvarlig hvis kalender — styrer manuelle blokeringer i tilgængelighed. */
+  calendarUserId?: string;
   initialMeetingLocal?: string;
   onConfirmBooking?: (detail: BookingConfirmPayload) => void | Promise<void>;
   isSubmitting?: boolean;
@@ -38,6 +40,7 @@ export type BookingPanelProps = {
 export function BookingPanel({
   campaignId,
   leadId,
+  calendarUserId: calendarUserIdProp,
   initialMeetingLocal,
   onConfirmBooking,
   isSubmitting = false,
@@ -54,6 +57,26 @@ export function BookingPanel({
   const [slotOptions, setSlotOptions] = useState<CopenhagenBookingSlotWithAvailability[]>([]);
   const [slotsLoading, setSlotsLoading] = useState(false);
   const [adminAvailabilityOverride, setAdminAvailabilityOverride] = useState(false);
+  const [resolvedCalendarUserId, setResolvedCalendarUserId] = useState<string | undefined>(
+    calendarUserIdProp,
+  );
+
+  useEffect(() => {
+    if (calendarUserIdProp) {
+      setResolvedCalendarUserId(calendarUserIdProp);
+      return;
+    }
+    let cancelled = false;
+    void (async () => {
+      const res = await fetch("/api/users/meeting-assignees");
+      if (!res.ok || cancelled) return;
+      const data = (await res.json()) as { defaultUserId: string | null };
+      if (!cancelled) setResolvedCalendarUserId(data.defaultUserId ?? undefined);
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [calendarUserIdProp]);
 
   useEffect(() => {
     if (!initialMeetingLocal?.trim()) {
@@ -83,10 +106,15 @@ export function BookingPanel({
       return;
     }
     const dayKey = toCopenhagenDateKey(selectedDate);
+    const calendarUserId = resolvedCalendarUserId;
+    if (!calendarUserId) {
+      setSlotOptions([]);
+      return;
+    }
     let cancelled = false;
     setSlotsLoading(true);
     void (async () => {
-      const qs = new URLSearchParams({ date: dayKey });
+      const qs = new URLSearchParams({ date: dayKey, userId: calendarUserId });
       if (leadId) qs.set("excludeLeadId", leadId);
       const res = await fetch(`/api/booking/availability?${qs}`);
       const occupied = res.ok
@@ -105,7 +133,13 @@ export function BookingPanel({
     return () => {
       cancelled = true;
     };
-  }, [selectedDate, leadId, allowAdminAvailabilityOverride, adminAvailabilityOverride]);
+  }, [
+    selectedDate,
+    leadId,
+    resolvedCalendarUserId,
+    allowAdminAvailabilityOverride,
+    adminAvailabilityOverride,
+  ]);
 
   useEffect(() => {
     if (

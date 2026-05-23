@@ -62,6 +62,8 @@ type Props = {
    * click-to-call, ingen auto-opkald (ignorerer kampagnens dial mode for adfærd).
    */
   voipApiContext?: VoipApiContext;
+  /** Kun synlig standby: forbind WebRTC til inbound bridge uden outbound auto-dial UI. */
+  standbyInboundOnly?: boolean;
 };
 
 export type LineStatus = "idle" | "connecting" | "ringing" | "live" | "error";
@@ -238,6 +240,7 @@ export function CampaignVoipStrip({
   onVoipFailureLogged,
   onCallEndedForActivity,
   voipApiContext = VOIP_API_CONTEXT.CAMPAIGN_ARBEJD,
+  standbyInboundOnly = false,
 }: Props) {
   const isGlobalVoip = voipApiContext === VOIP_API_CONTEXT.GLOBAL_LEAD_PAGE;
   const effectiveDialMode: CampaignDialMode = isGlobalVoip ? "CLICK_TO_CALL" : dialMode;
@@ -1595,8 +1598,12 @@ export function CampaignVoipStrip({
 
   return (
     <section
-      className="rounded-2xl border border-emerald-200/80 bg-gradient-to-br from-emerald-50/95 via-white to-white px-4 py-4 shadow-sm"
-      aria-label="VoIP opkald"
+      className={
+        standbyInboundOnly
+          ? "sr-only"
+          : "rounded-2xl border border-emerald-200/80 bg-gradient-to-br from-emerald-50/95 via-white to-white px-4 py-4 shadow-sm"
+      }
+      aria-label={standbyInboundOnly ? "VoIP standby (skjult)" : "VoIP opkald"}
     >
       <audio ref={remoteAudioRef} id={remoteAudioId} autoPlay playsInline />
 

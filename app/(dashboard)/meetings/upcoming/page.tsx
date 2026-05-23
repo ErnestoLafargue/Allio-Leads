@@ -1,6 +1,11 @@
+import { auth } from "@/auth";
+import { redirect } from "next/navigation";
 import { MeetingsList } from "@/app/(dashboard)/meetings/_components/meetings-list";
 
-export default function UpcomingMeetingsPage() {
+export default async function UpcomingMeetingsPage() {
+  const session = await auth();
+  if (!session?.user?.id) redirect("/login");
+  if (session.user.role !== "ADMIN") redirect("/meetings/new");
+
   return <MeetingsList type="upcoming" />;
 }
-

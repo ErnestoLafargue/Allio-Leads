@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { useParams, useRouter, useSearchParams } from "next/navigation";
-import { Suspense, useCallback, useEffect, useRef, useState } from "react";
+import { Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useSession } from "next-auth/react";
 import { LEAD_STATUSES, type LeadStatus } from "@/lib/lead-status";
 import { isQueueEligibleStatus, sortLeadsForQueue } from "@/lib/lead-queue";
@@ -27,6 +27,7 @@ import { LeadActivityDrawer } from "@/app/components/lead-activity-drawer";
 import { CampaignVoipStrip } from "@/app/components/campaign-voip-strip";
 import { VOIP_API_CONTEXT } from "@/lib/voip-api-context";
 import { useActivityRecordingPoll } from "@/lib/use-activity-recording-poll";
+import { LEAD_NAV_FALLBACK_PATH, parseLeadNavigation } from "@/lib/lead-navigation";
 
 type Lead = {
   id: string;
@@ -63,7 +64,9 @@ function LeadDetailInner() {
   const { id } = useParams<{ id: string }>();
   const router = useRouter();
   const searchParams = useSearchParams();
-  const fromCampaign = searchParams.get("fromCampaign")?.trim() ?? "";
+  const leadNavigation = useMemo(() => parseLeadNavigation(searchParams), [searchParams]);
+  const { openedFrom, querySuffix, queueCampaignId } = leadNavigation;
+  const returnPath = openedFrom.path || LEAD_NAV_FALLBACK_PATH;
   const { data: session } = useSession();
   const isAdmin = session?.user?.role === "ADMIN";
   const myUserId = session?.user?.id ?? "";
@@ -287,13 +290,14 @@ function LeadDetailInner() {
   }, [holdsEditLock, lead?.id]);
 
   useEffect(() => {
-    if (!fromCampaign || !lead || lead.campaignId !== fromCampaign) {
+    const campaignIdForQueue = queueCampaignId;
+    if (!campaignIdForQueue || !lead || lead.campaignId !== campaignIdForQueue) {
       setQueue(null);
       return;
     }
     let cancelled = false;
     async function loadQueue() {
-      const res = await fetch(`/api/leads?campaignId=${encodeURIComponent(fromCampaign)}`);
+      const res = await fetch(`/api/leads?campaignId=${encodeURIComponent(campaignIdForQueue)}`);
       if (!res.ok || cancelled) return;
       const rows: {
         id: string;
@@ -314,7 +318,7 @@ function LeadDetailInner() {
     return () => {
       cancelled = true;
     };
-  }, [fromCampaign, lead, id]);
+  }, [queueCampaignId, lead, id]);
 
   useEffect(() => {
     if (status !== "MEETING_BOOKED") setMeetingContactErrors({});
@@ -442,7 +446,11 @@ function LeadDetailInner() {
       setLockBusyMessage(null);
     }
     setActivityReloadToken((t) => t + 1);
-    router.refresh();
+    if (holdsLockRef.current && lead?.id) {
+      void fetch(`/api/leads/${lead.id}/lock`, { method: "DELETE", keepalive: true }).catch(() => {});
+      setHoldsEditLock(false);
+    }
+    router.push(returnPath);
   }
 
   function openCallbackDialog() {
@@ -590,8 +598,6 @@ function LeadDetailInner() {
   const nextLeadId =
     queue && queue.position < queue.ids.length ? queue.ids[queue.position] : null;
   const prevLeadId = queue && queue.position > 1 ? queue.ids[queue.position - 2] : null;
-  const q = fromCampaign ? `?fromCampaign=${encodeURIComponent(fromCampaign)}` : "";
-
   if (forbidden) {
     return (
       <div className="mx-auto max-w-lg rounded-xl border border-amber-200 bg-amber-50/80 px-6 py-8 text-center shadow-sm">
@@ -601,10 +607,10 @@ function LeadDetailInner() {
           Du kan stadig se mødet på oversigten under <strong>Møder</strong>.
         </p>
         <Link
-          href="/meetings"
+          href={returnPath}
           className="mt-4 inline-block text-sm font-medium text-amber-900 underline-offset-2 hover:underline"
         >
-          Tilbage til mødeoversigt
+          ← Tilbage
         </Link>
       </div>
     );
@@ -625,14 +631,11 @@ function LeadDetailInner() {
   return (
     <div className="mx-auto max-w-6xl flex min-h-[calc(100dvh-5.5rem)] flex-col gap-4 pb-4">
       <div className="shrink-0">
-        <Link
-          href={fromCampaign ? "/kampagner" : "/leads"}
-          className="text-sm text-stone-500 hover:text-stone-800"
-        >
-          {fromCampaign ? "← Tilbage til kampagner" : "← Tilbage til leads"}
+        <Link href={returnPath} className="text-sm text-stone-500 hover:text-stone-800">
+          ← Tilbage
         </Link>
 
-        {fromCampaign && queue && (
+        {queueCampaignId && queue && (
           <div className="mt-3 flex flex-wrap items-center justify-between gap-3 rounded-lg border border-emerald-200/80 bg-emerald-50/80 px-4 py-3 text-sm text-emerald-950">
             <p>
               <span className="font-medium">Kampagne-kø:</span> lead {queue.position} af {queue.ids.length} (nye /
@@ -641,7 +644,7 @@ function LeadDetailInner() {
             <div className="flex flex-wrap gap-2">
               {prevLeadId && (
                 <Link
-                  href={`/leads/${prevLeadId}${q}`}
+                  href={`/leads/${prevLeadId}${querySuffix}`}
                   className="rounded-md border border-emerald-300 bg-white px-3 py-1.5 text-sm font-medium text-emerald-900 hover:bg-emerald-100/80"
                 >
                   Forrige
@@ -649,7 +652,7 @@ function LeadDetailInner() {
               )}
               {nextLeadId && (
                 <Link
-                  href={`/leads/${nextLeadId}${q}`}
+                  href={`/leads/${nextLeadId}${querySuffix}`}
                   className="rounded-md bg-emerald-800 px-3 py-1.5 text-sm font-medium text-white hover:bg-emerald-900"
                 >
                   Næste lead
@@ -752,7 +755,7 @@ function LeadDetailInner() {
               <>
                 {status === "NEW" && showNextForMeeting ? (
                   <p className="max-w-[14rem] text-right text-xs text-stone-500">
-                    Gem ændringer gemmer kundedata og noter. Vælg udfald-knapperne ovenfor.
+                    Gem & Luk gemmer og sender dig tilbage. Vælg udfald-knapperne ovenfor.
                   </p>
                 ) : null}
                 <button
@@ -781,7 +784,7 @@ function LeadDetailInner() {
                   disabled={saving || (editLockBlocked && !isAdmin)}
                   className="rounded-xl bg-stone-900 px-6 py-3 text-sm font-semibold text-white shadow-md transition hover:bg-stone-800 disabled:opacity-60"
                 >
-                  {saving ? "Gemmer…" : "Gem ændringer"}
+                  {saving ? "Gemmer…" : "Gem & Luk"}
                 </button>
               </>
             }

@@ -21,6 +21,13 @@ import {
   writeWorkspaceStartDateFilter,
 } from "@/lib/workspace-start-date-filter";
 import {
+  buildCampaignArbejdHref,
+  buildLeadDetailHref,
+  campaignDetailOpenedFrom,
+  KNOWN_LEAD_SOURCES,
+  type LeadOpenedFrom,
+} from "@/lib/lead-navigation";
+import {
   EMPTY_ACTIVE_CAMPAIGN_QUEUE_VIEW,
   hasActiveQueueViewConstraints,
   parseActiveCampaignQueueView,
@@ -264,7 +271,9 @@ type LeadsBulkPanelProps = {
   showSearchField?: boolean;
   /** Vis kolumnen «Kampagne» (kun på oversigten over alle kampagner) */
   showCampaignColumn?: boolean;
-  /** Tilføjes til link til lead-detalje, fx ?fromCampaign=... */
+  /** Hvor lead-detalje / arbejd skal returnere til efter Gem & Luk / Tilbage. */
+  openedFrom?: LeadOpenedFrom;
+  /** @deprecated Brug `openedFrom` */
   leadDetailSearchSuffix?: string;
   /** Vis udvidede filtre (dato + status). */
   showFilters?: boolean;
@@ -279,6 +288,7 @@ export function LeadsBulkPanel({
   onSearchChange,
   showSearchField = false,
   showCampaignColumn = false,
+  openedFrom,
   leadDetailSearchSuffix = "",
   showFilters = true,
   dialMode = "NO_DIAL",
@@ -797,7 +807,11 @@ export function LeadsBulkPanel({
   }
   function leadOpenHref(lead: LeadRow): string {
     if (campaignId) {
-      return `/kampagner/${encodeURIComponent(campaignId)}/arbejd?leadId=${encodeURIComponent(lead.id)}`;
+      const ctx = openedFrom ?? campaignDetailOpenedFrom(campaignId);
+      return buildCampaignArbejdHref(campaignId, { openedFrom: ctx, leadId: lead.id });
+    }
+    if (openedFrom) {
+      return buildLeadDetailHref(lead.id, openedFrom);
     }
     return `/leads/${lead.id}${leadDetailSearchSuffix || ""}`;
   }

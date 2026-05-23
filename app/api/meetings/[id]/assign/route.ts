@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
-import { requireSession } from "@/lib/api-auth";
+import { requireAdmin } from "@/lib/api-auth";
 import { ensureSystemCampaignId } from "@/lib/ensure-system-campaigns";
 import { listMeetingAssignableUsers } from "@/lib/meeting-assignee";
 import { LEAD_ACTIVITY_KIND } from "@/lib/lead-activity-kinds";
@@ -8,7 +8,7 @@ import { LEAD_ACTIVITY_KIND } from "@/lib/lead-activity-kinds";
 type Params = { params: Promise<{ id: string }> };
 
 export async function PATCH(req: Request, { params }: Params) {
-  const { session, response } = await requireSession();
+  const { session, response } = await requireAdmin();
   if (response) return response;
   const { id } = await params;
 

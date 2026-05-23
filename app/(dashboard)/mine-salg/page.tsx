@@ -1,7 +1,9 @@
 "use client";
 
 import Link from "next/link";
-import { useEffect, useState } from "react";
+import { useRouter, useSearchParams } from "next/navigation";
+import { useSession } from "next-auth/react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import {
   meetingOutcomeBadgeClass,
   MEETING_OUTCOME_LABELS,
@@ -10,6 +12,10 @@ import {
 } from "@/lib/meeting-outcome";
 import { COMMISSION_REBOOKING_FLAT_KR, rateKrPerHeldMeeting } from "@/lib/commission";
 import { DashboardTabs } from "@/app/components/dashboard-tabs";
+import { buildLeadDetailHref, KNOWN_LEAD_SOURCES } from "@/lib/lead-navigation";
+import { UserViewSwitcher } from "./_components/user-view-switcher";
+
+type UserOption = { id: string; name: string; username: string; role?: string };
 
 type LeadRow = {
   id: string;
@@ -55,6 +61,7 @@ type SalesPayload = {
     sale: number;
     cancelled: number;
   };
+  viewingUser?: { id: string; name: string; username: string };
 };
 
 function formatDayKeyDa(dayKey: string): string {
@@ -70,37 +77,91 @@ function outcomeLabel(raw?: string) {
 }
 
 export default function MineSalgPage() {
+  const { data: session, status: sessionStatus } = useSession();
+  const searchParams = useSearchParams();
+  const router = useRouter();
+
+  const isAdmin = session?.user?.role === "ADMIN";
+  const myUserId = session?.user?.id ?? "";
+
+  const urlUserId = searchParams.get("userId")?.trim() ?? "";
+  const effectiveUserId = isAdmin ? urlUserId || myUserId : myUserId;
+
+  const [userOptions, setUserOptions] = useState<UserOption[]>([]);
   const [data, setData] = useState<SalesPayload | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
+    if (!isAdmin || sessionStatus !== "authenticated") return;
     let cancelled = false;
-    async function load() {
-      setLoading(true);
-      const res = await fetch("/api/me/sales");
-      if (!res.ok) {
-        const j = await res.json().catch(() => ({}));
-        if (!cancelled) {
-          setError(typeof j.error === "string" ? j.error : "Kunne ikke hente data");
-          setLoading(false);
-        }
-        return;
+    void (async () => {
+      const res = await fetch("/api/users/for-mine-salg-view");
+      if (!res.ok || cancelled) return;
+      const list = (await res.json().catch(() => [])) as UserOption[];
+      if (!cancelled && Array.isArray(list)) {
+        setUserOptions(list);
       }
-      const payload = (await res.json()) as SalesPayload;
-      if (!cancelled) {
-        setData(payload);
-        setError(null);
-        setLoading(false);
-      }
-    }
-    void load();
+    })();
     return () => {
       cancelled = true;
     };
-  }, []);
+  }, [isAdmin, sessionStatus]);
 
-  if (loading) {
+  const load = useCallback(async () => {
+    if (sessionStatus === "loading" || !myUserId) return;
+    if (isAdmin && !effectiveUserId) return;
+
+    setLoading(true);
+    setError(null);
+    const params = new URLSearchParams();
+    if (isAdmin && effectiveUserId) {
+      params.set("userId", effectiveUserId);
+    }
+    const qs = params.toString();
+    const res = await fetch(`/api/me/sales${qs ? `?${qs}` : ""}`);
+    if (!res.ok) {
+      const j = await res.json().catch(() => ({}));
+      setError(typeof j.error === "string" ? j.error : "Kunne ikke hente data");
+      setLoading(false);
+      return;
+    }
+    const payload = (await res.json()) as SalesPayload;
+    setData(payload);
+    setLoading(false);
+  }, [sessionStatus, myUserId, isAdmin, effectiveUserId]);
+
+  useEffect(() => {
+    void load();
+  }, [load]);
+
+  function handleUserChange(nextId: string) {
+    if (!isAdmin || !nextId) return;
+    const params = new URLSearchParams(searchParams.toString());
+    params.set("userId", nextId);
+    router.replace(`/mine-salg?${params.toString()}`);
+  }
+
+  const viewingName = useMemo(() => {
+    if (data?.viewingUser?.name) return data.viewingUser.name;
+    const fromList = userOptions.find((u) => u.id === effectiveUserId);
+    if (fromList?.name) return fromList.name;
+    if (effectiveUserId === myUserId) return session?.user?.name ?? "Dig";
+    return "Bruger";
+  }, [data?.viewingUser?.name, userOptions, effectiveUserId, myUserId, session?.user?.name]);
+
+  const viewingOtherUser = isAdmin && effectiveUserId !== myUserId;
+
+  if (sessionStatus === "loading") {
+    return (
+      <div className="space-y-6">
+        <DashboardTabs />
+        <div className="text-center text-stone-500">Henter session…</div>
+      </div>
+    );
+  }
+
+  if (loading && !data) {
     return (
       <div className="space-y-6">
         <DashboardTabs />
@@ -109,11 +170,20 @@ export default function MineSalgPage() {
     );
   }
 
-  if (error || !data) {
+  if (error && !data) {
     return (
       <div className="space-y-6">
         <DashboardTabs />
-        <p className="text-sm text-red-600">{error ?? "Ingen data"}</p>
+        <p className="text-sm text-red-600">{error}</p>
+      </div>
+    );
+  }
+
+  if (!data) {
+    return (
+      <div className="space-y-6">
+        <DashboardTabs />
+        <p className="text-sm text-stone-500">Ingen data</p>
       </div>
     );
   }
@@ -129,13 +199,42 @@ export default function MineSalgPage() {
   return (
     <div className="space-y-8">
       <DashboardTabs />
-      <div>
-        <h1 className="text-xl font-semibold text-stone-900">Mine Salg</h1>
-        <p className="mt-1 text-sm text-stone-600">
-          Oversigt over de møder du har booket, deres status og provision der løbende kan udbetales for afholdte
-          møder.
-        </p>
+
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+        <div>
+          <h1 className="text-xl font-semibold text-stone-900">Mine Salg</h1>
+          <p className="mt-1 text-sm text-stone-600">
+            {viewingOtherUser ? (
+              <>
+                Oversigt over møder booket af <strong>{viewingName}</strong>, deres status og provision der
+                løbende kan udbetales for afholdte møder.
+              </>
+            ) : (
+              <>
+                Oversigt over de møder du har booket, deres status og provision der løbende kan udbetales
+                for afholdte møder.
+              </>
+            )}
+          </p>
+        </div>
+        {isAdmin && userOptions.length > 0 && (
+          <UserViewSwitcher
+            value={effectiveUserId}
+            displayName={viewingName}
+            options={userOptions}
+            myUserId={myUserId}
+            disabled={loading}
+            onChange={handleUserChange}
+          />
+        )}
       </div>
+
+      {loading && (
+        <p className="text-sm text-stone-500" role="status">
+          Opdaterer data…
+        </p>
+      )}
+      {error && <p className="text-sm text-red-600">{error}</p>}
 
       <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-6">
         <div className="rounded-xl border border-stone-200 bg-white p-4 shadow-sm">
@@ -292,7 +391,9 @@ export default function MineSalgPage() {
       </div>
 
       <div>
-        <h2 className="text-sm font-semibold text-stone-900">Dine bookede møder</h2>
+        <h2 className="text-sm font-semibold text-stone-900">
+          {viewingOtherUser ? `Bookede møder (${viewingName})` : "Dine bookede møder"}
+        </h2>
         <div className="mt-3 overflow-hidden rounded-lg border border-stone-200 bg-white shadow-sm">
           <table className="w-full text-left text-sm">
             <thead className="border-b border-stone-200 bg-stone-50 text-stone-600">
@@ -309,7 +410,7 @@ export default function MineSalgPage() {
               {leads.length === 0 ? (
                 <tr>
                   <td colSpan={6} className="px-3 py-6 text-center text-stone-500">
-                    Du har ikke booket møder endnu.
+                    {viewingOtherUser ? "Ingen bookede møder for denne bruger." : "Du har ikke booket møder endnu."}
                   </td>
                 </tr>
               ) : (
@@ -317,7 +418,7 @@ export default function MineSalgPage() {
                   <tr key={l.id}>
                     <td className="px-3 py-2">
                       <Link
-                        href={`/leads/${l.leadId ?? l.id}`}
+                        href={buildLeadDetailHref(l.leadId ?? l.id, KNOWN_LEAD_SOURCES.mineSalg)}
                         className="font-medium text-stone-900 hover:underline"
                       >
                         {l.companyName}

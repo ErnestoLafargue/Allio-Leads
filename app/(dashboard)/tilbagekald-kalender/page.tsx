@@ -5,6 +5,7 @@ import { Fragment, useCallback, useEffect, useMemo, useState } from "react";
 import { useSession } from "next-auth/react";
 import { formatCallbackDa, isCallbackOverdue } from "@/lib/callback-datetime";
 import { DashboardTabs } from "@/app/components/dashboard-tabs";
+import { buildLeadDetailHref, KNOWN_LEAD_SOURCES } from "@/lib/lead-navigation";
 
 type CallbackLead = {
   id: string;
@@ -345,7 +346,7 @@ export default function TilbagekaldKalenderPage() {
                           {slotItems.map((it) => (
                             <Link
                               key={it.id}
-                              href={`/leads/${it.id}`}
+                              href={buildLeadDetailHref(it.id, KNOWN_LEAD_SOURCES.callbacks)}
                               className="mb-0.5 block truncate rounded border border-violet-200 bg-violet-50 px-1 py-0.5 text-[10px] font-medium text-violet-950 hover:bg-violet-100"
                             >
                               {it.companyName} · {formatCallbackDa(it.callbackScheduledFor).split("kl. ")[1]}
@@ -487,7 +488,10 @@ function CallbackCard({
       <div className="flex flex-wrap items-start justify-between gap-3">
         <div className="min-w-0">
           <div className="flex flex-wrap items-center gap-2">
-            <Link href={`/leads/${item.id}`} className="font-semibold text-stone-900 hover:underline">
+            <Link
+              href={buildLeadDetailHref(item.id, KNOWN_LEAD_SOURCES.callbacks)}
+              className="font-semibold text-stone-900 hover:underline"
+            >
               {item.companyName}
             </Link>
             {overdue && (
@@ -515,7 +519,7 @@ function CallbackCard({
         </div>
         <div className="flex shrink-0 flex-col gap-2">
           <Link
-            href={`/leads/${item.id}`}
+            href={buildLeadDetailHref(item.id, KNOWN_LEAD_SOURCES.callbacks)}
             className="rounded-lg bg-stone-900 px-3 py-1.5 text-center text-xs font-medium text-white hover:bg-stone-800"
           >
             Åbn lead

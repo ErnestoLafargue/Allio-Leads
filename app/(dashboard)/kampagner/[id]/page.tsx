@@ -11,7 +11,7 @@ import {
   type FieldGroupKey,
   type CampaignExtraField,
   isFixedCvrExtensionKey,
-  isFixedPersonExtensionKey,
+  isFixedCompanyNameExtensionKey,
   parseFieldConfig,
   serializeFieldConfig,
   slugifyKey,
@@ -24,6 +24,7 @@ import {
   isLeadStatus,
 } from "@/lib/lead-status";
 import { LeadsBulkPanel } from "@/app/components/leads-bulk-panel";
+import { campaignDetailOpenedFrom } from "@/lib/lead-navigation";
 import { CampaignProtectedSwitch } from "@/app/components/campaign-protected-switch";
 import { CampaignPhoneSwitch } from "@/app/components/campaign-phone-switch";
 import { CampaignDeleteFlow } from "@/app/components/campaign-delete-flow";
@@ -544,7 +545,7 @@ export default function RedigerKampagnePage() {
             key={id}
             campaignId={id}
             showSearchField
-            leadDetailSearchSuffix={`?fromCampaign=${encodeURIComponent(id)}`}
+            openedFrom={campaignDetailOpenedFrom(id)}
             dialMode={dialMode}
             systemCampaignType={campaignMeta?.systemCampaignType ?? null}
           />
@@ -666,8 +667,10 @@ export default function RedigerKampagnePage() {
                   <ul className="mt-4 space-y-3">
                     {ext[g].map((row) => {
                       const fixedCvr = g === "cvr" && isFixedCvrExtensionKey(row.key);
-                      const fixedPerson = g === "companyName" && isFixedPersonExtensionKey(row.key);
-                      const fixedField = fixedCvr || fixedPerson;
+                      const fixedCompanyName =
+                        g === "companyName" &&
+                        isFixedCompanyNameExtensionKey(row.key, row.label);
+                      const fixedField = fixedCvr || fixedCompanyName;
                       return (
                         <li key={row.draftId} className="flex flex-wrap items-end gap-3 rounded-md bg-stone-50 p-3">
                           <div className="min-w-[180px] flex-1">

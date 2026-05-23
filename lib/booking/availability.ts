@@ -151,6 +151,58 @@ export function parseOccupiedBlocksFromApi(
   return out;
 }
 
+export type BlockedTimeRow = {
+  id: string;
+  title: string;
+  startDateTime: Date | string;
+  endDateTime: Date | string;
+};
+
+export function occupiedBlocksFromBlockedTimes(
+  rows: Pick<BlockedTimeRow, "startDateTime" | "endDateTime">[],
+): TimeBlockMs[] {
+  const out: TimeBlockMs[] = [];
+  for (const row of rows) {
+    const startMs = new Date(row.startDateTime).getTime();
+    const endMs = new Date(row.endDateTime).getTime();
+    if (Number.isNaN(startMs) || Number.isNaN(endMs) || endMs <= startMs) continue;
+    out.push({ startMs, endMs });
+  }
+  return out;
+}
+
+/** Slot-start må ikke ligge inde i en manuel blokering (grænser tilladt som ved mødeblokke). */
+export function assertSlotNotBlocked(
+  slotStartMs: number,
+  blockedRows: Pick<BlockedTimeRow, "startDateTime" | "endDateTime">[],
+): void {
+  const occupied = occupiedBlocksFromBlockedTimes(blockedRows);
+  if (isSlotStartBlocked(slotStartMs, BOOKING_SLOT_STEP_MIN, occupied)) {
+    throw new Error("SLOT_BLOCKED");
+  }
+}
+
+export function findBlockedTimeConflict(
+  proposedStart: Date,
+  blockedRows: BlockedTimeRow[],
+): { id: string; title: string } | null {
+  const startMs = proposedStart.getTime();
+  if (Number.isNaN(startMs)) return null;
+  for (const row of blockedRows) {
+    const blockStart = new Date(row.startDateTime).getTime();
+    const blockEnd = new Date(row.endDateTime).getTime();
+    if (Number.isNaN(blockStart) || Number.isNaN(blockEnd) || blockEnd <= blockStart) continue;
+    if (startMs > blockStart && startMs < blockEnd) {
+      return { id: row.id, title: row.title.trim() || "Blokeret" };
+    }
+  }
+  return null;
+}
+
+export function blockedTimeConflictMessage(title: string): string {
+  return `Tidspunktet er blokeret (${title}) og kan ikke bookes.`;
+}
+
 export function findBookingTimeConflict(
   proposedStart: Date,
   existingRows: { id: string; meetingScheduledFor: Date | null; meetingOutcomeStatus: string | null }[],

@@ -37,6 +37,18 @@ export const FIXED_PERSON_EXTENSION_FIELDS: CampaignExtraField[] = [
   { key: "fuldt_ansvarlig_person", label: "Fuldt ansvarlig deltager" },
 ];
 
+/** Altid som sidste felt under Virksomhedsnavn (efter personfelterne). */
+export const FIXED_DOMAIN_EXTENSION_FIELD: CampaignExtraField = {
+  key: "domaene",
+  label: "Domæne",
+};
+
+/** Standardfelter under Virksomhedsnavn i rækkefølge. */
+export const FIXED_COMPANY_NAME_EXTENSION_FIELDS: CampaignExtraField[] = [
+  ...FIXED_PERSON_EXTENSION_FIELDS,
+  FIXED_DOMAIN_EXTENSION_FIELD,
+];
+
 /** Altid under CVR i alle kampagner (nøgler bruges i import + reklame-filter). */
 export const DEFAULT_CVR_EXTENSION_FIELDS: CampaignExtraField[] = [
   { key: "reklamebeskyttet", label: "Reklamebeskyttet" },
@@ -50,9 +62,42 @@ export function isFixedCvrExtensionKey(key: string): boolean {
 }
 
 const FIXED_PERSON_KEYS = new Set(FIXED_PERSON_EXTENSION_FIELDS.map((f) => f.key));
+const FIXED_DOMAIN_KEY = FIXED_DOMAIN_EXTENSION_FIELD.key;
+
+function normalizeFieldToken(value: string): string {
+  return value
+    .trim()
+    .toLowerCase()
+    .normalize("NFD")
+    .replace(/\p{M}/gu, "")
+    .replace(/[øØ]/g, "o")
+    .replace(/[æÆ]/g, "ae")
+    .replace(/[åÅ]/g, "aa");
+}
+
+/** True for tidligere manuelt tilføjede Domæne-varianter (skjules ved merge). */
+export function isLegacyDomainExtensionField(key: string, label?: string): boolean {
+  const kn = normalizeFieldToken(key);
+  const ln = label ? normalizeFieldToken(label) : "";
+  if (kn === FIXED_DOMAIN_KEY || kn === "domain") return true;
+  if (ln === "domaene" || ln === "domain") return true;
+  return kn === "domaene" || kn.includes("domaene");
+}
 
 export function isFixedPersonExtensionKey(key: string): boolean {
   return FIXED_PERSON_KEYS.has(key.trim());
+}
+
+export function isFixedDomainExtensionKey(key: string): boolean {
+  return key.trim() === FIXED_DOMAIN_KEY;
+}
+
+export function isFixedCompanyNameExtensionKey(key: string, label?: string): boolean {
+  return (
+    isFixedPersonExtensionKey(key) ||
+    isFixedDomainExtensionKey(key) ||
+    isLegacyDomainExtensionField(key, label)
+  );
 }
 
 export function mergeDefaultExtensions(cfg: CampaignFieldConfig): CampaignFieldConfig {
@@ -60,10 +105,12 @@ export function mergeDefaultExtensions(cfg: CampaignFieldConfig): CampaignFieldC
   for (const g of FIELD_GROUPS) {
     if (g === "companyName") {
       const existing = cfg.extensions.companyName ?? [];
-      const fixedKeys = new Set(FIXED_PERSON_EXTENSION_FIELDS.map((f) => f.key));
-      const merged: CampaignExtraField[] = [...FIXED_PERSON_EXTENSION_FIELDS];
+      const fixedKeys = new Set(FIXED_COMPANY_NAME_EXTENSION_FIELDS.map((f) => f.key));
+      const merged: CampaignExtraField[] = [...FIXED_COMPANY_NAME_EXTENSION_FIELDS];
       for (const f of existing) {
-        if (!fixedKeys.has(f.key)) merged.push(f);
+        if (fixedKeys.has(f.key)) continue;
+        if (isLegacyDomainExtensionField(f.key, f.label)) continue;
+        merged.push(f);
       }
       extensions.companyName = merged;
       continue;
@@ -117,14 +164,7 @@ export function parseFieldConfig(raw: string | null | undefined): CampaignFieldC
 }
 
 function normalizeLabel(label: string): string {
-  return label
-    .trim()
-    .toLowerCase()
-    .normalize("NFD")
-    .replace(/\p{M}/gu, "")
-    .replace(/[øØ]/g, "o")
-    .replace(/[æÆ]/g, "ae")
-    .replace(/[åÅ]/g, "aa");
+  return normalizeFieldToken(label);
 }
 
 /**

@@ -17,6 +17,7 @@ import {
 } from "@/lib/dialer-pacing";
 import {
   computeDispatchNewCallsNeeded,
+  computePowerDialerReplenishNewCalls,
   MAX_IN_FLIGHT_PER_CAMPAIGN,
   parseTelnyxOutboundChannelLimitFromEnv,
   POWER_DIALER_LEADS_PER_READY_AGENT,
@@ -47,9 +48,9 @@ import { claimDispatchLeadBatch } from "@/lib/power-dialer-batch";
 
 const DEFAULT_AMD: AmdConfig = {
   mode: "premium",
-  totalAnalysisTimeMs: 3500,
-  afterGreetingSilenceMs: 800,
-  greetingTotalAnalysisTimeMs: 3500,
+  totalAnalysisTimeMs: 5000,
+  afterGreetingSilenceMs: 1000,
+  greetingTotalAnalysisTimeMs: 4500,
 };
 
 /**
@@ -95,7 +96,7 @@ async function targetPacingRatio(
 function pacingJson(
   mode: string,
   pacing: Awaited<ReturnType<typeof targetPacingRatio>>,
-  extras?: { targetTotal?: number; telnyxChannelLimit?: number | null },
+  extras?: { targetTotal?: number; replenishBudget?: number; telnyxChannelLimit?: number | null },
 ) {
   return {
     mode,
@@ -109,6 +110,7 @@ function pacingJson(
     noAgentAbandons1h: pacing.noAgentAbandonCount,
     heldLowSample: pacing.heldLowSample,
     ...(extras?.targetTotal !== undefined ? { targetTotal: extras.targetTotal } : {}),
+    ...(extras?.replenishBudget !== undefined ? { replenishBudget: extras.replenishBudget } : {}),
     ...(extras?.telnyxChannelLimit !== undefined
       ? { telnyxChannelLimit: extras.telnyxChannelLimit }
       : {}),
@@ -221,14 +223,35 @@ export async function POST(req: Request) {
     });
   }
 
-  const { targetTotal, newCallsNeeded } = computeDispatchNewCallsNeeded({
-    readyCount,
-    ratio,
-    inFlightCalls,
-    maxInFlightCap: MAX_IN_FLIGHT_PER_CAMPAIGN,
-    maxNewCallsOverride,
-    channelLimit,
-  });
+  const isPowerDialer = mode === "POWER_DIALER";
+  let newCallsNeeded: number;
+  let targetTotal: number;
+  let replenishBudget: number | undefined;
+
+  if (isPowerDialer) {
+    const replenish = computePowerDialerReplenishNewCalls({
+      readyCount,
+      ratio,
+      inFlightCalls,
+      maxInFlightCap: MAX_IN_FLIGHT_PER_CAMPAIGN,
+      maxNewCallsOverride,
+      channelLimit,
+    });
+    replenishBudget = replenish.replenishBudget;
+    newCallsNeeded = replenish.newCallsNeeded;
+    targetTotal = inFlightCalls + replenish.replenishBudget;
+  } else {
+    const pacingResult = computeDispatchNewCallsNeeded({
+      readyCount,
+      ratio,
+      inFlightCalls,
+      maxInFlightCap: MAX_IN_FLIGHT_PER_CAMPAIGN,
+      maxNewCallsOverride,
+      channelLimit,
+    });
+    targetTotal = pacingResult.targetTotal;
+    newCallsNeeded = pacingResult.newCallsNeeded;
+  }
 
   if (newCallsNeeded === 0) {
     return NextResponse.json({
@@ -240,8 +263,14 @@ export async function POST(req: Request) {
       reason:
         channelLimit !== null && inFlightCalls >= channelLimit
           ? `Telnyx channel-limit nået (${inFlightCalls}/${channelLimit}) — ingen nye nu.`
-          : `Allerede ${inFlightCalls}/${targetTotal} i luften — ingen nye nu.`,
-      pacing: pacingJson(mode, pacing, { targetTotal, telnyxChannelLimit: channelLimit }),
+          : isPowerDialer
+            ? `Ingen kapacitet til ${replenishBudget ?? readyCount * ratio} nye opkald denne tick (${inFlightCalls} allerede i luften).`
+            : `Allerede ${inFlightCalls}/${targetTotal} i luften — ingen nye nu.`,
+      pacing: pacingJson(mode, pacing, {
+        targetTotal,
+        replenishBudget,
+        telnyxChannelLimit: channelLimit,
+      }),
     });
   }
 
@@ -259,7 +288,11 @@ export async function POST(req: Request) {
       ready: readyCount,
       inFlight: inFlightCalls,
       reason: "Ingen flere ledige leads at dispatche (alle er allerede i kø, låst eller ugyldige numre).",
-      pacing: pacingJson(mode, pacing, { targetTotal, telnyxChannelLimit: channelLimit }),
+      pacing: pacingJson(mode, pacing, {
+        targetTotal,
+        replenishBudget,
+        telnyxChannelLimit: channelLimit,
+      }),
     });
   }
 
@@ -363,7 +396,11 @@ export async function POST(req: Request) {
     target: targetTotal,
     dispatchId,
     errors: failures.length > 0 ? failures : undefined,
-    pacing: pacingJson(mode, pacing, { targetTotal, telnyxChannelLimit: channelLimit }),
+    pacing: pacingJson(mode, pacing, {
+      targetTotal,
+      replenishBudget,
+      telnyxChannelLimit: channelLimit,
+    }),
   });
 }
 

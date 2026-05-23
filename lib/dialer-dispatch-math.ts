@@ -39,3 +39,31 @@ export function computeDispatchNewCallsNeeded(params: {
   }
   return { targetTotal, newCallsNeeded };
 }
+
+/**
+ * Power Dialer: hver ledig agent kan udløse op til `ratio` nye opkald pr. dispatch-tick,
+ * uafhængigt af eksisterende in-flight fra optagede agenter (fx 4 gamle + 5 nye).
+ * Begrænses stadig af kampagne-cap og Telnyx channel-limit.
+ */
+export function computePowerDialerReplenishNewCalls(params: {
+  readyCount: number;
+  ratio: number;
+  inFlightCalls: number;
+  maxInFlightCap?: number;
+  maxNewCallsOverride: number | null;
+  channelLimit: number | null;
+}): { replenishBudget: number; newCallsNeeded: number } {
+  const replenishBudget = Math.max(0, Math.floor(params.readyCount * params.ratio));
+  let newCallsNeeded = replenishBudget;
+  if (params.maxNewCallsOverride !== null) {
+    newCallsNeeded = Math.min(newCallsNeeded, params.maxNewCallsOverride);
+  }
+  const maxCap = params.maxInFlightCap ?? MAX_IN_FLIGHT_PER_CAMPAIGN;
+  const campaignHeadroom = Math.max(0, maxCap - params.inFlightCalls);
+  newCallsNeeded = Math.min(newCallsNeeded, campaignHeadroom);
+  if (params.channelLimit !== null) {
+    const channelHeadroom = Math.max(0, params.channelLimit - params.inFlightCalls);
+    newCallsNeeded = Math.min(newCallsNeeded, channelHeadroom);
+  }
+  return { replenishBudget, newCallsNeeded };
+}

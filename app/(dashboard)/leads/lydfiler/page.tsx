@@ -5,6 +5,7 @@ import { useCallback, useEffect, useState } from "react";
 import { DashboardTabs } from "@/app/components/dashboard-tabs";
 import { LeadRecordingPlayer } from "@/app/components/lead-recording-player";
 import { LEAD_STATUSES, LEAD_STATUS_LABELS, type LeadStatus } from "@/lib/lead-status";
+import { buildLeadDetailHref, KNOWN_LEAD_SOURCES } from "@/lib/lead-navigation";
 
 type Row = {
   id: string;
@@ -218,7 +219,7 @@ export default function LydfilerPage() {
                     {r.lead ? (
                       <>
                         <Link
-                          href={`/leads/${encodeURIComponent(r.lead.id)}`}
+                          href={buildLeadDetailHref(r.lead.id, KNOWN_LEAD_SOURCES.recordings)}
                           className="font-medium text-emerald-800 hover:underline"
                         >
                           {r.lead.companyName || "—"}

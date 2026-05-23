@@ -51,6 +51,9 @@ model User {
   ticketsAssigned Ticket[] @relation("TicketAssignedTo")
   ticketsCreated  Ticket[] @relation("TicketCreatedBy")
   campaignEnrichmentLogs CampaignEnrichmentLog[]
+
+  blockedTimes         BlockedTime[] @relation("BlockedTimeUser")
+  blockedTimesCreated  BlockedTime[] @relation("BlockedTimeCreatedBy")
 }
 
 /// Én række pr. bruger pr. kalenderdag (København) ved vellykket login.
@@ -449,4 +452,22 @@ model CampaignEnrichmentLog {
 
   @@index([campaignId, createdAt])
   @@index([userId, createdAt])
+}
+
+/// Manuel blokering af kalender (per bruger) — fjernes fra ledige booking-tider.
+model BlockedTime {
+  id              String   @id @default(cuid())
+  userId          String
+  title           String
+  startDateTime   DateTime
+  endDateTime     DateTime
+  createdByUserId String
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  user      User @relation("BlockedTimeUser", fields: [userId], references: [id], onDelete: Cascade)
+  createdBy User @relation("BlockedTimeCreatedBy", fields: [createdByUserId], references: [id])
+
+  @@index([userId, startDateTime])
+  @@index([startDateTime, endDateTime])
 }

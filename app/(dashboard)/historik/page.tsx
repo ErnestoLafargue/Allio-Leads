@@ -6,6 +6,11 @@ import { useEffect, useState } from "react";
 import { LEAD_STATUS_LABELS, type LeadStatus } from "@/lib/lead-status";
 import { copenhagenDayKey } from "@/lib/copenhagen-day";
 import { DashboardTabs } from "@/app/components/dashboard-tabs";
+import {
+  buildCampaignArbejdHref,
+  buildLeadDetailHref,
+  KNOWN_LEAD_SOURCES,
+} from "@/lib/lead-navigation";
 
 type UserOption = { id: string; name: string; username: string; role: string };
 
@@ -177,8 +182,11 @@ export default function HistorikPage() {
             ) : (
               rows.map((row) => {
                 const href = row.campaignId
-                  ? `/kampagner/${encodeURIComponent(row.campaignId)}/arbejd?leadId=${encodeURIComponent(row.leadId)}`
-                  : `/leads/${encodeURIComponent(row.leadId)}`;
+                  ? buildCampaignArbejdHref(row.campaignId, {
+                      openedFrom: KNOWN_LEAD_SOURCES.history,
+                      leadId: row.leadId,
+                    })
+                  : buildLeadDetailHref(row.leadId, KNOWN_LEAD_SOURCES.history);
                 return (
                   <tr key={row.id} className="hover:bg-stone-50/80">
                     <td className="px-4 py-3 text-stone-700">

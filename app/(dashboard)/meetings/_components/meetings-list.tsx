@@ -1,8 +1,17 @@
 "use client";
 
 import Link from "next/link";
+import { useRouter, useSearchParams } from "next/navigation";
 import { useSession } from "next-auth/react";
 import { useCallback, useEffect, useMemo, useState } from "react";
+import {
+  BlockedTimeDialog,
+  type BlockedTimeDto,
+} from "@/app/(dashboard)/meetings/_components/blocked-time-dialog";
+import { MeetingsWeekCalendar } from "@/app/(dashboard)/meetings/_components/meetings-week-calendar";
+import type { BlockedTimeRow } from "@/lib/blocked-time-calendar";
+import { copenhagenDayBoundsUtcFromDayKey } from "@/lib/copenhagen-day";
+import { weekDayKeys } from "@/lib/meeting-week-calendar";
 import { MeetingNoShowRebookDialog } from "@/app/components/meeting-no-show-rebook-dialog";
 import { MeetingOutcomeSelect } from "@/app/components/meeting-outcome-select";
 import {
@@ -12,10 +21,17 @@ import {
   MEETING_OUTCOME_PENDING,
 } from "@/lib/meeting-outcome";
 import { isMeetingOutcomeLocked, MEETING_OUTCOME_LOCK_DAYS } from "@/lib/meetings";
+import {
+  buildLeadDetailHref,
+  KNOWN_LEAD_SOURCES,
+  meetingsUpcomingOpenedFrom,
+} from "@/lib/lead-navigation";
+import { parseWeekStartParam } from "@/lib/meeting-week-calendar";
 
 type MeetingRow = {
   id: string;
   companyName: string;
+  meetingContactName?: string | null;
   phone: string;
   meetingBookedAt: string | null;
   meetingScheduledFor: string | null;
@@ -44,10 +60,48 @@ function outcomeLabel(raw?: string | null) {
 }
 
 export function MeetingsList({ type }: { type: "upcoming" | "past" }) {
+  const router = useRouter();
+  const searchParams = useSearchParams();
   const { data: session, status: sessionStatus } = useSession();
   const role = session?.user?.role ?? "";
   const userId = session?.user?.id ?? "";
   const isAdmin = role === "ADMIN";
+
+  const viewMode =
+    type === "upcoming" && searchParams.get("view")?.trim().toLowerCase() === "calendar"
+      ? "calendar"
+      : "list";
+  const weekStartDayKey = parseWeekStartParam(searchParams.get("weekStart"));
+
+  const upcomingOpenedFrom = useMemo(
+    () =>
+      viewMode === "calendar"
+        ? meetingsUpcomingOpenedFrom({ view: "calendar", weekStart: weekStartDayKey })
+        : KNOWN_LEAD_SOURCES.meetingsUpcoming,
+    [viewMode, weekStartDayKey],
+  );
+
+  function setUpcomingView(next: "list" | "calendar") {
+    if (type !== "upcoming") return;
+    const params = new URLSearchParams(searchParams.toString());
+    if (next === "calendar") {
+      params.set("view", "calendar");
+      params.set("weekStart", weekStartDayKey);
+    } else {
+      params.delete("view");
+      params.delete("weekStart");
+    }
+    const qs = params.toString();
+    router.replace(`/meetings/upcoming${qs ? `?${qs}` : ""}`);
+  }
+
+  function setWeekStartDayKey(dayKey: string) {
+    if (type !== "upcoming") return;
+    const params = new URLSearchParams(searchParams.toString());
+    params.set("view", "calendar");
+    params.set("weekStart", dayKey);
+    router.replace(`/meetings/upcoming?${params.toString()}`);
+  }
 
   const [rows, setRows] = useState<MeetingRow[]>([]);
   const [assignees, setAssignees] = useState<Assignee[]>([]);
@@ -62,6 +116,12 @@ export function MeetingsList({ type }: { type: "upcoming" | "past" }) {
   const [error, setError] = useState<string | null>(null);
   /** Når true: vis kun tidligere møder med status MEETING_BOOKED. */
   const [activeOnlyPast, setActiveOnlyPast] = useState(false);
+  const [blockedTimes, setBlockedTimes] = useState<BlockedTimeRow[]>([]);
+  const [blockedTimesFull, setBlockedTimesFull] = useState<BlockedTimeDto[]>([]);
+  const [blockedDialogOpen, setBlockedDialogOpen] = useState(false);
+  const [blockedDialogMode, setBlockedDialogMode] = useState<"create" | "edit">("create");
+  const [blockedDialogInitial, setBlockedDialogInitial] = useState<BlockedTimeDto | null>(null);
+  const [blockedSaving, setBlockedSaving] = useState(false);
 
   const title = useMemo(() => (type === "upcoming" ? "Kommende møder" : "Tidligere møder"), [type]);
 
@@ -84,6 +144,54 @@ export function MeetingsList({ type }: { type: "upcoming" | "past" }) {
   useEffect(() => {
     void load();
   }, [load]);
+
+  const loadBlockedTimes = useCallback(async () => {
+    if (type !== "upcoming" || viewMode !== "calendar") return;
+    const keys = weekDayKeys(weekStartDayKey);
+    const { start } = copenhagenDayBoundsUtcFromDayKey(keys[0]!);
+    const { end } = copenhagenDayBoundsUtcFromDayKey(keys[6]!);
+    const qs = new URLSearchParams({
+      from: start.toISOString(),
+      to: end.toISOString(),
+    });
+    const res = await fetch(`/api/blocked-times?${qs}`);
+    if (!res.ok) return;
+    const data = (await res.json()) as { blockedTimes: BlockedTimeDto[] };
+    const list = data.blockedTimes ?? [];
+    setBlockedTimesFull(list);
+    setBlockedTimes(
+      list.map((b) => ({
+        id: b.id,
+        userId: b.userId,
+        title: b.title,
+        startDateTime: b.startDateTime,
+        endDateTime: b.endDateTime,
+        user: b.user ? { name: b.user.name } : undefined,
+      })),
+    );
+  }, [type, viewMode, weekStartDayKey]);
+
+  useEffect(() => {
+    void loadBlockedTimes();
+  }, [loadBlockedTimes]);
+
+  function openCreateBlockedDialog() {
+    setBlockedDialogMode("create");
+    setBlockedDialogInitial(null);
+    setBlockedDialogOpen(true);
+  }
+
+  function openEditBlockedDialog(row: BlockedTimeDto) {
+    setBlockedDialogMode("edit");
+    setBlockedDialogInitial(row);
+    setBlockedDialogOpen(true);
+  }
+
+  async function onBlockedTimesSaved() {
+    setBlockedSaving(false);
+    setBlockedDialogOpen(false);
+    await loadBlockedTimes();
+  }
 
   useEffect(() => {
     if (!isAdmin) return;
@@ -216,31 +324,98 @@ export function MeetingsList({ type }: { type: "upcoming" | "past" }) {
                 : `Viser alle tidligere møder uanset lead-status. Udfald kan ændres så længe mødetidspunktet er inden for ${MEETING_OUTCOME_LOCK_DAYS} dage.`}
           </p>
         </div>
-        {type === "past" ? (
-          <button
-            type="button"
-            onClick={() => setActiveOnlyPast((v) => !v)}
-            aria-pressed={activeOnlyPast}
-            className={[
-              "inline-flex items-center gap-1.5 rounded-lg border px-3 py-1.5 text-xs font-semibold shadow-sm transition",
-              activeOnlyPast
-                ? "border-stone-900 bg-stone-900 text-white hover:bg-stone-800"
-                : "border-stone-300 bg-white text-stone-700 hover:bg-stone-50",
-            ].join(" ")}
-            title={
-              activeOnlyPast
-                ? "Vis alle tidligere møder uanset lead-status"
-                : "Vis kun møder med aktiv Møde booket-status"
-            }
-          >
-            {activeOnlyPast ? "Vis alle tidligere møder" : "Vis kun aktive"}
-          </button>
-        ) : null}
+        <div className="flex flex-wrap items-center gap-2">
+          {type === "upcoming" ? (
+            <div
+              className="inline-flex rounded-lg border border-stone-200 bg-stone-100/80 p-0.5 shadow-sm"
+              role="group"
+              aria-label="Visning"
+            >
+              <button
+                type="button"
+                onClick={() => setUpcomingView("list")}
+                aria-pressed={viewMode === "list"}
+                className={[
+                  "rounded-md px-3 py-1.5 text-xs font-semibold transition",
+                  viewMode === "list"
+                    ? "bg-white text-stone-900 shadow-sm"
+                    : "text-stone-600 hover:text-stone-900",
+                ].join(" ")}
+              >
+                Liste
+              </button>
+              <button
+                type="button"
+                onClick={() => setUpcomingView("calendar")}
+                aria-pressed={viewMode === "calendar"}
+                className={[
+                  "rounded-md px-3 py-1.5 text-xs font-semibold transition",
+                  viewMode === "calendar"
+                    ? "bg-white text-stone-900 shadow-sm"
+                    : "text-stone-600 hover:text-stone-900",
+                ].join(" ")}
+              >
+                Kalender
+              </button>
+            </div>
+          ) : null}
+          {type === "past" ? (
+            <button
+              type="button"
+              onClick={() => setActiveOnlyPast((v) => !v)}
+              aria-pressed={activeOnlyPast}
+              className={[
+                "inline-flex items-center gap-1.5 rounded-lg border px-3 py-1.5 text-xs font-semibold shadow-sm transition",
+                activeOnlyPast
+                  ? "border-stone-900 bg-stone-900 text-white hover:bg-stone-800"
+                  : "border-stone-300 bg-white text-stone-700 hover:bg-stone-50",
+              ].join(" ")}
+              title={
+                activeOnlyPast
+                  ? "Vis alle tidligere møder uanset lead-status"
+                  : "Vis kun møder med aktiv Møde booket-status"
+              }
+            >
+              {activeOnlyPast ? "Vis alle tidligere møder" : "Vis kun aktive"}
+            </button>
+          ) : null}
+        </div>
       </div>
 
       {sessionStatus === "loading" && <p className="text-sm text-stone-500">Henter session…</p>}
       {error && <p className="text-sm text-red-600">{error}</p>}
 
+      {type === "upcoming" && viewMode === "calendar" ? (
+        <>
+          <MeetingsWeekCalendar
+            rows={rows}
+            blockedTimes={blockedTimes}
+            weekStartDayKey={weekStartDayKey}
+            loading={loading}
+            openedFrom={upcomingOpenedFrom}
+            canOpen={(m) => canOpen(m as MeetingRow)}
+            onWeekStartChange={setWeekStartDayKey}
+            onBlockTimesClick={openCreateBlockedDialog}
+            onBlockedSegmentClick={(seg) => {
+              const full = blockedTimesFull.find((b) => b.id === seg.id);
+              if (!full) return;
+              openEditBlockedDialog(full);
+            }}
+          />
+          <BlockedTimeDialog
+            open={blockedDialogOpen}
+            mode={blockedDialogMode}
+            initial={blockedDialogInitial}
+            currentUserId={userId}
+            isAdmin={isAdmin}
+            defaultUserId={defaultAssigneeId}
+            saving={blockedSaving}
+            errorText={null}
+            onClose={() => setBlockedDialogOpen(false)}
+            onSaved={() => void onBlockedTimesSaved()}
+          />
+        </>
+      ) : (
       <div className="overflow-hidden rounded-lg border border-stone-200 bg-white shadow-sm">
         <table className="w-full text-left text-sm">
           <thead className="border-b border-stone-200 bg-stone-50 text-stone-600">
@@ -274,7 +449,12 @@ export function MeetingsList({ type }: { type: "upcoming" | "past" }) {
                   <td className="px-4 py-3">
                     {canOpen(m) ? (
                       <Link
-                        href={`/leads/${m.id}`}
+                        href={buildLeadDetailHref(
+                          m.id,
+                          type === "upcoming"
+                            ? upcomingOpenedFrom
+                            : KNOWN_LEAD_SOURCES.meetingsPast,
+                        )}
                         className="font-medium text-stone-900 underline-offset-2 hover:underline"
                       >
                         {m.companyName}
@@ -400,6 +580,7 @@ export function MeetingsList({ type }: { type: "upcoming" | "past" }) {
           </tbody>
         </table>
       </div>
+      )}
 
       <MeetingNoShowRebookDialog
         open={noShowDialog != null}

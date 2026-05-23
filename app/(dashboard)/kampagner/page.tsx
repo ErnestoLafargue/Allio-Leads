@@ -10,6 +10,7 @@ import {
 } from "@/lib/dial-mode";
 import { VoipAudioSettingsButton } from "@/app/components/voip-audio-settings-button";
 import { DashboardTabs } from "@/app/components/dashboard-tabs";
+import { buildCampaignArbejdHref, KNOWN_LEAD_SOURCES } from "@/lib/lead-navigation";
 
 type Campaign = {
   id: string;
@@ -390,7 +391,11 @@ export default function StartPage() {
                   const agents = c.agentsOnline ?? 0;
                   const callbacks = c.myCallbacks ?? 0;
                   const onRowClick = () => {
-                    router.push(`/kampagner/${c.id}/arbejd`);
+                    router.push(
+                      buildCampaignArbejdHref(c.id, {
+                        openedFrom: KNOWN_LEAD_SOURCES.kampagner,
+                      }),
+                    );
                   };
                   return (
                     <tr
@@ -405,7 +410,10 @@ export default function StartPage() {
                       <td className="px-5 py-3.5" onClick={(e) => e.stopPropagation()}>
                         {showStart ? (
                           <Link
-                            href={`/kampagner/${c.id}/arbejd?voipSession=1`}
+                            href={buildCampaignArbejdHref(c.id, {
+                              openedFrom: { ...KNOWN_LEAD_SOURCES.kampagner, source: "dialer" },
+                              voipSession: true,
+                            })}
                             className="inline-flex h-9 w-9 items-center justify-center rounded-full bg-gradient-to-br from-emerald-600 to-emerald-700 text-white shadow-sm ring-1 ring-emerald-700/20 transition hover:from-emerald-600 hover:to-emerald-800 hover:shadow-md focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-emerald-500"
                             aria-label={`Start ${c.name}`}
                             title="Start kampagne (åbner VoIP-session)"
@@ -414,7 +422,9 @@ export default function StartPage() {
                           </Link>
                         ) : (
                           <Link
-                            href={`/kampagner/${c.id}/arbejd`}
+                            href={buildCampaignArbejdHref(c.id, {
+                              openedFrom: KNOWN_LEAD_SOURCES.kampagner,
+                            })}
                             className="inline-flex h-9 w-9 items-center justify-center rounded-full border border-stone-200 bg-white text-stone-500 transition hover:border-stone-300 hover:bg-stone-50 hover:text-stone-700"
                             aria-label={`Åbn ${c.name}`}
                             title="Åbn kampagne (manuel)"

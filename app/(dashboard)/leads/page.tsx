@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { useState } from "react";
 import { LeadsBulkPanel } from "@/app/components/leads-bulk-panel";
+import { KNOWN_LEAD_SOURCES } from "@/lib/lead-navigation";
 import { DashboardTabs } from "@/app/components/dashboard-tabs";
 
 export default function LeadsPage() {
@@ -28,6 +29,12 @@ export default function LeadsPage() {
             className="w-full min-w-[200px] rounded-md border border-stone-200 bg-white px-3 py-2 text-sm text-stone-900 shadow-sm outline-none ring-stone-400 focus:ring-2 sm:w-64"
           />
           <Link
+            href="/leads/duplicates"
+            className="shrink-0 rounded-md border border-stone-300 bg-white px-3 py-2 text-sm font-medium text-stone-800 shadow-sm hover:bg-stone-50"
+          >
+            Find dubletter
+          </Link>
+          <Link
             href="/leads/new?next=/leads"
             className="shrink-0 rounded-md bg-stone-800 px-3 py-2 text-sm font-medium text-white hover:bg-stone-900"
           >
@@ -36,7 +43,13 @@ export default function LeadsPage() {
         </div>
       </div>
 
-      <LeadsBulkPanel campaignId={null} searchQuery={q} onSearchChange={setQ} showCampaignColumn />
+      <LeadsBulkPanel
+        campaignId={null}
+        searchQuery={q}
+        onSearchChange={setQ}
+        showCampaignColumn
+        openedFrom={KNOWN_LEAD_SOURCES.leads}
+      />
     </div>
   );
 }

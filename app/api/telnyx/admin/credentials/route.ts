@@ -3,6 +3,7 @@ import { requireAdmin } from "@/lib/api-auth";
 import {
   createTelnyxCredentialConnection,
   createTelnyxTelephonyCredential,
+  getTelnyxCallControlApplication,
   getTelnyxConnectionId,
   getTelnyxTelephonyCredentialId,
   listTelnyxCredentialConnections,
@@ -11,6 +12,10 @@ import {
   patchTelnyxCredentialConnection,
   type TelnyxCredentialConnection,
 } from "@/lib/telnyx-call-control";
+import {
+  parseTelnyxOutboundChannelLimitFromEnv,
+  POWER_DIALER_LEADS_PER_READY_AGENT,
+} from "@/lib/dialer-dispatch-math";
 
 type PostBody = {
   credentialConnectionId?: string;
@@ -26,6 +31,63 @@ function configuredCredentialHint(): string | null {
   const id = getTelnyxTelephonyCredentialId();
   if (!id) return null;
   return id.length > 4 ? `…${id.slice(-4)}` : id;
+}
+
+const EXPECTED_CALL_EVENTS_WEBHOOK_PATH = "/api/telnyx/webhooks/call-events";
+
+function webhookPathMatchesExpected(url: string | null | undefined): boolean | null {
+  if (!url?.trim()) return null;
+  try {
+    return new URL(url.trim()).pathname === EXPECTED_CALL_EVENTS_WEBHOOK_PATH;
+  } catch {
+    return false;
+  }
+}
+
+async function buildPowerDialerDeploymentInfo(apiKey: string) {
+  const envWebhookOverride = process.env.TELNYX_CALL_WEBHOOK_URL?.trim() || null;
+  const envChannelLimit = parseTelnyxOutboundChannelLimitFromEnv(
+    process.env.TELNYX_OUTBOUND_CHANNEL_LIMIT,
+  );
+  const voiceApiApplicationId = getTelnyxConnectionId();
+
+  let telnyxWebhookEventUrl: string | null = null;
+  let telnyxWebhookError: string | null = null;
+  if (voiceApiApplicationId) {
+    const app = await getTelnyxCallControlApplication({
+      apiKey,
+      applicationId: voiceApiApplicationId,
+    });
+    if (app.ok) {
+      telnyxWebhookEventUrl = app.webhookEventUrl;
+    } else {
+      telnyxWebhookError = app.message;
+    }
+  }
+
+  const profiles = await listTelnyxOutboundVoiceProfiles({ apiKey });
+  const powerProfile =
+    profiles.ok
+      ? profiles.profiles.find((p) => p.name?.toLowerCase().includes("powerdialer")) ??
+        profiles.profiles.find((p) => p.channelLimit !== null) ??
+        null
+      : null;
+
+  const effectiveWebhookUrl = envWebhookOverride ?? telnyxWebhookEventUrl;
+  const webhookPathOk = webhookPathMatchesExpected(effectiveWebhookUrl);
+
+  return {
+    expectedWebhookPath: EXPECTED_CALL_EVENTS_WEBHOOK_PATH,
+    envWebhookOverride,
+    telnyxWebhookEventUrl,
+    telnyxWebhookError,
+    effectiveWebhookUrl,
+    webhookPathMatchesExpected: webhookPathOk,
+    envOutboundChannelLimit: envChannelLimit,
+    telnyxPowerProfileName: powerProfile?.name ?? null,
+    telnyxPowerProfileChannelLimit: powerProfile?.channelLimit ?? null,
+    leadsPerReadyAgent: POWER_DIALER_LEADS_PER_READY_AGENT,
+  };
 }
 
 export async function GET() {
@@ -76,6 +138,7 @@ export async function GET() {
     allioCredentialConnectionName: allioConnection?.name ?? null,
     currentCredentialId,
     currentCredentialIdHint: configuredCredentialHint(),
+    powerDialerDeployment: await buildPowerDialerDeploymentInfo(apiKey),
   });
 }
 

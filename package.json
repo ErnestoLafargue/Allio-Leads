@@ -4,6 +4,7 @@
   "private": true,
   "scripts": {
     "dev": "next dev",
+    "dev:remote": "next dev -H 0.0.0.0 -p ${PORT:-3000}",
     "build": "prisma generate && node scripts/run-prisma-migrate-retry.cjs && next build",
     "postinstall": "prisma generate",
     "start": "next start",
