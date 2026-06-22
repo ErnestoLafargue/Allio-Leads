@@ -1,34 +1,43 @@
 import { NextResponse } from "next/server";
-import { getItem, readCategoryValue, validateHook } from "@/lib/podio/client";
+import {
+  getItem,
+  isPodioAppConfigured,
+  readCategoryValue,
+  readPodioDateValue,
+  validateHook,
+  type PodioAppKey,
+  type PodioItem,
+} from "@/lib/podio/client";
 import { moveLeadToRebooking } from "@/lib/calcom/webhook-apply";
+import {
+  advanceKundeStadie,
+  ensureOpfoelgningsProces,
+  KUNDE_STADIE,
+  MOEDE,
+  MOEDE_TYPE,
+  resolveLeadIdFromMoedeItem,
+  syncProcessesForStadie,
+} from "@/lib/podio/customer-mapping";
+import { handleOnboardingAfholdt } from "@/lib/podio/kickoff-from-onboarding";
 
 /**
  * Indgående Podio-webhook (Podio → Allio).
  *
- * Registrering (se docs/PODIO-SETUP.md + scripts/podio-register-hooks.mjs): opret
- * en hook på MØDER-appen via Podios API med type "item.update" og URL:
- *   https://<domæne>/api/webhooks/podio?token=<PODIO_WEBHOOK_SECRET>
+ * Møder-app:
+ *   - Onboarding Genbook → Allio Genbook-kampagne
+ *   - Onboarding Afholdt + Kick-off dato → kick-off-møde + Cal.eu + stadie
+ *   - Kick-off Afholdt → Kampagne kørt
+ *   - Kick-off Aflyst/Genbook → opfølgningsproces med noter
  *
- * Podio sender application/x-www-form-urlencoded med felter:
- *   - type:    "hook.verify" | "item.update" | "item.create" | "item.delete" | ...
- *   - hook_id: hookens id
- *   - code:    (kun ved hook.verify) udfordringskode der skal valideres
- *   - item_id: (ved item.*) item'ets id
- *
- * Podio signerer ikke payloaden. Vi beskytter endpointet med en delt hemmelig
- * token i query-strengen (?token=…) sammenlignet med PODIO_WEBHOOK_SECRET.
- *
- * Aktiv adfærd (Møder-appen):
- *   - Møde-status sat til "Genbook" → flyt leadet til Genbook-kampagnen i Allio
- *     (kun additivt; fjerner aldrig et lead fra Genbook).
- *   - Alle andre statusser ("Aflyst"/"Booket"/"Afholdt") → ingen handling.
- *
- * Leadet udledes af Møde-itemets external_id ("<leadId>-onboarding").
+ * Kunder-app:
+ *   - Stadie-ændring → syncProcessesForStadie
  */
 
 const MOEDE_STATUS_LABEL = "Status";
-const MOEDE_GENBOOK = "genbook";
-const ONBOARDING_SUFFIX = "-onboarding";
+const MOEDE_TYPE_LABEL = "Type";
+const KUNDE_STADIE_LABEL = "Stadie";
+
+const HOOK_APPS: PodioAppKey[] = ["moeder", "kunder"];
 
 function expectedToken(): string {
   return (process.env.PODIO_WEBHOOK_SECRET ?? "").trim();
@@ -36,18 +45,151 @@ function expectedToken(): string {
 
 function tokenOk(req: Request): boolean {
   const expected = expectedToken();
-  // Hvis ingen secret er sat, tillad (lettere opsætning). Sæt PODIO_WEBHOOK_SECRET for at låse.
   if (!expected) return true;
   const got = (new URL(req.url).searchParams.get("token") ?? "").trim();
   return got === expected;
 }
 
-/** Udled Allio leadId fra et Møde-items external_id ("<leadId>-onboarding"). */
-function leadIdFromMoedeExternalId(externalId: string | null | undefined): string | null {
-  const ext = (externalId ?? "").trim();
-  if (!ext.endsWith(ONBOARDING_SUFFIX)) return null;
-  const leadId = ext.slice(0, -ONBOARDING_SUFFIX.length);
-  return leadId || null;
+function norm(value: string | null | undefined): string {
+  return (value ?? "").trim().toLowerCase();
+}
+
+function formatDanishDateTime(d: Date): string {
+  return new Intl.DateTimeFormat("da-DK", {
+    timeZone: "Europe/Copenhagen",
+    dateStyle: "medium",
+    timeStyle: "short",
+  }).format(d);
+}
+
+async function validateHookOnAnyApp(hookId: string, code: string): Promise<boolean> {
+  for (const app of HOOK_APPS) {
+    if (!isPodioAppConfigured(app)) continue;
+    try {
+      await validateHook(app, hookId, code);
+      return true;
+    } catch {
+      /* prøv næste app */
+    }
+  }
+  return false;
+}
+
+async function fetchItemFromAnyApp(itemId: number): Promise<{ app: PodioAppKey; item: PodioItem } | null> {
+  for (const app of HOOK_APPS) {
+    if (!isPodioAppConfigured(app)) continue;
+    const item = await getItem(app, itemId);
+    if (item) return { app, item };
+  }
+  return null;
+}
+
+async function handleKickoffAflystOrGenbook(
+  item: PodioItem,
+  leadId: string,
+  kind: "aflyst" | "genbook",
+): Promise<NextResponse> {
+  const scheduled = readPodioDateValue(item, MOEDE.dato);
+  const when = scheduled ? formatDanishDateTime(scheduled) : "ukendt tidspunkt";
+
+  let kundeNavn = leadId;
+  if (isPodioAppConfigured("kunder")) {
+    const rel = item.fields.find((f) => f.label === MOEDE.kunde);
+    const kundeId = (rel?.values?.[0]?.value as { item_id?: number } | undefined)?.item_id;
+    if (kundeId) {
+      const kunde = await getItem("kunder", kundeId);
+      const virksomhed = kunde?.fields.find((f) => f.label === "Virksomhed")?.values?.[0]?.value;
+      if (typeof virksomhed === "string" && virksomhed.trim()) {
+        kundeNavn = virksomhed.trim();
+      }
+    }
+  }
+
+  const noter =
+    kind === "aflyst"
+      ? `Kick-off-møde aflyst for ${kundeNavn}.\nPlanlagt tid: ${when}.\nFyld op — kontakt kunden og book nyt kick-off.`
+      : `Kick-off skal genbookes for ${kundeNavn}.\nOprindelig tid: ${when}.\nNotér ny dato og opdater Kick-off dato på onboarding-mødet ved rebooking.`;
+
+  await ensureOpfoelgningsProces(leadId, noter);
+  return NextResponse.json({ ok: true, handled: "item.update", action: `kickoff_${kind}` });
+}
+
+async function handleMoederItem(item: PodioItem, type: string): Promise<NextResponse> {
+  const leadId = await resolveLeadIdFromMoedeItem(item);
+  const status = readCategoryValue(item, MOEDE_STATUS_LABEL);
+  const moedeType = readCategoryValue(item, MOEDE_TYPE_LABEL);
+  console.log(
+    `[podio] ${type} møde item=${item.item_id} ext=${item.external_id ?? "?"} status=${status ?? "?"} type=${moedeType ?? "?"} lead=${leadId ?? "?"}`,
+  );
+
+  if (!leadId) {
+    return NextResponse.json({ ok: true, ignored: "no lead" });
+  }
+
+  const statusNorm = norm(status);
+  const typeNorm = norm(moedeType);
+  const isOnboarding = typeNorm === norm(MOEDE_TYPE.onboarding);
+  const isKickoff = typeNorm === norm(MOEDE_TYPE.kickOff);
+
+  if (statusNorm === "genbook") {
+    if (isOnboarding) {
+      const moved = await moveLeadToRebooking(leadId);
+      console.log(
+        `[podio] onboarding møde ${item.item_id} Genbook → lead ${leadId} ${moved ? "flyttet" : "noop"}`,
+      );
+      return NextResponse.json({ ok: true, handled: type, action: moved ? "moved" : "noop" });
+    }
+    if (isKickoff) {
+      return handleKickoffAflystOrGenbook(item, leadId, "genbook");
+    }
+    return NextResponse.json({ ok: true, handled: type, action: "none" });
+  }
+
+  if (statusNorm === "aflyst") {
+    if (isKickoff) {
+      return handleKickoffAflystOrGenbook(item, leadId, "aflyst");
+    }
+    return NextResponse.json({ ok: true, handled: type, action: "none" });
+  }
+
+  if (statusNorm === "afholdt") {
+    if (isOnboarding) {
+      const result = await handleOnboardingAfholdt(item);
+      if (!result.ok) {
+        return NextResponse.json({
+          ok: true,
+          handled: type,
+          action: "onboarding_afholdt_skipped",
+          reason: result.reason,
+        });
+      }
+      return NextResponse.json({ ok: true, handled: type, action: result.action });
+    }
+    if (isKickoff) {
+      await advanceKundeStadie(leadId, KUNDE_STADIE.kampagneKoert);
+      return NextResponse.json({ ok: true, handled: type, action: "stadie_kampagne_koert" });
+    }
+  }
+
+  return NextResponse.json({ ok: true, handled: type, action: "none", status });
+}
+
+async function handleKunderItem(item: PodioItem, type: string): Promise<NextResponse> {
+  const leadId = (item.external_id ?? "").trim();
+  const stadie = readCategoryValue(item, KUNDE_STADIE_LABEL);
+  console.log(
+    `[podio] ${type} kunde item=${item.item_id} ext=${leadId || "?"} stadie=${stadie ?? "?"}`,
+  );
+
+  if (!leadId) {
+    return NextResponse.json({ ok: true, ignored: "no lead in external_id" });
+  }
+  if (!stadie) {
+    return NextResponse.json({ ok: true, ignored: "no stadie" });
+  }
+
+  await syncProcessesForStadie(leadId, stadie);
+  return NextResponse.json({ ok: true, handled: type, action: "sync_processes", stadie });
 }
 
 export async function POST(req: Request) {
@@ -66,14 +208,12 @@ export async function POST(req: Request) {
   const type = (params.get("type") ?? "").trim();
   const hookId = (params.get("hook_id") ?? "").trim();
 
-  // Aktiverings-håndtryk: validér hooken så Podio markerer den som aktiv.
   if (type === "hook.verify") {
     const code = (params.get("code") ?? "").trim();
     if (hookId && code) {
-      try {
-        await validateHook("moeder", hookId, code);
-      } catch (err) {
-        console.error("[podio] hook.verify validering fejlede:", err instanceof Error ? err.message : err);
+      const ok = await validateHookOnAnyApp(hookId, code);
+      if (!ok) {
+        console.error("[podio] hook.verify validering fejlede for alle apps");
         return NextResponse.json({ ok: false, error: "verify failed" }, { status: 502 });
       }
     }
@@ -88,36 +228,18 @@ export async function POST(req: Request) {
     }
 
     try {
-      const item = await getItem("moeder", itemId);
-      if (!item) {
+      const found = await fetchItemFromAnyApp(itemId);
+      if (!found) {
         console.log(`[podio] ${type} item ${itemId} → ikke fundet`);
         return NextResponse.json({ ok: true, ignored: "item not found" });
       }
 
-      const leadId = leadIdFromMoedeExternalId(item.external_id);
-      const status = readCategoryValue(item, MOEDE_STATUS_LABEL);
-      console.log(
-        `[podio] ${type} møde item=${itemId} ext=${item.external_id ?? "?"} status=${status ?? "?"} lead=${leadId ?? "?"}`,
-      );
-
-      if (!leadId) {
-        return NextResponse.json({ ok: true, ignored: "no lead in external_id" });
+      if (found.app === "moeder") {
+        return await handleMoederItem(found.item, type);
       }
-
-      // Kun "Genbook" flytter leadet (additivt). Alt andet er en no-op, så Podio
-      // aldrig kan fjerne et lead fra Genbook-kampagnen.
-      if ((status ?? "").trim().toLowerCase() !== MOEDE_GENBOOK) {
-        return NextResponse.json({ ok: true, handled: type, action: "none", status });
-      }
-
-      const moved = await moveLeadToRebooking(leadId);
-      console.log(
-        `[podio] møde ${itemId} status=Genbook → lead ${leadId} ${moved ? "flyttet til Genbook" : "lå allerede i Genbook"}`,
-      );
-      return NextResponse.json({ ok: true, handled: type, action: moved ? "moved" : "noop" });
+      return await handleKunderItem(found.item, type);
     } catch (err) {
       console.error("[podio] webhook-behandling fejlede:", err instanceof Error ? err.message : err);
-      // Returnér 200 så Podio ikke spammer med retries på et item vi ikke kan bruge.
       return NextResponse.json({ ok: true, error: "processing failed" });
     }
   }

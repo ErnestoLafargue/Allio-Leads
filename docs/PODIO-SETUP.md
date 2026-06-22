@@ -99,7 +99,8 @@ som vist (inkl. store/små bogstaver og tegn).
 |---|---|---|
 | `Kunde` | Relation → Kunder | |
 | `Type` | Kategori (single) | `Onboarding`, `Kick-off`, `Strategi/Performance`, `Årsmøde` |
-| `Dato & tid` | Dato (med tidspunkt) | |
+| `Dato & tid` | Dato (med tidspunkt) | Onboarding/kick-off mødets faktiske tid |
+| `Kick-off dato` | Dato (med tidspunkt) | **Kun på onboarding-mødet** — udfyldes før Afholdt (ikke et stadie) |
 | `Mødelink` | Link | |
 | `Status` | Kategori (single) | `Booket`, `Afholdt`, `Aflyst`, `Genbook` |
 | `Fathom-noter` | Tekst (multi line) | Eller link til optagelse |
@@ -121,9 +122,22 @@ Allio opretter automatisk et standard-sæt processer pr. kunde.
 > **Kanban-visning:** opret en visning af typen *Board*, grupperet på `Status`.
 > Brug `Ansvarlig` som filter, så hver medarbejder ser sine egne leverancer.
 
-Standard-processer Allio opretter pr. kunde (status `Ikke startet`):
-`Gecko åbnet`, `Onboarding-noter (Fathom)`, `Kick-off PDF`, `SMS-kampagneflow`,
-`Loom Levering`, `Opsalg & Binding`.
+Standard-processer Allio opretter **stadie-drevet** (lazy, ikke alle på én gang ved booking):
+
+| Minimum-stadie | Proces |
+|---|---|
+| Møde booket | `Gecko åbnet` |
+| Kick-off prep | `Kick-off prep` (Fathom-noter + kick-off PDF), `SMS-kampagneflow`, `SMS-levering` |
+| Kampagne kørt | `Loom Levering` |
+| Opsalg & Binding | `Opsalg & Binding` |
+
+Ved booking oprettes kun **Gecko åbnet**. Resten oprettes når `Stadie` rykkes fremad
+(via Podio-webhook eller når Allio sætter stadie efter afholdt møde). Går I **tilbage**
+i `Stadie`, sletter Allio processer for for høje stadier (automatisk rollback).
+`Tabt/Annulleret` sletter alle aktive processer for kunden.
+
+> **Mødetid:** Allio sender dato/tid til Podio som **UTC** (app-auth), så 09:00 dansk
+> tid vises som 09:00 i Podio — ikke +2 timer.
 
 ### App: Betalingsaftaler
 
@@ -198,60 +212,100 @@ tilføjer Møde/Processer/Leveringsmodel når de respektive apps også er konfig
 
 ## 6. Kunde-journey (sådan flyder data)
 
-1. **Møde booket** (Allio): kunde + onboarding-møde + processer oprettes i Podio.
-2. **Gecko åbnet**: vi sender Gecko en mail for at åbne kundens booking-API. Markeres
-   manuelt på `Gecko åbnet`-processen (kan springes over).
-3. **Møde afholdt**: onboarding-mødet holdes (mødelink ligger allerede i Podio fra Cal.eu).
-   Aftal næste kick-off — datoen noteres på et Kick-off-møde i Møder.
-4. **Kick-off prep**: Fathom-noter + kick-off PDF (processer/kanban).
-5. **SMS Levering**: SMS-kampagneflow sættes op og klargøres (før kick-off-mødet).
-6. **Kick-off afholdt**: kick-off-møde afholdes — konto + reg.nr. indsættes på kunden.
-7. **Kampagne kørt**: SMS-kampagnen er sat i gang og kører.
-8. **Loom Levering**: resultat-/Loom-video sendes til kunden (retainer-review).
-9. **Opsalg & Binding**: sælger følger op på binding/opsalg.
-10. **Løbende aftale** eller **Tabt/Annulleret**.
+### Booking (Allio → Podio, hurtig)
 
-> Trin 4–7's automatik (PDF→Allio SMS, mails, auto-kickoff-booking i Cal.eu) bygges i
-> senere faser. Strukturen er forberedt: processerne findes, og den indgående webhook
-> er klar som udvidelsespunkt.
+Når et møde bookes i Allio, gemmes leadet med det samme i databasen. Cal.eu-booking og
+Podio-sync (kunde + onboarding-møde + `Gecko åbnet`-proces) kører **i baggrunden** på
+serveren, så dialeren kan gå til næste lead med det samme.
+
+Allio opretter i Podio:
+
+1. **Kunde** med `Stadie = Møde booket`
+2. **Onboarding-møde** (`Type = Onboarding`, `Status = Booket`) med korrekt lokal tid
+3. **Én proces:** `Gecko åbnet` (ikke alle leverancer på én gang)
+
+### Stadie og processer (Podio ↔ Allio)
+
+| Stadie / hændelse | Hvad sker |
+|---|---|
+| **Møde booket** | Kunde + onboarding-møde + `Gecko åbnet` |
+| **Gecko åbnet** | Manuel proces — Gecko-mail for booking-API |
+| **Møde afholdt** (onboarding) | Se **Kick-off fra onboarding** nedenfor |
+| **Kick-off prep** | `Kick-off prep` (Fathom-noter i proces-Noter), `SMS-kampagneflow`, `SMS-levering` |
+| **Kick-off afholdt** | Podio Kick-off-møde `Status = Afholdt` → `Stadie = Kampagne kørt` + `Loom Levering` |
+| **Kick-off aflyst/genbook** | Proces `Kick-off opfølgning` med noter (ikke Allio Genbook-kampagne) |
+| **Kampagne kørt** | SMS-kampagnen kører |
+| **Opsalg & Binding** | `Opsalg & Binding`-proces oprettes |
+| **Løbende aftale** | TODO — automatisk procesmodel udskydes |
+| **Tabt/Annulleret** | Alle processer slettes for kunden |
+
+**Rollback:** Ændrer I `Stadie` manuelt tilbage i Podio (fx fra Kick-off prep til Møde
+afholdt), sletter Allio automatisk processer der hører til højere stadier. Podio kan
+ikke vise en bekræftelsesdialog på webhooks — brug stadie-rollback til at rette fejl.
+
+### Kick-off fra onboarding (kun i Podio)
+
+Alt sker i Podio — Allio reagerer via webhook i baggrunden:
+
+1. På **onboarding-mødet**: udfyld `Fathom-noter`
+2. Udfyld **`Kick-off dato`** (dato/tid for næste møde — **ikke** et stadie)
+3. Sæt `Status` til **`Afholdt`**
+4. Allio opretter automatisk:
+   - `Stadie = Kick-off prep` + relevante processer
+   - Fathom-noter kopieres til **`Kick-off prep`**-processens `Noter`
+   - Nyt **kick-off-møde** (`Type = Kick-off`, `Status = Booket`) med link
+   - **Cal.eu-booking** + kalenderinvitation til kunden (samme event type som onboarding)
+
+Onboarding-mødet forbliver `Afholdt` med Fathom-noter (historik).
+
+**Kick-off aflyst** i Podio → proces `Kick-off opfølgning` (`I gang`) med noter om planlagt tid.
+
+**Kick-off Genbook** i Podio → samme opfølgningsproces med noter om oprindelig tid (flytter
+**ikke** lead til Allio Genbook-kampagnen — det er kun for salgs-onboarding).
+
+> Tilføj feltet `Kick-off dato` manuelt i Møder-appen hvis det mangler, eller kør
+> `node scripts/podio-setup.mjs` på en frisk workspace.
+
+> Trin med PDF→Allio SMS, mails og auto-kickoff-booking i Cal.eu bygges i senere faser.
 
 ---
 
-## 7. (Valgfri) Indgående webhook: Podio → Allio
+## 7. Indgående webhook: Podio → Allio
 
-Allio kan reagere når noget ændres i Podio (fx stadie-skift eller en proces, der
-markeres `Færdig`). Endpoint: `https://<domæne>/api/webhooks/podio`
-(valgfrit `?token=<PODIO_WEBHOOK_SECRET>`).
+Endpoint: `https://<domæne>/api/webhooks/podio` (valgfrit `?token=<PODIO_WEBHOOK_SECRET>`).
 
-Registrér en hook på **Kunder**-appen via Podios API:
+Registrér `item.update`-hooks på **Møder**- og **Kunder**-appen:
 
 ```bash
-# 1) Hent access token (app-auth) for Kunder-appen
-curl -s https://podio.com/oauth/token \
-  -d grant_type=app \
-  -d app_id=$PODIO_KUNDER_APP_ID \
-  -d app_token=$PODIO_KUNDER_APP_TOKEN \
-  -d client_id=$PODIO_CLIENT_ID \
-  -d client_secret=$PODIO_CLIENT_SECRET
-# -> kopier "access_token" fra svaret
-
-# 2) Registrér hook på Kunder-appen (item.update)
-curl -s -X POST "https://api.podio.com/hook/app/$PODIO_KUNDER_APP_ID/" \
-  -H "Authorization: OAuth2 <ACCESS_TOKEN>" \
-  -H "Content-Type: application/json" \
-  -d '{"url":"https://<domæne>/api/webhooks/podio?token=<PODIO_WEBHOOK_SECRET>","type":"item.update"}'
+node scripts/podio-register-hooks.mjs --url=https://allio-leads.vercel.app
+# --list     vis eksisterende hooks
+# --replace  gendan hooks (slet + opret)
 ```
 
-Podio sender straks et `hook.verify`-kald med en `code`. Allios endpoint håndterer
-verifikationen automatisk. Når den er bekræftet, er hooken aktiv.
+**Møder-app** reagerer på:
 
-> Bemærk: Podio kan kun nå offentlige HTTPS-URL'er — virker i produktion (Vercel),
-> ikke mod localhost uden en tunnel (fx ngrok).
+- `Status = Genbook` → lead flyttes til Genbook-kampagnen i Allio (additivt)
+- `Status = Afholdt` + `Type = Onboarding` (+ udfyldt `Kick-off dato`) → kick-off-møde + Cal.eu + stadie
+- `Status = Afholdt` + `Type = Kick-off` → `Stadie = Kampagne kørt` + proces-sync
+- `Status = Aflyst` + `Type = Kick-off` → opfølgningsproces med noter
+- `Status = Genbook` + `Type = Onboarding` → Allio Genbook-kampagne
+- `Status = Genbook` + `Type = Kick-off` → opfølgningsproces (ikke Allio Genbook)
+
+**Kunder-app** reagerer på:
+
+- Ændring af `Stadie` → opret manglende processer / slet ved rollback
+
+Podio sender straks et `hook.verify`-kald. Allios endpoint validerer på begge apps
+automatisk. Når den er bekræftet, er hooken aktiv.
+
+> Podio kan kun nå offentlige HTTPS-URL'er — virker i produktion (Vercel), ikke mod
+> localhost uden tunnel (fx ngrok).
 
 ---
 
 ## 8. Begrænsninger (gratis plan)
 
-- **100 items i alt** på tværs af alle apps. Hver kunde koster ~1 (Kunde) + 1 (Møde) +
-  6 (Processer) = ca. 8 items. Opgradér til Plus/Premium når I skalerer.
+- **100 items i alt** på tværs af alle apps. Hver ny kunde koster ca. 1 (Kunde) + 1
+  (Møde) + 1–6 (Processer, stadie-drevet) = typisk **3 items ved booking**, flere
+  efterhånden som kunden rykker frem i pipelinen. Opgradér til Plus/Premium når I skalerer.
 - **1.000 API-kald/dag** — rigeligt ved lav volumen.

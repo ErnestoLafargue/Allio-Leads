@@ -294,6 +294,7 @@ async function main() {
       appRef("Kunde", kunderId),
       category("Type", ["Onboarding", "Kick-off", "Strategi/Performance", "Årsmøde"]),
       date("Dato & tid", true),
+      date("Kick-off dato", true),
       link("Mødelink"),
       category("Status", ["Booket", "Afholdt", "Aflyst", "Genbook"]),
       text("Fathom-noter", "large"),

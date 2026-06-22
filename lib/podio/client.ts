@@ -326,6 +326,25 @@ export async function findItemIdByExternalId(
   return (json as { item_id?: number })?.item_id ?? null;
 }
 
+/** Slet et item i Podio. */
+export async function deleteItem(app: PodioAppKey, itemId: number): Promise<void> {
+  const { status, json } = await podioRequest(app, "DELETE", `/item/${itemId}`);
+  if (status !== 200 && status !== 204) {
+    throw new Error(`Podio deleteItem fejl (${status}) i "${app}": ${JSON.stringify(json).slice(0, 200)}`);
+  }
+}
+
+/** Slet item via external_id. Returnerer true hvis item fandtes og blev slettet. */
+export async function deleteItemByExternalId(
+  app: PodioAppKey,
+  externalId: string,
+): Promise<boolean> {
+  const itemId = await findItemIdByExternalId(app, externalId);
+  if (!itemId) return false;
+  await deleteItem(app, itemId);
+  return true;
+}
+
 /** Validér en Podio hook.verify-udfordring (aktiverer webhooken). */
 export async function validateHook(app: PodioAppKey, hookId: string, code: string): Promise<void> {
   const { status } = await podioRequest(app, "POST", `/hook/${hookId}/verify/validate`, { code });
@@ -372,4 +391,41 @@ export function readCategoryValue(item: PodioItem, label: string): string | null
   const first = field?.values?.[0]?.value as { text?: string } | undefined;
   const text = (first?.text ?? "").trim();
   return text || null;
+}
+
+/** Læs tekst fra et tekstfelt på et Podio-item (via etiket). */
+export function readTextValue(item: PodioItem, label: string): string | null {
+  const want = normalizeLabel(label);
+  const field = item.fields.find((f) => normalizeLabel(f.label) === want);
+  const raw = field?.values?.[0]?.value;
+  if (typeof raw !== "string") return null;
+  const text = raw.trim();
+  return text || null;
+}
+
+/**
+ * Læs dato/tid fra et Podio date-felt (via etiket).
+ * App-auth gemmer UTC som "YYYY-MM-DD HH:mm:ss" — parses som UTC.
+ */
+export function readPodioDateValue(item: PodioItem, label: string): Date | null {
+  const want = normalizeLabel(label);
+  const field = item.fields.find((f) => normalizeLabel(f.label) === want);
+  const raw = field?.values?.[0]?.value as { start?: string } | undefined;
+  const start = (raw?.start ?? "").trim();
+  if (!start) return null;
+  const iso = start.includes("T") ? start : `${start.replace(" ", "T")}Z`;
+  const d = new Date(iso);
+  return Number.isNaN(d.getTime()) ? null : d;
+}
+
+/** Læs linkede app-item-id'er fra et relation-felt (fx Kunde på et møde). */
+export function readAppRelationItemIds(item: PodioItem, label: string): number[] {
+  const want = normalizeLabel(label);
+  const field = item.fields.find((f) => normalizeLabel(f.label) === want);
+  const ids: number[] = [];
+  for (const v of field?.values ?? []) {
+    const raw = v.value as { item_id?: number } | undefined;
+    if (typeof raw?.item_id === "number" && raw.item_id > 0) ids.push(raw.item_id);
+  }
+  return ids;
 }

@@ -18,6 +18,7 @@
  *   npx tsx scripts/calcom-reconcile.ts --rebook-uids=uid1,uid2  # engangsretning af konkrete bookinger
  *   npx tsx scripts/calcom-reconcile.ts --repair-uids            # gem manglende booking-uid på bookede leads
  *   npx tsx scripts/calcom-reconcile.ts --repair-uids --dry-run  # vis kun hvad repair ville gøre
+ *   npx tsx scripts/calcom-reconcile.ts --repair-uids --lead-ids=id1,id2  # kun bestemte leads (fx test)
  *
  * --rebook-uids er til engangsoprydning (fx aflysninger mistet før webhooken var
  * deployet): det sætter de NAVNGIVNE bookingers leads til Genbook uanset status,
@@ -278,8 +279,11 @@ async function rebookUids(uids: string[]): Promise<void> {
 /**
  * Sikkerhedsnet: gem manglende booking-uid på fremtidige bookede leads, så
  * aflysninger kan matche. Adoptér eksisterende Cal-booking (e-mail+tid) eller opret.
+ *
+ * leadIds (valgfri): begræns til bestemte leads (fx kun test-leads), så vi ikke
+ * opretter rigtige Cal.eu-bookinger/invitationer for alle leads på én gang.
  */
-async function repairUids(dryRun: boolean): Promise<void> {
+async function repairUids(dryRun: boolean, leadIds?: string[]): Promise<void> {
   const now = new Date();
   const leads = await prisma.lead.findMany({
     where: {
@@ -287,6 +291,7 @@ async function repairUids(dryRun: boolean): Promise<void> {
       calComBookingUid: null,
       meetingScheduledFor: { gt: now },
       NOT: { meetingContactEmail: "" },
+      ...(leadIds && leadIds.length ? { id: { in: leadIds } } : {}),
     },
     select: {
       id: true,
@@ -380,7 +385,11 @@ async function main(): Promise<void> {
         .filter(Boolean);
       await rebookUids(uids);
     } else if (args.includes("--repair-uids")) {
-      await repairUids(dryRun);
+      const leadIdsArg = args.find((a) => a.startsWith("--lead-ids="));
+      const leadIds = leadIdsArg
+        ? leadIdsArg.slice("--lead-ids=".length).split(",").map((s) => s.trim()).filter(Boolean)
+        : undefined;
+      await repairUids(dryRun, leadIds);
     } else if (args.includes("--report")) {
       await reportMode();
     } else {

@@ -1,4 +1,4 @@
-import { NextResponse } from "next/server";
+import { after, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { requireSession } from "@/lib/api-auth";
 import { isLeadStatus, LEAD_STATUS_LABELS, type LeadStatus } from "@/lib/lead-status";
@@ -37,8 +37,7 @@ import { getDefaultMeetingAssigneeId } from "@/lib/meeting-assignee";
 import { LEAD_ACTIVITY_KIND } from "@/lib/lead-activity-kinds";
 import { hangupActiveOutboundLeadLegsForLead } from "@/lib/dialer-bridge";
 import { canonicalLeadPhoneForStorage } from "@/lib/phone-e164";
-import { ensureCalComBookingForLead } from "@/lib/calcom/sync-lead-booking";
-import { ensureCustomerInPodio } from "@/lib/podio/customer-mapping";
+import { syncPostBookingIntegrations } from "@/lib/booking/post-booking-sync";
 
 type Params = { params: Promise<{ id: string }> };
 
@@ -743,36 +742,16 @@ export async function PATCH(req: Request, { params }: Params) {
   });
 
   let leadResponse = lead;
-  if (
+  const shouldSyncIntegrations =
     status === "MEETING_BOOKED" &&
     meetingScheduledFor &&
     meetingContactName &&
-    meetingContactEmail
-  ) {
-    if (!lead.calComBookingUid) {
-      await ensureCalComBookingForLead({
-        leadId: id,
-        start: meetingScheduledFor,
-        attendeeName: meetingContactName,
-        attendeeEmail: meetingContactEmail,
-        attendeePhone: meetingContactPhonePrivate || undefined,
-        notes: notes || undefined,
-      });
-    }
+    meetingContactEmail;
 
-    /** Opret/opdatér kunden i Podio-CRM (idempotent via Allio Lead ID, ikke-fatal). */
-    await ensureCustomerInPodio(id);
-
-    const refreshed = await prisma.lead.findUnique({
-      where: { id },
-      include: {
-        bookedByUser: { select: { id: true, name: true, username: true } },
-        campaign: { select: { id: true, name: true, fieldConfig: true } },
-        lockedByUser: { select: { id: true, name: true, username: true } },
-        callbackReservedByUser: { select: { id: true, name: true, username: true } },
-      },
+  if (shouldSyncIntegrations) {
+    after(() => {
+      void syncPostBookingIntegrations(id);
     });
-    if (refreshed) leadResponse = refreshed;
   }
 
   const apiKey = process.env.TELNYX_API_KEY?.trim();
@@ -789,7 +768,9 @@ export async function PATCH(req: Request, { params }: Params) {
     }
   }
 
-  return NextResponse.json(leadResponse);
+  return NextResponse.json(
+    shouldSyncIntegrations ? { ...leadResponse, integrationsPending: true } : leadResponse,
+  );
 }
 
 export async function DELETE() {

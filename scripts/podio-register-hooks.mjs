@@ -1,24 +1,17 @@
 /**
- * Registrér Podio → Allio webhook på MØDER-appen (item.update + item.create).
- *
- * Når en sælger manuelt sætter Møde-status til "Genbook" i Podio, fyrer Podio en
- * item.update-hook mod Allio (/api/webhooks/podio), som flytter leadet til
- * Genbook-kampagnen. Se app/api/webhooks/podio/route.ts.
+ * Registrér Podio → Allio webhooks på MØDER- og KUNDER-appen (item.update).
  *
  * Brug:
  *   node scripts/podio-register-hooks.mjs --list
  *   node scripts/podio-register-hooks.mjs --url=https://allio-leads.vercel.app
  *   node scripts/podio-register-hooks.mjs --url=https://allio-leads.vercel.app --replace
  *
- * --url   Allios offentlige base-URL (uden trailing slash). Default: prod.
- * --list  Vis kun eksisterende hooks (ingen ændring).
- * --replace  Slet eksisterende item.update/item.create-hooks mod vores sti før oprettelse.
+ * --url      Allios offentlige base-URL (uden trailing slash). Default: prod.
+ * --list     Vis kun eksisterende hooks (ingen ændring).
+ * --replace  Slet eksisterende item.update-hooks mod vores sti før oprettelse.
  *
- * Podio sender straks et hook.verify-kald; Allios endpoint validerer det automatisk
- * (kræver at den angivne base-URL er live og deployet).
- *
- * Kræver i .env.local: PODIO_CLIENT_ID/SECRET, PODIO_MOEDER_APP_ID/TOKEN,
- * og (anbefalet) PODIO_WEBHOOK_SECRET.
+ * Kræver i .env.local: PODIO_CLIENT_ID/SECRET, PODIO_MOEDER_* og PODIO_KUNDER_*,
+ * samt (anbefalet) PODIO_WEBHOOK_SECRET.
  */
 
 import fs from "node:fs";
@@ -48,9 +41,20 @@ loadEnvLocal();
 
 const CLIENT_ID = (process.env.PODIO_CLIENT_ID ?? "").trim();
 const CLIENT_SECRET = (process.env.PODIO_CLIENT_SECRET ?? "").trim();
-const MOEDER_APP_ID = (process.env.PODIO_MOEDER_APP_ID ?? "").trim();
-const MOEDER_APP_TOKEN = (process.env.PODIO_MOEDER_APP_TOKEN ?? "").trim();
 const WEBHOOK_SECRET = (process.env.PODIO_WEBHOOK_SECRET ?? "").trim();
+
+const APPS = [
+  {
+    name: "Møder",
+    appId: (process.env.PODIO_MOEDER_APP_ID ?? "").trim(),
+    appToken: (process.env.PODIO_MOEDER_APP_TOKEN ?? "").trim(),
+  },
+  {
+    name: "Kunder",
+    appId: (process.env.PODIO_KUNDER_APP_ID ?? "").trim(),
+    appToken: (process.env.PODIO_KUNDER_APP_TOKEN ?? "").trim(),
+  },
+].filter((a) => a.appId && a.appToken);
 
 function arg(name) {
   const hit = process.argv.find((a) => a.startsWith(`--${name}=`));
@@ -65,13 +69,15 @@ function hookUrl() {
   return WEBHOOK_SECRET ? `${u}?token=${encodeURIComponent(WEBHOOK_SECRET)}` : u;
 }
 
-let token = null;
-async function appAuth() {
-  if (token) return token;
+const tokenByAppId = new Map();
+
+async function appAuth(appId, appToken) {
+  const cached = tokenByAppId.get(appId);
+  if (cached) return cached;
   const body = new URLSearchParams({
     grant_type: "app",
-    app_id: MOEDER_APP_ID,
-    app_token: MOEDER_APP_TOKEN,
+    app_id: appId,
+    app_token: appToken,
     client_id: CLIENT_ID,
     client_secret: CLIENT_SECRET,
   });
@@ -81,13 +87,13 @@ async function appAuth() {
     body,
   });
   const json = await res.json();
-  if (!res.ok) throw new Error(`Token fejl: ${JSON.stringify(json).slice(0, 200)}`);
-  token = json.access_token;
-  return token;
+  if (!res.ok) throw new Error(`Token fejl for app ${appId}: ${JSON.stringify(json).slice(0, 200)}`);
+  tokenByAppId.set(appId, json.access_token);
+  return json.access_token;
 }
 
-async function api(method, pathname, body) {
-  const t = await appAuth();
+async function api(appId, appToken, method, pathname, body) {
+  const t = await appAuth(appId, appToken);
   const res = await fetch(`${API}${pathname}`, {
     method,
     headers: { Authorization: `OAuth2 ${t}`, "Content-Type": "application/json" },
@@ -103,9 +109,9 @@ async function api(method, pathname, body) {
   return { status: res.status, json, text };
 }
 
-async function listHooks() {
-  const { status, json } = await api("GET", `/hook/app/${MOEDER_APP_ID}/`);
-  if (status !== 200) throw new Error(`Kunne ikke hente hooks (HTTP ${status})`);
+async function listHooks(app) {
+  const { status, json } = await api(app.appId, app.appToken, "GET", `/hook/app/${app.appId}/`);
+  if (status !== 200) throw new Error(`Kunne ikke hente hooks for ${app.name} (HTTP ${status})`);
   return Array.isArray(json) ? json : [];
 }
 
@@ -113,52 +119,68 @@ function samePath(url) {
   return typeof url === "string" && url.includes(HOOK_PATH);
 }
 
-async function main() {
-  if (!CLIENT_ID || !CLIENT_SECRET || !MOEDER_APP_ID || !MOEDER_APP_TOKEN) {
-    console.error("Mangler PODIO_CLIENT_ID/SECRET eller PODIO_MOEDER_APP_ID/TOKEN i .env.local");
-    process.exit(1);
-  }
-
-  const existing = await listHooks();
-  console.log(`Eksisterende hooks på Møder-appen (${MOEDER_APP_ID}): ${existing.length}`);
+async function ensureHook(app) {
+  const existing = await listHooks(app);
+  console.log(`\n${app.name}-appen (${app.appId}): ${existing.length} hook(s)`);
   for (const h of existing) {
     console.log(`  - id=${h.hook_id} type=${h.type} status=${h.status} url=${h.url}`);
   }
 
-  if (FLAG_LIST) {
-    console.log("\n(--list: ingen ændringer foretaget)");
-    return;
-  }
-
-  if (!WEBHOOK_SECRET) {
-    console.log("\n⚠ PODIO_WEBHOOK_SECRET er ikke sat — hooken oprettes uden token (mindre sikkert).");
-  }
+  if (FLAG_LIST) return;
 
   if (FLAG_REPLACE) {
     for (const h of existing) {
-      if (samePath(h.url) && (h.type === "item.update" || h.type === "item.create")) {
-        const del = await api("DELETE", `/hook/${h.hook_id}`);
-        console.log(`  ${del.status === 200 || del.status === 204 ? "✓ slettede" : "✖ kunne ikke slette"} hook id=${h.hook_id}`);
+      if (samePath(h.url) && h.type === "item.update") {
+        const del = await api(app.appId, app.appToken, "DELETE", `/hook/${h.hook_id}`);
+        console.log(
+          `  ${del.status === 200 || del.status === 204 ? "✓ slettede" : "✖ kunne ikke slette"} hook id=${h.hook_id}`,
+        );
       }
     }
   } else {
     const dupe = existing.find((h) => samePath(h.url) && h.type === "item.update");
     if (dupe) {
-      console.log(`\n✓ En item.update-hook mod vores sti findes allerede (id=${dupe.hook_id}, status=${dupe.status}).`);
-      console.log("  Brug --replace for at gendanne den (fx hvis status ikke er 'active').");
+      console.log(`  ✓ item.update findes allerede (id=${dupe.hook_id}, status=${dupe.status})`);
       return;
     }
   }
 
   const url = hookUrl();
-  console.log(`\nOpretter item.update-hook → ${url.replace(/token=[^&]+/, "token=***")}`);
-  const created = await api("POST", `/hook/app/${MOEDER_APP_ID}/`, { url, type: "item.update" });
+  console.log(`  Opretter item.update → ${url.replace(/token=[^&]+/, "token=***")}`);
+  const created = await api(app.appId, app.appToken, "POST", `/hook/app/${app.appId}/`, {
+    url,
+    type: "item.update",
+  });
   if (created.status === 200 || created.status === 201) {
-    console.log(`✓ Hook oprettet (id=${created.json?.hook_id}). Podio sender nu et hook.verify-kald.`);
-    console.log("  Allios /api/webhooks/podio validerer automatisk — tjek at base-URL er live/deployet.");
+    console.log(`  ✓ Hook oprettet (id=${created.json?.hook_id})`);
   } else {
-    console.log(`✖ Kunne ikke oprette hook (HTTP ${created.status}): ${created.text.slice(0, 300)}`);
+    console.log(`  ✖ Kunne ikke oprette hook (HTTP ${created.status}): ${created.text.slice(0, 300)}`);
+    process.exitCode = 1;
+  }
+}
+
+async function main() {
+  if (!CLIENT_ID || !CLIENT_SECRET) {
+    console.error("Mangler PODIO_CLIENT_ID/SECRET i .env.local");
     process.exit(1);
+  }
+  if (APPS.length === 0) {
+    console.error("Mangler PODIO_MOEDER_* og/eller PODIO_KUNDER_* app-id/token i .env.local");
+    process.exit(1);
+  }
+
+  if (!WEBHOOK_SECRET) {
+    console.log("⚠ PODIO_WEBHOOK_SECRET er ikke sat — hooken oprettes uden token (mindre sikkert).");
+  }
+
+  for (const app of APPS) {
+    await ensureHook(app);
+  }
+
+  if (FLAG_LIST) {
+    console.log("\n(--list: ingen ændringer foretaget)");
+  } else {
+    console.log("\nPodio sender hook.verify — Allios endpoint validerer automatisk når base-URL er live.");
   }
 }
 

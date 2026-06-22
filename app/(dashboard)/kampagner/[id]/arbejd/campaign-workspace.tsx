@@ -172,6 +172,7 @@ export function CampaignWorkspace({ campaignId, preferredLeadId, voipSession = f
   const [nextAdvanceBusy, setNextAdvanceBusy] = useState(false);
   /** Fejl ved baggrundsgem af forrige lead (blokér ikke næste lead). */
   const [backgroundSyncError, setBackgroundSyncError] = useState<string | null>(null);
+  const [integrationsSyncHint, setIntegrationsSyncHint] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [done, setDone] = useState(false);
   /** Lås på leads der stadig gemmes i baggrunden — heartbeat som aktivt lead. */
@@ -949,7 +950,7 @@ export function CampaignWorkspace({ campaignId, preferredLeadId, voipSession = f
     if (!activeLead) return;
     requestCallHangupBeforeAdvance();
 
-    /** Mødebooking: vent på bekræftet gem — ingen optimistisk navigation (data integritet). */
+    /** Mødebooking: overlap-validering synkront; Cal.eu/Podio sync kører i baggrunden på serveren. */
     if (status === "MEETING_BOOKED" && predictiveOutcome === undefined) {
       const iso =
         meetingScheduledForISO ??
@@ -976,16 +977,41 @@ export function CampaignWorkspace({ campaignId, preferredLeadId, voipSession = f
       }
 
       const currentId = activeLead.id;
+      const pf = prefetchedLeadRef.current;
+      const usePrefetch =
+        Boolean(pf && pf.id !== currentId && !backgroundLockLeadIdsRef.current.includes(pf.id));
+
       setSaving(true);
       setError(null);
       const saved = await saveLead(activeLead, meetingScheduledForISO, adminSkipBookingOverlap);
       setSaving(false);
       if (!saved) return;
 
+      if ((saved.updated as Lead & { integrationsPending?: boolean }).integrationsPending) {
+        setIntegrationsSyncHint(true);
+        window.setTimeout(() => setIntegrationsSyncHint(false), 30_000);
+      }
+
       if (meetingScheduledForISO) {
         const d = new Date(meetingScheduledForISO);
         const local = new Date(d.getTime() - d.getTimezoneOffset() * 60000);
         setMeetingScheduledFor(local.toISOString().slice(0, 16));
+      }
+
+      if (usePrefetch && pf) {
+        setPrefetchedLead(null);
+        prefetchInFlightRef.current = false;
+        void releaseLockHttp(currentId);
+        requestScrollToTopAfterLeadChange();
+        setActiveLead(pf);
+        loadFormFromLead(pf);
+        try {
+          sessionStorage.setItem(preferStorageKey(campaignId), pf.id);
+        } catch {
+          /* ignore */
+        }
+        void prefetchNextLead(pf.id);
+        return;
       }
 
       await advanceToNextReservedAfterSave(currentId);
@@ -1758,6 +1784,11 @@ export function CampaignWorkspace({ campaignId, preferredLeadId, voipSession = f
       {showBackgroundSaveHint && (
         <p className="shrink-0 text-xs text-stone-500" aria-live="polite">
           Gemmer forrige lead i baggrunden…
+        </p>
+      )}
+      {integrationsSyncHint && (
+        <p className="shrink-0 text-xs text-stone-500" aria-live="polite">
+          Synkroniserer møde til Cal/Podio…
         </p>
       )}
       {backgroundSyncError && (

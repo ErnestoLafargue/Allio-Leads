@@ -1,4 +1,4 @@
-import { NextResponse } from "next/server";
+import { after, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { requireSession } from "@/lib/api-auth";
 import { pickLeadCreateData } from "@/lib/prisma-lead-write";
@@ -12,8 +12,7 @@ import { findBlockedTimeConflictInDb } from "@/lib/booking/meeting-slots";
 import { findLeadBookingOverlapInDb } from "@/lib/booking/overlap-db";
 import { requireDefaultMeetingAssigneeId } from "@/lib/meeting-assignee";
 import { canonicalLeadPhoneForStorage } from "@/lib/phone-e164";
-import { ensureCalComBookingForLead } from "@/lib/calcom/sync-lead-booking";
-import { ensureCustomerInPodio } from "@/lib/podio/customer-mapping";
+import { syncPostBookingIntegrations } from "@/lib/booking/post-booking-sync";
 
 export async function POST(req: Request) {
   const { session, response } = await requireSession();
@@ -137,34 +136,11 @@ export async function POST(req: Request) {
       return created;
     });
 
-    /**
-     * Opret ekstern Cal.eu-booking (kalender-sync + Google Meet-link).
-     * Ikke-fatal: fejler Cal.eu, beholder vi den interne booking (hybrid-model).
-     */
-    await ensureCalComBookingForLead({
-      leadId: lead.id,
-      start: meetingScheduledFor,
-      attendeeName: meetingContactName,
-      attendeeEmail: meetingContactEmail,
-      attendeePhone: meetingContactPhonePrivate || undefined,
-      notes: notes || undefined,
+    after(() => {
+      void syncPostBookingIntegrations(lead.id);
     });
 
-    /**
-     * Opret kunden i Podio-CRM (kunde + onboarding-møde). Ikke-fatal og
-     * idempotent via Allio Lead ID. Køres efter Cal.eu, så mødelinket er sat.
-     */
-    await ensureCustomerInPodio(lead.id);
-
-    const leadWithCalCom = await prisma.lead.findUnique({
-      where: { id: lead.id },
-      include: {
-        bookedByUser: { select: { id: true, name: true, username: true } },
-        campaign: { select: { id: true, name: true } },
-      },
-    });
-
-    return NextResponse.json(leadWithCalCom ?? lead);
+    return NextResponse.json({ ...lead, integrationsPending: true });
   } catch (e) {
     const msg = e instanceof Error ? e.message : String(e);
     return NextResponse.json(

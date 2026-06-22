@@ -92,6 +92,7 @@ const EXPECTED = {
       Kunde: ["app"],
       Type: ["category"],
       "Dato & tid": ["date"],
+      "Kick-off dato": ["date"],
       Mødelink: ["embed"],
       Status: ["category"],
       "Fathom-noter": ["text"],
