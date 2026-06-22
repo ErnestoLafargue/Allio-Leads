@@ -193,10 +193,6 @@ async function handleKunderItem(item: PodioItem, type: string): Promise<NextResp
 }
 
 export async function POST(req: Request) {
-  if (!tokenOk(req)) {
-    return NextResponse.json({ ok: false, error: "Invalid token" }, { status: 401 });
-  }
-
   let params: URLSearchParams;
   try {
     const raw = await req.text();
@@ -207,6 +203,11 @@ export async function POST(req: Request) {
 
   const type = (params.get("type") ?? "").trim();
   const hookId = (params.get("hook_id") ?? "").trim();
+
+  // Podio sender hook.verify uden query-token — sikkerhed via engangs-kode til Podio API.
+  if (type !== "hook.verify" && !tokenOk(req)) {
+    return NextResponse.json({ ok: false, error: "Invalid token" }, { status: 401 });
+  }
 
   if (type === "hook.verify") {
     const code = (params.get("code") ?? "").trim();

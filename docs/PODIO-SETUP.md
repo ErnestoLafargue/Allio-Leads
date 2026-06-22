@@ -254,7 +254,7 @@ Alt sker i Podio — Allio reagerer via webhook i baggrunden:
    - `Stadie = Kick-off prep` + relevante processer
    - Fathom-noter kopieres til **`Kick-off prep`**-processens `Noter`
    - Nyt **kick-off-møde** (`Type = Kick-off`, `Status = Booket`) med link
-   - **Cal.eu-booking** + kalenderinvitation til kunden (samme event type som onboarding)
+   - **Cal.eu-booking** (event type `CALCOM_KICKOFF_EVENT_TYPE_ID`, fx `342780`) + kalenderinvitation til kunden
 
 Onboarding-mødet forbliver `Afholdt` med Fathom-noter (historik).
 

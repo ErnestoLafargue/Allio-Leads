@@ -18,13 +18,25 @@ function apiKey(): string {
   return (process.env.CALCOM_API_KEY ?? "").trim();
 }
 
-function eventTypeId(): number {
-  const n = Number((process.env.CALCOM_EVENT_TYPE_ID ?? "").trim());
+function parseEventTypeId(raw: string | undefined): number {
+  const n = Number((raw ?? "").trim());
   return Number.isFinite(n) && n > 0 ? n : 0;
 }
 
+function onboardingEventTypeId(): number {
+  return parseEventTypeId(process.env.CALCOM_EVENT_TYPE_ID);
+}
+
+export function kickoffEventTypeId(): number {
+  return parseEventTypeId(process.env.CALCOM_KICKOFF_EVENT_TYPE_ID);
+}
+
 export function isCalComConfigured(): boolean {
-  return Boolean(apiKey()) && eventTypeId() > 0;
+  return Boolean(apiKey()) && onboardingEventTypeId() > 0;
+}
+
+export function isCalComKickoffConfigured(): boolean {
+  return Boolean(apiKey()) && kickoffEventTypeId() > 0;
 }
 
 export type CalComBookingInput = {
@@ -36,6 +48,8 @@ export type CalComBookingInput = {
   attendeePhone?: string;
   /** Valgfrie noter til værten. */
   notes?: string;
+  /** Override event type (fx kick-off). Default: CALCOM_EVENT_TYPE_ID (onboarding). */
+  eventTypeId?: number;
 };
 
 export type CalComBookingResult = {
@@ -57,9 +71,16 @@ export async function createCalComBooking(
     );
   }
 
+  const resolvedEventTypeId = input.eventTypeId ?? onboardingEventTypeId();
+  if (!resolvedEventTypeId) {
+    throw new Error(
+      "Cal.eu event type mangler (CALCOM_EVENT_TYPE_ID eller eventTypeId i kald).",
+    );
+  }
+
   const url = `https://${host()}/v2/bookings`;
   const body: Record<string, unknown> = {
-    eventTypeId: eventTypeId(),
+    eventTypeId: resolvedEventTypeId,
     start: input.start.toISOString(),
     attendee: {
       name: input.attendeeName,
