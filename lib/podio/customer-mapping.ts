@@ -21,6 +21,7 @@ import {
   createItem,
   deleteItemByExternalId,
   findItemIdByExternalId,
+  findKundeItemIdByAllioLeadId,
   getItem,
   isPodioAppConfigured,
   isPodioConfigured,
@@ -546,6 +547,12 @@ export async function advanceKundeStadie(leadId: string, newStadie: KundeStadie)
     await updateItemValues("kunder", kundeItemId, fields);
     await syncProcessesForStadie(leadId, newStadie);
   } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    if (msg.includes("Podio-kategori")) {
+      console.error(
+        `[podio] advanceKundeStadie → "${newStadie}" fejlede — tjek at Stadie-valget findes i Podio Kunder-app: ${msg}`,
+      );
+    }
     logPodioError(`advanceKundeStadie → ${newStadie}`, err);
   }
 }
@@ -633,6 +640,66 @@ async function ensureOnboardingMeeting(lead: LeadForPodio, kundeItemId: number):
   }
 }
 
+/** Slå kunde-item op: podioItemId-cache → external_id → Allio Lead ID-felt. */
+async function resolveKundeItemId(
+  leadId: string,
+  cachedPodioItemId: string | null,
+): Promise<number | null> {
+  if (cachedPodioItemId) {
+    const id = Number(cachedPodioItemId);
+    if (Number.isFinite(id) && id > 0) {
+      const item = await getItem("kunder", id);
+      if (item) return id;
+    }
+  }
+
+  const byExternalId = await findItemIdByExternalId("kunder", leadId);
+  if (byExternalId) return byExternalId;
+
+  return findKundeItemIdByAllioLeadId(leadId);
+}
+
+async function ensureProcessesForExistingKunde(leadId: string): Promise<void> {
+  const geckoExt = procesExternalId(leadId, PROCES_GECKO_KEY);
+  const hasGecko = await findItemIdByExternalId("processer", geckoExt);
+  if (hasGecko) return;
+
+  const stadie = (await readKundeStadie(leadId)) ?? KUNDE_STADIE.moedeBooket;
+  await syncProcessesForStadie(leadId, stadie);
+}
+
+/**
+ * Slet alle Podio-artefakter for et lead (processer, møder, evt. kunde).
+ * Idempotent via external_id. Ikke-fatal.
+ */
+export async function deleteAllPodioArtifactsForLead(
+  leadId: string,
+  opts?: { skipKunde?: boolean },
+): Promise<void> {
+  if (!isPodioConfigured()) return;
+
+  try {
+    for (const proc of PROCES_DEFINITIONS) {
+      await deleteProcessByKey(leadId, proc.key);
+    }
+    for (const key of LEGACY_PROCES_KEYS) {
+      await deleteProcessByKey(leadId, key);
+    }
+    await deleteProcessByKey(leadId, PROCES_OPFOELGNING.key);
+
+    if (isPodioAppConfigured("moeder")) {
+      await deleteItemByExternalId("moeder", onboardingExternalId(leadId));
+      await deleteItemByExternalId("moeder", kickoffExternalId(leadId));
+    }
+
+    if (!opts?.skipKunde && isPodioAppConfigured("kunder")) {
+      await deleteItemByExternalId("kunder", leadId);
+    }
+  } catch (err) {
+    logPodioError("deleteAllPodioArtifactsForLead", err);
+  }
+}
+
 /**
  * Opretter (eller opdaterer) kunden + onboarding-møde + processer i Podio.
  * Idempotent via external_id. Gemmer podioItemId på leadet. Ikke-fatal.
@@ -663,18 +730,30 @@ export async function ensureCustomerInPodio(leadId: string): Promise<void> {
     })) as LeadForPodio | null;
     if (!lead) return;
 
-    // --- Kunde (rygrad) ---
-    const existingKundeId = await findItemIdByExternalId("kunder", lead.id);
-    let kundeItemId: number;
-    if (existingKundeId) {
-      // Overskriv ikke stadie/leveringsmodel ved opdatering (bevarer manuel fremgang).
+    let kundeItemId = await resolveKundeItemId(lead.id, lead.podioItemId);
+    const isNewKunde = kundeItemId == null;
+
+    if (kundeItemId) {
       const fields = await buildKundeFields(lead, false);
-      await updateItemValues("kunder", existingKundeId, fields);
-      kundeItemId = existingKundeId;
+      await updateItemValues("kunder", kundeItemId, fields);
     } else {
       const fields = await buildKundeFields(lead, true);
-      kundeItemId = await createItem("kunder", { externalId: lead.id, fields });
+      try {
+        kundeItemId = await createItem("kunder", { externalId: lead.id, fields });
+        isNewKunde = true;
+      } catch (createErr) {
+        kundeItemId = await resolveKundeItemId(lead.id, lead.podioItemId);
+        if (!kundeItemId) throw createErr;
+        isNewKunde = false;
+        const updateFields = await buildKundeFields(lead, false);
+        await updateItemValues("kunder", kundeItemId, updateFields);
+      }
+    }
+
+    if (isNewKunde) {
       await syncProcessesForStadie(lead.id, KUNDE_STADIE.moedeBooket);
+    } else {
+      await ensureProcessesForExistingKunde(lead.id);
     }
 
     if (lead.podioItemId !== String(kundeItemId)) {

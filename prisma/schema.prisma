@@ -181,6 +181,8 @@ model Lead {
   geckoMailSentAt   DateTime?
   /// Podio item-id for kundens journey-tracking.
   podioItemId       String?
+  /// Kort lås mens Podio-sync kører (forhindrer parallelle dublet-oprettelser).
+  podioSyncLockUntil DateTime?
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt

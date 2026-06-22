@@ -1,5 +1,5 @@
 /**
- * Registrér Podio → Allio webhooks på MØDER-, KUNDER- og PROCESSER-appen (item.update).
+ * Registrér Podio → Allio webhooks på MØDER-, KUNDER- og PROCESSER-appen.
  *
  * Brug:
  *   node scripts/podio-register-hooks.mjs --list
@@ -8,7 +8,7 @@
  *
  * --url      Allios offentlige base-URL (uden trailing slash). Default: prod.
  * --list     Vis kun eksisterende hooks (ingen ændring).
- * --replace  Slet eksisterende item.update-hooks mod vores sti før oprettelse.
+ * --replace  Slet eksisterende hooks mod vores sti før oprettelse.
  *
  * Kræver i .env.local: PODIO_CLIENT_ID/SECRET, PODIO_MOEDER_*, PODIO_KUNDER_*,
  * PODIO_PROCESSER_* og (anbefalet) PODIO_WEBHOOK_SECRET.
@@ -48,16 +48,19 @@ const APPS = [
     name: "Møder",
     appId: (process.env.PODIO_MOEDER_APP_ID ?? "").trim(),
     appToken: (process.env.PODIO_MOEDER_APP_TOKEN ?? "").trim(),
+    hookTypes: ["item.update"],
   },
   {
     name: "Kunder",
     appId: (process.env.PODIO_KUNDER_APP_ID ?? "").trim(),
     appToken: (process.env.PODIO_KUNDER_APP_TOKEN ?? "").trim(),
+    hookTypes: ["item.update", "item.delete"],
   },
   {
     name: "Processer",
     appId: (process.env.PODIO_PROCESSER_APP_ID ?? "").trim(),
     appToken: (process.env.PODIO_PROCESSER_APP_TOKEN ?? "").trim(),
+    hookTypes: ["item.update"],
   },
 ].filter((a) => a.appId && a.appToken);
 
@@ -124,7 +127,7 @@ function samePath(url) {
   return typeof url === "string" && url.includes(HOOK_PATH);
 }
 
-async function ensureHook(app) {
+async function ensureHooksForApp(app) {
   const existing = await listHooks(app);
   console.log(`\n${app.name}-appen (${app.appId}): ${existing.length} hook(s)`);
   for (const h of existing) {
@@ -133,34 +136,40 @@ async function ensureHook(app) {
 
   if (FLAG_LIST) return;
 
+  const url = hookUrl();
+  const maskedUrl = url.replace(/token=[^&]+/, "token=***");
+
   if (FLAG_REPLACE) {
     for (const h of existing) {
-      if (samePath(h.url) && h.type === "item.update") {
+      if (samePath(h.url) && app.hookTypes.includes(h.type)) {
         const del = await api(app.appId, app.appToken, "DELETE", `/hook/${h.hook_id}`);
         console.log(
-          `  ${del.status === 200 || del.status === 204 ? "✓ slettede" : "✖ kunne ikke slette"} hook id=${h.hook_id}`,
+          `  ${del.status === 200 || del.status === 204 ? "✓ slettede" : "✖ kunne ikke slette"} hook id=${h.hook_id} type=${h.type}`,
         );
       }
     }
-  } else {
-    const dupe = existing.find((h) => samePath(h.url) && h.type === "item.update");
-    if (dupe) {
-      console.log(`  ✓ item.update findes allerede (id=${dupe.hook_id}, status=${dupe.status})`);
-      return;
-    }
   }
 
-  const url = hookUrl();
-  console.log(`  Opretter item.update → ${url.replace(/token=[^&]+/, "token=***")}`);
-  const created = await api(app.appId, app.appToken, "POST", `/hook/app/${app.appId}/`, {
-    url,
-    type: "item.update",
-  });
-  if (created.status === 200 || created.status === 201) {
-    console.log(`  ✓ Hook oprettet (id=${created.json?.hook_id})`);
-  } else {
-    console.log(`  ✖ Kunne ikke oprette hook (HTTP ${created.status}): ${created.text.slice(0, 300)}`);
-    process.exitCode = 1;
+  for (const hookType of app.hookTypes) {
+    if (!FLAG_REPLACE) {
+      const dupe = existing.find((h) => samePath(h.url) && h.type === hookType);
+      if (dupe) {
+        console.log(`  ✓ ${hookType} findes allerede (id=${dupe.hook_id}, status=${dupe.status})`);
+        continue;
+      }
+    }
+
+    console.log(`  Opretter ${hookType} → ${maskedUrl}`);
+    const created = await api(app.appId, app.appToken, "POST", `/hook/app/${app.appId}/`, {
+      url,
+      type: hookType,
+    });
+    if (created.status === 200 || created.status === 201) {
+      console.log(`  ✓ Hook oprettet type=${hookType} (id=${created.json?.hook_id})`);
+    } else {
+      console.log(`  ✖ Kunne ikke oprette ${hookType} (HTTP ${created.status}): ${created.text.slice(0, 300)}`);
+      process.exitCode = 1;
+    }
   }
 }
 
@@ -179,7 +188,7 @@ async function main() {
   }
 
   for (const app of APPS) {
-    await ensureHook(app);
+    await ensureHooksForApp(app);
   }
 
   if (FLAG_LIST) {

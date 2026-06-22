@@ -264,6 +264,23 @@ node scripts/podio-sync-processes.mjs <leadId>
 # eller: npx tsx scripts/podio-sync-processes.ts <leadId>
 ```
 
+**Idempotens (én kunde pr. lead):** Allio bruger `external_id = Lead.id` på Kunder-appen.
+Gentagen «Bekræft møde» uden ændringer starter **ikke** ny Podio-sync. Dubletter fra
+tidligere bugs findes med:
+
+```bash
+node scripts/podio-dedupe-kunder.mjs
+node scripts/podio-dedupe-kunder.mjs --lead-id=<leadId> --delete-duplicates
+```
+
+**Sync-hastighed:** Efter booking oprettes Kunde + Gecko-proces + onboarding-møde i Podio
+**før** Cal.eu (typisk få sekunder). Cal-link opdateres bagefter. Se Vercel-logs med
+`[podio-sync]` for timing.
+
+**Sletning:** Brug helst `Stadie = Tabt/Annulleret` frem for at slette kunden i Podio.
+Hvis kunden slettes manuelt i Podio, sletter Allio automatisk tilhørende processer og
+møder via `item.delete`-webhook på Kunder-appen (kræver hook-registrering).
+
 ### Kick-off fra onboarding (kun i Podio)
 
 Alt sker i Podio — Allio reagerer via webhook i baggrunden:
@@ -297,11 +314,14 @@ Onboarding-mødet forbliver `Afholdt` med Fathom-noter (historik).
 
 Endpoint: `https://<domæne>/api/webhooks/podio` (valgfrit `?token=<PODIO_WEBHOOK_SECRET>`).
 
-Registrér `item.update`-hooks på **Møder**, **Kunder** og **Processer**-appen:
+Registrér hooks på **Møder**, **Kunder** og **Processer**-appen:
+
+- **Møder** + **Processer:** `item.update`
+- **Kunder:** `item.update` + `item.delete` (cascade-slet processer/møder)
 
 ```bash
 node scripts/podio-register-hooks.mjs --url=https://allio-leads.vercel.app
-# --list     vis eksisterende hooks
+# --list     vis eksisterende hooks (tjek status=active på Processer!)
 # --replace  gendan hooks (slet + opret)
 ```
 
@@ -318,6 +338,10 @@ node scripts/podio-register-hooks.mjs --url=https://allio-leads.vercel.app
 **Kunder-app** reagerer på:
 
 - Ændring af `Stadie` → opret manglende processer / slet ved rollback
+
+**Kunder-app** reagerer også på:
+
+- `item.delete` → slet tilhørende processer og møder for leadet (kunden er allerede slettet)
 
 **Processer-app** reagerer på:
 

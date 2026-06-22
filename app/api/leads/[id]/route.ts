@@ -38,6 +38,7 @@ import { LEAD_ACTIVITY_KIND } from "@/lib/lead-activity-kinds";
 import { hangupActiveOutboundLeadLegsForLead } from "@/lib/dialer-bridge";
 import { canonicalLeadPhoneForStorage } from "@/lib/phone-e164";
 import { syncPostBookingIntegrations } from "@/lib/booking/post-booking-sync";
+import { leadNeedsPostBookingSync } from "@/lib/booking/post-booking-sync-needs";
 
 type Params = { params: Promise<{ id: string }> };
 
@@ -742,11 +743,32 @@ export async function PATCH(req: Request, { params }: Params) {
   });
 
   let leadResponse = lead;
+  const afterSyncSnapshot = {
+    podioItemId: lead.podioItemId,
+    meetingScheduledFor,
+    meetingContactEmail,
+    meetingContactName,
+    meetingContactPhonePrivate,
+    meetingCompanyName,
+    calComBookingUid: lead.calComBookingUid,
+  };
   const shouldSyncIntegrations =
     status === "MEETING_BOOKED" &&
     meetingScheduledFor &&
     meetingContactName &&
-    meetingContactEmail;
+    meetingContactEmail &&
+    leadNeedsPostBookingSync(
+      {
+        podioItemId: existing.podioItemId,
+        meetingScheduledFor: existing.meetingScheduledFor,
+        meetingContactEmail: existing.meetingContactEmail,
+        meetingContactName: existing.meetingContactName,
+        meetingContactPhonePrivate: existing.meetingContactPhonePrivate,
+        meetingCompanyName: existing.meetingCompanyName,
+        calComBookingUid: existing.calComBookingUid,
+      },
+      afterSyncSnapshot,
+    );
 
   if (shouldSyncIntegrations) {
     after(() => {

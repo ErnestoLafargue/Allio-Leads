@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { prisma } from "@/lib/prisma";
 import {
   detectPodioItemApp,
   getItem,
@@ -12,6 +13,7 @@ import {
 import { moveLeadToRebooking } from "@/lib/calcom/webhook-apply";
 import {
   advanceKundeStadie,
+  deleteAllPodioArtifactsForLead,
   ensureOpfoelgningsProces,
   handleGeckoProcesFaerdig,
   handleOnboardingMeetingCancelled,
@@ -300,7 +302,28 @@ export async function POST(req: Request) {
   }
 
   if (type === "item.delete") {
-    return NextResponse.json({ ok: true, ignored: "item.delete" });
+    const itemId = Number((params.get("item_id") ?? "").trim());
+    if (!Number.isFinite(itemId) || itemId <= 0) {
+      return NextResponse.json({ ok: true, ignored: "no item_id" });
+    }
+
+    let leadId = (params.get("external_id") ?? "").trim();
+    if (!leadId) {
+      const lead = await prisma.lead.findFirst({
+        where: { podioItemId: String(itemId) },
+        select: { id: true },
+      });
+      leadId = lead?.id ?? "";
+    }
+
+    if (!leadId) {
+      console.log(`[podio] item.delete item=${itemId} — ingen matchende lead`);
+      return NextResponse.json({ ok: true, ignored: "no lead for deleted item" });
+    }
+
+    console.log(`[podio] item.delete kunde item=${itemId} lead=${leadId} → cascade`);
+    await deleteAllPodioArtifactsForLead(leadId, { skipKunde: true });
+    return NextResponse.json({ ok: true, handled: "item.delete", action: "cascade_delete", leadId });
   }
 
   return NextResponse.json({ ok: true, ignored: type || "unknown" });

@@ -326,6 +326,31 @@ export async function findItemIdByExternalId(
   return (json as { item_id?: number })?.item_id ?? null;
 }
 
+/** Find kunde-item via Allio Lead ID-felt (backup når external_id mangler på ældre dubletter). */
+export async function findKundeItemIdByAllioLeadId(leadId: string): Promise<number | null> {
+  if (!isAppConfigured("kunder") || !leadId.trim()) return null;
+
+  try {
+    const fieldExt = await resolveFieldExternalId("kunder", "Allio Lead ID");
+    const a = appEnv("kunder");
+    const { status, json } = await podioRequest(
+      "kunder",
+      "POST",
+      `/item/app/${a.id}/filter/`,
+      {
+        filters: { [fieldExt]: leadId.trim() },
+        limit: 1,
+      },
+    );
+    if (status !== 200) return null;
+    const items = (json as { items?: { item_id?: number }[] })?.items ?? [];
+    const id = items[0]?.item_id;
+    return typeof id === "number" && id > 0 ? id : null;
+  } catch {
+    return null;
+  }
+}
+
 /** Slet et item i Podio. */
 export async function deleteItem(app: PodioAppKey, itemId: number): Promise<void> {
   const { status, json } = await podioRequest(app, "DELETE", `/item/${itemId}`);
