@@ -13,7 +13,10 @@ import { CallbackScheduleDialog } from "@/app/components/callback-schedule-dialo
 import { SendStandardMailDialog } from "@/app/components/send-standard-mail-dialog";
 import type { BookingConfirmPayload } from "@/app/components/booking/booking-panel";
 import { parseCustomFields } from "@/lib/custom-fields";
-import { validateMeetingContactFields } from "@/lib/meeting-contact-validation";
+import {
+  validateMeetingContactFields,
+  type MeetingContactFieldErrors,
+} from "@/lib/meeting-contact-validation";
 import {
   meetingOutcomeBadgeClass,
   MEETING_OUTCOME_LABELS,
@@ -49,6 +52,7 @@ type Lead = {
   meetingContactName?: string;
   meetingContactEmail?: string;
   meetingContactPhonePrivate?: string;
+  meetingCompanyName?: string;
   meetingOutcomeStatus?: string;
   campaign: { id: string; name: string; fieldConfig: string } | null;
   lockedByUserId?: string | null;
@@ -94,11 +98,8 @@ function LeadDetailInner() {
   const [meetingContactName, setMeetingContactName] = useState("");
   const [meetingContactEmail, setMeetingContactEmail] = useState("");
   const [meetingContactPhonePrivate, setMeetingContactPhonePrivate] = useState("");
-  const [meetingContactErrors, setMeetingContactErrors] = useState<{
-    name?: string;
-    email?: string;
-    phone?: string;
-  }>({});
+  const [meetingCompanyName, setMeetingCompanyName] = useState("");
+  const [meetingContactErrors, setMeetingContactErrors] = useState<MeetingContactFieldErrors>({});
   const [meetingOutcomeStatus, setMeetingOutcomeStatus] = useState(MEETING_OUTCOME_PENDING);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
@@ -186,6 +187,7 @@ function LeadDetailInner() {
       setMeetingContactName(data.meetingContactName ?? "");
       setMeetingContactEmail(data.meetingContactEmail ?? "");
       setMeetingContactPhonePrivate(data.meetingContactPhonePrivate ?? "");
+      setMeetingCompanyName(data.meetingCompanyName ?? "");
       setMeetingOutcomeStatus(
         String(data.meetingOutcomeStatus ?? "").trim().toUpperCase() || MEETING_OUTCOME_PENDING,
       );
@@ -331,6 +333,7 @@ function LeadDetailInner() {
       meetingContactName,
       meetingContactEmail,
       meetingContactPhonePrivate,
+      meetingCompanyName,
     );
     if (contactErr) {
       setMeetingContactErrors(contactErr);
@@ -356,6 +359,7 @@ function LeadDetailInner() {
       meetingContactName: meetingContactName.trim(),
       meetingContactEmail: meetingContactEmail.trim(),
       meetingContactPhonePrivate: meetingContactPhonePrivate.trim(),
+      meetingCompanyName: meetingCompanyName.trim(),
     };
     if (detail.adminSkipBookingOverlap) {
       body.adminSkipBookingOverlap = true;
@@ -395,6 +399,7 @@ function LeadDetailInner() {
         meetingContactName,
         meetingContactEmail,
         meetingContactPhonePrivate,
+        meetingCompanyName,
       );
       if (contactErr) {
         setMeetingContactErrors(contactErr);
@@ -426,6 +431,7 @@ function LeadDetailInner() {
       body.meetingContactName = meetingContactName.trim();
       body.meetingContactEmail = meetingContactEmail.trim();
       body.meetingContactPhonePrivate = meetingContactPhonePrivate.trim();
+      body.meetingCompanyName = meetingCompanyName.trim();
     }
     const res = await fetch(`/api/leads/${id}`, {
       method: "PATCH",
@@ -863,6 +869,7 @@ function LeadDetailInner() {
                 meetingContactName,
                 meetingContactEmail,
                 meetingContactPhonePrivate,
+                meetingCompanyName,
                 onMeetingContactName: (v) => {
                   setMeetingContactName(v);
                   setMeetingContactErrors((prev) => ({ ...prev, name: undefined }));
@@ -874,6 +881,10 @@ function LeadDetailInner() {
                 onMeetingContactPhonePrivate: (v) => {
                   setMeetingContactPhonePrivate(v);
                   setMeetingContactErrors((prev) => ({ ...prev, phone: undefined }));
+                },
+                onMeetingCompanyName: (v) => {
+                  setMeetingCompanyName(v);
+                  setMeetingContactErrors((prev) => ({ ...prev, meetingCompany: undefined }));
                 },
                 contactRequired: status === "MEETING_BOOKED",
                 meetingContactErrors: status === "MEETING_BOOKED" ? meetingContactErrors : undefined,

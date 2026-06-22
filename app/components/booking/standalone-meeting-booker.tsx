@@ -18,6 +18,7 @@ export function StandaloneMeetingBooker({ className = "", onBooked }: Props) {
   const { data: session } = useSession();
   const isAdmin = session?.user?.role === "ADMIN";
   const [notes, setNotes] = useState("");
+  const [meetingCompanyName, setMeetingCompanyName] = useState("");
   const [meetingContactName, setMeetingContactName] = useState("");
   const [meetingContactEmail, setMeetingContactEmail] = useState("");
   const [meetingContactPhonePrivate, setMeetingContactPhonePrivate] = useState("");
@@ -40,9 +41,14 @@ export function StandaloneMeetingBooker({ className = "", onBooked }: Props) {
 
   async function onConfirmBooking(detail: BookingConfirmPayload) {
     setError(null);
+    const company = meetingCompanyName.trim();
     const cn = meetingContactName.trim();
     const ce = meetingContactEmail.trim();
     const cp = meetingContactPhonePrivate.trim();
+    if (!company) {
+      setError("Udfyld virksomhedens navn.");
+      return;
+    }
     if (!cn || !ce || !cp) {
       setError("Udfyld navn, e-mail og privat telefon til mødekontakten.");
       return;
@@ -58,6 +64,7 @@ export function StandaloneMeetingBooker({ className = "", onBooked }: Props) {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
         notes,
+        meetingCompanyName: company,
         meetingContactName: cn,
         meetingContactEmail: ce,
         meetingContactPhonePrivate: cp,
@@ -95,6 +102,8 @@ export function StandaloneMeetingBooker({ className = "", onBooked }: Props) {
 
       <MeetingContactFields
         contactRequired
+        meetingCompanyName={meetingCompanyName}
+        onMeetingCompanyName={setMeetingCompanyName}
         meetingContactName={meetingContactName}
         meetingContactEmail={meetingContactEmail}
         meetingContactPhonePrivate={meetingContactPhonePrivate}

@@ -61,6 +61,7 @@ describe("leadMeetingRecordCreateInput", () => {
         meetingContactName: "A",
         meetingContactEmail: "a@b.dk",
         meetingContactPhonePrivate: "+4512345678",
+        meetingCompanyName: "Firma ApS",
       },
       "rebooked",
     );

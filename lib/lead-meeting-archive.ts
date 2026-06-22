@@ -15,6 +15,7 @@ export type LeadMeetingSnapshotSource = Pick<
   | "meetingContactName"
   | "meetingContactEmail"
   | "meetingContactPhonePrivate"
+  | "meetingCompanyName"
 >;
 
 /** True når der allerede er et booket møde og klienten bekræfter en ny mødetid. */
@@ -52,6 +53,7 @@ export function leadMeetingRecordCreateInput(
     meetingContactName: lead.meetingContactName ?? "",
     meetingContactEmail: lead.meetingContactEmail ?? "",
     meetingContactPhonePrivate: lead.meetingContactPhonePrivate ?? "",
+    meetingCompanyName: lead.meetingCompanyName ?? "",
     archivedReason: reason,
   };
 }

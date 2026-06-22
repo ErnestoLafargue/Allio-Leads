@@ -17,6 +17,7 @@ export type CampaignLeadFormSnapshot = {
   meetingContactName: string;
   meetingContactEmail: string;
   meetingContactPhonePrivate: string;
+  meetingCompanyName: string;
 };
 
 /**
@@ -48,6 +49,7 @@ export function buildCampaignLeadPatchBody(
     body.meetingContactName = s.meetingContactName.trim();
     body.meetingContactEmail = s.meetingContactEmail.trim();
     body.meetingContactPhonePrivate = s.meetingContactPhonePrivate.trim();
+    body.meetingCompanyName = s.meetingCompanyName.trim();
     if (opts?.adminSkipBookingOverlap) {
       body.adminSkipBookingOverlap = true;
     }

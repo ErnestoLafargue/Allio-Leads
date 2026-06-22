@@ -269,6 +269,8 @@ export async function POST(req: Request) {
     typeof body?.meetingContactPhonePrivate === "string"
       ? canonicalLeadPhoneForStorage(body.meetingContactPhonePrivate)
       : "";
+  const meetingCompanyName =
+    typeof body?.meetingCompanyName === "string" ? body.meetingCompanyName.trim() : "";
 
   if (meetingContactEmail.length > 0 && !meetingContactEmailValid(meetingContactEmail)) {
     return NextResponse.json({ error: "Ugyldig e-mail til mødekontakten." }, { status: 400 });
@@ -280,6 +282,9 @@ export async function POST(req: Request) {
   if (status === "MEETING_BOOKED") {
     if (!meetingScheduledFor || Number.isNaN(meetingScheduledFor.getTime())) {
       return NextResponse.json({ error: "Mødetid mangler eller er ugyldig." }, { status: 400 });
+    }
+    if (!meetingCompanyName) {
+      return NextResponse.json({ error: "Virksomhedsnavn til mødet er påkrævet." }, { status: 400 });
     }
   }
 
@@ -308,6 +313,7 @@ export async function POST(req: Request) {
       meetingContactName,
       meetingContactEmail,
       meetingContactPhonePrivate,
+      meetingCompanyName,
       customFields: stringifyCustomFields(custom),
       status,
       meetingScheduledFor,

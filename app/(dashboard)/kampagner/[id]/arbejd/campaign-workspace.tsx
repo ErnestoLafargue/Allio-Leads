@@ -9,7 +9,10 @@ import { parseCustomFields } from "@/lib/custom-fields";
 import type { BookingConfirmPayload } from "@/app/components/booking/booking-panel";
 import { LeadOutcomeStrip } from "@/app/components/lead-workspace/lead-outcome-strip";
 import { LeadKundeNoterBooking } from "@/app/components/lead-workspace/lead-kunde-noter-booking";
-import { validateMeetingContactFields } from "@/lib/meeting-contact-validation";
+import {
+  validateMeetingContactFields,
+  type MeetingContactFieldErrors,
+} from "@/lib/meeting-contact-validation";
 import { CallbackScheduleDialog } from "@/app/components/callback-schedule-dialog";
 import { SendStandardMailDialog } from "@/app/components/send-standard-mail-dialog";
 import {
@@ -57,6 +60,7 @@ type Lead = {
   meetingContactName?: string;
   meetingContactEmail?: string;
   meetingContactPhonePrivate?: string;
+  meetingCompanyName?: string;
   lockedByUserId?: string | null;
   lockedAt?: string | null;
   lockExpiresAt?: string | null;
@@ -205,11 +209,8 @@ export function CampaignWorkspace({ campaignId, preferredLeadId, voipSession = f
   const [meetingContactName, setMeetingContactName] = useState("");
   const [meetingContactEmail, setMeetingContactEmail] = useState("");
   const [meetingContactPhonePrivate, setMeetingContactPhonePrivate] = useState("");
-  const [meetingContactErrors, setMeetingContactErrors] = useState<{
-    name?: string;
-    email?: string;
-    phone?: string;
-  }>({});
+  const [meetingCompanyName, setMeetingCompanyName] = useState("");
+  const [meetingContactErrors, setMeetingContactErrors] = useState<MeetingContactFieldErrors>({});
   const [callbackDialogOpen, setCallbackDialogOpen] = useState(false);
   const [callbackSubmitError, setCallbackSubmitError] = useState<string | null>(null);
   const [mailDialogOpen, setMailDialogOpen] = useState(false);
@@ -335,6 +336,7 @@ export function CampaignWorkspace({ campaignId, preferredLeadId, voipSession = f
     setMeetingContactName(l.meetingContactName ?? "");
     setMeetingContactEmail(l.meetingContactEmail ?? "");
     setMeetingContactPhonePrivate(l.meetingContactPhonePrivate ?? "");
+    setMeetingCompanyName(l.meetingCompanyName ?? "");
   }, [campaignSystemType]);
 
   const resetFormForPowerWaiting = useCallback(() => {
@@ -355,6 +357,7 @@ export function CampaignWorkspace({ campaignId, preferredLeadId, voipSession = f
     setMeetingContactName("");
     setMeetingContactEmail("");
     setMeetingContactPhonePrivate("");
+    setMeetingCompanyName("");
     setMeetingContactErrors({});
   }, []);
 
@@ -803,6 +806,7 @@ export function CampaignWorkspace({ campaignId, preferredLeadId, voipSession = f
       meetingContactName,
       meetingContactEmail,
       meetingContactPhonePrivate,
+      meetingCompanyName,
     };
   }
 
@@ -832,6 +836,7 @@ export function CampaignWorkspace({ campaignId, preferredLeadId, voipSession = f
     setMeetingContactName(updated.meetingContactName ?? "");
     setMeetingContactEmail(updated.meetingContactEmail ?? "");
     setMeetingContactPhonePrivate(updated.meetingContactPhonePrivate ?? "");
+    setMeetingCompanyName(updated.meetingCompanyName ?? "");
     setError(null);
     return { next: [], updated };
   }
@@ -953,6 +958,7 @@ export function CampaignWorkspace({ campaignId, preferredLeadId, voipSession = f
         meetingContactName,
         meetingContactEmail,
         meetingContactPhonePrivate,
+        meetingCompanyName,
       );
       if (contactErr) setMeetingContactErrors(contactErr);
       else setMeetingContactErrors({});
@@ -1813,6 +1819,7 @@ export function CampaignWorkspace({ campaignId, preferredLeadId, voipSession = f
           meetingContactName,
           meetingContactEmail,
           meetingContactPhonePrivate,
+          meetingCompanyName,
           onMeetingContactName: (v) => {
             setMeetingContactName(v);
             setMeetingContactErrors((prev) => ({ ...prev, name: undefined }));
@@ -1824,6 +1831,10 @@ export function CampaignWorkspace({ campaignId, preferredLeadId, voipSession = f
           onMeetingContactPhonePrivate: (v) => {
             setMeetingContactPhonePrivate(v);
             setMeetingContactErrors((prev) => ({ ...prev, phone: undefined }));
+          },
+          onMeetingCompanyName: (v) => {
+            setMeetingCompanyName(v);
+            setMeetingContactErrors((prev) => ({ ...prev, meetingCompany: undefined }));
           },
           contactRequired: status === "MEETING_BOOKED",
           meetingContactErrors: status === "MEETING_BOOKED" ? meetingContactErrors : undefined,

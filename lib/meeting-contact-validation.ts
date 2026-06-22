@@ -1,6 +1,6 @@
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
-export type MeetingContactFieldKey = "name" | "email" | "phone";
+export type MeetingContactFieldKey = "meetingCompany" | "name" | "email" | "phone";
 
 export type MeetingContactFieldErrors = Partial<Record<MeetingContactFieldKey, string>>;
 
@@ -8,8 +8,12 @@ export function validateMeetingContactFields(
   name: string,
   email: string,
   phonePrivate: string,
+  meetingCompanyName?: string,
 ): MeetingContactFieldErrors | null {
   const errors: MeetingContactFieldErrors = {};
+  if (meetingCompanyName !== undefined && !meetingCompanyName.trim()) {
+    errors.meetingCompany = "Virksomhedsnavn til mødet er påkrævet.";
+  }
   if (!name.trim()) errors.name = "Navn på person til mødet er påkrævet.";
   if (!email.trim()) errors.email = "Personens e-mail er påkrævet.";
   else if (!EMAIL_RE.test(email.trim())) errors.email = "Indtast en gyldig e-mailadresse.";

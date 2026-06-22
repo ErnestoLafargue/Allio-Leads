@@ -37,6 +37,8 @@ import { getDefaultMeetingAssigneeId } from "@/lib/meeting-assignee";
 import { LEAD_ACTIVITY_KIND } from "@/lib/lead-activity-kinds";
 import { hangupActiveOutboundLeadLegsForLead } from "@/lib/dialer-bridge";
 import { canonicalLeadPhoneForStorage } from "@/lib/phone-e164";
+import { ensureCalComBookingForLead } from "@/lib/calcom/sync-lead-booking";
+import { ensureCustomerInPodio } from "@/lib/podio/customer-mapping";
 
 type Params = { params: Promise<{ id: string }> };
 
@@ -283,6 +285,7 @@ export async function PATCH(req: Request, { params }: Params) {
   let meetingContactName = existing.meetingContactName;
   let meetingContactEmail = existing.meetingContactEmail;
   let meetingContactPhonePrivate = existing.meetingContactPhonePrivate;
+  let meetingCompanyName = existing.meetingCompanyName;
 
   let meetingOutcomeStatus = existing.meetingOutcomeStatus ?? MEETING_OUTCOME_PENDING;
   let meetingCommissionDayKey = existing.meetingCommissionDayKey ?? "";
@@ -312,6 +315,9 @@ export async function PATCH(req: Request, { params }: Params) {
     if (typeof body?.meetingContactPhonePrivate === "string") {
       meetingContactPhonePrivate = canonicalLeadPhoneForStorage(body.meetingContactPhonePrivate);
     }
+    if (typeof body?.meetingCompanyName === "string") {
+      meetingCompanyName = body.meetingCompanyName.trim();
+    }
 
     if (!meetingContactName || !meetingContactEmail || !meetingContactPhonePrivate) {
       return NextResponse.json(
@@ -324,6 +330,12 @@ export async function PATCH(req: Request, { params }: Params) {
     }
     if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(meetingContactEmail)) {
       return NextResponse.json({ error: "Ugyldig e-mail til mødekontakten." }, { status: 400 });
+    }
+    if (!meetingCompanyName.trim()) {
+      return NextResponse.json(
+        { error: "Virksomhedsnavn til mødet er påkrævet ved møde booket." },
+        { status: 400 },
+      );
     }
 
     const newMeetingConfirm =
@@ -359,6 +371,7 @@ export async function PATCH(req: Request, { params }: Params) {
     meetingContactName = existing.meetingContactName ?? "";
     meetingContactEmail = existing.meetingContactEmail ?? "";
     meetingContactPhonePrivate = existing.meetingContactPhonePrivate ?? "";
+    meetingCompanyName = existing.meetingCompanyName ?? "";
     meetingOutcomeStatus = existing.meetingOutcomeStatus ?? MEETING_OUTCOME_PENDING;
   } else {
     const preserveMeetingWhenRebooking =
@@ -382,6 +395,10 @@ export async function PATCH(req: Request, { params }: Params) {
         typeof body?.meetingContactPhonePrivate === "string"
           ? canonicalLeadPhoneForStorage(body.meetingContactPhonePrivate)
           : (existing.meetingContactPhonePrivate ?? "");
+      meetingCompanyName =
+        typeof body?.meetingCompanyName === "string"
+          ? body.meetingCompanyName.trim()
+          : (existing.meetingCompanyName ?? "");
       meetingOutcomeStatus = MEETING_OUTCOME_PENDING;
     } else {
       meetingBookedAt = null;
@@ -395,6 +412,9 @@ export async function PATCH(req: Request, { params }: Params) {
       }
       if (typeof body?.meetingContactPhonePrivate === "string") {
         meetingContactPhonePrivate = canonicalLeadPhoneForStorage(body.meetingContactPhonePrivate);
+      }
+      if (typeof body?.meetingCompanyName === "string") {
+        meetingCompanyName = body.meetingCompanyName.trim();
       }
       meetingOutcomeStatus = MEETING_OUTCOME_PENDING;
       meetingCommissionDayKey = "";
@@ -589,6 +609,7 @@ export async function PATCH(req: Request, { params }: Params) {
           meetingContactName,
           meetingContactEmail,
           meetingContactPhonePrivate,
+          meetingCompanyName,
           meetingOutcomeStatus,
           meetingCommissionDayKey,
           bookedFromRebookingCampaign,
@@ -721,6 +742,39 @@ export async function PATCH(req: Request, { params }: Params) {
     return updated;
   });
 
+  let leadResponse = lead;
+  if (
+    status === "MEETING_BOOKED" &&
+    meetingScheduledFor &&
+    meetingContactName &&
+    meetingContactEmail
+  ) {
+    if (!lead.calComBookingUid) {
+      await ensureCalComBookingForLead({
+        leadId: id,
+        start: meetingScheduledFor,
+        attendeeName: meetingContactName,
+        attendeeEmail: meetingContactEmail,
+        attendeePhone: meetingContactPhonePrivate || undefined,
+        notes: notes || undefined,
+      });
+    }
+
+    /** Opret/opdatér kunden i Podio-CRM (idempotent via Allio Lead ID, ikke-fatal). */
+    await ensureCustomerInPodio(id);
+
+    const refreshed = await prisma.lead.findUnique({
+      where: { id },
+      include: {
+        bookedByUser: { select: { id: true, name: true, username: true } },
+        campaign: { select: { id: true, name: true, fieldConfig: true } },
+        lockedByUser: { select: { id: true, name: true, username: true } },
+        callbackReservedByUser: { select: { id: true, name: true, username: true } },
+      },
+    });
+    if (refreshed) leadResponse = refreshed;
+  }
+
   const apiKey = process.env.TELNYX_API_KEY?.trim();
   if (
     apiKey &&
@@ -735,7 +789,7 @@ export async function PATCH(req: Request, { params }: Params) {
     }
   }
 
-  return NextResponse.json(lead);
+  return NextResponse.json(leadResponse);
 }
 
 export async function DELETE() {

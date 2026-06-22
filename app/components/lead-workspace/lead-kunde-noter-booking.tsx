@@ -13,6 +13,9 @@ type MeetingContactProps = {
   onMeetingContactName: (v: string) => void;
   onMeetingContactEmail: (v: string) => void;
   onMeetingContactPhonePrivate: (v: string) => void;
+  /** Virksomhed til mødet — separat fra leadets companyName i Kunde-panelet. */
+  meetingCompanyName: string;
+  onMeetingCompanyName: (v: string) => void;
   contactRequired: boolean;
   meetingContactErrors?: MeetingContactFieldErrors;
 };
@@ -100,6 +103,8 @@ export function LeadKundeNoterBooking({
     onMeetingContactName,
     onMeetingContactEmail,
     onMeetingContactPhonePrivate,
+    meetingCompanyName,
+    onMeetingCompanyName,
     contactRequired,
     meetingContactErrors,
   } = meetingContact;
@@ -159,6 +164,9 @@ export function LeadKundeNoterBooking({
           <MeetingContactFields
             className="mt-4 shrink-0"
             contactRequired={contactRequired}
+            meetingCompanyName={meetingCompanyName}
+            onMeetingCompanyName={onMeetingCompanyName}
+            meetingCompanyNameError={contactRequired ? meetingContactErrors?.meetingCompany : undefined}
             fieldErrors={contactRequired ? meetingContactErrors : undefined}
             meetingContactName={meetingContactName}
             meetingContactEmail={meetingContactEmail}

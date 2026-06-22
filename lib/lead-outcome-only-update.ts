@@ -89,6 +89,10 @@ export function buildLeadOutcomeOnlyUpdate(
     status === "MEETING_BOOKED" || existing.campaign?.systemCampaignType === "rebooking"
       ? existing.meetingContactPhonePrivate ?? ""
       : "";
+  const meetingCompanyName =
+    status === "MEETING_BOOKED" || existing.campaign?.systemCampaignType === "rebooking"
+      ? existing.meetingCompanyName ?? ""
+      : "";
 
   let voicemailMarkedAt = existing.voicemailMarkedAt;
   let notHomeMarkedAt = existing.notHomeMarkedAt;
@@ -150,6 +154,7 @@ export function buildLeadOutcomeOnlyUpdate(
       meetingContactName,
       meetingContactEmail,
       meetingContactPhonePrivate,
+      meetingCompanyName,
       meetingOutcomeStatus,
       meetingCommissionDayKey,
       bookedFromRebookingCampaign,

@@ -5,7 +5,10 @@ import { useRouter, useSearchParams } from "next/navigation";
 import { useEffect, useState } from "react";
 import { LeadOutcomeStrip } from "@/app/components/lead-workspace/lead-outcome-strip";
 import { LeadKundeNoterBooking } from "@/app/components/lead-workspace/lead-kunde-noter-booking";
-import { validateMeetingContactFields } from "@/lib/meeting-contact-validation";
+import {
+  validateMeetingContactFields,
+  type MeetingContactFieldErrors,
+} from "@/lib/meeting-contact-validation";
 import type { LeadStatus } from "@/lib/lead-status";
 
 type CampaignOption = { id: string; name: string };
@@ -52,11 +55,8 @@ export default function NewLeadPage() {
   const [meetingContactName, setMeetingContactName] = useState("");
   const [meetingContactEmail, setMeetingContactEmail] = useState("");
   const [meetingContactPhonePrivate, setMeetingContactPhonePrivate] = useState("");
-  const [meetingContactErrors, setMeetingContactErrors] = useState<{
-    name?: string;
-    email?: string;
-    phone?: string;
-  }>({});
+  const [meetingCompanyName, setMeetingCompanyName] = useState("");
+  const [meetingContactErrors, setMeetingContactErrors] = useState<MeetingContactFieldErrors>({});
   const [custom, setCustom] = useState<Record<string, string>>({});
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
@@ -128,6 +128,7 @@ export default function NewLeadPage() {
         meetingContactName,
         meetingContactEmail,
         meetingContactPhonePrivate,
+        meetingCompanyName,
       );
       if (contactErrors) {
         setMeetingContactErrors(contactErrors);
@@ -156,6 +157,7 @@ export default function NewLeadPage() {
           meetingContactName: meetingContactName.trim(),
           meetingContactEmail: meetingContactEmail.trim(),
           meetingContactPhonePrivate: meetingContactPhonePrivate.trim(),
+          meetingCompanyName: meetingCompanyName.trim(),
           status,
           meetingScheduledFor: status === "MEETING_BOOKED" ? meetingScheduledFor : null,
           customFields: custom,
@@ -286,6 +288,7 @@ export default function NewLeadPage() {
               meetingContactName,
               meetingContactEmail,
               meetingContactPhonePrivate,
+              meetingCompanyName,
               onMeetingContactName: (v) => {
                 setMeetingContactName(v);
                 setMeetingContactErrors((prev) => ({ ...prev, name: undefined }));
@@ -297,6 +300,10 @@ export default function NewLeadPage() {
               onMeetingContactPhonePrivate: (v) => {
                 setMeetingContactPhonePrivate(v);
                 setMeetingContactErrors((prev) => ({ ...prev, phone: undefined }));
+              },
+              onMeetingCompanyName: (v) => {
+                setMeetingCompanyName(v);
+                setMeetingContactErrors((prev) => ({ ...prev, meetingCompany: undefined }));
               },
               contactRequired: status === "MEETING_BOOKED",
               meetingContactErrors: status === "MEETING_BOOKED" ? meetingContactErrors : undefined,

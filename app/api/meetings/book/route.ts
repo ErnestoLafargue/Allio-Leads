@@ -12,6 +12,8 @@ import { findBlockedTimeConflictInDb } from "@/lib/booking/meeting-slots";
 import { findLeadBookingOverlapInDb } from "@/lib/booking/overlap-db";
 import { requireDefaultMeetingAssigneeId } from "@/lib/meeting-assignee";
 import { canonicalLeadPhoneForStorage } from "@/lib/phone-e164";
+import { ensureCalComBookingForLead } from "@/lib/calcom/sync-lead-booking";
+import { ensureCustomerInPodio } from "@/lib/podio/customer-mapping";
 
 export async function POST(req: Request) {
   const { session, response } = await requireSession();
@@ -26,15 +28,19 @@ export async function POST(req: Request) {
     typeof body?.meetingContactPhonePrivate === "string"
       ? canonicalLeadPhoneForStorage(body.meetingContactPhonePrivate)
       : "";
+  const meetingCompanyName =
+    typeof body?.meetingCompanyName === "string" ? body.meetingCompanyName.trim() : "";
   const scheduledRaw = body?.meetingScheduledFor;
 
   /** Lead kræver companyName/phone — udfyldes automatisk fra mødekontakt når kunden ikke angiver virksomhed. */
-  const companyNameFromBody = typeof body?.companyName === "string" ? body.companyName.trim() : "";
   const phoneFromBody =
     typeof body?.phone === "string" ? canonicalLeadPhoneForStorage(body.phone) : "";
   const emailFromBody = typeof body?.email === "string" ? body.email.trim() : "";
   const addressFromBody = typeof body?.address === "string" ? body.address.trim() : "";
 
+  if (!meetingCompanyName) {
+    return NextResponse.json({ error: "Virksomhedsnavn til mødet er påkrævet." }, { status: 400 });
+  }
   if (!meetingContactName || !meetingContactEmail || !meetingContactPhonePrivate) {
     return NextResponse.json(
       {
@@ -48,7 +54,7 @@ export async function POST(req: Request) {
     return NextResponse.json({ error: "Ugyldig e-mail til mødekontakten." }, { status: 400 });
   }
 
-  const companyName = companyNameFromBody || "Direkte møde";
+  const companyName = "Direkte møde";
   const phone = phoneFromBody || meetingContactPhonePrivate;
   const email = emailFromBody || meetingContactEmail;
   const address = addressFromBody;
@@ -110,6 +116,7 @@ export async function POST(req: Request) {
           meetingContactName,
           meetingContactEmail,
           meetingContactPhonePrivate,
+          meetingCompanyName,
           meetingOutcomeStatus: MEETING_OUTCOME_PENDING,
           meetingCommissionDayKey: copenhagenDayKey(meetingBookedAt),
           assignedUserId,
@@ -130,7 +137,34 @@ export async function POST(req: Request) {
       return created;
     });
 
-    return NextResponse.json(lead);
+    /**
+     * Opret ekstern Cal.eu-booking (kalender-sync + Google Meet-link).
+     * Ikke-fatal: fejler Cal.eu, beholder vi den interne booking (hybrid-model).
+     */
+    await ensureCalComBookingForLead({
+      leadId: lead.id,
+      start: meetingScheduledFor,
+      attendeeName: meetingContactName,
+      attendeeEmail: meetingContactEmail,
+      attendeePhone: meetingContactPhonePrivate || undefined,
+      notes: notes || undefined,
+    });
+
+    /**
+     * Opret kunden i Podio-CRM (kunde + onboarding-møde). Ikke-fatal og
+     * idempotent via Allio Lead ID. Køres efter Cal.eu, så mødelinket er sat.
+     */
+    await ensureCustomerInPodio(lead.id);
+
+    const leadWithCalCom = await prisma.lead.findUnique({
+      where: { id: lead.id },
+      include: {
+        bookedByUser: { select: { id: true, name: true, username: true } },
+        campaign: { select: { id: true, name: true } },
+      },
+    });
+
+    return NextResponse.json(leadWithCalCom ?? lead);
   } catch (e) {
     const msg = e instanceof Error ? e.message : String(e);
     return NextResponse.json(

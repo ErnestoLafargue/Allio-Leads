@@ -19,6 +19,7 @@ describe("buildCampaignLeadPatchBody", () => {
     meetingContactName: "",
     meetingContactEmail: "",
     meetingContactPhonePrivate: "",
+    meetingCompanyName: "",
   };
 
   it("sender telefon og email korrekt (ikke byttet om)", () => {
@@ -36,6 +37,7 @@ describe("buildCampaignLeadPatchBody", () => {
         meetingContactName: " Navn ",
         meetingContactEmail: " a@b.dk ",
         meetingContactPhonePrivate: " 12 ",
+        meetingCompanyName: " Firma ApS ",
       },
       { meetingScheduledForISO: "2026-05-01T08:00:00.000Z" },
     );
@@ -44,6 +46,7 @@ describe("buildCampaignLeadPatchBody", () => {
     expect(body.meetingContactName).toBe("Navn");
     expect(body.meetingContactEmail).toBe("a@b.dk");
     expect(body.meetingContactPhonePrivate).toBe("12");
+    expect(body.meetingCompanyName).toBe("Firma ApS");
   });
 });
 

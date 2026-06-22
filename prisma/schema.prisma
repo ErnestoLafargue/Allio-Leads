@@ -134,6 +134,7 @@ model Lead {
   assignedUser        User?     @relation("LeadMeetingAssignedTo", fields: [assignedUserId], references: [id], onDelete: SetNull)
 
   /// Kontaktperson til booket møde (sælgeren udfylder ved møde-booking)
+  meetingCompanyName       String @default("")
   meetingContactName         String @default("")
   meetingContactEmail        String @default("")
   meetingContactPhonePrivate String @default("")
@@ -172,6 +173,15 @@ model Lead {
   /// Første gang den tildelte åbner/reserverer leadet efter planlagt tilbagekald (bruges til genudlevering i kø).
   callbackSeenByAssigneeAt DateTime?
 
+  /// Cal.eu booking uid + ekstern mødelink (Google Meet/Cal Video) — sættes når booking oprettes eksternt.
+  calComBookingUid  String?
+  calComMeetingUrl  String?
+  /// Idempotens-stempler for leverancemails (sættes når mail er sendt).
+  welcomeMailSentAt DateTime?
+  geckoMailSentAt   DateTime?
+  /// Podio item-id for kundens journey-tracking.
+  podioItemId       String?
+
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
@@ -202,6 +212,7 @@ model LeadMeetingRecord {
   meetingOutcomeStatus        String
   meetingCommissionDayKey     String   @default("")
   bookedFromRebookingCampaign Boolean  @default(false)
+  meetingCompanyName          String   @default("")
   meetingContactName          String   @default("")
   meetingContactEmail         String   @default("")
   meetingContactPhonePrivate  String   @default("")
