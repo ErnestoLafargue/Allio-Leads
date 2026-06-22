@@ -263,8 +263,10 @@ Onboarding-mødet forbliver `Afholdt` med Fathom-noter (historik).
 **Kick-off Genbook** i Podio → samme opfølgningsproces med noter om oprindelig tid (flytter
 **ikke** lead til Allio Genbook-kampagnen — det er kun for salgs-onboarding).
 
-> Tilføj feltet `Kick-off dato` manuelt i Møder-appen hvis det mangler, eller kør
-> `node scripts/podio-setup.mjs` på en frisk workspace.
+> Tilføj feltet `Kick-off dato` manuelt i Møder-appen (Dato med tid) hvis det mangler.
+> Podio API tillader ikke felt-oprettelse via app-token — brug Podio UI:
+> Møder → Customize → Add field → **Kick-off dato** (date + time).
+> Verificér med: `node scripts/podio-verify.mjs`
 
 > Trin med PDF→Allio SMS, mails og auto-kickoff-booking i Cal.eu bygges i senere faser.
 
@@ -297,6 +299,9 @@ node scripts/podio-register-hooks.mjs --url=https://allio-leads.vercel.app
 
 Podio sender straks et `hook.verify`-kald. Allios endpoint validerer på begge apps
 automatisk. Når den er bekræftet, er hooken aktiv.
+
+> `hook.verify` kræver ikke `?token=` i URL'en (Podio sender den ikke altid). Øvrige
+> webhook-kald (`item.update`) kræver stadig `PODIO_WEBHOOK_SECRET` i query-strengen.
 
 > Podio kan kun nå offentlige HTTPS-URL'er — virker i produktion (Vercel), ikke mod
 > localhost uden tunnel (fx ngrok).
