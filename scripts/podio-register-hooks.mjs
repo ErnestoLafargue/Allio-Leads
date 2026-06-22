@@ -1,5 +1,5 @@
 /**
- * Registrér Podio → Allio webhooks på MØDER- og KUNDER-appen (item.update).
+ * Registrér Podio → Allio webhooks på MØDER-, KUNDER- og PROCESSER-appen (item.update).
  *
  * Brug:
  *   node scripts/podio-register-hooks.mjs --list
@@ -10,8 +10,8 @@
  * --list     Vis kun eksisterende hooks (ingen ændring).
  * --replace  Slet eksisterende item.update-hooks mod vores sti før oprettelse.
  *
- * Kræver i .env.local: PODIO_CLIENT_ID/SECRET, PODIO_MOEDER_* og PODIO_KUNDER_*,
- * samt (anbefalet) PODIO_WEBHOOK_SECRET.
+ * Kræver i .env.local: PODIO_CLIENT_ID/SECRET, PODIO_MOEDER_*, PODIO_KUNDER_*,
+ * PODIO_PROCESSER_* og (anbefalet) PODIO_WEBHOOK_SECRET.
  */
 
 import fs from "node:fs";
@@ -53,6 +53,11 @@ const APPS = [
     name: "Kunder",
     appId: (process.env.PODIO_KUNDER_APP_ID ?? "").trim(),
     appToken: (process.env.PODIO_KUNDER_APP_TOKEN ?? "").trim(),
+  },
+  {
+    name: "Processer",
+    appId: (process.env.PODIO_PROCESSER_APP_ID ?? "").trim(),
+    appToken: (process.env.PODIO_PROCESSER_APP_TOKEN ?? "").trim(),
   },
 ].filter((a) => a.appId && a.appToken);
 
@@ -165,7 +170,7 @@ async function main() {
     process.exit(1);
   }
   if (APPS.length === 0) {
-    console.error("Mangler PODIO_MOEDER_* og/eller PODIO_KUNDER_* app-id/token i .env.local");
+    console.error("Mangler PODIO_MOEDER_*, PODIO_KUNDER_* og/eller PODIO_PROCESSER_* app-id/token i .env.local");
     process.exit(1);
   }
 

@@ -226,6 +226,15 @@ Allio opretter i Podio:
 
 ### Stadie og processer (Podio ↔ Allio)
 
+| Stadie | Synlige processer i Podio |
+|---|---|
+| **Møde booket** | Kun `Gecko åbnet` |
+| **Gecko åbnet** | Kun `Gecko åbnet` |
+| **Møde afholdt** | Kun `Gecko åbnet` (mellemstadie — flere processer kommer først ved Kick-off prep) |
+| **Kick-off prep** | `Gecko åbnet` + `Kick-off prep` + `SMS-kampagneflow` + `SMS-levering` |
+| **Kampagne kørt** | Ovenstående + `Loom Levering` |
+| **Opsalg & Binding** | Ovenstående + `Opsalg & Binding` |
+
 | Stadie / hændelse | Hvad sker |
 |---|---|
 | **Møde booket** | Kunde + onboarding-møde + `Gecko åbnet` |
@@ -234,14 +243,24 @@ Allio opretter i Podio:
 | **Kick-off prep** | `Kick-off prep` (Fathom-noter i proces-Noter), `SMS-kampagneflow`, `SMS-levering` |
 | **Kick-off afholdt** | Podio Kick-off-møde `Status = Afholdt` → `Stadie = Kampagne kørt` + `Loom Levering` |
 | **Kick-off aflyst/genbook** | Proces `Kick-off opfølgning` med noter (ikke Allio Genbook-kampagne) |
+| **Onboarding aflyst** (Cal eller Podio) | Møde `Aflyst`, `Stadie = Tabt/Annulleret`, **alle processer slettes** — lead flyttes til Genbook i Allio |
+| **Genbook efter annullering** | Ved ny booking: `Stadie = Møde booket` + frisk `Gecko åbnet` |
 | **Kampagne kørt** | SMS-kampagnen kører |
 | **Opsalg & Binding** | `Opsalg & Binding`-proces oprettes |
 | **Løbende aftale** | TODO — automatisk procesmodel udskydes |
-| **Tabt/Annulleret** | Alle processer slettes for kunden |
+| **Tabt/Annulleret** | Alle processer slettes for kunden (inkl. kick-off opfølgning) |
 
 **Rollback:** Ændrer I `Stadie` manuelt tilbage i Podio (fx fra Kick-off prep til Møde
 afholdt), sletter Allio automatisk processer der hører til højere stadier. Podio kan
 ikke vise en bekræftelsesdialog på webhooks — brug stadie-rollback til at rette fejl.
+
+**Manuel reparation:** Hvis processer mangler efter stadie-ændring (fx webhook var nede):
+
+```bash
+set -a && source .env.local && set +a
+node scripts/podio-sync-processes.mjs <leadId>
+# eller: npx tsx scripts/podio-sync-processes.ts <leadId>
+```
 
 ### Kick-off fra onboarding (kun i Podio)
 
@@ -276,7 +295,7 @@ Onboarding-mødet forbliver `Afholdt` med Fathom-noter (historik).
 
 Endpoint: `https://<domæne>/api/webhooks/podio` (valgfrit `?token=<PODIO_WEBHOOK_SECRET>`).
 
-Registrér `item.update`-hooks på **Møder**- og **Kunder**-appen:
+Registrér `item.update`-hooks på **Møder**, **Kunder** og **Processer**-appen:
 
 ```bash
 node scripts/podio-register-hooks.mjs --url=https://allio-leads.vercel.app
@@ -290,12 +309,22 @@ node scripts/podio-register-hooks.mjs --url=https://allio-leads.vercel.app
 - `Status = Afholdt` + `Type = Onboarding` (+ udfyldt `Kick-off dato`) → kick-off-møde + Cal.eu + stadie
 - `Status = Afholdt` + `Type = Kick-off` → `Stadie = Kampagne kørt` + proces-sync
 - `Status = Aflyst` + `Type = Kick-off` → opfølgningsproces med noter
+- `Status = Aflyst` + `Type = Onboarding` → `Stadie = Tabt/Annulleret` + slet alle processer
 - `Status = Genbook` + `Type = Onboarding` → Allio Genbook-kampagne
 - `Status = Genbook` + `Type = Kick-off` → opfølgningsproces (ikke Allio Genbook)
 
 **Kunder-app** reagerer på:
 
 - Ændring af `Stadie` → opret manglende processer / slet ved rollback
+
+**Processer-app** reagerer på:
+
+- `Gecko åbnet` → `Status = Færdig` → `Stadie = Gecko åbnet` (hvis kunden ikke allerede er længere)
+
+**Cal.eu → Allio** (onboarding, event type `340981`):
+
+- `BOOKING_CANCELLED` / no-show → Genbook i Allio + Podio møde `Aflyst` + `Tabt/Annulleret` + slet processer
+- `BOOKING_RESCHEDULED` → ingen proces-sletning (ombook)
 
 Podio sender straks et `hook.verify`-kald. Allios endpoint validerer på begge apps
 automatisk. Når den er bekræftet, er hooken aktiv.

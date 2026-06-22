@@ -5,7 +5,11 @@ import {
   MEETING_OUTCOME_REBOOK,
 } from "@/lib/meeting-outcome";
 import { LEAD_ACTIVITY_KIND } from "@/lib/lead-activity-kinds";
-import { MOEDE_STATUS, updatePodioMeetingStatus } from "@/lib/podio/customer-mapping";
+import {
+  handleOnboardingMeetingCancelled,
+  MOEDE_STATUS,
+  updatePodioMeetingStatus,
+} from "@/lib/podio/customer-mapping";
 
 /**
  * Anvender Cal.eu-webhook-handlinger på et lead.
@@ -73,6 +77,9 @@ export async function applyCalRebook(
   if (opts.mirrorToPodio !== false) {
     await updatePodioMeetingStatus(leadId, { status: MOEDE_STATUS.aflyst });
   }
+
+  // Onboarding (Cal uid på lead) — slet processer og sæt kunde til Tabt/Annulleret.
+  await handleOnboardingMeetingCancelled(leadId);
 }
 
 /**

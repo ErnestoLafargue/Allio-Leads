@@ -29,6 +29,7 @@ import {
 } from "@/lib/dial-mode";
 import { CampaignVoipStrip, type LineStatus } from "@/app/components/campaign-voip-strip";
 import { LeadActivityDrawer } from "@/app/components/lead-activity-drawer";
+import { LeadIdBadge } from "@/app/components/lead-id-badge";
 import {
   useDialerPresence,
   type AssignedLead,
@@ -1704,6 +1705,7 @@ export function CampaignWorkspace({ campaignId, preferredLeadId, voipSession = f
             {mailSuccess}
           </div>
         )}
+        <LeadIdBadge leadId={current.id} className="mt-2" />
       </div>
 
       <LeadOutcomeStrip

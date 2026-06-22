@@ -11,6 +11,7 @@ import { LeadOutcomeStrip } from "@/app/components/lead-workspace/lead-outcome-s
 import { LeadKundeNoterBooking } from "@/app/components/lead-workspace/lead-kunde-noter-booking";
 import { CallbackScheduleDialog } from "@/app/components/callback-schedule-dialog";
 import { SendStandardMailDialog } from "@/app/components/send-standard-mail-dialog";
+import { LeadIdBadge } from "@/app/components/lead-id-badge";
 import type { BookingConfirmPayload } from "@/app/components/booking/booking-panel";
 import { parseCustomFields } from "@/lib/custom-fields";
 import {
@@ -701,7 +702,10 @@ function LeadDetailInner() {
         )}
 
         <div className="mt-2 flex flex-wrap items-start justify-between gap-3">
-          <h1 className="text-xl font-semibold text-stone-900">{lead.companyName}</h1>
+          <div>
+            <h1 className="text-xl font-semibold text-stone-900">{lead.companyName}</h1>
+            <LeadIdBadge leadId={lead.id} className="mt-1" />
+          </div>
           <a
             href="#lead-aktivitet"
             className="shrink-0 rounded-lg border border-stone-200 bg-white px-3 py-1.5 text-xs font-semibold text-stone-800 shadow-sm hover:bg-stone-50"

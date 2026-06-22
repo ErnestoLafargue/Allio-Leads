@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import {
+  detectPodioItemApp,
   getItem,
   isPodioAppConfigured,
   readCategoryValue,
@@ -12,6 +13,8 @@ import { moveLeadToRebooking } from "@/lib/calcom/webhook-apply";
 import {
   advanceKundeStadie,
   ensureOpfoelgningsProces,
+  handleGeckoProcesFaerdig,
+  handleOnboardingMeetingCancelled,
   KUNDE_STADIE,
   MOEDE,
   MOEDE_TYPE,
@@ -31,13 +34,17 @@ import { handleOnboardingAfholdt } from "@/lib/podio/kickoff-from-onboarding";
  *
  * Kunder-app:
  *   - Stadie-ændring → syncProcessesForStadie
+ *
+ * Processer-app:
+ *   - Gecko åbnet → Færdig → kunde-stadie «Gecko åbnet»
  */
 
 const MOEDE_STATUS_LABEL = "Status";
 const MOEDE_TYPE_LABEL = "Type";
 const KUNDE_STADIE_LABEL = "Stadie";
+const PROCES_STATUS_LABEL = "Status";
 
-const HOOK_APPS: PodioAppKey[] = ["moeder", "kunder"];
+const HOOK_APPS: PodioAppKey[] = ["moeder", "kunder", "processer"];
 
 function expectedToken(): string {
   return (process.env.PODIO_WEBHOOK_SECRET ?? "").trim();
@@ -76,12 +83,26 @@ async function validateHookOnAnyApp(hookId: string, code: string): Promise<boole
 }
 
 async function fetchItemFromAnyApp(itemId: number): Promise<{ app: PodioAppKey; item: PodioItem } | null> {
+  let item: PodioItem | null = null;
   for (const app of HOOK_APPS) {
     if (!isPodioAppConfigured(app)) continue;
-    const item = await getItem(app, itemId);
-    if (item) return { app, item };
+    try {
+      item = await getItem(app, itemId);
+      if (item) break;
+    } catch {
+      /* prøv næste app-token */
+    }
   }
-  return null;
+  if (!item) return null;
+
+  const app = detectPodioItemApp(item);
+  if (!app) {
+    console.log(
+      `[podio] item ${itemId} — ukendt app-type (ext=${item.external_id ?? "?"})`,
+    );
+    return null;
+  }
+  return { app, item };
 }
 
 async function handleKickoffAflystOrGenbook(
@@ -149,6 +170,10 @@ async function handleMoederItem(item: PodioItem, type: string): Promise<NextResp
     if (isKickoff) {
       return handleKickoffAflystOrGenbook(item, leadId, "aflyst");
     }
+    if (isOnboarding) {
+      await handleOnboardingMeetingCancelled(leadId);
+      return NextResponse.json({ ok: true, handled: type, action: "onboarding_aflyst_cleanup" });
+    }
     return NextResponse.json({ ok: true, handled: type, action: "none" });
   }
 
@@ -190,6 +215,25 @@ async function handleKunderItem(item: PodioItem, type: string): Promise<NextResp
 
   await syncProcessesForStadie(leadId, stadie);
   return NextResponse.json({ ok: true, handled: type, action: "sync_processes", stadie });
+}
+
+async function handleProcesItem(item: PodioItem, type: string): Promise<NextResponse> {
+  const status = readCategoryValue(item, PROCES_STATUS_LABEL);
+  console.log(
+    `[podio] ${type} proces item=${item.item_id} ext=${item.external_id ?? "?"} status=${status ?? "?"} proces=${item.fields.find((f) => f.label === "Proces")?.values?.[0]?.value ?? "?"}`,
+  );
+
+  const result = await handleGeckoProcesFaerdig(item);
+  if (result.ok && result.action) {
+    return NextResponse.json({ ok: true, handled: type, action: result.action });
+  }
+
+  return NextResponse.json({
+    ok: true,
+    handled: type,
+    action: "none",
+    reason: result.reason ?? "ignored",
+  });
 }
 
 export async function POST(req: Request) {
@@ -237,6 +281,9 @@ export async function POST(req: Request) {
 
       if (found.app === "moeder") {
         return await handleMoederItem(found.item, type);
+      }
+      if (found.app === "processer") {
+        return await handleProcesItem(found.item, type);
       }
       return await handleKunderItem(found.item, type);
     } catch (err) {

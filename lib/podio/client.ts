@@ -371,6 +371,24 @@ export type PodioItem = {
   fields: PodioItemField[];
 };
 
+/**
+ * Podio item_id er globalt på tværs af apps — GET /item/{id} virker med enhver app-token.
+ * Klassificér item ud fra external_id/felter så webhooks routes korrekt.
+ */
+export function detectPodioItemApp(item: PodioItem): PodioAppKey | null {
+  const ext = (item.external_id ?? "").trim();
+  if (ext.includes("-proc-")) return "processer";
+  if (ext.endsWith("-onboarding") || ext.endsWith("-kickoff")) return "moeder";
+
+  const labels = new Set(item.fields.map((f) => normalizeLabel(f.label)));
+  if (labels.has(normalizeLabel("Proces"))) return "processer";
+  if (labels.has(normalizeLabel("Type")) && labels.has(normalizeLabel("Dato & tid"))) {
+    return "moeder";
+  }
+  if (labels.has(normalizeLabel("Stadie"))) return "kunder";
+  return null;
+}
+
 /** Hent et helt item (felter + external_id). Returnerer null ved 404. */
 export async function getItem(app: PodioAppKey, itemId: number): Promise<PodioItem | null> {
   const { status, json } = await podioRequest(app, "GET", `/item/${itemId}`);

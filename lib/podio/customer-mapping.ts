@@ -25,6 +25,8 @@ import {
   isPodioAppConfigured,
   isPodioConfigured,
   readAppRelationItemIds,
+  readCategoryValue,
+  readTextValue,
   resolveCategoryOptionId,
   resolveFieldExternalId,
   setPodioFieldValue,
@@ -73,6 +75,7 @@ export type KundeStadie = (typeof STADIE_ORDER)[number];
 
 export const KUNDE_STADIE = {
   moedeBooket: "Møde booket",
+  geckoAabnet: "Gecko åbnet",
   kickoffPrep: "Kick-off prep",
   kampagneKoert: "Kampagne kørt",
   tabt: "Tabt/Annulleret",
@@ -118,9 +121,12 @@ const PROCES = {
   noter: "Noter",
 } as const;
 
+export const PROCES_GECKO_KEY = "gecko";
+
 const PROCES_STATUS = {
   ikkeStartet: "Ikke startet",
   iGang: "I gang",
+  faerdig: "Færdig",
 } as const;
 
 /** Opfølgningsproces ved kick-off aflyst/genbook (ikke stadie-drevet). */
@@ -212,6 +218,94 @@ function leadIdFromMoedeExternalId(externalId: string | null | undefined): strin
   return leadId || null;
 }
 
+function leadIdFromProcesExternalId(
+  externalId: string | null | undefined,
+): { leadId: string; key: string } | null {
+  const ext = (externalId ?? "").trim();
+  const marker = "-proc-";
+  const idx = ext.lastIndexOf(marker);
+  if (idx <= 0) return null;
+  const leadId = ext.slice(0, idx);
+  const key = ext.slice(idx + marker.length);
+  return leadId && key ? { leadId, key } : null;
+}
+
+/** Udled Allio leadId fra et Proces-item (external_id eller Kunde-relation). */
+export async function resolveLeadIdFromProcesItem(item: PodioItem): Promise<string | null> {
+  const fromExt = leadIdFromProcesExternalId(item.external_id);
+  if (fromExt) return fromExt.leadId;
+  if (!isPodioAppConfigured("kunder")) return null;
+  const kundeIds = readAppRelationItemIds(item, PROCES.kunde);
+  if (kundeIds.length === 0) return null;
+  try {
+    const kunde = await getItem("kunder", kundeIds[0]);
+    const ext = (kunde?.external_id ?? "").trim();
+    return ext || null;
+  } catch {
+    return null;
+  }
+}
+
+function isGeckoProcesItem(item: PodioItem): boolean {
+  const fromExt = leadIdFromProcesExternalId(item.external_id);
+  if (fromExt?.key === PROCES_GECKO_KEY) return true;
+  const navn = (readTextValue(item, PROCES.proces) ?? "").trim().toLowerCase();
+  return navn === "gecko åbnet";
+}
+
+/**
+ * Når proces «Gecko åbnet» sættes til Færdig → kundens stadie til «Gecko åbnet».
+ * Idempotent: springer over hvis kunden allerede er på eller forbi det stadie.
+ */
+export async function handleGeckoProcesFaerdig(item: PodioItem): Promise<{
+  ok: boolean;
+  action?: string;
+  reason?: string;
+}> {
+  const status = (readCategoryValue(item, PROCES.status) ?? "").trim().toLowerCase();
+  if (status !== PROCES_STATUS.faerdig.toLowerCase()) {
+    return { ok: false, reason: "not_faerdig" };
+  }
+  if (!isGeckoProcesItem(item)) {
+    return { ok: false, reason: "not_gecko" };
+  }
+
+  const leadId = await resolveLeadIdFromProcesItem(item);
+  if (!leadId) {
+    return { ok: false, reason: "no_lead" };
+  }
+
+  const advanced = await advanceKundeStadieToGeckoOpened(leadId);
+  return advanced
+    ? { ok: true, action: "stadie_gecko_aabnet" }
+    : { ok: true, action: "stadie_gecko_aabnet_noop" };
+}
+
+/** Sæt kunde-stadie til «Gecko åbnet» hvis kunden endnu ikke er forbi det stadie. */
+export async function advanceKundeStadieToGeckoOpened(leadId: string): Promise<boolean> {
+  if (!isPodioAppConfigured("kunder")) return false;
+
+  try {
+    const kundeItemId = await findItemIdByExternalId("kunder", leadId);
+    if (!kundeItemId) return false;
+
+    const kunde = await getItem("kunder", kundeItemId);
+    if (!kunde) return false;
+    const current = readCategoryValue(kunde, KUNDE.stadie);
+    const targetIndex = stadieIndex(KUNDE_STADIE.geckoAabnet);
+    const currentIndex = stadieIndex(current ?? "");
+    if (currentIndex >= targetIndex && currentIndex >= 0) {
+      return false;
+    }
+
+    await advanceKundeStadie(leadId, KUNDE_STADIE.geckoAabnet);
+    return true;
+  } catch (err) {
+    logPodioError("advanceKundeStadieToGeckoOpened", err);
+    return false;
+  }
+}
+
 /** Udled Allio leadId fra et Møde-item (external_id eller Kunde-relation). */
 export async function resolveLeadIdFromMoedeItem(item: PodioItem): Promise<string | null> {
   const fromExt = leadIdFromMoedeExternalId(item.external_id);
@@ -276,6 +370,7 @@ export async function syncProcessesForStadie(leadId: string, stadie: string): Pr
       for (const key of LEGACY_PROCES_KEYS) {
         await deleteProcessByKey(leadId, key);
       }
+      await deleteProcessByKey(leadId, PROCES_OPFOELGNING.key);
       return;
     }
 
@@ -340,6 +435,30 @@ export async function ensureOpfoelgningsProces(leadId: string, noter: string): P
   } catch (err) {
     logPodioError("ensureOpfoelgningsProces", err);
   }
+}
+
+/** Læs nuværende kunde-stadie fra Podio (null hvis ukendt/manglende). */
+export async function readKundeStadie(leadId: string): Promise<string | null> {
+  if (!isPodioAppConfigured("kunder")) return null;
+
+  try {
+    const kundeItemId = await findItemIdByExternalId("kunder", leadId);
+    if (!kundeItemId) return null;
+    const item = await getItem("kunder", kundeItemId);
+    if (!item) return null;
+    return readCategoryValue(item, KUNDE.stadie);
+  } catch (err) {
+    logPodioError("readKundeStadie", err);
+    return null;
+  }
+}
+
+/**
+ * Hard reset efter annullering af onboarding-mødet: slet alle processer og sæt
+ * kunde-stadie til Tabt/Annulleret. Idempotent. Ikke-fatal.
+ */
+export async function handleOnboardingMeetingCancelled(leadId: string): Promise<void> {
+  await advanceKundeStadie(leadId, KUNDE_STADIE.tabt);
 }
 
 /** Opdater Kunde-stadie i Podio og synk processer derefter. Ikke-fatal. */
@@ -483,6 +602,7 @@ export async function ensureCustomerInPodio(leadId: string): Promise<void> {
     } else {
       const fields = await buildKundeFields(lead, true);
       kundeItemId = await createItem("kunder", { externalId: lead.id, fields });
+      await syncProcessesForStadie(lead.id, KUNDE_STADIE.moedeBooket);
     }
 
     if (lead.podioItemId !== String(kundeItemId)) {
@@ -493,7 +613,6 @@ export async function ensureCustomerInPodio(leadId: string): Promise<void> {
     }
 
     await ensureOnboardingMeeting(lead, kundeItemId);
-    await syncProcessesForStadie(lead.id, KUNDE_STADIE.moedeBooket);
   } catch (err) {
     logPodioError("ensureCustomerInPodio", err);
   }

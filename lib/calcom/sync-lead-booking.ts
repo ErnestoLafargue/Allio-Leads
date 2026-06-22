@@ -1,5 +1,6 @@
 import { prisma } from "@/lib/prisma";
 import { createCalComBooking, isCalComConfigured } from "@/lib/calcom/client";
+import { calBookingNeedsRefresh } from "@/lib/calcom/fetch-booking";
 
 export type EnsureCalComBookingInput = {
   leadId: string;
@@ -8,10 +9,13 @@ export type EnsureCalComBookingInput = {
   attendeeEmail: string;
   attendeePhone?: string;
   notes?: string;
+  /** Opret ny booking selv om leadet allerede har calComBookingUid (genbook). */
+  replaceExisting?: boolean;
 };
 
 /**
- * Opretter Cal.eu-booking for et lead hvis det endnu ikke har calComBookingUid.
+ * Opretter Cal.eu-booking for et lead hvis det endnu ikke har calComBookingUid,
+ * eller når replaceExisting er sat (genbook / ny mødetid).
  * Ikke-fatal: returnerer null ved fejl (intern Allio-booking bevares).
  */
 export async function ensureCalComBookingForLead(
@@ -21,9 +25,17 @@ export async function ensureCalComBookingForLead(
 
   const existing = await prisma.lead.findUnique({
     where: { id: input.leadId },
-    select: { calComBookingUid: true },
+    select: { calComBookingUid: true, meetingScheduledFor: true },
   });
-  if (existing?.calComBookingUid) return null;
+  if (!existing) return null;
+
+  if (existing.calComBookingUid && !input.replaceExisting) {
+    const needsRefresh = await calBookingNeedsRefresh({
+      calComBookingUid: existing.calComBookingUid,
+      meetingScheduledFor: existing.meetingScheduledFor,
+    });
+    if (!needsRefresh) return null;
+  }
 
   try {
     const booking = await createCalComBooking({
@@ -41,13 +53,10 @@ export async function ensureCalComBookingForLead(
       },
     });
     console.log(
-      `[calcom] booking oprettet for lead ${input.leadId}: uid=${booking.uid}`,
+      `[calcom] booking ${input.replaceExisting || existing.calComBookingUid ? "opdateret" : "oprettet"} for lead ${input.leadId}: uid=${booking.uid}`,
     );
     return booking;
   } catch (err) {
-    // Ikke-fatal: intern Allio-booking bevares. Men uden uid kan en senere
-    // Cal.eu-aflysning ikke matches — derfor logges det tydeligt, og
-    // scripts/calcom-reconcile.ts --repair-uids er sikkerhedsnettet.
     console.error(
       `[calcom] ensureCalComBookingForLead FEJLEDE for lead ${input.leadId} (uid mangler — aflysninger kan ikke matche):`,
       err instanceof Error ? err.message : err,
