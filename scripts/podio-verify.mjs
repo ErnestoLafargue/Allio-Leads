@@ -58,7 +58,7 @@ const STADIER = [
   "Gecko åbnet",
   "Møde afholdt",
   "Kick-off prep",
-  "SMS Levering",
+    "SMS leveret",
   "Kick-off afholdt",
   "Kampagne kørt",
   "Loom Levering",

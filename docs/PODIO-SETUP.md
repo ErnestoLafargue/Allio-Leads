@@ -81,7 +81,7 @@ som vist (inkl. store/små bogstaver og tegn).
 2. `Gecko åbnet`
 3. `Møde afholdt`
 4. `Kick-off prep`
-5. `SMS Levering`
+5. `SMS leveret`
 6. `Kick-off afholdt`
 7. `Kampagne kørt`
 8. `Loom Levering`
@@ -231,7 +231,8 @@ Allio opretter i Podio:
 | **Møde booket** | Kun `Gecko åbnet` |
 | **Gecko åbnet** | Kun `Gecko åbnet` |
 | **Møde afholdt** | Kun `Gecko åbnet` (mellemstadie — flere processer kommer først ved Kick-off prep) |
-| **Kick-off prep** | `Gecko åbnet` + `SMS-kampagne levering` |
+| **Kick-off prep** | `Gecko åbnet` + `SMS-kampagne levering` (`Ikke startet`) |
+| **SMS leveret** | `Gecko åbnet` + `SMS-kampagne levering` (`Færdig`) |
 | **Kampagne kørt** | Ovenstående + `Loom Levering` |
 | **Opsalg & Binding** | Ovenstående + `Opsalg & Binding` |
 
@@ -241,6 +242,7 @@ Allio opretter i Podio:
 | **Gecko åbnet** | Manuel proces — Gecko-mail for booking-API |
 | **Møde afholdt** (onboarding) | Se **Kick-off fra onboarding** nedenfor |
 | **Kick-off prep** | `SMS-kampagne levering` oprettes (`Ikke startet`); Fathom-noter kopieres til `Noter` |
+| **SMS-kampagne levering → Færdig** | `Stadie = SMS leveret` (automatisk via Processer-webhook) |
 | **Kick-off afholdt** | Podio Kick-off-møde `Status = Afholdt` → `Stadie = Kampagne kørt` + `Loom Levering` |
 | **Kick-off aflyst/genbook** | Proces `Kick-off opfølgning` med noter (ikke Allio Genbook-kampagne) |
 | **Onboarding aflyst** (Cal eller Podio) | Møde `Aflyst`, `Stadie = Tabt/Annulleret`, **alle processer slettes** — lead flyttes til Genbook i Allio |
@@ -320,6 +322,10 @@ node scripts/podio-register-hooks.mjs --url=https://allio-leads.vercel.app
 **Processer-app** reagerer på:
 
 - `Gecko åbnet` → `Status = Færdig` → `Stadie = Gecko åbnet` (hvis kunden ikke allerede er længere)
+- `SMS-kampagne levering` → `Status = Færdig` → `Stadie = SMS leveret` (hvis kunden ikke allerede er længere)
+
+> **Podio UI:** Omdøb kategori-valget `SMS Levering` til **`SMS leveret`** på Kunder-appens
+> `Stadie`-felt, så det matcher Allio (eller opret nyt valg og slet det gamle).
 
 **Cal.eu → Allio** (onboarding, event type `340981`):
 

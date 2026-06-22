@@ -15,6 +15,7 @@ import {
   ensureOpfoelgningsProces,
   handleGeckoProcesFaerdig,
   handleOnboardingMeetingCancelled,
+  handleSmsKampagneLeveringProcesFaerdig,
   KUNDE_STADIE,
   MOEDE,
   MOEDE_TYPE,
@@ -37,6 +38,7 @@ import { handleOnboardingAfholdt } from "@/lib/podio/kickoff-from-onboarding";
  *
  * Processer-app:
  *   - Gecko åbnet → Færdig → kunde-stadie «Gecko åbnet»
+ *   - SMS-kampagne levering → Færdig → kunde-stadie «SMS leveret»
  */
 
 const MOEDE_STATUS_LABEL = "Status";
@@ -223,16 +225,21 @@ async function handleProcesItem(item: PodioItem, type: string): Promise<NextResp
     `[podio] ${type} proces item=${item.item_id} ext=${item.external_id ?? "?"} status=${status ?? "?"} proces=${item.fields.find((f) => f.label === "Proces")?.values?.[0]?.value ?? "?"}`,
   );
 
-  const result = await handleGeckoProcesFaerdig(item);
-  if (result.ok && result.action) {
-    return NextResponse.json({ ok: true, handled: type, action: result.action });
+  const geckoResult = await handleGeckoProcesFaerdig(item);
+  if (geckoResult.ok && geckoResult.action) {
+    return NextResponse.json({ ok: true, handled: type, action: geckoResult.action });
+  }
+
+  const smsResult = await handleSmsKampagneLeveringProcesFaerdig(item);
+  if (smsResult.ok && smsResult.action) {
+    return NextResponse.json({ ok: true, handled: type, action: smsResult.action });
   }
 
   return NextResponse.json({
     ok: true,
     handled: type,
     action: "none",
-    reason: result.reason ?? "ignored",
+    reason: smsResult.reason ?? geckoResult.reason ?? "ignored",
   });
 }
 

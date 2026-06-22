@@ -62,7 +62,7 @@ export const STADIE_ORDER = [
   "Gecko åbnet",
   "Møde afholdt",
   "Kick-off prep",
-  "SMS Levering",
+  "SMS leveret",
   "Kick-off afholdt",
   "Kampagne kørt",
   "Loom Levering",
@@ -77,6 +77,7 @@ export const KUNDE_STADIE = {
   moedeBooket: "Møde booket",
   geckoAabnet: "Gecko åbnet",
   kickoffPrep: "Kick-off prep",
+  smsLeveret: "SMS leveret",
   kampagneKoert: "Kampagne kørt",
   tabt: "Tabt/Annulleret",
 } as const satisfies Record<string, KundeStadie>;
@@ -264,6 +265,13 @@ function isGeckoProcesItem(item: PodioItem): boolean {
   return navn === "gecko åbnet";
 }
 
+function isSmsKampagneLeveringProcesItem(item: PodioItem): boolean {
+  const fromExt = leadIdFromProcesExternalId(item.external_id);
+  if (fromExt?.key === PROCES_SMS_KAMPAGNE_LEVERING_KEY) return true;
+  const navn = (readTextValue(item, PROCES.proces) ?? "").trim().toLowerCase();
+  return navn === "sms-kampagne levering";
+}
+
 /**
  * Når proces «Gecko åbnet» sættes til Færdig → kundens stadie til «Gecko åbnet».
  * Idempotent: springer over hvis kunden allerede er på eller forbi det stadie.
@@ -292,6 +300,34 @@ export async function handleGeckoProcesFaerdig(item: PodioItem): Promise<{
     : { ok: true, action: "stadie_gecko_aabnet_noop" };
 }
 
+/**
+ * Når proces «SMS-kampagne levering» sættes til Færdig → kundens stadie til «SMS leveret».
+ * Idempotent: springer over hvis kunden allerede er på eller forbi det stadie.
+ */
+export async function handleSmsKampagneLeveringProcesFaerdig(item: PodioItem): Promise<{
+  ok: boolean;
+  action?: string;
+  reason?: string;
+}> {
+  const status = (readCategoryValue(item, PROCES.status) ?? "").trim().toLowerCase();
+  if (status !== PROCES_STATUS.faerdig.toLowerCase()) {
+    return { ok: false, reason: "not_faerdig" };
+  }
+  if (!isSmsKampagneLeveringProcesItem(item)) {
+    return { ok: false, reason: "not_sms_kampagne_levering" };
+  }
+
+  const leadId = await resolveLeadIdFromProcesItem(item);
+  if (!leadId) {
+    return { ok: false, reason: "no_lead" };
+  }
+
+  const advanced = await advanceKundeStadieToSmsLeveret(leadId);
+  return advanced
+    ? { ok: true, action: "stadie_sms_leveret" }
+    : { ok: true, action: "stadie_sms_leveret_noop" };
+}
+
 /** Sæt kunde-stadie til «Gecko åbnet» hvis kunden endnu ikke er forbi det stadie. */
 export async function advanceKundeStadieToGeckoOpened(leadId: string): Promise<boolean> {
   if (!isPodioAppConfigured("kunder")) return false;
@@ -313,6 +349,31 @@ export async function advanceKundeStadieToGeckoOpened(leadId: string): Promise<b
     return true;
   } catch (err) {
     logPodioError("advanceKundeStadieToGeckoOpened", err);
+    return false;
+  }
+}
+
+/** Sæt kunde-stadie til «SMS leveret» hvis kunden endnu ikke er forbi det stadie. */
+export async function advanceKundeStadieToSmsLeveret(leadId: string): Promise<boolean> {
+  if (!isPodioAppConfigured("kunder")) return false;
+
+  try {
+    const kundeItemId = await findItemIdByExternalId("kunder", leadId);
+    if (!kundeItemId) return false;
+
+    const kunde = await getItem("kunder", kundeItemId);
+    if (!kunde) return false;
+    const current = readCategoryValue(kunde, KUNDE.stadie);
+    const targetIndex = stadieIndex(KUNDE_STADIE.smsLeveret);
+    const currentIndex = stadieIndex(current ?? "");
+    if (currentIndex >= targetIndex && currentIndex >= 0) {
+      return false;
+    }
+
+    await advanceKundeStadie(leadId, KUNDE_STADIE.smsLeveret);
+    return true;
+  } catch (err) {
+    logPodioError("advanceKundeStadieToSmsLeveret", err);
     return false;
   }
 }

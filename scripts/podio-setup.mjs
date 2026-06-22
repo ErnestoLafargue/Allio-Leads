@@ -198,7 +198,7 @@ async function ensureGenaktivering(leveringId) {
   if (byLabel["Beskrivelse"]) fields[byLabel["Beskrivelse"]] = "Genaktiverings-pakke (standard leveringsmodel).";
   if (byLabel["Stadier"]) {
     fields[byLabel["Stadier"]] =
-      "Møde booket → Gecko åbnet → Møde afholdt → Kick-off prep → SMS Levering → " +
+      "Møde booket → Gecko åbnet → Møde afholdt → Kick-off prep → SMS leveret → " +
       "Kick-off afholdt → Kampagne kørt → Loom Levering → Opsalg & Binding → " +
       "Løbende aftale → Tabt/Annulleret";
   }
@@ -243,7 +243,7 @@ async function main() {
     "Gecko åbnet",
     "Møde afholdt",
     "Kick-off prep",
-    "SMS Levering",
+    "SMS leveret",
     "Kick-off afholdt",
     "Kampagne kørt",
     "Loom Levering",
