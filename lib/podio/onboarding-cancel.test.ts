@@ -46,6 +46,7 @@ describe("handleOnboardingMeetingCancelled", () => {
 
     const deleted = vi.mocked(deleteItemByExternalId).mock.calls.map((c) => c[1]);
     expect(deleted).toContain("lead-cancel-2-proc-gecko");
+    expect(deleted).toContain("lead-cancel-2-proc-sms-kampagne-levering");
     expect(deleted).toContain("lead-cancel-2-proc-kickoff-prep");
     expect(deleted).toContain("lead-cancel-2-proc-sms-flow");
     expect(deleted).toContain("lead-cancel-2-proc-sms-levering");

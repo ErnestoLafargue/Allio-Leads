@@ -135,7 +135,10 @@ export const PROCES_OPFOELGNING = {
   navn: "Kick-off opfølgning",
 } as const;
 
-export const PROCES_KICKOFF_PREP_KEY = "kickoff-prep";
+export const PROCES_SMS_KAMPAGNE_LEVERING_KEY = "sms-kampagne-levering";
+
+/** @deprecated Brug PROCES_SMS_KAMPAGNE_LEVERING_KEY */
+export const PROCES_KICKOFF_PREP_KEY = PROCES_SMS_KAMPAGNE_LEVERING_KEY;
 
 /** Stadie-drevne processer — oprettes lazy ved booking/webhooks (ikke alle 6 på én gang). */
 const PROCES_DEFINITIONS: ReadonlyArray<{
@@ -144,15 +147,23 @@ const PROCES_DEFINITIONS: ReadonlyArray<{
   minimumStadie: KundeStadie;
 }> = [
   { key: "gecko", navn: "Gecko åbnet", minimumStadie: "Møde booket" },
-  { key: "kickoff-prep", navn: "Kick-off prep", minimumStadie: "Kick-off prep" },
-  { key: "sms-flow", navn: "SMS-kampagneflow", minimumStadie: "Kick-off prep" },
-  { key: "sms-levering", navn: "SMS-levering", minimumStadie: "Kick-off prep" },
+  {
+    key: PROCES_SMS_KAMPAGNE_LEVERING_KEY,
+    navn: "SMS-kampagne levering",
+    minimumStadie: "Kick-off prep",
+  },
   { key: "loom", navn: "Loom Levering", minimumStadie: "Kampagne kørt" },
   { key: "opsalg", navn: "Opsalg & Binding", minimumStadie: "Opsalg & Binding" },
 ];
 
-/** Ældre proces-nøgler (merged til kickoff-prep) — slettes ved sync/rollback. */
-const LEGACY_PROCES_KEYS = ["onboarding-noter", "kickoff-pdf"] as const;
+/** Ældre proces-nøgler — slettes ved sync/rollback. */
+const LEGACY_PROCES_KEYS = [
+  "onboarding-noter",
+  "kickoff-pdf",
+  "kickoff-prep",
+  "sms-flow",
+  "sms-levering",
+] as const;
 
 // --- Hjælpere --------------------------------------------------------------
 

@@ -24,7 +24,7 @@ import {
   MOEDE,
   MOEDE_STATUS,
   MOEDE_TYPE,
-  PROCES_KICKOFF_PREP_KEY,
+  PROCES_SMS_KAMPAGNE_LEVERING_KEY,
   resolveLeadIdFromMoedeItem,
   updateProcesNoter,
 } from "@/lib/podio/customer-mapping";
@@ -114,7 +114,7 @@ export async function handleOnboardingAfholdt(item: PodioItem): Promise<Onboardi
   await advanceKundeStadie(leadId, KUNDE_STADIE.kickoffPrep);
 
   if (fathomNoter) {
-    await updateProcesNoter(leadId, PROCES_KICKOFF_PREP_KEY, fathomNoter);
+    await updateProcesNoter(leadId, PROCES_SMS_KAMPAGNE_LEVERING_KEY, fathomNoter);
   }
 
   const existingKickoff = await findItemIdByExternalId("moeder", kickoffExternalId(leadId));
@@ -125,7 +125,7 @@ export async function handleOnboardingAfholdt(item: PodioItem): Promise<Onboardi
     const booking = await createPodioKickoffBooking({
       leadId,
       start: kickoffStart,
-      notes: fathomNoter ? `Kick-off prep\n\n${fathomNoter.slice(0, 500)}` : undefined,
+      notes: fathomNoter ? `SMS-kampagne levering\n\n${fathomNoter.slice(0, 500)}` : undefined,
     });
     meetingUrl = booking?.meetingUrl ?? null;
     calUid = booking?.uid ?? null;

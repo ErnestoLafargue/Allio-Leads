@@ -127,7 +127,7 @@ Standard-processer Allio opretter **stadie-drevet** (lazy, ikke alle på én gan
 | Minimum-stadie | Proces |
 |---|---|
 | Møde booket | `Gecko åbnet` |
-| Kick-off prep | `Kick-off prep` (Fathom-noter + kick-off PDF), `SMS-kampagneflow`, `SMS-levering` |
+| Kick-off prep | `SMS-kampagne levering` (Fathom-noter i `Noter`; status `Ikke startet` → `I gang` → `Færdig`) |
 | Kampagne kørt | `Loom Levering` |
 | Opsalg & Binding | `Opsalg & Binding` |
 
@@ -231,7 +231,7 @@ Allio opretter i Podio:
 | **Møde booket** | Kun `Gecko åbnet` |
 | **Gecko åbnet** | Kun `Gecko åbnet` |
 | **Møde afholdt** | Kun `Gecko åbnet` (mellemstadie — flere processer kommer først ved Kick-off prep) |
-| **Kick-off prep** | `Gecko åbnet` + `Kick-off prep` + `SMS-kampagneflow` + `SMS-levering` |
+| **Kick-off prep** | `Gecko åbnet` + `SMS-kampagne levering` |
 | **Kampagne kørt** | Ovenstående + `Loom Levering` |
 | **Opsalg & Binding** | Ovenstående + `Opsalg & Binding` |
 
@@ -240,7 +240,7 @@ Allio opretter i Podio:
 | **Møde booket** | Kunde + onboarding-møde + `Gecko åbnet` |
 | **Gecko åbnet** | Manuel proces — Gecko-mail for booking-API |
 | **Møde afholdt** (onboarding) | Se **Kick-off fra onboarding** nedenfor |
-| **Kick-off prep** | `Kick-off prep` (Fathom-noter i proces-Noter), `SMS-kampagneflow`, `SMS-levering` |
+| **Kick-off prep** | `SMS-kampagne levering` oprettes (`Ikke startet`); Fathom-noter kopieres til `Noter` |
 | **Kick-off afholdt** | Podio Kick-off-møde `Status = Afholdt` → `Stadie = Kampagne kørt` + `Loom Levering` |
 | **Kick-off aflyst/genbook** | Proces `Kick-off opfølgning` med noter (ikke Allio Genbook-kampagne) |
 | **Onboarding aflyst** (Cal eller Podio) | Møde `Aflyst`, `Stadie = Tabt/Annulleret`, **alle processer slettes** — lead flyttes til Genbook i Allio |
@@ -270,8 +270,8 @@ Alt sker i Podio — Allio reagerer via webhook i baggrunden:
 2. Udfyld **`Kick-off dato`** (dato/tid for næste møde — **ikke** et stadie)
 3. Sæt `Status` til **`Afholdt`**
 4. Allio opretter automatisk:
-   - `Stadie = Kick-off prep` + relevante processer
-   - Fathom-noter kopieres til **`Kick-off prep`**-processens `Noter`
+   - `Stadie = Kick-off prep` + `SMS-kampagne levering`-proces
+   - Fathom-noter kopieres til **`SMS-kampagne levering`**-processens `Noter`
    - Nyt **kick-off-møde** (`Type = Kick-off`, `Status = Booket`) med link
    - **Cal.eu-booking** (event type `CALCOM_KICKOFF_EVENT_TYPE_ID`, fx `342780`) + kalenderinvitation til kunden
 
