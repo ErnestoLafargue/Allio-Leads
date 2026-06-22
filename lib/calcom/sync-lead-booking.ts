@@ -40,10 +40,16 @@ export async function ensureCalComBookingForLead(
         calComMeetingUrl: booking.meetingUrl,
       },
     });
+    console.log(
+      `[calcom] booking oprettet for lead ${input.leadId}: uid=${booking.uid}`,
+    );
     return booking;
   } catch (err) {
+    // Ikke-fatal: intern Allio-booking bevares. Men uden uid kan en senere
+    // Cal.eu-aflysning ikke matches — derfor logges det tydeligt, og
+    // scripts/calcom-reconcile.ts --repair-uids er sikkerhedsnettet.
     console.error(
-      "[calcom] ensureCalComBookingForLead fejlede (lead bevaret):",
+      `[calcom] ensureCalComBookingForLead FEJLEDE for lead ${input.leadId} (uid mangler — aflysninger kan ikke matche):`,
       err instanceof Error ? err.message : err,
     );
     return null;

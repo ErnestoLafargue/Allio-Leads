@@ -31,10 +31,17 @@ export type CalRebookSource = "cancelled" | "no_show";
  * Aflysning eller udeblivelse via Cal -> udfald "Genbook" + flyt til genbook-kampagnen.
  * Leadet beholder status MEETING_BOOKED, så det indgår i genbook-puljen.
  * Slot-blokeringen frigives automatisk (overlap tæller kun udfald PENDING).
+ *
+ * I Podio spejles møde-status som "Aflyst" (kunden aflyste/udeblev). Sælgeren kan
+ * manuelt sætte Podio-status til "Genbook" senere — det er en separat handling der
+ * IKKE ændrer noget i Allio (leadet ligger allerede i Genbook-kampagnen).
+ *
+ * mirrorToPodio=false bruges når kaldet selv kommer FRA Podio (Podio→Allio), så vi
+ * ikke skriver tilbage til Podio og skaber en løkke.
  */
 export async function applyCalRebook(
   leadId: string,
-  opts: { source: CalRebookSource; reason?: string },
+  opts: { source: CalRebookSource; reason?: string; mirrorToPodio?: boolean },
 ): Promise<void> {
   const rebookingCampaignId = await ensureSystemCampaignId("rebooking");
 
@@ -62,8 +69,58 @@ export async function applyCalRebook(
     },
   });
 
-  // Spejl møde-status i Podio (ikke-fatal, no-op hvis Podio ikke er konfigureret).
-  await updatePodioMeetingStatus(leadId, { status: MOEDE_STATUS.genbook });
+  // Spejl møde-status i Podio som "Aflyst" (ikke-fatal, no-op hvis ikke konfigureret).
+  if (opts.mirrorToPodio !== false) {
+    await updatePodioMeetingStatus(leadId, { status: MOEDE_STATUS.aflyst });
+  }
+}
+
+/**
+ * Podio → Allio: flyt et lead til Genbook-kampagnen (kun additivt).
+ *
+ * Kaldes når en sælger manuelt sætter Podio Møde-status til "Genbook". Opdaterer
+ * KUN Allio (skriver aldrig tilbage til Podio). Idempotent: hvis leadet allerede
+ * er REBOOK i genbook-kampagnen, gøres intet. Fjerner aldrig et lead fra Genbook.
+ *
+ * Returnerer true hvis leadet blev flyttet, false hvis det allerede lå korrekt.
+ */
+export async function moveLeadToRebooking(leadId: string): Promise<boolean> {
+  const rebookingCampaignId = await ensureSystemCampaignId("rebooking");
+
+  const lead = await prisma.lead.findUnique({
+    where: { id: leadId },
+    select: { status: true, meetingOutcomeStatus: true, campaignId: true },
+  });
+  if (!lead) return false;
+
+  // Allerede i Genbook-kampagnen med Genbook-udfald → no-op (idempotent).
+  if (
+    lead.status === "MEETING_BOOKED" &&
+    lead.meetingOutcomeStatus === MEETING_OUTCOME_REBOOK &&
+    lead.campaignId === rebookingCampaignId
+  ) {
+    return false;
+  }
+
+  await prisma.lead.update({
+    where: { id: leadId },
+    data: {
+      status: "MEETING_BOOKED",
+      meetingOutcomeStatus: MEETING_OUTCOME_REBOOK,
+      campaignId: rebookingCampaignId,
+    },
+  });
+
+  await prisma.leadActivityEvent.create({
+    data: {
+      leadId,
+      userId: null,
+      kind: LEAD_ACTIVITY_KIND.MEETING_OUTCOME_SET,
+      summary: "Møde sat til Genbook i Podio — flyttet til genbook-kampagnen i Allio.",
+    },
+  });
+
+  return true;
 }
 
 /**

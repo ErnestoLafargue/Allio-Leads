@@ -333,3 +333,43 @@ export async function validateHook(app: PodioAppKey, hookId: string, code: strin
     throw new Error(`Podio hook-validate fejl (${status}).`);
   }
 }
+
+// --- Læs item (til indgående webhook) --------------------------------------
+
+type PodioItemFieldValue = {
+  value?: unknown;
+};
+type PodioItemField = {
+  field_id: number;
+  external_id: string;
+  label: string;
+  type: string;
+  values?: PodioItemFieldValue[];
+};
+export type PodioItem = {
+  item_id: number;
+  external_id?: string | null;
+  fields: PodioItemField[];
+};
+
+/** Hent et helt item (felter + external_id). Returnerer null ved 404. */
+export async function getItem(app: PodioAppKey, itemId: number): Promise<PodioItem | null> {
+  const { status, json } = await podioRequest(app, "GET", `/item/${itemId}`);
+  if (status === 404) return null;
+  if (status !== 200 || !json || typeof json !== "object") {
+    throw new Error(`Podio getItem fejl (${status}) i "${app}" for item ${itemId}.`);
+  }
+  return json as PodioItem;
+}
+
+/**
+ * Læs den valgte tekst i et kategori-felt på et item (via etiket). Returnerer
+ * option-teksten (fx "Genbook") eller null hvis feltet er tomt/findes ikke.
+ */
+export function readCategoryValue(item: PodioItem, label: string): string | null {
+  const want = normalizeLabel(label);
+  const field = item.fields.find((f) => normalizeLabel(f.label) === want);
+  const first = field?.values?.[0]?.value as { text?: string } | undefined;
+  const text = (first?.text ?? "").trim();
+  return text || null;
+}

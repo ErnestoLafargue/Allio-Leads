@@ -99,12 +99,18 @@ export async function createCalComBooking(
       (json.error as { message?: string } | undefined)?.message ||
       text.slice(0, 300) ||
       res.statusText;
+    console.error(
+      `[calcom] createCalComBooking afvist (${res.status}) for ${input.attendeeEmail} @ ${input.start.toISOString()}: ${detail}`,
+    );
     throw new Error(`Cal.eu booking fejlede (${res.status}): ${detail}`);
   }
 
   const data = (json.data ?? {}) as Record<string, unknown>;
   const uid = typeof data.uid === "string" ? data.uid : "";
   if (!uid) {
+    console.error(
+      `[calcom] createCalComBooking 2xx men uden uid for ${input.attendeeEmail} @ ${input.start.toISOString()}: ${text.slice(0, 300)}`,
+    );
     throw new Error("Cal.eu svarede uden booking-uid.");
   }
 
