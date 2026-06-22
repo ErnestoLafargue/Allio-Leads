@@ -731,7 +731,7 @@ export async function ensureCustomerInPodio(leadId: string): Promise<void> {
     if (!lead) return;
 
     let kundeItemId = await resolveKundeItemId(lead.id, lead.podioItemId);
-    const isNewKunde = kundeItemId == null;
+    let isNewKunde = kundeItemId == null;
 
     if (kundeItemId) {
       const fields = await buildKundeFields(lead, false);
