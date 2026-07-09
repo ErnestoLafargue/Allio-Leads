@@ -1,6 +1,9 @@
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
+import { isCalComConfigured, createCalComBooking } from "@/lib/calcom/client";
 import { syncPostBookingIntegrations } from "@/lib/booking/post-booking-sync";
+import { isPodioConfigured } from "@/lib/podio/client";
+import { updateMoedeInPodio, MOEDE_STATUS } from "@/lib/podio/meeting-sync";
 
 /**
  * Gentrig Podio + Cal.eu sync for et booket lead (production-only værktøj).
@@ -54,6 +57,45 @@ export async function GET(req: Request) {
 
   await syncPostBookingIntegrations(leadId);
 
+  let calError: string | null = null;
+  const leadForCal = await prisma.lead.findUnique({
+    where: { id: leadId },
+    select: {
+      calComBookingUid: true,
+      meetingScheduledFor: true,
+      meetingContactName: true,
+      meetingContactEmail: true,
+      meetingContactPhonePrivate: true,
+      notes: true,
+    },
+  });
+
+  if (leadForCal && !leadForCal.calComBookingUid && leadForCal.meetingScheduledFor) {
+    try {
+      const booking = await createCalComBooking({
+        start: leadForCal.meetingScheduledFor,
+        attendeeName: leadForCal.meetingContactName,
+        attendeeEmail: leadForCal.meetingContactEmail,
+        attendeePhone: leadForCal.meetingContactPhonePrivate || undefined,
+        notes: leadForCal.notes || undefined,
+      });
+      await prisma.lead.update({
+        where: { id: leadId },
+        data: {
+          calComBookingUid: booking.uid,
+          calComMeetingUrl: booking.meetingUrl,
+        },
+      });
+      await updateMoedeInPodio(leadId, {
+        status: MOEDE_STATUS.afventer,
+        newStart: leadForCal.meetingScheduledFor,
+        meetingUrl: booking.meetingUrl,
+      });
+    } catch (err) {
+      calError = err instanceof Error ? err.message : String(err);
+    }
+  }
+
   const after = await prisma.lead.findUnique({
     where: { id: leadId },
     select: {
@@ -66,12 +108,17 @@ export async function GET(req: Request) {
   return NextResponse.json({
     ok: true,
     leadId,
+    configured: {
+      podio: isPodioConfigured(),
+      calcom: isCalComConfigured(),
+    },
     before: {
       podioItemId: before.podioItemId,
       calComBookingUid: before.calComBookingUid,
       calComMeetingUrl: before.calComMeetingUrl,
     },
     after,
+    calError,
     success: Boolean(after?.podioItemId && after?.calComBookingUid),
   });
 }
