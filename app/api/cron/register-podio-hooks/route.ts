@@ -77,8 +77,16 @@ export async function GET(req: Request) {
       }
     }
 
-    const dupe = Array.isArray(existing)
-      ? existing.find((h) => h.url?.includes(HOOK_PATH) && h.type === "item.update")
+    const hooksAfterReplace = replace
+      ? ((await (
+          await fetch(`https://api.podio.com/hook/app/${appId}/`, {
+            headers: { Authorization: `OAuth2 ${token}` },
+          })
+        ).json()) as { hook_id?: number; type?: string; url?: string }[])
+      : existing;
+
+    const dupe = Array.isArray(hooksAfterReplace)
+      ? hooksAfterReplace.find((h) => h.url?.includes(HOOK_PATH) && h.type === "item.update")
       : null;
 
     if (dupe?.hook_id) {
