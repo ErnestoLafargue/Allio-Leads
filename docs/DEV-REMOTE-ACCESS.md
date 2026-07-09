@@ -54,6 +54,30 @@ Port **3000/tcp** skal være åben:
 
   Kør derefter på VPS: `npm run dev` (kun localhost), og åbn på Mac: `http://localhost:3000`.
 
+## 4. Podio / Cal.eu fra localhost
+
+`vercel env pull` kan **ikke** hente Sensitive-variabler (Podio, Cal.eu) — de bliver tomme i `.env.local`.
+
+Kopier manuelt fra **Vercel → Settings → Environment Variables → Production → Reveal**:
+
+```env
+PODIO_CLIENT_ID="..."
+PODIO_CLIENT_SECRET="..."
+PODIO_MOEDER_APP_ID="..."
+PODIO_MOEDER_APP_TOKEN="..."
+CALCOM_HOST="api.cal.eu"
+CALCOM_API_KEY="cal_live_..."
+CALCOM_EVENT_TYPE_ID="340981"
+```
+
+Tjek at nøglerne er sat:
+
+```bash
+node scripts/check-local-env.mjs
+```
+
+Genstart dev-serveren efter ændring. **Podio-webhook** (Genbook/Tabt/Vundet tilbage til Allio) virker kun mod production — ikke localhost.
+
 ## Fejlsøgning
 
 | Problem | Løsning |

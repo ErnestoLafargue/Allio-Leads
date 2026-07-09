@@ -86,6 +86,18 @@ node scripts/podio-register-hooks.mjs --list --url=https://allio-leads.vercel.ap
 - `Lead.podioItemId` er cache — bruges til hurtig opslag
 - Per-lead sync-lock (`podioSyncLockUntil`) forhindrer dubletter ved parallel sync
 
+## Gentrig sync for et lead (production)
+
+Hvis booking skete på localhost uden credentials, kan sync gentrigges på production:
+
+```bash
+# Efter deploy — brug AUTH_SECRET fra Vercel (eller PODIO_WEBHOOK_SECRET som ?token=)
+curl -s -H "Authorization: Bearer $AUTH_SECRET" \
+  "https://allio-leads.vercel.app/api/cron/retrigger-booking-sync?leadId=<leadId>"
+```
+
+Alternativt: bekræft mødet igen på https://allio-leads.vercel.app (virker hvis `podioItemId`/`calComBookingUid` mangler).
+
 ## Fejlsøgning
 
 | Problem | Løsning |
