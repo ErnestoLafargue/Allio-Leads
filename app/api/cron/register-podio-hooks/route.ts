@@ -10,9 +10,9 @@ function authorize(req: Request): boolean {
   const authHeader = (req.headers.get("authorization") ?? "").trim();
   const podioSecret = (process.env.PODIO_WEBHOOK_SECRET ?? "").trim();
   const authSecret = (process.env.AUTH_SECRET ?? "").trim();
-  return (
+  return Boolean(
     (podioSecret && token === podioSecret) ||
-    (authSecret && authHeader === `Bearer ${authSecret}`)
+      (authSecret && authHeader === `Bearer ${authSecret}`),
   );
 }
 

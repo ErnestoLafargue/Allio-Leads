@@ -20,9 +20,10 @@ export async function GET(req: Request) {
   const podioSecret = (process.env.PODIO_WEBHOOK_SECRET ?? "").trim();
   const authSecret = (process.env.AUTH_SECRET ?? "").trim();
 
-  const authorized =
+  const authorized = Boolean(
     (podioSecret && token === podioSecret) ||
-    (authSecret && authHeader === `Bearer ${authSecret}`);
+      (authSecret && authHeader === `Bearer ${authSecret}`),
+  );
 
   if (!authorized) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
