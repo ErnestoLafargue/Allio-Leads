@@ -79,22 +79,24 @@ export async function createCalComBooking(
   }
 
   const url = `https://${host()}/v2/bookings`;
-  const body: Record<string, unknown> = {
-    eventTypeId: resolvedEventTypeId,
-    start: input.start.toISOString(),
-    attendee: {
-      name: input.attendeeName,
-      email: input.attendeeEmail,
-      timeZone: "Europe/Copenhagen",
-      language: "da",
-      ...(input.attendeePhone ? { phoneNumber: input.attendeePhone } : {}),
-    },
-    ...(input.notes ? { bookingFieldsResponses: { notes: input.notes } } : {}),
-  };
 
-  let res: Response;
-  try {
-    res = await fetch(url, {
+  async function postBooking(includePhone: boolean): Promise<Response> {
+    const body: Record<string, unknown> = {
+      eventTypeId: resolvedEventTypeId,
+      start: input.start.toISOString(),
+      attendee: {
+        name: input.attendeeName,
+        email: input.attendeeEmail,
+        timeZone: "Europe/Copenhagen",
+        language: "da",
+        ...(includePhone && input.attendeePhone
+          ? { phoneNumber: input.attendeePhone }
+          : {}),
+      },
+      ...(input.notes ? { bookingFieldsResponses: { notes: input.notes } } : {}),
+    };
+
+    return fetch(url, {
       method: "POST",
       headers: {
         Authorization: `Bearer ${apiKey()}`,
@@ -103,16 +105,40 @@ export async function createCalComBooking(
       },
       body: JSON.stringify(body),
     });
+  }
+
+  let res: Response;
+  try {
+    res = await postBooking(Boolean(input.attendeePhone));
   } catch (err) {
     throw new Error(`Cal.eu netværksfejl: ${(err as Error).message}`);
   }
 
-  const text = await res.text();
+  let text = await res.text();
   let json: { data?: Record<string, unknown>; error?: unknown } = {};
   try {
     json = text ? JSON.parse(text) : {};
   } catch {
     /* ignore parse error — håndteres via status nedenfor */
+  }
+
+  if (!res.ok && input.attendeePhone) {
+    const detail =
+      (json.error as { message?: string } | undefined)?.message ||
+      text.slice(0, 300) ||
+      res.statusText;
+    if (detail.toLowerCase().includes("invalid_number")) {
+      console.warn(
+        `[calcom] createCalComBooking: ugyldigt telefonnummer (${input.attendeePhone}) — prøver uden telefon`,
+      );
+      res = await postBooking(false);
+      text = await res.text();
+      try {
+        json = text ? JSON.parse(text) : {};
+      } catch {
+        json = {};
+      }
+    }
   }
 
   if (!res.ok) {
