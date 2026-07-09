@@ -4,6 +4,7 @@ import {
   MEETING_OUTCOME_PENDING,
   MEETING_OUTCOME_REBOOK,
   MEETING_OUTCOME_SALE,
+  MEETING_OUTCOME_LOST,
   normalizeMeetingOutcomeStatus,
 } from "@/lib/meeting-outcome";
 import { ensureStandardCampaignId, ensureSystemCampaignId } from "@/lib/ensure-system-campaigns";
@@ -22,7 +23,7 @@ export async function campaignIdForBookedMeetingOutcome(outcomeRaw: string): Pro
   if (o === MEETING_OUTCOME_SALE) {
     return ensureSystemCampaignId("active_customers");
   }
-  if (o === MEETING_OUTCOME_HELD || o === MEETING_OUTCOME_CANCELLED) {
+  if (o === MEETING_OUTCOME_HELD || o === MEETING_OUTCOME_CANCELLED || o === MEETING_OUTCOME_LOST) {
     return ensureStandardCampaignId();
   }
   return null;

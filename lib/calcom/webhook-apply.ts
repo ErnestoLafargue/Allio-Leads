@@ -5,11 +5,7 @@ import {
   MEETING_OUTCOME_REBOOK,
 } from "@/lib/meeting-outcome";
 import { LEAD_ACTIVITY_KIND } from "@/lib/lead-activity-kinds";
-import {
-  handleOnboardingMeetingCancelled,
-  MOEDE_STATUS,
-  updatePodioMeetingStatus,
-} from "@/lib/podio/customer-mapping";
+import { MOEDE_STATUS, updateMoedeInPodio } from "@/lib/podio/meeting-sync";
 
 /**
  * Anvender Cal.eu-webhook-handlinger på et lead.
@@ -34,11 +30,6 @@ export type CalRebookSource = "cancelled" | "no_show";
 /**
  * Aflysning eller udeblivelse via Cal -> udfald "Genbook" + flyt til genbook-kampagnen.
  * Leadet beholder status MEETING_BOOKED, så det indgår i genbook-puljen.
- * Slot-blokeringen frigives automatisk (overlap tæller kun udfald PENDING).
- *
- * I Podio spejles møde-status som "Aflyst" (kunden aflyste/udeblev). Sælgeren kan
- * manuelt sætte Podio-status til "Genbook" senere — det er en separat handling der
- * IKKE ændrer noget i Allio (leadet ligger allerede i Genbook-kampagnen).
  *
  * mirrorToPodio=false bruges når kaldet selv kommer FRA Podio (Podio→Allio), så vi
  * ikke skriver tilbage til Podio og skaber en løkke.
@@ -73,23 +64,13 @@ export async function applyCalRebook(
     },
   });
 
-  // Spejl møde-status i Podio som "Aflyst" (ikke-fatal, no-op hvis ikke konfigureret).
   if (opts.mirrorToPodio !== false) {
-    await updatePodioMeetingStatus(leadId, { status: MOEDE_STATUS.aflyst });
+    await updateMoedeInPodio(leadId, { status: MOEDE_STATUS.genbook });
   }
-
-  // Onboarding (Cal uid på lead) — slet processer og sæt kunde til Tabt/Annulleret.
-  await handleOnboardingMeetingCancelled(leadId);
 }
 
 /**
  * Podio → Allio: flyt et lead til Genbook-kampagnen (kun additivt).
- *
- * Kaldes når en sælger manuelt sætter Podio Møde-status til "Genbook". Opdaterer
- * KUN Allio (skriver aldrig tilbage til Podio). Idempotent: hvis leadet allerede
- * er REBOOK i genbook-kampagnen, gøres intet. Fjerner aldrig et lead fra Genbook.
- *
- * Returnerer true hvis leadet blev flyttet, false hvis det allerede lå korrekt.
  */
 export async function moveLeadToRebooking(leadId: string): Promise<boolean> {
   const rebookingCampaignId = await ensureSystemCampaignId("rebooking");
@@ -100,7 +81,6 @@ export async function moveLeadToRebooking(leadId: string): Promise<boolean> {
   });
   if (!lead) return false;
 
-  // Allerede i Genbook-kampagnen med Genbook-udfald → no-op (idempotent).
   if (
     lead.status === "MEETING_BOOKED" &&
     lead.meetingOutcomeStatus === MEETING_OUTCOME_REBOOK &&
@@ -132,8 +112,6 @@ export async function moveLeadToRebooking(leadId: string): Promise<boolean> {
 
 /**
  * Ombooking via Cal -> ny mødetid + nyt Meet-link.
- * Gammel tid frigives automatisk (meetingScheduledFor ændres), ny tid optages.
- * Udfald sættes til Afventende og leadet routes til "Kommende møder".
  */
 export async function applyCalReschedule(
   leadId: string,
@@ -162,9 +140,8 @@ export async function applyCalReschedule(
     },
   });
 
-  // Spejl ny dato/link + status i Podio (ikke-fatal, no-op hvis ikke konfigureret).
-  await updatePodioMeetingStatus(leadId, {
-    status: MOEDE_STATUS.booket,
+  await updateMoedeInPodio(leadId, {
+    status: MOEDE_STATUS.afventer,
     newStart: opts.newStart,
     meetingUrl: opts.meetingUrl,
   });

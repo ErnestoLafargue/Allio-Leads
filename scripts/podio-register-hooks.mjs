@@ -1,17 +1,10 @@
 /**
- * Registrér Podio → Allio webhooks på MØDER-, KUNDER- og PROCESSER-appen.
+ * Registrér Podio → Allio webhook på MØDER-appen (Salg-workspace).
  *
  * Brug:
  *   node scripts/podio-register-hooks.mjs --list
  *   node scripts/podio-register-hooks.mjs --url=https://allio-leads.vercel.app
  *   node scripts/podio-register-hooks.mjs --url=https://allio-leads.vercel.app --replace
- *
- * --url      Allios offentlige base-URL (uden trailing slash). Default: prod.
- * --list     Vis kun eksisterende hooks (ingen ændring).
- * --replace  Slet eksisterende hooks mod vores sti før oprettelse.
- *
- * Kræver i .env.local: PODIO_CLIENT_ID/SECRET, PODIO_MOEDER_*, PODIO_KUNDER_*,
- * PODIO_PROCESSER_* og (anbefalet) PODIO_WEBHOOK_SECRET.
  */
 
 import fs from "node:fs";
@@ -43,26 +36,12 @@ const CLIENT_ID = (process.env.PODIO_CLIENT_ID ?? "").trim();
 const CLIENT_SECRET = (process.env.PODIO_CLIENT_SECRET ?? "").trim();
 const WEBHOOK_SECRET = (process.env.PODIO_WEBHOOK_SECRET ?? "").trim();
 
-const APPS = [
-  {
-    name: "Møder",
-    appId: (process.env.PODIO_MOEDER_APP_ID ?? "").trim(),
-    appToken: (process.env.PODIO_MOEDER_APP_TOKEN ?? "").trim(),
-    hookTypes: ["item.update"],
-  },
-  {
-    name: "Kunder",
-    appId: (process.env.PODIO_KUNDER_APP_ID ?? "").trim(),
-    appToken: (process.env.PODIO_KUNDER_APP_TOKEN ?? "").trim(),
-    hookTypes: ["item.update", "item.delete"],
-  },
-  {
-    name: "Processer",
-    appId: (process.env.PODIO_PROCESSER_APP_ID ?? "").trim(),
-    appToken: (process.env.PODIO_PROCESSER_APP_TOKEN ?? "").trim(),
-    hookTypes: ["item.update"],
-  },
-].filter((a) => a.appId && a.appToken);
+const MOEDER_APP = {
+  name: "Møder",
+  appId: (process.env.PODIO_MOEDER_APP_ID ?? "").trim(),
+  appToken: (process.env.PODIO_MOEDER_APP_TOKEN ?? "").trim(),
+  hookTypes: ["item.update"],
+};
 
 function arg(name) {
   const hit = process.argv.find((a) => a.startsWith(`--${name}=`));
@@ -178,8 +157,8 @@ async function main() {
     console.error("Mangler PODIO_CLIENT_ID/SECRET i .env.local");
     process.exit(1);
   }
-  if (APPS.length === 0) {
-    console.error("Mangler PODIO_MOEDER_*, PODIO_KUNDER_* og/eller PODIO_PROCESSER_* app-id/token i .env.local");
+  if (!MOEDER_APP.appId || !MOEDER_APP.appToken) {
+    console.error("Mangler PODIO_MOEDER_APP_ID/TOKEN i .env.local");
     process.exit(1);
   }
 
@@ -187,9 +166,7 @@ async function main() {
     console.log("⚠ PODIO_WEBHOOK_SECRET er ikke sat — hooken oprettes uden token (mindre sikkert).");
   }
 
-  for (const app of APPS) {
-    await ensureHooksForApp(app);
-  }
+  await ensureHooksForApp(MOEDER_APP);
 
   if (FLAG_LIST) {
     console.log("\n(--list: ingen ændringer foretaget)");

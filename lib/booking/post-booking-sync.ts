@@ -1,14 +1,7 @@
 import { prisma } from "@/lib/prisma";
 import { calBookingNeedsRefresh } from "@/lib/calcom/fetch-booking";
 import { ensureCalComBookingForLead } from "@/lib/calcom/sync-lead-booking";
-import {
-  advanceKundeStadie,
-  ensureCustomerInPodio,
-  KUNDE_STADIE,
-  MOEDE_STATUS,
-  readKundeStadie,
-  updatePodioMeetingStatus,
-} from "@/lib/podio/customer-mapping";
+import { ensureMoedeInPodio, MOEDE_STATUS, updateMoedeInPodio } from "@/lib/podio/meeting-sync";
 import { acquirePodioSyncLock, releasePodioSyncLock } from "@/lib/podio/sync-lock";
 
 function syncLog(leadId: string, step: string, startedMs: number): void {
@@ -45,8 +38,8 @@ export async function syncPostBookingIntegrations(leadId: string): Promise<void>
     if (!lead || lead.status !== "MEETING_BOOKED") return;
     if (!lead.meetingScheduledFor || !lead.meetingContactName || !lead.meetingContactEmail) return;
 
-    await ensureCustomerInPodio(leadId);
-    syncLog(leadId, "podio_kunde_moede_processer", t0);
+    await ensureMoedeInPodio(leadId);
+    syncLog(leadId, "podio_moede", t0);
 
     const afterPodio = await prisma.lead.findUnique({
       where: { id: leadId },
@@ -57,18 +50,12 @@ export async function syncPostBookingIntegrations(leadId: string): Promise<void>
     });
 
     if (afterPodio?.meetingScheduledFor) {
-      await updatePodioMeetingStatus(leadId, {
-        status: MOEDE_STATUS.booket,
+      await updateMoedeInPodio(leadId, {
+        status: MOEDE_STATUS.afventer,
         newStart: afterPodio.meetingScheduledFor,
         meetingUrl: afterPodio.calComMeetingUrl,
       });
       syncLog(leadId, "podio_moede_status", t0);
-    }
-
-    const stadie = await readKundeStadie(leadId);
-    if (stadie === KUNDE_STADIE.tabt) {
-      await advanceKundeStadie(leadId, KUNDE_STADIE.moedeBooket);
-      syncLog(leadId, "podio_stadie_reset_fra_tabt", t0);
     }
 
     const needsCal =
@@ -99,8 +86,8 @@ export async function syncPostBookingIntegrations(leadId: string): Promise<void>
       });
 
       if (refreshed?.meetingScheduledFor) {
-        await updatePodioMeetingStatus(leadId, {
-          status: MOEDE_STATUS.booket,
+        await updateMoedeInPodio(leadId, {
+          status: MOEDE_STATUS.afventer,
           newStart: refreshed.meetingScheduledFor,
           meetingUrl: refreshed.calComMeetingUrl,
         });

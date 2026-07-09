@@ -16,6 +16,7 @@ import {
   MEETING_OUTCOME_CANCELLED,
   MEETING_OUTCOME_LABELS,
   MEETING_OUTCOME_PENDING,
+  MEETING_OUTCOME_LOST,
   MEETING_OUTCOME_REBOOK,
   MEETING_OUTCOME_SALE,
   normalizeMeetingOutcomeStatus,
@@ -193,7 +194,8 @@ export async function PATCH(req: Request, { params }: Params) {
       o !== "HELD" &&
       o !== "CANCELLED" &&
       o !== MEETING_OUTCOME_REBOOK &&
-      o !== MEETING_OUTCOME_SALE
+      o !== MEETING_OUTCOME_SALE &&
+      o !== MEETING_OUTCOME_LOST
     ) {
       return NextResponse.json({ error: "Ugyldigt mødeudfald." }, { status: 400 });
     }

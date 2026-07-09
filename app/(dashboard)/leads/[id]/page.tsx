@@ -22,6 +22,7 @@ import {
   meetingOutcomeBadgeClass,
   MEETING_OUTCOME_LABELS,
   MEETING_OUTCOME_PENDING,
+  MEETING_OUTCOME_LOST,
   MEETING_OUTCOME_REBOOK,
   MEETING_OUTCOME_SALE,
 } from "@/lib/meeting-outcome";
@@ -514,7 +515,7 @@ function LeadDetailInner() {
   }
 
   async function patchMeetingOutcome(
-    o: "PENDING" | "HELD" | "CANCELLED" | typeof MEETING_OUTCOME_REBOOK | typeof MEETING_OUTCOME_SALE,
+    o: "PENDING" | "HELD" | "CANCELLED" | typeof MEETING_OUTCOME_REBOOK | typeof MEETING_OUTCOME_SALE | typeof MEETING_OUTCOME_LOST,
   ) {
     if (!lead) return;
     setError(null);

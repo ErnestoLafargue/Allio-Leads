@@ -2,7 +2,7 @@ import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { requireAdmin } from "@/lib/api-auth";
 import { filterLeadIdsForBulkDelete } from "@/lib/lead-delete-guards";
-import { deleteAllPodioArtifactsForLead } from "@/lib/podio/customer-mapping";
+import { deleteMoedeInPodio } from "@/lib/podio/meeting-sync";
 
 export async function POST(req: Request) {
   const { response } = await requireAdmin();
@@ -50,7 +50,7 @@ export async function POST(req: Request) {
   }
 
   for (const leadId of deletableIds) {
-    await deleteAllPodioArtifactsForLead(leadId);
+    await deleteMoedeInPodio(leadId);
   }
 
   const result = await prisma.lead.deleteMany({

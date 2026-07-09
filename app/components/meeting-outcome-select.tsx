@@ -7,6 +7,7 @@ import {
   MEETING_OUTCOME_PENDING,
   MEETING_OUTCOME_REBOOK,
   MEETING_OUTCOME_SALE,
+  MEETING_OUTCOME_LOST,
 } from "@/lib/meeting-outcome";
 
 type MeetingOutcomeValue =
@@ -14,7 +15,8 @@ type MeetingOutcomeValue =
   | typeof MEETING_OUTCOME_HELD
   | typeof MEETING_OUTCOME_CANCELLED
   | typeof MEETING_OUTCOME_REBOOK
-  | typeof MEETING_OUTCOME_SALE;
+  | typeof MEETING_OUTCOME_SALE
+  | typeof MEETING_OUTCOME_LOST;
 
 const OPTIONS: MeetingOutcomeValue[] = [
   MEETING_OUTCOME_PENDING,
@@ -22,6 +24,7 @@ const OPTIONS: MeetingOutcomeValue[] = [
   MEETING_OUTCOME_CANCELLED,
   MEETING_OUTCOME_REBOOK,
   MEETING_OUTCOME_SALE,
+  MEETING_OUTCOME_LOST,
 ];
 
 type Props = {

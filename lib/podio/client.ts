@@ -16,7 +16,7 @@ const OAUTH_URL = "https://podio.com/oauth/token";
 const API_BASE = "https://api.podio.com";
 const APP_CONFIG_TTL_MS = 5 * 60 * 1000;
 
-export type PodioAppKey = "kunder" | "moeder" | "processer" | "betaling" | "levering";
+export type PodioAppKey = "moeder";
 
 type AppEnv = { id: string; token: string };
 
@@ -29,34 +29,18 @@ function clientSecret(): string {
 
 function appEnv(app: PodioAppKey): AppEnv {
   const map: Record<PodioAppKey, AppEnv> = {
-    kunder: {
-      id: (process.env.PODIO_KUNDER_APP_ID ?? "").trim(),
-      token: (process.env.PODIO_KUNDER_APP_TOKEN ?? "").trim(),
-    },
     moeder: {
       id: (process.env.PODIO_MOEDER_APP_ID ?? "").trim(),
       token: (process.env.PODIO_MOEDER_APP_TOKEN ?? "").trim(),
-    },
-    processer: {
-      id: (process.env.PODIO_PROCESSER_APP_ID ?? "").trim(),
-      token: (process.env.PODIO_PROCESSER_APP_TOKEN ?? "").trim(),
-    },
-    betaling: {
-      id: (process.env.PODIO_BETALING_APP_ID ?? "").trim(),
-      token: (process.env.PODIO_BETALING_APP_TOKEN ?? "").trim(),
-    },
-    levering: {
-      id: (process.env.PODIO_LEVERING_APP_ID ?? "").trim(),
-      token: (process.env.PODIO_LEVERING_APP_TOKEN ?? "").trim(),
     },
   };
   return map[app];
 }
 
-/** True hvis Podio er konfigureret (client + mindst Kunder-app). */
+/** True hvis Podio er konfigureret (client + Møder-app). */
 export function isPodioConfigured(): boolean {
-  const k = appEnv("kunder");
-  return Boolean(clientId() && clientSecret() && k.id && k.token);
+  const m = appEnv("moeder");
+  return Boolean(clientId() && clientSecret() && m.id && m.token);
 }
 
 function isAppConfigured(app: PodioAppKey): boolean {
@@ -326,31 +310,6 @@ export async function findItemIdByExternalId(
   return (json as { item_id?: number })?.item_id ?? null;
 }
 
-/** Find kunde-item via Allio Lead ID-felt (backup når external_id mangler på ældre dubletter). */
-export async function findKundeItemIdByAllioLeadId(leadId: string): Promise<number | null> {
-  if (!isAppConfigured("kunder") || !leadId.trim()) return null;
-
-  try {
-    const fieldExt = await resolveFieldExternalId("kunder", "Allio Lead ID");
-    const a = appEnv("kunder");
-    const { status, json } = await podioRequest(
-      "kunder",
-      "POST",
-      `/item/app/${a.id}/filter/`,
-      {
-        filters: { [fieldExt]: leadId.trim() },
-        limit: 1,
-      },
-    );
-    if (status !== 200) return null;
-    const items = (json as { items?: { item_id?: number }[] })?.items ?? [];
-    const id = items[0]?.item_id;
-    return typeof id === "number" && id > 0 ? id : null;
-  } catch {
-    return null;
-  }
-}
-
 /** Slet et item i Podio. */
 export async function deleteItem(app: PodioAppKey, itemId: number): Promise<void> {
   const { status, json } = await podioRequest(app, "DELETE", `/item/${itemId}`);
@@ -395,24 +354,6 @@ export type PodioItem = {
   external_id?: string | null;
   fields: PodioItemField[];
 };
-
-/**
- * Podio item_id er globalt på tværs af apps — GET /item/{id} virker med enhver app-token.
- * Klassificér item ud fra external_id/felter så webhooks routes korrekt.
- */
-export function detectPodioItemApp(item: PodioItem): PodioAppKey | null {
-  const ext = (item.external_id ?? "").trim();
-  if (ext.includes("-proc-")) return "processer";
-  if (ext.endsWith("-onboarding") || ext.endsWith("-kickoff")) return "moeder";
-
-  const labels = new Set(item.fields.map((f) => normalizeLabel(f.label)));
-  if (labels.has(normalizeLabel("Proces"))) return "processer";
-  if (labels.has(normalizeLabel("Type")) && labels.has(normalizeLabel("Dato & tid"))) {
-    return "moeder";
-  }
-  if (labels.has(normalizeLabel("Stadie"))) return "kunder";
-  return null;
-}
 
 /** Hent et helt item (felter + external_id). Returnerer null ved 404. */
 export async function getItem(app: PodioAppKey, itemId: number): Promise<PodioItem | null> {
