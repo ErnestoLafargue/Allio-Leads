@@ -1,22 +1,9 @@
 import { NextResponse } from "next/server";
-import { prisma } from "@/lib/prisma";
 import {
-  getItem,
   isPodioAppConfigured,
-  readCategoryValue,
   validateHook,
 } from "@/lib/podio/client";
-import { moveLeadToRebooking } from "@/lib/calcom/webhook-apply";
-import {
-  MEETING_OUTCOME_LOST,
-  MEETING_OUTCOME_SALE,
-} from "@/lib/meeting-outcome";
-import { LEAD_ACTIVITY_KIND } from "@/lib/lead-activity-kinds";
-import {
-  MOEDE_FIELDS,
-  normalizeMoedeStatus,
-  resolveLeadIdFromMoedeItem,
-} from "@/lib/podio/meeting-sync";
+import { applyMoederItemUpdate } from "@/lib/podio/moeder-item-update";
 
 /**
  * Indgående Podio-webhook (Podio → Allio) for Møder-appen i Salg-workspace.
@@ -36,82 +23,6 @@ function tokenOk(req: Request): boolean {
   if (!expected) return true;
   const got = (new URL(req.url).searchParams.get("token") ?? "").trim();
   return got === expected;
-}
-
-async function applyLostOutcome(leadId: string): Promise<void> {
-  await prisma.lead.update({
-    where: { id: leadId },
-    data: { meetingOutcomeStatus: MEETING_OUTCOME_LOST },
-  });
-  await prisma.leadActivityEvent.create({
-    data: {
-      leadId,
-      userId: null,
-      kind: LEAD_ACTIVITY_KIND.MEETING_OUTCOME_SET,
-      summary: "Møde sat til Tabt i Podio.",
-    },
-  });
-}
-
-async function applySaleOutcome(leadId: string): Promise<void> {
-  const { ensureSystemCampaignId } = await import("@/lib/ensure-system-campaigns");
-  const activeCustomersId = await ensureSystemCampaignId("active_customers");
-
-  await prisma.lead.update({
-    where: { id: leadId },
-    data: {
-      meetingOutcomeStatus: MEETING_OUTCOME_SALE,
-      campaignId: activeCustomersId,
-    },
-  });
-  await prisma.leadActivityEvent.create({
-    data: {
-      leadId,
-      userId: null,
-      kind: LEAD_ACTIVITY_KIND.MEETING_OUTCOME_SET,
-      summary: "Møde sat til Vundet i Podio — flyttet til Aktive kunder.",
-    },
-  });
-}
-
-async function handleMoederItemUpdate(itemId: number): Promise<NextResponse> {
-  const item = await getItem("moeder", itemId);
-  if (!item) {
-    return NextResponse.json({ ok: true, ignored: "item not found" });
-  }
-
-  const leadId = resolveLeadIdFromMoedeItem(item);
-  const statusRaw = readCategoryValue(item, MOEDE_FIELDS.status);
-  const statusKey = normalizeMoedeStatus(statusRaw);
-
-  console.log(
-    `[podio] item.update møde item=${item.item_id} ext=${item.external_id ?? "?"} status=${statusRaw ?? "?"} lead=${leadId ?? "?"}`,
-  );
-
-  if (!leadId) {
-    return NextResponse.json({ ok: true, ignored: "no lead" });
-  }
-
-  if (statusKey === "genbook") {
-    const moved = await moveLeadToRebooking(leadId);
-    return NextResponse.json({
-      ok: true,
-      handled: "item.update",
-      action: moved ? "genbook" : "noop",
-    });
-  }
-
-  if (statusKey === "tabt") {
-    await applyLostOutcome(leadId);
-    return NextResponse.json({ ok: true, handled: "item.update", action: "tabt" });
-  }
-
-  if (statusKey === "vundet") {
-    await applySaleOutcome(leadId);
-    return NextResponse.json({ ok: true, handled: "item.update", action: "vundet" });
-  }
-
-  return NextResponse.json({ ok: true, handled: "item.update", action: "none", status: statusRaw });
 }
 
 export async function POST(req: Request) {
@@ -154,7 +65,8 @@ export async function POST(req: Request) {
     }
 
     try {
-      return await handleMoederItemUpdate(itemId);
+      const result = await applyMoederItemUpdate(itemId);
+      return NextResponse.json(result);
     } catch (err) {
       console.error("[podio] webhook-behandling fejlede:", err instanceof Error ? err.message : err);
       return NextResponse.json({ ok: true, error: "processing failed" });

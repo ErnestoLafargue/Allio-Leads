@@ -1,20 +1,9 @@
 import { NextResponse } from "next/server";
 import { isPodioAppConfigured } from "@/lib/podio/client";
+import { authorizePodioCron } from "@/lib/podio/cron-auth";
 
 const HOOK_PATH = "/api/webhooks/podio";
 const BASE_URL = "https://allio-leads.vercel.app";
-
-function authorize(req: Request): boolean {
-  const url = new URL(req.url);
-  const token = (url.searchParams.get("token") ?? "").trim();
-  const authHeader = (req.headers.get("authorization") ?? "").trim();
-  const podioSecret = (process.env.PODIO_WEBHOOK_SECRET ?? "").trim();
-  const authSecret = (process.env.AUTH_SECRET ?? "").trim();
-  return Boolean(
-    (podioSecret && token === podioSecret) ||
-      (authSecret && authHeader === `Bearer ${authSecret}`),
-  );
-}
 
 async function podioToken(appId: string, appToken: string): Promise<string> {
   const body = new URLSearchParams({
@@ -41,7 +30,7 @@ async function podioToken(appId: string, appToken: string): Promise<string> {
  * GET /api/cron/register-podio-hooks?replace=1
  */
 export async function GET(req: Request) {
-  if (!authorize(req)) {
+  if (!authorizePodioCron(req)) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
 

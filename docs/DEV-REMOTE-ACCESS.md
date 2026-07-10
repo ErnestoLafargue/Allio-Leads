@@ -76,7 +76,35 @@ Tjek at nøglerne er sat:
 node scripts/check-local-env.mjs
 ```
 
-Genstart dev-serveren efter ændring. **Podio-webhook** (Genbook/Tabt/Vundet tilbage til Allio) virker kun mod production — ikke localhost.
+Genstart dev-serveren efter ændring.
+
+### Allio → Podio / Cal.eu (ved booking)
+
+Virker fra localhost når nøglerne ovenfor er sat (`npm run check:env`).
+
+### Podio → Allio (mødeudfald: Tabt / Vundet / Genbook)
+
+Podio sender webhook **kun** til production:
+
+`https://allio-leads.vercel.app/api/webhooks/podio`
+
+Localhost kan **ikke** modtage webhooks direkte. Fordi dev bruger samme Neon-database som production, vises opdateret udfald på localhost efter **side-refresh** — når webhooken på production har kørt.
+
+**Manuel sync under dev** (efter du har ændret status i Podio):
+
+```bash
+# Via production (anbefalet — samme DB)
+curl -s -H "Authorization: Bearer $AUTH_SECRET" \
+  "https://allio-leads.vercel.app/api/cron/sync-podio-outcome?leadId=<LEAD_ID>"
+
+# Eller genafspil via Podio item-id
+curl -s -H "Authorization: Bearer $AUTH_SECRET" \
+  "https://allio-leads.vercel.app/api/cron/replay-podio-webhook?itemId=<PODIO_ITEM_ID>"
+```
+
+Refresh lead-siden bagefter — udfaldet skal matche Podio-status (fx «Møde Tabt» → **Tabt**).
+
+**Tip:** Podio sender kun webhook ved **ændring**. Hvis status allerede var sat før webhook virkede, skift status væk og tilbage i Podio, eller brug `sync-podio-outcome` ovenfor.
 
 ## Fejlsøgning
 
@@ -85,3 +113,4 @@ Genstart dev-serveren efter ændring. **Podio-webhook** (Genbook/Tabt/Vundet til
 | Timeout fra Mac | Tjek cloud firewall + `ss -tlnp \| grep 3000` på VPS |
 | Login fejler | Sæt `AUTH_URL` til præcis den URL du bruger i browseren |
 | Connection refused | Er `npm run dev:remote` kørende? |
+| Podio udfald synker ikke til Allio | Webhook rammer kun production; brug `sync-podio-outcome?leadId=...` og refresh siden |
