@@ -53,7 +53,7 @@ export async function POST(req: Request) {
 
   const e164 = toE164 ? normalizePhoneToE164ForDial(toE164) : null;
   const phoneLabel = e164 ? formatPhoneForActivitySummary(e164) : "ukendt nummer";
-  const summary = `WebRTC: opkald startet til ${phoneLabel}`;
+  const summary = `Opkald startet til ${phoneLabel}`;
 
   try {
     await prisma.leadActivityEvent.create({

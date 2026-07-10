@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
-import { useEffect, useState } from "react";
+import { Suspense, useEffect, useRef, useState } from "react";
 import { LeadOutcomeStrip } from "@/app/components/lead-workspace/lead-outcome-strip";
 import { LeadKundeNoterBooking } from "@/app/components/lead-workspace/lead-kunde-noter-booking";
 import {
@@ -29,11 +29,12 @@ function leadCreateReturnPath(nextParam: string | null): string {
   }
 }
 
-export default function NewLeadPage() {
+function NewLeadPageInner() {
   const router = useRouter();
   const search = useSearchParams();
   const fromUrl = search.get("campaignId")?.trim() ?? "";
   const returnAfterCreate = leadCreateReturnPath(search.get("next"));
+  const submitLockRef = useRef(false);
   const [campaigns, setCampaigns] = useState<CampaignOption[]>([]);
   const [picked, setPicked] = useState("");
   const campaignId = fromUrl || picked;
@@ -109,7 +110,7 @@ export default function NewLeadPage() {
 
   async function onSubmit(e: React.FormEvent) {
     e.preventDefault();
-    if (loading) return;
+    if (loading || submitLockRef.current) return;
     if (!campaignId) {
       setError("Vælg en kampagne");
       return;
@@ -166,12 +167,14 @@ export default function NewLeadPage() {
       if (!res.ok) {
         const j = await res.json().catch(() => ({}));
         setError(j.error ?? "Kunne ikke oprette");
+        setLoading(false);
         return;
       }
+      submitLockRef.current = true;
       router.replace(returnAfterCreate);
+      router.refresh();
     } catch {
       setError("Netværksfejl — prøv igen.");
-    } finally {
       setLoading(false);
     }
   }
@@ -241,6 +244,28 @@ export default function NewLeadPage() {
         <p className="text-sm text-stone-600">Vælg hvilket kampagne leadet skal oprettes under.</p>
       ) : (
         <form onSubmit={onSubmit} className="space-y-4">
+          <div className="sticky top-0 z-10 -mx-1 flex flex-wrap items-center justify-between gap-2 rounded-lg border border-stone-200 bg-white/95 px-3 py-2 shadow-sm backdrop-blur-sm">
+            <div className="flex flex-wrap items-center gap-3">
+              <Link
+                href={returnAfterCreate}
+                className="text-sm font-medium text-stone-600 hover:text-stone-900"
+              >
+                Annuller
+              </Link>
+              {!fromUrl ? (
+                <button
+                  type="button"
+                  onClick={() => setPicked("")}
+                  className="text-sm font-medium text-stone-600 hover:text-stone-900"
+                >
+                  Skift kampagne
+                </button>
+              ) : null}
+            </div>
+            {campaignName ? (
+              <span className="text-xs text-stone-500">{campaignName}</span>
+            ) : null}
+          </div>
           <LeadOutcomeStrip
             status={status}
             onStatusChange={(nextStatus) => {
@@ -324,5 +349,13 @@ export default function NewLeadPage() {
         </form>
       )}
     </div>
+  );
+}
+
+export default function NewLeadPage() {
+  return (
+    <Suspense fallback={<div className="text-center text-stone-500">Henter…</div>}>
+      <NewLeadPageInner />
+    </Suspense>
   );
 }

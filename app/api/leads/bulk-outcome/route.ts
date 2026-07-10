@@ -4,6 +4,7 @@ import { prisma } from "@/lib/prisma";
 import { requireSession } from "@/lib/api-auth";
 import { isLeadStatus, type LeadStatus } from "@/lib/lead-status";
 import { buildLeadOutcomeOnlyUpdate } from "@/lib/lead-outcome-only-update";
+import { shouldIncrementUnansweredAttempts } from "@/lib/lead-attempts";
 import { applyLeadCooldownResets } from "@/lib/lead-cooldown";
 import {
   normalizeLeaderboardOutcomeStatus,
@@ -123,6 +124,9 @@ export async function POST(req: Request) {
           userId,
           status: normalizeLeaderboardOutcomeStatus(status),
         });
+      }
+      if (shouldIncrementUnansweredAttempts(existing, status)) {
+        data.unansweredAttempts = { increment: 1 };
       }
     }
 

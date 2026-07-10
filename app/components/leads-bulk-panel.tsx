@@ -39,6 +39,7 @@ import {
 } from "@/lib/active-campaign-queue";
 import { isLeadInPowerPredictiveCampaignTable } from "@/lib/lead-queue";
 import type { CampaignDialMode } from "@/lib/dial-mode";
+import { leadExceedsMaxAttemptsWarning } from "@/lib/lead-attempts";
 import { buildIndustryFilterLabelMap } from "@/lib/industry-display";
 
 type CampaignLeadViewPrefs = {
@@ -113,6 +114,7 @@ type LeadRow = {
   notes?: string;
   status: string;
   importedAt: string;
+  unansweredAttempts?: number;
   lastOutcomeAt?: string | null;
   /** Fra API (til udfalds-modal) */
   meetingScheduledFor?: string | null;
@@ -169,7 +171,7 @@ function formatDateCell(isoLike: string): string {
   return new Date(t).toLocaleDateString("da-DK");
 }
 
-type SortColumn = "company" | "phone" | "address" | "status" | "campaign" | "imported";
+type SortColumn = "company" | "phone" | "address" | "status" | "campaign" | "imported" | "attempts";
 
 function compareLeads(a: LeadRow, b: LeadRow, key: SortColumn, dir: "asc" | "desc"): number {
   let cmp = 0;
@@ -213,6 +215,10 @@ function compareLeads(a: LeadRow, b: LeadRow, key: SortColumn, dir: "asc" | "des
       const ta = a.importedAt ? new Date(a.importedAt).getTime() : 0;
       const tb = b.importedAt ? new Date(b.importedAt).getTime() : 0;
       cmp = ta - tb;
+      break;
+    }
+    case "attempts": {
+      cmp = (a.unansweredAttempts ?? 0) - (b.unansweredAttempts ?? 0);
       break;
     }
   }
@@ -262,6 +268,8 @@ function sortSummary(key: SortColumn | null, dir: "asc" | "desc"): string {
       return `Telefon numerisk (${d})`;
     case "imported":
       return dir === "desc" ? "Tilføjet: nyeste først" : "Tilføjet: ældste først";
+    case "attempts":
+      return dir === "desc" ? "Forsøg: flest først" : "Forsøg: færrest først";
   }
 }
 
@@ -821,7 +829,7 @@ export function LeadsBulkPanel({
   const actionsBtnClass =
     "rounded-md border border-stone-200 bg-white px-3 py-1.5 text-sm font-medium text-stone-800 shadow-sm hover:bg-stone-50";
 
-  const colCount = (showCampaignColumn ? 7 : 6) + (isAdmin ? 1 : 0);
+  const colCount = (showCampaignColumn ? 8 : 7) + (isAdmin ? 1 : 0);
 
   const tableContainerClass = campaignId
     ? "max-h-[58vh] overflow-x-auto overflow-y-auto rounded-lg border border-stone-200 bg-white shadow-sm"
@@ -1333,6 +1341,16 @@ export function LeadsBulkPanel({
               <th className="px-2 py-3 font-medium">
                 <button
                   type="button"
+                  onClick={() => onSortColumnClick("attempts")}
+                  className="-mx-1 flex w-full items-center gap-0.5 rounded px-1 text-left font-medium text-stone-700 hover:bg-stone-200/80 hover:text-stone-900"
+                >
+                  Forsøg
+                  {sortKey === "attempts" && <span aria-hidden>{sortDir === "asc" ? "↑" : "↓"}</span>}
+                </button>
+              </th>
+              <th className="px-2 py-3 font-medium">
+                <button
+                  type="button"
                   onClick={() => onSortColumnClick("imported")}
                   className="-mx-1 flex w-full items-center gap-0.5 rounded px-1 text-left font-medium text-stone-700 hover:bg-stone-200/80 hover:text-stone-900"
                 >
@@ -1389,6 +1407,14 @@ export function LeadsBulkPanel({
                       >
                         {l.companyName}
                       </Link>
+                      {leadExceedsMaxAttemptsWarning(l.unansweredAttempts ?? 0) && (
+                        <span
+                          className="inline-flex w-fit items-center rounded-full bg-amber-100 px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-amber-900"
+                          title="Max antal forsøg"
+                        >
+                          Max forsøg
+                        </span>
+                      )}
                       {isLockedByAnotherUser(l, myUserId) && (
                         <span className="text-xs text-amber-800">
                           Optaget ({l.lockedByUser?.name ?? "kollega"})
@@ -1424,6 +1450,9 @@ export function LeadsBulkPanel({
                       {l.lastOutcomeAt ? new Date(l.lastOutcomeAt).toLocaleString("da-DK") : "Intet endnu"}
                     </td>
                   )}
+                  <td className="whitespace-nowrap px-2 py-3 tabular-nums text-stone-700">
+                    {l.unansweredAttempts ?? 0}
+                  </td>
                   <td className="whitespace-nowrap px-2 py-3 text-stone-500">
                     {l.importedAt
                       ? new Date(l.importedAt).toLocaleDateString("da-DK")

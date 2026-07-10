@@ -12,6 +12,7 @@ import { filterLeadsByCampaignProtectedSetting } from "@/lib/reklamebeskyttet-fi
 import { filterLeadsByCampaignPhoneSetting } from "@/lib/lead-phone-filter";
 import { normalizePhoneToE164ForDial } from "@/lib/phone-e164";
 import { QUEUE_RESERVATION_TTL_MS } from "@/lib/dialer-shared";
+import { unansweredAttemptsWithinMaxWhere } from "@/lib/lead-attempts";
 
 export type ClaimedDialerLead = {
   leadId: string;
@@ -36,6 +37,7 @@ type CampaignQueueFields = {
   activeQueueFilter: string;
   includeProtectedBusinesses: boolean;
   includeLeadsWithoutPhone: boolean;
+  maxContactAttempts: number | null;
 };
 
 /**
@@ -70,6 +72,7 @@ export async function claimDispatchLeadBatch(
       id: queuedLeadIds.length > 0 ? { notIn: queuedLeadIds } : undefined,
       callbackReservedByUserId: null,
       ...(restrictPowerDialerEligibleAfter ? powerDialerEligibleOrPastWhere(now) : {}),
+      ...unansweredAttemptsWithinMaxWhere(campaign.maxContactAttempts),
     },
     select: {
       id: true,

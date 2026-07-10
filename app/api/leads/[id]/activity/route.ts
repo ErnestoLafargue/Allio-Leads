@@ -6,6 +6,7 @@ import { canAccessCallbackLead } from "@/lib/lead-callback-access";
 import { LEAD_ACTIVITY_KIND } from "@/lib/lead-activity-kinds";
 import { isLeadStatus, LEAD_STATUS_LABELS, type LeadStatus } from "@/lib/lead-status";
 import { normalizeLeaderboardOutcomeStatus } from "@/lib/lead-outcome-log";
+import { dedupeLeadVisits } from "@/lib/lead-visit-dedupe";
 
 /** Hent nok rækker til komplet tidslinje (ældste øverst efter sortering). */
 const ACTIVITY_FETCH_LIMIT = 2000;
@@ -107,13 +108,22 @@ export async function GET(_req: Request, { params }: Params) {
       }),
     ]);
 
-    const visitItems = visits.map((v) => ({
+    const visitsDeduped = dedupeLeadVisits(
+      visits.map((v) => ({
+        ...v,
+        leadId: id,
+      })),
+    );
+
+    const visitItems = visitsDeduped.map((v) => ({
       kind: "visit" as const,
       at: v.visitedAt.toISOString(),
       summary: `${v.user.name} åbnede leadet i arbejdskøen`,
       user: { name: v.user.name, username: v.user.username },
       recordingUrl: null as string | null,
       durationSeconds: null as number | null,
+      noteAdded: null as string | null,
+      noteRemoved: null as string | null,
     }));
 
     const eventItems = events.map((e) => ({
@@ -123,6 +133,8 @@ export async function GET(_req: Request, { params }: Params) {
       user: e.user ? { name: e.user.name, username: e.user.username } : null,
       recordingUrl: e.recordingUrl,
       durationSeconds: e.durationSeconds,
+      noteAdded: e.noteAdded,
+      noteRemoved: e.noteRemoved,
     }));
 
     /** Undgå dobbeltlinje når samme gem både skrev LeadActivityEvent (OUTCOME_SET) og LeadOutcomeLog. */
@@ -143,6 +155,8 @@ export async function GET(_req: Request, { params }: Params) {
       user: log.user ? { name: log.user.name, username: log.user.username } : null,
       recordingUrl: null as string | null,
       durationSeconds: null as number | null,
+      noteAdded: null as string | null,
+      noteRemoved: null as string | null,
     }));
 
     const leadOriginAt = lead.importedAt ?? lead.createdAt;
@@ -153,6 +167,8 @@ export async function GET(_req: Request, { params }: Params) {
       user: null as { name: string; username: string } | null,
       recordingUrl: null as string | null,
       durationSeconds: null as number | null,
+      noteAdded: null as string | null,
+      noteRemoved: null as string | null,
     };
 
     const items = [...visitItems, ...eventItems, ...outcomeLogItems, originItem].sort(

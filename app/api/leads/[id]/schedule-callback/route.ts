@@ -6,6 +6,7 @@ import { isCallbackTimeInCopenhagenBusinessWindow } from "@/lib/callback-datetim
 import { parseCustomFields, stringifyCustomFields } from "@/lib/custom-fields";
 import { normalizeLeaderboardOutcomeStatus } from "@/lib/lead-outcome-log";
 import { LEAD_ACTIVITY_KIND } from "@/lib/lead-activity-kinds";
+import { logNoteUpdateSession } from "@/lib/note-activity";
 import { LEAD_STATUS_LABELS } from "@/lib/lead-status";
 
 type Params = { params: Promise<{ id: string }> };
@@ -171,18 +172,12 @@ export async function POST(req: Request, { params }: Params) {
         },
       });
       if (notesChangedForActivity) {
-        const noteSummary =
-          nextNotesTrim.length > prevNotesTrim.length ||
-          (prevNotesTrim === "" && nextNotesTrim !== "")
-            ? `${label} tilføjede til noter`
-            : `${label} opdaterede noterne`;
-        await tx.leadActivityEvent.create({
-          data: {
-            leadId: id,
-            userId,
-            kind: LEAD_ACTIVITY_KIND.NOTE_UPDATE,
-            summary: noteSummary,
-          },
+        await logNoteUpdateSession(tx, {
+          leadId: id,
+          userId,
+          userLabel: label,
+          prevNotes: prevNotesTrim,
+          nextNotes: nextNotesTrim,
         });
       }
       return u;

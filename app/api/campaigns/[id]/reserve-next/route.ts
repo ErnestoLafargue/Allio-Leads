@@ -20,6 +20,8 @@ import {
 } from "@/lib/active-campaign-queue";
 import { normalizeCampaignDialMode } from "@/lib/dial-mode";
 import { powerDialerEligibleOrPastWhere } from "@/lib/power-dialer-batch";
+import { unansweredAttemptsWithinMaxWhere } from "@/lib/lead-attempts";
+import { LEAD_VISIT_DEDUPE_WINDOW_MS } from "@/lib/lead-visit-dedupe";
 
 type Params = { params: Promise<{ id: string }> };
 
@@ -77,6 +79,7 @@ export async function POST(req: Request, { params }: Params) {
         systemCampaignType: true,
         fieldConfig: true,
         activeQueueFilter: true,
+        maxContactAttempts: true,
       },
     });
     if (!campaign) {
@@ -98,6 +101,7 @@ export async function POST(req: Request, { params }: Params) {
       normalizeCampaignDialMode(campaign.dialMode) === "POWER_DIALER"
         ? powerDialerEligibleOrPastWhere(now)
         : {};
+    const contactAttemptsEligible = unansweredAttemptsWithinMaxWhere(campaign.maxContactAttempts);
 
     async function tryReserve(id: string) {
       const ok = await tryAcquireLeadLock(prisma, id, userId, now);
@@ -134,17 +138,28 @@ export async function POST(req: Request, { params }: Params) {
         }
       }
 
-      await prisma.leadVisitHistory.create({
-        data: {
+      const recentVisit = await prisma.leadVisitHistory.findFirst({
+        where: {
           leadId: lead.id,
           userId,
-          campaignId: lead.campaign?.id ?? null,
-          companyName: lead.companyName,
-          statusAtVisit: lead.status,
-          dayKey: copenhagenDayKey(now),
-          visitedAt: now,
+          visitedAt: { gte: new Date(now.getTime() - LEAD_VISIT_DEDUPE_WINDOW_MS) },
         },
+        select: { id: true },
       });
+
+      if (!recentVisit) {
+        await prisma.leadVisitHistory.create({
+          data: {
+            leadId: lead.id,
+            userId,
+            campaignId: lead.campaign?.id ?? null,
+            companyName: lead.companyName,
+            statusAtVisit: lead.status,
+            dayKey: copenhagenDayKey(now),
+            visitedAt: now,
+          },
+        });
+      }
       return lead;
     }
 
@@ -193,8 +208,9 @@ export async function POST(req: Request, { params }: Params) {
                 newInDialerPool,
               ],
               ...powerDialEligible,
+              ...contactAttemptsEligible,
             }
-          : { campaignId, ...newInDialerPool, ...powerDialEligible },
+          : { campaignId, ...newInDialerPool, ...powerDialEligible, ...contactAttemptsEligible },
       select: {
         id: true,
         status: true,

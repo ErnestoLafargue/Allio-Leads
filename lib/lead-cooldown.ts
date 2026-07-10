@@ -1,31 +1,56 @@
 import { prisma } from "@/lib/prisma";
+import {
+  DEFAULT_UNANSWERED_COOLDOWN_HOURS,
+  isUnansweredCooldownExpired,
+  normalizeUnansweredCooldownHours,
+} from "@/lib/lead-attempts";
 
-const VOICEMAIL_MS = 2 * 60 * 60 * 1000;
-const NOT_HOME_MS = 6 * 60 * 60 * 1000;
+type LeadCooldownCandidate = {
+  id: string;
+  voicemailMarkedAt: Date | null;
+  notHomeMarkedAt: Date | null;
+  updatedAt: Date;
+  campaign: { unansweredCooldownHours: number } | null;
+};
+
+function cooldownHoursForLead(lead: LeadCooldownCandidate): number {
+  return normalizeUnansweredCooldownHours(
+    lead.campaign?.unansweredCooldownHours ?? DEFAULT_UNANSWERED_COOLDOWN_HOURS,
+  );
+}
 
 /**
  * Sætter leads med udløbet ventetid tilbage til NEW (kaldes før læsning af leads).
+ * Cooldown evalueres **pr. kampagne** — dubletter på tværs af kampagner med forskellige
+ * cooldown-tider kan blive ringbare uafhængigt.
+ *
  * Opretter LeadOutcomeLog (userId null, status NEW) så scoreboard får episode-grænse ved genåbning i køen.
  *
- * Tilbagekald: rækker med planlagt genopkald må ikke auto-nulstilles af 2t/6t-reglen.
+ * Tilbagekald: rækker med planlagt genopkald må ikke auto-nulstilles af cooldown-reglen.
  */
 export async function applyLeadCooldownResets(): Promise<void> {
-  const now = Date.now();
-  const voicemailCutoff = new Date(now - VOICEMAIL_MS);
-  const notHomeCutoff = new Date(now - NOT_HOME_MS);
+  const nowMs = Date.now();
   const touchedAt = new Date();
 
-  const toResetVm = await prisma.lead.findMany({
+  const vmCandidates = await prisma.lead.findMany({
     where: {
       status: "VOICEMAIL",
       callbackScheduledFor: null,
-      OR: [
-        { voicemailMarkedAt: { lte: voicemailCutoff } },
-        { AND: [{ voicemailMarkedAt: null }, { updatedAt: { lte: voicemailCutoff } }] },
-      ],
     },
-    select: { id: true },
+    select: {
+      id: true,
+      voicemailMarkedAt: true,
+      notHomeMarkedAt: true,
+      updatedAt: true,
+      campaign: { select: { unansweredCooldownHours: true } },
+    },
   });
+
+  const toResetVm = vmCandidates.filter((lead) => {
+    const markedAt = lead.voicemailMarkedAt ?? lead.updatedAt;
+    return isUnansweredCooldownExpired(markedAt, cooldownHoursForLead(lead), nowMs);
+  });
+
   if (toResetVm.length > 0) {
     const ids = toResetVm.map((l) => l.id);
     await prisma.lead.updateMany({
@@ -42,14 +67,26 @@ export async function applyLeadCooldownResets(): Promise<void> {
     });
   }
 
-  const toResetNh = await prisma.lead.findMany({
+  const nhCandidates = await prisma.lead.findMany({
     where: {
       status: "NOT_HOME",
       callbackScheduledFor: null,
-      notHomeMarkedAt: { not: null, lte: notHomeCutoff },
+      notHomeMarkedAt: { not: null },
     },
-    select: { id: true },
+    select: {
+      id: true,
+      voicemailMarkedAt: true,
+      notHomeMarkedAt: true,
+      updatedAt: true,
+      campaign: { select: { unansweredCooldownHours: true } },
+    },
   });
+
+  const toResetNh = nhCandidates.filter((lead) => {
+    const markedAt = lead.notHomeMarkedAt ?? lead.updatedAt;
+    return isUnansweredCooldownExpired(markedAt, cooldownHoursForLead(lead), nowMs);
+  });
+
   if (toResetNh.length > 0) {
     const ids = toResetNh.map((l) => l.id);
     await prisma.lead.updateMany({

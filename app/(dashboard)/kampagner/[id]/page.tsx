@@ -102,6 +102,12 @@ export default function RedigerKampagnePage() {
   const [exporting, setExporting] = useState(false);
   const [exportMessage, setExportMessage] = useState<string | null>(null);
   const [dialMode, setDialMode] = useState<CampaignDialMode>("NO_DIAL");
+  const [maxContactAttempts, setMaxContactAttempts] = useState("");
+  const [unansweredCooldownHours, setUnansweredCooldownHours] = useState("2");
+  const [contactAttemptStats, setContactAttemptStats] = useState<{
+    totalWorkableLeads: number;
+    eligibleForDialing: number | null;
+  } | null>(null);
 
   const isAdmin = session?.user.role === "ADMIN";
 
@@ -136,6 +142,28 @@ export default function RedigerKampagnePage() {
       setIncludeProtectedBusinesses(Boolean(c.includeProtectedBusinesses));
       setIncludeLeadsWithoutPhone(c.includeLeadsWithoutPhone !== false);
       setDialMode(normalizeCampaignDialMode(c.dialMode));
+      setMaxContactAttempts(
+        c.maxContactAttempts != null && c.maxContactAttempts !== undefined
+          ? String(c.maxContactAttempts)
+          : "",
+      );
+      setUnansweredCooldownHours(
+        c.unansweredCooldownHours != null && c.unansweredCooldownHours !== undefined
+          ? String(c.unansweredCooldownHours)
+          : "2",
+      );
+      setContactAttemptStats(
+        c.contactAttemptStats &&
+          typeof c.contactAttemptStats.totalWorkableLeads === "number"
+          ? {
+              totalWorkableLeads: c.contactAttemptStats.totalWorkableLeads,
+              eligibleForDialing:
+                typeof c.contactAttemptStats.eligibleForDialing === "number"
+                  ? c.contactAttemptStats.eligibleForDialing
+                  : null,
+            }
+          : null,
+      );
       const cfg = parseFieldConfig(c.fieldConfig);
       const next: Record<FieldGroupKey, Row[]> = {
         companyName: [],
@@ -290,6 +318,12 @@ export default function RedigerKampagnePage() {
     if (!isAdmin) return;
     setError(null);
 
+    const cooldownParsed = Number.parseInt(unansweredCooldownHours, 10);
+    if (!Number.isFinite(cooldownParsed) || cooldownParsed < 1) {
+      setError("Cooldown skal være mindst 1 time.");
+      return;
+    }
+
     const used = new Set<string>();
     const extensions: Partial<Record<FieldGroupKey, CampaignExtraField[]>> = {};
 
@@ -324,6 +358,8 @@ export default function RedigerKampagnePage() {
         includeProtectedBusinesses,
         includeLeadsWithoutPhone,
         dialMode,
+        maxContactAttempts: maxContactAttempts.trim() === "" ? null : Number.parseInt(maxContactAttempts, 10),
+        unansweredCooldownHours: cooldownParsed,
       }),
     });
     setSaving(false);
@@ -455,6 +491,71 @@ export default function RedigerKampagnePage() {
             </label>
           ))}
         </fieldset>
+      </section>
+
+      <section className="rounded-lg border border-stone-200 bg-white p-6 shadow-sm">
+        <h2 className="text-sm font-semibold text-stone-900">Max kontaktforsøg</h2>
+        <p className="mt-1 text-xs text-stone-500">
+          Tæller ubesvarede opkald (telefonsvarer og træffes ikke). Leads med flere forsøg end grænsen
+          ringes ikke op automatisk, men forbliver i kampagnen. Skru op i løbet af dagen for at få flere
+          leads i opkaldspuljen.
+        </p>
+        <div className="mt-4 max-w-xs">
+          <label htmlFor="maxContactAttempts" className="block text-xs font-medium text-stone-700">
+            Maks. ubesvarede forsøg
+          </label>
+          <input
+            id="maxContactAttempts"
+            type="number"
+            min={0}
+            step={1}
+            inputMode="numeric"
+            value={maxContactAttempts}
+            onChange={(e) => setMaxContactAttempts(e.target.value)}
+            placeholder="Ingen grænse"
+            disabled={saving}
+            className="mt-1 w-full rounded-md border border-stone-300 px-3 py-2 text-sm shadow-sm focus:border-emerald-500 focus:outline-none focus:ring-1 focus:ring-emerald-500"
+          />
+          <p className="mt-2 text-xs text-stone-500">
+            Tomt felt = ingen grænse. Eksempel: 5 betyder at leads med 6+ forsøg ikke ringes op.
+          </p>
+          {contactAttemptStats && maxContactAttempts.trim() !== "" && (
+            <p className="mt-2 text-xs text-stone-700">
+              <span className="font-medium tabular-nums">
+                {contactAttemptStats.eligibleForDialing ?? "—"}
+              </span>{" "}
+              af{" "}
+              <span className="tabular-nums">{contactAttemptStats.totalWorkableLeads}</span> leads
+              er inden for grænsen (gemt værdi).
+            </p>
+          )}
+        </div>
+      </section>
+
+      <section className="rounded-lg border border-stone-200 bg-white p-6 shadow-sm">
+        <h2 className="text-sm font-semibold text-stone-900">Cooldown efter ubesvaret opkald</h2>
+        <p className="mt-1 text-xs text-stone-500">
+          Tid før et lead med telefonsvarer eller træffes ikke automatisk sættes tilbage til «Ny» og kan
+          ringes op igen i denne kampagne. Cooldown gælder pr. kampagne — samme virksomhed i to kampagner
+          med forskellig cooldown kan ringes op uafhængigt.
+        </p>
+        <div className="mt-4 max-w-xs">
+          <label htmlFor="unansweredCooldownHours" className="block text-xs font-medium text-stone-700">
+            Cooldown (timer)
+          </label>
+          <input
+            id="unansweredCooldownHours"
+            type="number"
+            min={1}
+            step={1}
+            inputMode="numeric"
+            value={unansweredCooldownHours}
+            onChange={(e) => setUnansweredCooldownHours(e.target.value)}
+            disabled={saving}
+            className="mt-1 w-full rounded-md border border-stone-300 px-3 py-2 text-sm shadow-sm focus:border-emerald-500 focus:outline-none focus:ring-1 focus:ring-emerald-500"
+          />
+          <p className="mt-2 text-xs text-stone-500">Standard er 2 timer. Minimum 1 time.</p>
+        </div>
       </section>
 
       {outcomeStats && (

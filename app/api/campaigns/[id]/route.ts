@@ -8,6 +8,7 @@ import {
 } from "@/lib/campaign-delete";
 import { workableCampaignLeadsWhere } from "@/lib/campaign-workable-leads";
 import { DIAL_MODES, normalizeCampaignDialMode, type CampaignDialMode } from "@/lib/dial-mode";
+import { parseMaxContactAttemptsInput, parseUnansweredCooldownHoursInput } from "@/lib/lead-attempts";
 
 type Params = { params: Promise<{ id: string }> };
 
@@ -28,6 +29,8 @@ export async function GET(_req: Request, { params }: Params) {
       isSystemCampaign: true,
       systemCampaignType: true,
       dialMode: true,
+      maxContactAttempts: true,
+      unansweredCooldownHours: true,
       createdAt: true,
       updatedAt: true,
       _count: {
@@ -47,7 +50,26 @@ export async function GET(_req: Request, { params }: Params) {
       { status: 403 },
     );
   }
-  return NextResponse.json(campaign);
+
+  const totalWorkableLeads = campaign._count.leads;
+  const eligibleForDialing =
+    campaign.maxContactAttempts != null
+      ? await prisma.lead.count({
+          where: {
+            campaignId: id,
+            ...workableCampaignLeadsWhere,
+            unansweredAttempts: { lte: campaign.maxContactAttempts },
+          },
+        })
+      : null;
+
+  return NextResponse.json({
+    ...campaign,
+    contactAttemptStats: {
+      totalWorkableLeads,
+      eligibleForDialing,
+    },
+  });
 }
 
 export async function DELETE(_req: Request, { params }: Params) {
@@ -116,6 +138,30 @@ export async function PATCH(req: Request, { params }: Params) {
     dialMode = next;
   }
 
+  let maxContactAttempts: number | null = existing.maxContactAttempts;
+  if (body?.maxContactAttempts !== undefined) {
+    const parsed = parseMaxContactAttemptsInput(body.maxContactAttempts);
+    if (body.maxContactAttempts !== null && body.maxContactAttempts !== "" && parsed === null) {
+      return NextResponse.json(
+        { error: "Max kontaktforsøg skal være et heltal ≥ 0, eller tom for ingen grænse." },
+        { status: 400 },
+      );
+    }
+    maxContactAttempts = parsed;
+  }
+
+  let unansweredCooldownHours = existing.unansweredCooldownHours;
+  if (body?.unansweredCooldownHours !== undefined) {
+    const parsed = parseUnansweredCooldownHoursInput(body.unansweredCooldownHours);
+    if (parsed === null) {
+      return NextResponse.json(
+        { error: "Cooldown skal være et heltal på mindst 1 time." },
+        { status: 400 },
+      );
+    }
+    unansweredCooldownHours = parsed;
+  }
+
   let fieldConfigStr = existing.fieldConfig;
   if (body?.fieldConfig !== undefined) {
     const raw =
@@ -137,6 +183,8 @@ export async function PATCH(req: Request, { params }: Params) {
       includeProtectedBusinesses,
       includeLeadsWithoutPhone,
       dialMode,
+      maxContactAttempts,
+      unansweredCooldownHours,
     },
     select: {
       id: true,
@@ -145,6 +193,8 @@ export async function PATCH(req: Request, { params }: Params) {
       includeProtectedBusinesses: true,
       includeLeadsWithoutPhone: true,
       dialMode: true,
+      maxContactAttempts: true,
+      unansweredCooldownHours: true,
       updatedAt: true,
     },
   });

@@ -453,17 +453,30 @@ export async function POST(req: Request) {
             });
           }
           if (log.leadId && !leadBridged) {
-            await prisma.lead.updateMany({
-              where: {
-                id: log.leadId,
-                status: "NEW",
-              },
-              data: {
-                status: "NOT_HOME",
-                notHomeMarkedAt: new Date(),
-                lastOutcomeAt: new Date(),
-              },
+            const leadRow = await prisma.lead.findUnique({
+              where: { id: log.leadId },
+              select: { status: true },
             });
+            if (leadRow?.status === "NEW") {
+              await prisma.$transaction([
+                prisma.lead.update({
+                  where: { id: log.leadId },
+                  data: {
+                    status: "NOT_HOME",
+                    notHomeMarkedAt: new Date(),
+                    lastOutcomeAt: new Date(),
+                    unansweredAttempts: { increment: 1 },
+                  },
+                }),
+                prisma.leadOutcomeLog.create({
+                  data: {
+                    leadId: log.leadId,
+                    userId: null,
+                    status: "NOT_HOME",
+                  },
+                }),
+              ]);
+            }
           }
         }
       }

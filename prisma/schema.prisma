@@ -88,6 +88,10 @@ model Campaign {
   systemCampaignType         String?
   /// NO_DIAL | CLICK_TO_CALL | POWER_DIALER | PREDICTIVE — styrer Telnyx VOIP / opkaldsflow
   dialMode                   String   @default("NO_DIAL")
+  /// Maks. ubesvarede kontaktforsøg (VOICEMAIL + TRÆFFES IKKE) før lead udelukkes fra auto-opkald. null = ingen grænse.
+  maxContactAttempts         Int?
+  /// Timer før VOICEMAIL / TRÆFFES IKKE auto-sættes tilbage til Ny i denne kampagne (min. 1, default 2).
+  unansweredCooldownHours    Int      @default(2)
   createdAt                  DateTime @default(now())
   updatedAt                  DateTime @updatedAt
 
@@ -154,6 +158,8 @@ model Lead {
   lastDialAttemptAt DateTime?
   /// Power Dialer: lead må ikke dispatches/reserveres før dette tidspunkt (cooldown efter usikkert AMD / no-bridge hangup).
   powerDialerEligibleAfter DateTime?
+  /// Antal ubesvarede kontaktforsøg (VOICEMAIL + TRÆFFES IKKE) — denormaliseret fra LeadOutcomeLog.
+  unansweredAttempts       Int      @default(0)
 
   /// Lås: én sælger ad gangen — frigives ved navigering eller efter max. inaktivitet (LEAD_LOCK_MAX_IDLE_SECONDS)
   lockedByUserId String?
@@ -202,6 +208,8 @@ model Lead {
   @@index([lastOutcomeAt])
   @@index([campaignId, status, lastDialAttemptAt])
   @@index([campaignId, powerDialerEligibleAfter])
+  @@index([unansweredAttempts])
+  @@index([campaignId, unansweredAttempts])
 }
 
 /// Arkiveret møde-snapshot (historik til Mine salg / provision når lead får nyt møde).
@@ -295,6 +303,12 @@ model LeadActivityEvent {
   kind            String
   /// Kort tekst til UI (fx «Marie opdaterede noterne») — aldrig fuld notetekst
   summary         String
+  /// NOTE_UPDATE: notens fulde tekst ved sessionens start (til diff-beregning)
+  noteBaseline    String?
+  /// NOTE_UPDATE: tekst tilføjet i sessionen
+  noteAdded       String?
+  /// NOTE_UPDATE: tekst fjernet/erstattet i sessionen
+  noteRemoved     String?
   recordingUrl    String?
   durationSeconds Int?
   telnyxCallLegId String?

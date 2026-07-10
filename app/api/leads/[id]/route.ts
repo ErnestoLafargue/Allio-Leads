@@ -9,6 +9,7 @@ import {
   normalizeLeaderboardOutcomeStatus,
   shouldLogOutcomeForLeaderboard,
 } from "@/lib/lead-outcome-log";
+import { shouldIncrementUnansweredAttempts } from "@/lib/lead-attempts";
 import { canAccessBookedMeetingNotes } from "@/lib/lead-meeting-access";
 import { canAccessCallbackLead } from "@/lib/lead-callback-access";
 import { copenhagenDayKey } from "@/lib/copenhagen-day";
@@ -36,6 +37,7 @@ import { findBlockedTimeConflictInDb } from "@/lib/booking/meeting-slots";
 import { findLeadBookingOverlapInDb } from "@/lib/booking/overlap-db";
 import { getDefaultMeetingAssigneeId } from "@/lib/meeting-assignee";
 import { LEAD_ACTIVITY_KIND } from "@/lib/lead-activity-kinds";
+import { logNoteUpdateSession } from "@/lib/note-activity";
 import { hangupActiveOutboundLeadLegsForLead } from "@/lib/dialer-bridge";
 import { canonicalLeadPhoneForStorage } from "@/lib/phone-e164";
 import { syncPostBookingIntegrations } from "@/lib/booking/post-booking-sync";
@@ -629,6 +631,9 @@ export async function PATCH(req: Request, { params }: Params) {
         ...(clearLeadLock
           ? { lockedByUserId: null, lockedAt: null, lockExpiresAt: null }
           : {}),
+        ...(logOutcome && shouldIncrementUnansweredAttempts(existing, status)
+          ? { unansweredAttempts: { increment: 1 } }
+          : {}),
       },
       include: {
         bookedByUser: { select: { id: true, name: true, username: true } },
@@ -668,18 +673,12 @@ export async function PATCH(req: Request, { params }: Params) {
         select: { name: true },
       });
       const label = actor?.name?.trim() || "Bruger";
-      const summary =
-        nextNotesTrim.length > prevNotesTrim.length ||
-        (prevNotesTrim === "" && nextNotesTrim !== "")
-          ? `${label} tilføjede til noter`
-          : `${label} opdaterede noterne`;
-      await tx.leadActivityEvent.create({
-        data: {
-          leadId: id,
-          userId,
-          kind: LEAD_ACTIVITY_KIND.NOTE_UPDATE,
-          summary,
-        },
+      await logNoteUpdateSession(tx, {
+        leadId: id,
+        userId,
+        userLabel: label,
+        prevNotes: prevNotesTrim,
+        nextNotes: nextNotesTrim,
       });
     }
 

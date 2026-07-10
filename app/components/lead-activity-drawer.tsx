@@ -1,7 +1,14 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState, type ReactNode } from "react";
 import { LeadRecordingPlayer } from "@/app/components/lead-recording-player";
+import {
+  LEAD_STATUS_COUNT_BADGE_CLASS,
+  LEAD_STATUS_LABELS,
+  isLeadStatus,
+  type LeadStatus,
+} from "@/lib/lead-status";
+import { MEETING_OUTCOME_LABELS, meetingOutcomeBadgeClass } from "@/lib/meeting-outcome";
 
 export type DrawerActivityItem = {
   kind: "visit" | "note" | "call" | "call_attempt" | "outcome" | "callback_schedule";
@@ -10,6 +17,8 @@ export type DrawerActivityItem = {
   user: { name: string; username: string } | null;
   recordingUrl: string | null;
   durationSeconds: number | null;
+  noteAdded: string | null;
+  noteRemoved: string | null;
 };
 
 type Props = {
@@ -23,6 +32,15 @@ type Props = {
 };
 
 type TabKey = "timeline" | "notes" | "calls" | "messages";
+
+type ActivityLayout = "compact" | "card";
+
+type ActivityVisual = {
+  layout: ActivityLayout;
+  dotClass: string;
+  icon: ReactNode | null;
+  cardRingClass: string;
+};
 
 const TABS: { id: TabKey; label: string; placeholder?: boolean }[] = [
   { id: "timeline", label: "Tidslinje" },
@@ -87,6 +105,311 @@ function formatDuration(seconds: number | null): string | null {
   return `${m} min ${s.toString().padStart(2, "0")} sek.`;
 }
 
+function extractQuotedLabel(summary: string): string | null {
+  const m = summary.match(/«([^»]+)»/);
+  return m?.[1]?.trim() ?? null;
+}
+
+function isCallAttemptFailure(summary: string): boolean {
+  return /fejlede|ikke startet|blokeret/i.test(summary);
+}
+
+/** Fjerner tekniske præfikser fra ældre loglinjer og normaliserer visning. */
+function formatActivitySummary(summary: string): string {
+  return summary.replace(/^WebRTC:\s*/i, "").trim();
+}
+
+function hasNoteJournal(row: DrawerActivityItem): boolean {
+  return !!(row.noteAdded?.trim() || row.noteRemoved?.trim());
+}
+
+function isImportantActivity(row: DrawerActivityItem): boolean {
+  if (row.kind === "call") return true;
+  if (row.kind === "outcome") return true;
+  if (row.kind === "callback_schedule") return true;
+  if (row.kind === "call_attempt") return !isCallAttemptFailure(row.summary);
+  if (row.kind === "note" && hasNoteJournal(row)) return true;
+  return false;
+}
+
+function outcomeBadgeClass(label: string): string {
+  const leadEntry = Object.entries(LEAD_STATUS_LABELS).find(([, v]) => v === label);
+  if (leadEntry && isLeadStatus(leadEntry[0])) {
+    return LEAD_STATUS_COUNT_BADGE_CLASS[leadEntry[0] as LeadStatus];
+  }
+  const meetingEntry = Object.entries(MEETING_OUTCOME_LABELS).find(([, v]) => v === label);
+  if (meetingEntry) {
+    return meetingOutcomeBadgeClass(meetingEntry[0]);
+  }
+  return "border border-stone-300 bg-stone-100 text-stone-800";
+}
+
+function getActivityVisual(row: DrawerActivityItem): ActivityVisual {
+  if (!isImportantActivity(row)) {
+    return {
+      layout: "compact",
+      dotClass: "",
+      icon: null,
+      cardRingClass: "",
+    };
+  }
+
+  if (row.kind === "call_attempt") {
+    return {
+      layout: "card",
+      dotClass: "bg-emerald-100 text-emerald-800 ring-emerald-200",
+      icon: <PhoneOutgoingIcon className="h-3.5 w-3.5" />,
+      cardRingClass: "ring-emerald-100",
+    };
+  }
+
+  if (row.kind === "call") {
+    return {
+      layout: "card",
+      dotClass: "bg-emerald-100 text-emerald-800 ring-emerald-200",
+      icon: <PhoneIcon className="h-3.5 w-3.5" />,
+      cardRingClass: "ring-emerald-100",
+    };
+  }
+
+  if (row.kind === "outcome") {
+    return {
+      layout: "card",
+      dotClass: "bg-violet-100 text-violet-800 ring-violet-200",
+      icon: <FlagIcon className="h-3.5 w-3.5" />,
+      cardRingClass: "ring-violet-100",
+    };
+  }
+
+  if (row.kind === "callback_schedule") {
+    return {
+      layout: "card",
+      dotClass: "bg-violet-100 text-violet-800 ring-violet-200",
+      icon: <CalendarClockIcon className="h-3.5 w-3.5" />,
+      cardRingClass: "ring-violet-100",
+    };
+  }
+
+  if (row.kind === "note" && hasNoteJournal(row)) {
+    return {
+      layout: "card",
+      dotClass: "bg-amber-100 text-amber-800 ring-amber-200",
+      icon: <NoteIcon className="h-3.5 w-3.5" />,
+      cardRingClass: "ring-amber-100",
+    };
+  }
+
+  return {
+    layout: "compact",
+    dotClass: "",
+    icon: null,
+    cardRingClass: "",
+  };
+}
+
+const TIMELINE_RAIL_CLASS = "flex w-7 shrink-0 justify-center";
+
+function TimelineRailLine() {
+  return (
+    <div
+      className="pointer-events-none absolute bottom-2 left-3.5 top-1 w-px -translate-x-1/2 bg-stone-200"
+      aria-hidden
+    />
+  );
+}
+
+function IconShell({
+  className,
+  children,
+}: {
+  className?: string;
+  children: ReactNode;
+}) {
+  return (
+    <span
+      className={[
+        "flex h-7 w-7 shrink-0 items-center justify-center rounded-full ring-1",
+        className,
+      ].join(" ")}
+      aria-hidden
+    >
+      {children}
+    </span>
+  );
+}
+
+function NoteJournalDiff({
+  noteAdded,
+  noteRemoved,
+}: {
+  noteAdded: string | null;
+  noteRemoved: string | null;
+}) {
+  const added = noteAdded?.trim() ?? "";
+  const removed = noteRemoved?.trim() ?? "";
+  if (!added && !removed) return null;
+
+  return (
+    <div className="mt-2 space-y-1.5">
+      {removed ? (
+        <div className="rounded-md border-l-2 border-red-300 bg-red-50 px-2.5 py-1.5">
+          <p className="text-[10px] font-medium uppercase tracking-wide text-red-700/80">Fjernet</p>
+          <p className="mt-0.5 whitespace-pre-wrap text-[12px] leading-snug text-red-900/80 line-through">
+            {removed}
+          </p>
+        </div>
+      ) : null}
+      {added ? (
+        <div className="rounded-md border-l-2 border-emerald-400 bg-emerald-50 px-2.5 py-1.5">
+          <p className="text-[10px] font-medium uppercase tracking-wide text-emerald-800/80">
+            Tilføjet
+          </p>
+          <p className="mt-0.5 whitespace-pre-wrap text-[12px] leading-snug text-emerald-950">
+            {added}
+          </p>
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
+function ActivityTimelineRow({
+  row,
+  isLast,
+  isNewest,
+}: {
+  row: DrawerActivityItem;
+  isLast: boolean;
+  isNewest: boolean;
+}) {
+  const visual = getActivityVisual(row);
+  const layout = visual.layout;
+  const userName = row.user?.name ?? "System";
+  const initials = initialsFromName(userName);
+  const palette = AVATAR_PALETTE[hashStringToIndex(userName, AVATAR_PALETTE.length)]!;
+  const time = formatTime(new Date(row.at));
+  const duration = formatDuration(row.durationSeconds);
+  const outcomeLabel = row.kind === "outcome" ? extractQuotedLabel(row.summary) : null;
+  const displaySummary = formatActivitySummary(row.summary);
+
+  if (layout === "compact") {
+    return (
+      <li className="relative flex gap-3">
+        <div className={[TIMELINE_RAIL_CLASS, "pt-1.5"].join(" ")}>
+          <span
+            className="relative z-10 h-1.5 w-1.5 rounded-full bg-stone-300 ring-2 ring-stone-50"
+            aria-hidden
+          />
+        </div>
+        <p
+          className={[
+            "min-w-0 flex-1 py-0.5 text-[11px] leading-relaxed",
+            isLast ? "pb-0" : "pb-3",
+          ].join(" ")}
+        >
+          <span className="text-stone-300">—</span>{" "}
+          <span
+            className={
+              isCallAttemptFailure(row.summary) ? "text-amber-800/80" : "text-stone-500"
+            }
+          >
+            {displaySummary}
+          </span>{" "}
+          <span className="text-stone-300">—</span>
+          <span className="ml-1.5 tabular-nums text-stone-400">{time}</span>
+        </p>
+      </li>
+    );
+  }
+
+  return (
+    <li className="relative flex gap-3">
+      <div className={TIMELINE_RAIL_CLASS}>
+        <IconShell className={["relative z-10", visual.dotClass].join(" ")}>{visual.icon}</IconShell>
+      </div>
+
+      <div className={["min-w-0 flex-1", isLast ? "pb-0" : "pb-4"].join(" ")}>
+          <div
+            className={[
+              "rounded-lg bg-white p-3 ring-1 ring-stone-100",
+              visual.cardRingClass,
+              isNewest ? "shadow-sm ring-emerald-200/60" : "",
+            ].join(" ")}
+          >
+            <div className="flex items-start gap-2.5">
+              <span
+                className={[
+                  "flex h-8 w-8 shrink-0 items-center justify-center rounded-full text-[10px] font-semibold ring-1",
+                  palette,
+                ].join(" ")}
+                aria-hidden
+              >
+                {initials}
+              </span>
+              <div className="min-w-0 flex-1">
+                <div className="flex flex-wrap items-baseline justify-between gap-x-2 gap-y-0.5">
+                  <p className="truncate text-[13px] font-medium text-stone-900">{userName}</p>
+                  <span className="text-[11px] tabular-nums text-stone-400">{time}</span>
+                </div>
+
+                {outcomeLabel ? (
+                  <div className="mt-1.5 flex flex-wrap items-center gap-2">
+                    <span
+                      className={[
+                        "inline-flex rounded-full px-2 py-0.5 text-[11px] font-semibold",
+                        outcomeBadgeClass(outcomeLabel),
+                      ].join(" ")}
+                    >
+                      {outcomeLabel}
+                    </span>
+                  </div>
+                ) : null}
+
+                <p
+                  className={[
+                    "text-[13px] leading-snug text-stone-700",
+                    outcomeLabel ? "mt-1" : "mt-0.5",
+                  ].join(" ")}
+                >
+                  {displaySummary}
+                </p>
+
+                {hasNoteJournal(row) ? (
+                  <NoteJournalDiff noteAdded={row.noteAdded} noteRemoved={row.noteRemoved} />
+                ) : null}
+
+                {row.kind === "call" && duration ? (
+                  <p className="mt-1.5 inline-flex items-center gap-1 text-[11px] font-medium text-emerald-800">
+                    <PhoneIcon className="h-3 w-3" />
+                    Varighed {duration}
+                  </p>
+                ) : null}
+
+                {row.kind === "call" && row.recordingUrl ? (
+                  <div className="mt-2">
+                    <LeadRecordingPlayer
+                      key={row.recordingUrl}
+                      src={row.recordingUrl}
+                      durationSecondsHint={row.durationSeconds}
+                      variant="default"
+                    />
+                  </div>
+                ) : null}
+
+                {row.kind === "call" && !row.recordingUrl ? (
+                  <p className="mt-1.5 inline-flex items-center gap-1 text-[11px] text-stone-500">
+                    <PhoneIcon className="h-3 w-3 opacity-70" />
+                    Optagelse er ikke tilgængelig endnu.
+                  </p>
+                ) : null}
+              </div>
+            </div>
+          </div>
+      </div>
+    </li>
+  );
+}
+
 function CloseIcon({ className }: { className?: string }) {
   return (
     <svg
@@ -125,6 +448,26 @@ function PhoneIcon({ className }: { className?: string }) {
   );
 }
 
+function PhoneOutgoingIcon({ className }: { className?: string }) {
+  return (
+    <svg
+      className={className}
+      width="14"
+      height="14"
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      aria-hidden
+    >
+      <path d="m16 8 4-4-4-4M20 4H9a5 5 0 0 0-5 5v2" />
+      <path d="M22 16.92v3a2 2 0 0 1-2.18 2 19.86 19.86 0 0 1-8.63-3.07 19.5 19.5 0 0 1-6-6A19.86 19.86 0 0 1 2.12 4.18 2 2 0 0 1 4.11 2h3a2 2 0 0 1 2 1.72 12.8 12.8 0 0 0 .7 2.81 2 2 0 0 1-.45 2.11L8.09 9.91a16 16 0 0 0 6 6l1.27-1.27a2 2 0 0 1 2.11-.45 12.8 12.8 0 0 0 2.81.7A2 2 0 0 1 22 16.92Z" />
+    </svg>
+  );
+}
+
 function NoteIcon({ className }: { className?: string }) {
   return (
     <svg
@@ -146,6 +489,48 @@ function NoteIcon({ className }: { className?: string }) {
   );
 }
 
+function FlagIcon({ className }: { className?: string }) {
+  return (
+    <svg
+      className={className}
+      width="14"
+      height="14"
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      aria-hidden
+    >
+      <path d="M4 15s1-1 4-1 5 2 8 2 4-1 4-1V3s-1 1-4 1-5-2-8-2-4 1-4 1z" />
+      <line x1="4" y1="22" x2="4" y2="15" />
+    </svg>
+  );
+}
+
+function CalendarClockIcon({ className }: { className?: string }) {
+  return (
+    <svg
+      className={className}
+      width="14"
+      height="14"
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      aria-hidden
+    >
+      <path d="M21 12V7a2 2 0 0 0-2-2H5a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h7" />
+      <path d="M16 2v4M8 2v4M3 10h18" />
+      <circle cx="18" cy="18" r="3" />
+      <path d="M18 16.5V18l1 1" />
+    </svg>
+  );
+}
+
 function ChatIcon({ className }: { className?: string }) {
   return (
     <svg
@@ -163,13 +548,6 @@ function ChatIcon({ className }: { className?: string }) {
       <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" />
     </svg>
   );
-}
-
-function eventIcon(kind: DrawerActivityItem["kind"]): React.ReactNode {
-  if (kind === "call" || kind === "call_attempt") {
-    return <PhoneIcon className="h-3 w-3 text-emerald-700" />;
-  }
-  return null;
 }
 
 export function LeadActivityDrawer({
@@ -413,14 +791,11 @@ export function LeadActivityDrawer({
             </div>
           ) : loading && items.length === 0 ? (
             <div className="px-5 py-6">
-              <div className="space-y-3">
+              <div className="space-y-4">
                 {Array.from({ length: 4 }).map((_, i) => (
-                  <div
-                    key={i}
-                    className="flex animate-pulse gap-3 rounded-xl bg-white p-3 ring-1 ring-stone-100"
-                  >
-                    <div className="h-9 w-9 rounded-full bg-stone-100" />
-                    <div className="flex-1 space-y-2">
+                  <div key={i} className="flex animate-pulse gap-3">
+                    <div className="h-7 w-7 shrink-0 rounded-full bg-stone-100" />
+                    <div className="flex-1 space-y-2 pt-0.5">
                       <div className="h-3 w-2/3 rounded bg-stone-100" />
                       <div className="h-2.5 w-1/3 rounded bg-stone-100" />
                     </div>
@@ -455,79 +830,22 @@ export function LeadActivityDrawer({
               </p>
             </div>
           ) : (
-            <div className="px-3 py-3">
+            <div className="px-4 py-3">
               {grouped.map((group, gi) => (
-                <section key={group.key} className={gi > 0 ? "mt-4" : undefined}>
-                  <h3 className="sticky top-0 z-10 -mx-3 mb-2 bg-stone-50/40 px-3 py-1.5 text-[10px] font-semibold uppercase tracking-[0.08em] text-stone-500 backdrop-blur-sm">
+                <section key={group.key} className={gi > 0 ? "mt-5" : undefined}>
+                  <h3 className="sticky top-0 z-10 -mx-4 mb-2 bg-stone-50/90 px-4 py-1.5 text-[10px] font-semibold uppercase tracking-[0.08em] text-stone-500 backdrop-blur-sm">
                     {group.heading}
                   </h3>
-                  <ul className="space-y-2">
-                    {group.items.map((row, idx) => {
-                      const isNewest = gi === 0 && idx === 0;
-                      const userName = row.user?.name ?? "System";
-                      const initials = initialsFromName(userName);
-                      const palette = AVATAR_PALETTE[hashStringToIndex(userName, AVATAR_PALETTE.length)]!;
-                      const time = formatTime(new Date(row.at));
-                      const duration = formatDuration(row.durationSeconds);
-                      const isCallish = row.kind === "call" || row.kind === "call_attempt";
-                      return (
-                        <li
-                          key={`${row.at}-${idx}`}
-                          className={[
-                            "rounded-xl bg-white p-3 ring-1 ring-stone-100 transition-shadow",
-                            isNewest ? "shadow-sm ring-emerald-200/70" : "",
-                          ].join(" ")}
-                        >
-                          <div className="flex items-start gap-3">
-                            <span
-                              className={[
-                                "flex h-9 w-9 shrink-0 items-center justify-center rounded-full text-[11px] font-semibold ring-1",
-                                palette,
-                              ].join(" ")}
-                              aria-hidden
-                            >
-                              {initials}
-                            </span>
-                            <div className="min-w-0 flex-1">
-                              <div className="flex flex-wrap items-baseline justify-between gap-2">
-                                <p className="truncate text-sm font-medium text-stone-900">
-                                  {userName}
-                                </p>
-                                <span className="text-[11px] tabular-nums text-stone-500">{time}</span>
-                              </div>
-                              <p className="mt-0.5 text-[13px] leading-snug text-stone-700">
-                                {row.summary}
-                              </p>
-                              {isCallish && duration ? (
-                                <p className="mt-1 inline-flex items-center gap-1 text-[11px] font-medium text-emerald-800">
-                                  {eventIcon(row.kind)} Varighed {duration}
-                                </p>
-                              ) : null}
-                              {row.kind === "call" && row.recordingUrl ? (
-                                <LeadRecordingPlayer
-                                  key={row.recordingUrl}
-                                  src={row.recordingUrl}
-                                  durationSecondsHint={row.durationSeconds}
-                                  variant="default"
-                                />
-                              ) : null}
-                              {row.kind === "call" && !row.recordingUrl ? (
-                                <p className="mt-1 inline-flex items-center gap-1 text-[11px] text-stone-500">
-                                  <PhoneIcon className="h-3 w-3 opacity-70" />
-                                  Optagelse er ikke tilgængelig endnu.
-                                </p>
-                              ) : null}
-                              {row.kind === "note" && (
-                                <p className="mt-1 inline-flex items-center gap-1 text-[11px] text-stone-500">
-                                  <NoteIcon className="h-3 w-3 opacity-70" />
-                                  Note opdateret
-                                </p>
-                              )}
-                            </div>
-                          </div>
-                        </li>
-                      );
-                    })}
+                  <ul className="relative">
+                    <TimelineRailLine />
+                    {group.items.map((row, idx) => (
+                      <ActivityTimelineRow
+                        key={`${row.at}-${idx}`}
+                        row={row}
+                        isLast={idx === group.items.length - 1}
+                        isNewest={gi === 0 && idx === 0}
+                      />
+                    ))}
                   </ul>
                 </section>
               ))}

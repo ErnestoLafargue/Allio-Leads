@@ -382,6 +382,7 @@ export async function handleAmdMachine(params: {
           status: "VOICEMAIL",
           voicemailMarkedAt: new Date(),
           lastOutcomeAt: new Date(),
+          unansweredAttempts: { increment: 1 },
         },
       }),
       prisma.leadOutcomeLog.create({

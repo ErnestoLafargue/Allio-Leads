@@ -143,6 +143,7 @@ export async function POST(req: Request) {
       activeQueueFilter: true,
       includeProtectedBusinesses: true,
       includeLeadsWithoutPhone: true,
+      maxContactAttempts: true,
     },
   });
   if (!campaign) {
