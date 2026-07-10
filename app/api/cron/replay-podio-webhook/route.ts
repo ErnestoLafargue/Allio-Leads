@@ -18,7 +18,7 @@ export async function GET(req: Request) {
 
   try {
     const result = await applyMoederItemUpdate(itemId);
-    return NextResponse.json({ ok: true, itemId, ...result });
+    return NextResponse.json({ itemId, ...result });
   } catch (err) {
     return NextResponse.json(
       { error: err instanceof Error ? err.message : String(err) },
