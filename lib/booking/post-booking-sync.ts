@@ -32,7 +32,6 @@ export async function syncPostBookingIntegrations(leadId: string): Promise<void>
         meetingContactName: true,
         meetingContactEmail: true,
         meetingContactPhonePrivate: true,
-        notes: true,
       },
     });
     if (!lead || lead.status !== "MEETING_BOOKED") return;
@@ -72,7 +71,6 @@ export async function syncPostBookingIntegrations(leadId: string): Promise<void>
         attendeeName: lead.meetingContactName,
         attendeeEmail: lead.meetingContactEmail,
         attendeePhone: lead.meetingContactPhonePrivate || undefined,
-        notes: lead.notes || undefined,
         replaceExisting: Boolean(lead.calComBookingUid),
       });
       syncLog(leadId, "cal_booking", t0);

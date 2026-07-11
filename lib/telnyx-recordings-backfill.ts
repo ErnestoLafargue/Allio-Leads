@@ -40,6 +40,11 @@ function asString(v: unknown): string | null {
   return typeof v === "string" && v.length > 0 ? v : null;
 }
 
+/** True hvis URL'en peger på vores egen kopi i Vercel Blob. */
+export function isVercelBlobUrl(url: string): boolean {
+  return url.includes(".blob.vercel-storage.com/");
+}
+
 function asNumber(v: unknown): number | null {
   if (typeof v === "number" && Number.isFinite(v)) return v;
   if (typeof v === "string" && v.trim() !== "") {
@@ -356,10 +361,20 @@ async function processOneRecording(
     return;
   }
 
-  // Forsøg at kopiere lyden til Vercel Blob så afspilning ikke afhænger af
-  // udløbende Telnyx-download-links (samme persist som live-flowet).
+  // Hvis eventet allerede peger på en kopi i vores eget lager (Vercel Blob),
+  // må URL'en IKKE omskrives: gen-upload skaber dublet-filer, og en ny URL
+  // remounter afspilleren i UI'et midt i afspilning. Behold den eksisterende.
+  const existingBlobUrl =
+    existing?.recordingUrl && isVercelBlobUrl(existing.recordingUrl)
+      ? existing.recordingUrl
+      : null;
+
   let playbackUrl = playbackSourceUrl;
-  if (options.copyToBlob && rec.mp3Url) {
+  if (existingBlobUrl) {
+    playbackUrl = existingBlobUrl;
+  } else if (options.copyToBlob && rec.mp3Url) {
+    // Forsøg at kopiere lyden til Vercel Blob så afspilning ikke afhænger af
+    // udløbende Telnyx-download-links (samme persist som live-flowet).
     try {
       const persisted = await persistTelnyxRecordingToAllio({
         telnyxMp3Url: rec.mp3Url,

@@ -8,7 +8,6 @@ export type EnsureCalComBookingInput = {
   attendeeName: string;
   attendeeEmail: string;
   attendeePhone?: string;
-  notes?: string;
   /** Opret ny booking selv om leadet allerede har calComBookingUid (genbook). */
   replaceExisting?: boolean;
 };
@@ -43,7 +42,6 @@ export async function ensureCalComBookingForLead(
       attendeeName: input.attendeeName,
       attendeeEmail: input.attendeeEmail,
       attendeePhone: input.attendeePhone,
-      notes: input.notes,
     });
     await prisma.lead.update({
       where: { id: input.leadId },

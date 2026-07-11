@@ -27,6 +27,7 @@ export const MOEDE_FIELDS = {
   email: "Email",
   dato: "Dato for møde",
   moedeLink: "Møde link",
+  moedeNoter: "Møde noter",
   produkter: "Produkter",
   leadId: "Lead-Id",
   itemId: "Item-id",
@@ -53,6 +54,7 @@ type LeadMeetingSnapshot = {
   meetingContactPhonePrivate: string;
   meetingScheduledFor: Date | null;
   calComMeetingUrl: string | null;
+  notes: string | null;
   bookedByUser: { name: string | null } | null;
 };
 
@@ -112,6 +114,16 @@ async function buildMoedeFields(
     await setDate(fields, MOEDE_FIELDS.dato, lead.meetingScheduledFor);
   }
 
+  // Interne lead-noter må kun ligge i Podio ("Møde noter") — aldrig i Cal.eu,
+  // hvor kunden kan se dem. Feltet er valgfrit i appen, så fejl er ikke-fatale.
+  if (lead.notes?.trim()) {
+    try {
+      await setPodioFieldValue("moeder", fields, MOEDE_FIELDS.moedeNoter, lead.notes.trim());
+    } catch {
+      /* "Møde noter"-feltet mangler i appen — spring over */
+    }
+  }
+
   const status = opts?.status ?? MOEDE_STATUS.afventer;
   await setCategory(fields, MOEDE_FIELDS.status, status);
 
@@ -156,6 +168,7 @@ async function loadLeadMeetingSnapshot(leadId: string): Promise<LeadMeetingSnaps
       meetingContactPhonePrivate: true,
       meetingScheduledFor: true,
       calComMeetingUrl: true,
+      notes: true,
       bookedByUser: { select: { name: true } },
     },
   });

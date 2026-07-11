@@ -32,15 +32,38 @@ export function LeadRecordingPlayer({ src, durationSecondsHint, variant = "defau
   const [ready, setReady] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
+  /** Spejler playing/current så src-skifte-effekten ikke skal have dem som deps. */
+  const playingRef = useRef(false);
+  const currentRef = useRef(0);
   useEffect(() => {
-    setCurrent(0);
-    setPlaying(false);
+    playingRef.current = playing;
+  }, [playing]);
+  useEffect(() => {
+    currentRef.current = current;
+  }, [current]);
+
+  /** Ved src-skift midt i afspilning: genoptag fra samme position når ny metadata er klar. */
+  const resumeRef = useRef<{ time: number; play: boolean } | null>(null);
+  const prevSrcRef = useRef(src);
+
+  useEffect(() => {
+    if (prevSrcRef.current === src) return;
+    prevSrcRef.current = src;
+    // Samme optagelse kan få ny URL (fx frisk kopi efter Telnyx-sync) —
+    // afspilningen skal fortsætte hvor den var i stedet for at stoppe.
+    resumeRef.current = playingRef.current
+      ? { time: currentRef.current, play: true }
+      : null;
     setReady(false);
     setError(null);
-    if (typeof durationSecondsHint === "number" && durationSecondsHint > 0) {
-      setDuration(durationSecondsHint);
-    } else {
-      setDuration(null);
+    if (!resumeRef.current) {
+      setCurrent(0);
+      setPlaying(false);
+      if (typeof durationSecondsHint === "number" && durationSecondsHint > 0) {
+        setDuration(durationSecondsHint);
+      } else {
+        setDuration(null);
+      }
     }
   }, [src, durationSecondsHint]);
 
@@ -52,6 +75,25 @@ export function LeadRecordingPlayer({ src, durationSecondsHint, variant = "defau
     }
     setReady(true);
     setError(null);
+
+    const resume = resumeRef.current;
+    if (resume) {
+      resumeRef.current = null;
+      if (resume.time > 0) {
+        try {
+          el.currentTime = resume.time;
+        } catch {
+          /* seek kan fejle før data er klar — afspil da forfra */
+        }
+      }
+      setCurrent(el.currentTime);
+      if (resume.play) {
+        void el.play().then(
+          () => setPlaying(true),
+          () => setPlaying(false),
+        );
+      }
+    }
   }, []);
 
   const onTime = useCallback(() => {

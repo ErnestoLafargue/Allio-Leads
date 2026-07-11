@@ -11,6 +11,8 @@ import {
 import { MEETING_OUTCOME_LABELS, meetingOutcomeBadgeClass } from "@/lib/meeting-outcome";
 
 export type DrawerActivityItem = {
+  /** Stabilt id fra API'et — bruges som React-key så afspilning ikke afbrydes ved genindlæsning. */
+  id?: string;
   kind: "visit" | "note" | "call" | "call_attempt" | "outcome" | "callback_schedule";
   at: string;
   summary: string;
@@ -387,8 +389,9 @@ function ActivityTimelineRow({
 
                 {row.kind === "call" && row.recordingUrl ? (
                   <div className="mt-2">
+                    {/* Ingen key på URL: en ny URL (fx efter Telnyx-sync) må ikke remounte
+                        afspilleren midt i afspilning — src-skift håndteres inde i afspilleren. */}
                     <LeadRecordingPlayer
-                      key={row.recordingUrl}
                       src={row.recordingUrl}
                       durationSecondsHint={row.durationSeconds}
                       variant="default"
@@ -577,7 +580,10 @@ export function LeadActivityDrawer({
       return;
     }
     const data = (await res.json()) as { items?: DrawerActivityItem[] };
-    setItems(Array.isArray(data.items) ? data.items : []);
+    const next = Array.isArray(data.items) ? data.items : [];
+    // Behold eksisterende array hvis indholdet er uændret, så genindlæsninger
+    // (fx polling efter opkald) ikke rører DOM'en og forstyrrer afspilning.
+    setItems((prev) => (JSON.stringify(prev) === JSON.stringify(next) ? prev : next));
     setLoading(false);
   }, [leadId]);
 
@@ -840,7 +846,7 @@ export function LeadActivityDrawer({
                     <TimelineRailLine />
                     {group.items.map((row, idx) => (
                       <ActivityTimelineRow
-                        key={`${row.at}-${idx}`}
+                        key={row.id ?? `${row.at}-${row.kind}-${row.summary}`}
                         row={row}
                         isLast={idx === group.items.length - 1}
                         isNewest={gi === 0 && idx === 0}

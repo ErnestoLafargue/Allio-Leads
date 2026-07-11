@@ -67,7 +67,6 @@ export async function GET(req: Request) {
       meetingContactName: true,
       meetingContactEmail: true,
       meetingContactPhonePrivate: true,
-      notes: true,
     },
   });
 
@@ -78,7 +77,6 @@ export async function GET(req: Request) {
         attendeeName: leadForCal.meetingContactName,
         attendeeEmail: leadForCal.meetingContactEmail,
         attendeePhone: leadForCal.meetingContactPhonePrivate || undefined,
-        notes: leadForCal.notes || undefined,
       });
       await prisma.lead.update({
         where: { id: leadId },

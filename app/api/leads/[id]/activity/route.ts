@@ -116,6 +116,7 @@ export async function GET(_req: Request, { params }: Params) {
     );
 
     const visitItems = visitsDeduped.map((v) => ({
+      id: `visit-${v.id}`,
       kind: "visit" as const,
       at: v.visitedAt.toISOString(),
       summary: `${v.user.name} åbnede leadet i arbejdskøen`,
@@ -127,6 +128,7 @@ export async function GET(_req: Request, { params }: Params) {
     }));
 
     const eventItems = events.map((e) => ({
+      id: `event-${e.id}`,
       kind: mapDbKindToItemKind(e.kind),
       at: e.createdAt.toISOString(),
       summary: e.summary,
@@ -147,6 +149,7 @@ export async function GET(_req: Request, { params }: Params) {
     });
 
     const outcomeLogItems = outcomeLogsDeduped.map((log) => ({
+      id: `outcome-${log.id}`,
       kind: "outcome" as const,
       at: log.createdAt.toISOString(),
       summary: log.user
@@ -161,6 +164,7 @@ export async function GET(_req: Request, { params }: Params) {
 
     const leadOriginAt = lead.importedAt ?? lead.createdAt;
     const originItem = {
+      id: `origin-${lead.id}`,
       kind: "note" as const,
       at: leadOriginAt.toISOString(),
       summary: "Lead tilføjet / oprettet i systemet",

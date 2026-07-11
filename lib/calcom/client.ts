@@ -46,8 +46,6 @@ export type CalComBookingInput = {
   attendeeEmail: string;
   /** Valgfrit telefonnummer (E.164) — vises på bookingen hvis event type understøtter det. */
   attendeePhone?: string;
-  /** Valgfrie noter til værten. */
-  notes?: string;
   /** Override event type (fx kick-off). Default: CALCOM_EVENT_TYPE_ID (onboarding). */
   eventTypeId?: number;
 };
@@ -93,7 +91,8 @@ export async function createCalComBooking(
           ? { phoneNumber: input.attendeePhone }
           : {}),
       },
-      ...(input.notes ? { bookingFieldsResponses: { notes: input.notes } } : {}),
+      // BEVIDST ingen notes/bookingFieldsResponses: interne lead-noter må
+      // aldrig sendes til Cal.eu, da attendee kan se dem (mail + kalender).
     };
 
     return fetch(url, {

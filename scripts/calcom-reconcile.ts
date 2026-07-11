@@ -300,7 +300,6 @@ async function repairUids(dryRun: boolean, leadIds?: string[]): Promise<void> {
       meetingContactEmail: true,
       meetingContactPhonePrivate: true,
       meetingScheduledFor: true,
-      notes: true,
     },
   });
 
@@ -351,7 +350,6 @@ async function repairUids(dryRun: boolean, leadIds?: string[]): Promise<void> {
       attendeeName: lead.meetingContactName || lead.companyName,
       attendeeEmail: email,
       attendeePhone: lead.meetingContactPhonePrivate || undefined,
-      notes: lead.notes || undefined,
     });
     if (booking) {
       created += 1;
