@@ -47,6 +47,8 @@ type Props = {
   canOpen: (m: MeetingCalendarRow) => boolean;
   onWeekStartChange: (dayKey: string) => void;
   onBlockTimesClick?: () => void;
+  /** Admin: åbn kalender-indstillinger (mødeblok 55/75 min). */
+  onSettingsClick?: () => void;
   onBlockedSegmentClick?: (segment: BlockedTimeSegment) => void;
 };
 
@@ -184,6 +186,7 @@ export function MeetingsWeekCalendar({
   canOpen,
   onWeekStartChange,
   onBlockTimesClick,
+  onSettingsClick,
   onBlockedSegmentClick,
 }: Props) {
   const weekKeys = useMemo(() => weekDayKeys(weekStartDayKey), [weekStartDayKey]);
@@ -225,6 +228,15 @@ export function MeetingsWeekCalendar({
               className="rounded-lg border border-stone-300 bg-white px-3 py-1.5 text-sm font-medium text-stone-800 shadow-sm hover:bg-stone-50"
             >
               Bloker tider
+            </button>
+          ) : null}
+          {onSettingsClick ? (
+            <button
+              type="button"
+              onClick={onSettingsClick}
+              className="rounded-lg border border-stone-300 bg-white px-3 py-1.5 text-sm font-medium text-stone-800 shadow-sm hover:bg-stone-50"
+            >
+              Indstillinger
             </button>
           ) : null}
           <button

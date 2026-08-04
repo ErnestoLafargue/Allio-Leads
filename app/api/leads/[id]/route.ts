@@ -33,6 +33,7 @@ import {
 } from "@/lib/lead-meeting-archive";
 import { releaseExpiredLocksEverywhere, sellerMayEditLead } from "@/lib/lead-lock";
 import { blockedTimeConflictMessage } from "@/lib/booking/availability";
+import { getMeetingBlockMinutes } from "@/lib/booking/meeting-block-setting";
 import { findBlockedTimeConflictInDb } from "@/lib/booking/meeting-slots";
 import { findLeadBookingOverlapInDb } from "@/lib/booking/overlap-db";
 import { getDefaultMeetingAssigneeId } from "@/lib/meeting-assignee";
@@ -42,6 +43,10 @@ import { hangupActiveOutboundLeadLegsForLead } from "@/lib/dialer-bridge";
 import { canonicalLeadPhoneForStorage } from "@/lib/phone-e164";
 import { syncPostBookingIntegrations } from "@/lib/booking/post-booking-sync";
 import { leadNeedsPostBookingSync } from "@/lib/booking/post-booking-sync-needs";
+import {
+  isMeetingNotesSufficient,
+  MEETING_NOTES_REQUIRED_ERROR,
+} from "@/lib/meeting-notes-quality";
 
 type Params = { params: Promise<{ id: string }> };
 
@@ -347,6 +352,16 @@ export async function PATCH(req: Request, { params }: Params) {
       meetingScheduledFor != null &&
       isFutureMeetingTime(meetingScheduledFor);
 
+    // Kræv rigtige noter ved nye booking-bekræftelser (ikke ved redigering af
+    // allerede-bookede møder, så gamle leads med korte noter stadig kan rettes).
+    const isNewBookingForNotesGuard = !existing.meetingBookedAt || newMeetingConfirm;
+    if (isNewBookingForNotesGuard && !isMeetingNotesSufficient(notes)) {
+      return NextResponse.json(
+        { error: MEETING_NOTES_REQUIRED_ERROR, code: "MEETING_NOTES_INSUFFICIENT" },
+        { status: 400 },
+      );
+    }
+
     if (!existing.meetingBookedAt) {
       meetingBookedAt = new Date();
       bookedByUserId = userId;
@@ -449,12 +464,15 @@ export async function PATCH(req: Request, { params }: Params) {
     normalizeMeetingOutcomeStatus(meetingOutcomeStatus) !== MEETING_OUTCOME_CANCELLED &&
     !adminSkipBookingOverlap
   ) {
-    const overlap = await findLeadBookingOverlapInDb(meetingScheduledFor, { excludeLeadId: id });
+    const blockMinutes = await getMeetingBlockMinutes();
+    const overlap = await findLeadBookingOverlapInDb(meetingScheduledFor, {
+      excludeLeadId: id,
+      blockMinutes,
+    });
     if (overlap) {
       return NextResponse.json(
         {
-          error:
-            "Det valgte tidspunkt overlapper et andet møde. Hvert møde reserverer 75 min før og 75 min efter start — vælg et andet tidspunkt.",
+          error: `Det valgte tidspunkt overlapper et andet møde. Hvert møde reserverer ${blockMinutes} min før og ${blockMinutes} min efter start — vælg et andet tidspunkt.`,
         },
         { status: 409 },
       );

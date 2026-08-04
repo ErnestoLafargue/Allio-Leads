@@ -8,6 +8,7 @@ import {
   BlockedTimeDialog,
   type BlockedTimeDto,
 } from "@/app/(dashboard)/meetings/_components/blocked-time-dialog";
+import { MeetingBlockSettingDialog } from "@/app/(dashboard)/meetings/_components/meeting-block-setting-dialog";
 import { MeetingsWeekCalendar } from "@/app/(dashboard)/meetings/_components/meetings-week-calendar";
 import type { BlockedTimeRow } from "@/lib/blocked-time-calendar";
 import { copenhagenDayBoundsUtcFromDayKey } from "@/lib/copenhagen-day";
@@ -122,6 +123,7 @@ export function MeetingsList({ type }: { type: "upcoming" | "past" }) {
   const [blockedDialogMode, setBlockedDialogMode] = useState<"create" | "edit">("create");
   const [blockedDialogInitial, setBlockedDialogInitial] = useState<BlockedTimeDto | null>(null);
   const [blockedSaving, setBlockedSaving] = useState(false);
+  const [settingsDialogOpen, setSettingsDialogOpen] = useState(false);
 
   const title = useMemo(() => (type === "upcoming" ? "Kommende møder" : "Tidligere møder"), [type]);
 
@@ -396,6 +398,7 @@ export function MeetingsList({ type }: { type: "upcoming" | "past" }) {
             canOpen={(m) => canOpen(m as MeetingRow)}
             onWeekStartChange={setWeekStartDayKey}
             onBlockTimesClick={openCreateBlockedDialog}
+            onSettingsClick={isAdmin ? () => setSettingsDialogOpen(true) : undefined}
             onBlockedSegmentClick={(seg) => {
               const full = blockedTimesFull.find((b) => b.id === seg.id);
               if (!full) return;
@@ -413,6 +416,10 @@ export function MeetingsList({ type }: { type: "upcoming" | "past" }) {
             errorText={null}
             onClose={() => setBlockedDialogOpen(false)}
             onSaved={() => void onBlockedTimesSaved()}
+          />
+          <MeetingBlockSettingDialog
+            open={settingsDialogOpen}
+            onClose={() => setSettingsDialogOpen(false)}
           />
         </>
       ) : (

@@ -8,11 +8,16 @@ import { copenhagenDayKey } from "@/lib/copenhagen-day";
 import { MEETING_OUTCOME_PENDING } from "@/lib/meeting-outcome";
 import { shouldLogOutcomeForLeaderboard } from "@/lib/lead-outcome-log";
 import { blockedTimeConflictMessage } from "@/lib/booking/availability";
+import { getMeetingBlockMinutes } from "@/lib/booking/meeting-block-setting";
 import { findBlockedTimeConflictInDb } from "@/lib/booking/meeting-slots";
 import { findLeadBookingOverlapInDb } from "@/lib/booking/overlap-db";
 import { requireDefaultMeetingAssigneeId } from "@/lib/meeting-assignee";
 import { canonicalLeadPhoneForStorage } from "@/lib/phone-e164";
 import { syncPostBookingIntegrations } from "@/lib/booking/post-booking-sync";
+import {
+  isMeetingNotesSufficient,
+  MEETING_NOTES_REQUIRED_ERROR,
+} from "@/lib/meeting-notes-quality";
 
 export async function POST(req: Request) {
   const { session, response } = await requireSession();
@@ -52,6 +57,12 @@ export async function POST(req: Request) {
   if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(meetingContactEmail)) {
     return NextResponse.json({ error: "Ugyldig e-mail til mødekontakten." }, { status: 400 });
   }
+  if (!isMeetingNotesSufficient(notes)) {
+    return NextResponse.json(
+      { error: MEETING_NOTES_REQUIRED_ERROR, code: "MEETING_NOTES_INSUFFICIENT" },
+      { status: 400 },
+    );
+  }
 
   const companyName = "Direkte møde";
   const phone = phoneFromBody || meetingContactPhonePrivate;
@@ -71,12 +82,12 @@ export async function POST(req: Request) {
   const assignedUserId = await requireDefaultMeetingAssigneeId();
 
   if (!adminSkipBookingOverlap) {
-    const overlap = await findLeadBookingOverlapInDb(meetingScheduledFor);
+    const blockMinutes = await getMeetingBlockMinutes();
+    const overlap = await findLeadBookingOverlapInDb(meetingScheduledFor, { blockMinutes });
     if (overlap) {
       return NextResponse.json(
         {
-          error:
-            "Tidspunktet overlapper et eksisterende møde. Hvert møde reserverer 75 min før og 75 min efter start — vælg et andet tidspunkt.",
+          error: `Tidspunktet overlapper et eksisterende møde. Hvert møde reserverer ${blockMinutes} min før og ${blockMinutes} min efter start — vælg et andet tidspunkt.`,
         },
         { status: 409 },
       );

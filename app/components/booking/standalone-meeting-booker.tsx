@@ -6,6 +6,8 @@ import { useEffect, useState } from "react";
 import { BookingPanel, type BookingConfirmPayload } from "@/app/components/booking/booking-panel";
 import { MeetingContactFields } from "@/app/components/booking/meeting-contact-fields";
 import { buildLeadDetailHref, KNOWN_LEAD_SOURCES } from "@/lib/lead-navigation";
+import { isMeetingNotesSufficient } from "@/lib/meeting-notes-quality";
+import { MeetingNotesRequiredDialog } from "@/app/components/meeting-notes-required-dialog";
 
 type Props = {
   className?: string;
@@ -24,6 +26,7 @@ export function StandaloneMeetingBooker({ className = "", onBooked }: Props) {
   const [meetingContactPhonePrivate, setMeetingContactPhonePrivate] = useState("");
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [notesRequiredOpen, setNotesRequiredOpen] = useState(false);
   const [calendarUserId, setCalendarUserId] = useState<string | undefined>();
 
   useEffect(() => {
@@ -57,6 +60,10 @@ export function StandaloneMeetingBooker({ className = "", onBooked }: Props) {
       setError("Ugyldig e-mail til mødekontakten.");
       return;
     }
+    if (!isMeetingNotesSufficient(notes)) {
+      setNotesRequiredOpen(true);
+      return;
+    }
 
     setSubmitting(true);
     const res = await fetch("/api/meetings/book", {
@@ -75,6 +82,10 @@ export function StandaloneMeetingBooker({ className = "", onBooked }: Props) {
     setSubmitting(false);
     if (!res.ok) {
       const j = await res.json().catch(() => ({}));
+      if (j?.code === "MEETING_NOTES_INSUFFICIENT") {
+        setNotesRequiredOpen(true);
+        return;
+      }
       setError(typeof j.error === "string" ? j.error : "Kunne ikke oprette mødet.");
       return;
     }
@@ -94,7 +105,7 @@ export function StandaloneMeetingBooker({ className = "", onBooked }: Props) {
       <div>
         <h2 className="text-lg font-semibold text-stone-900">Book nyt møde</h2>
         <p className="mt-1 text-sm text-stone-500">
-          Opretter et lead under «Kommende møder» med status møde booket. Udfyld mødekontakt, evt. noter og vælg tid.
+          Opretter et lead under «Kommende møder» med status møde booket. Udfyld mødekontakt, noter og vælg tid.
         </p>
       </div>
 
@@ -113,13 +124,13 @@ export function StandaloneMeetingBooker({ className = "", onBooked }: Props) {
       />
 
       <div>
-        <label className="mb-1 block text-xs font-medium text-stone-700">Noter (valgfri)</label>
+        <label className="mb-1 block text-xs font-medium text-stone-700">Noter (påkrævet)</label>
         <textarea
           value={notes}
           onChange={(e) => setNotes(e.target.value)}
           rows={3}
           className="w-full resize-y rounded-lg border border-stone-200 bg-stone-50/60 px-3 py-2 text-sm text-stone-900 shadow-inner outline-none ring-stone-400 focus:ring-2"
-          placeholder="Evt. bemærkninger til mødet…"
+          placeholder="Hvad blev aftalt, og hvad fandt kunden interessant?"
         />
       </div>
 
@@ -129,6 +140,10 @@ export function StandaloneMeetingBooker({ className = "", onBooked }: Props) {
         allowAdminAvailabilityOverride={isAdmin}
         isSubmitting={submitting}
         onConfirmBooking={(d) => void onConfirmBooking(d)}
+      />
+      <MeetingNotesRequiredDialog
+        open={notesRequiredOpen}
+        onClose={() => setNotesRequiredOpen(false)}
       />
     </section>
   );

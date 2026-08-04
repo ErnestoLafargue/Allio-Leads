@@ -13,6 +13,8 @@ import {
   validateMeetingContactFields,
   type MeetingContactFieldErrors,
 } from "@/lib/meeting-contact-validation";
+import { isMeetingNotesSufficient } from "@/lib/meeting-notes-quality";
+import { MeetingNotesRequiredDialog } from "@/app/components/meeting-notes-required-dialog";
 import { CallbackScheduleDialog } from "@/app/components/callback-schedule-dialog";
 import { SendStandardMailDialog } from "@/app/components/send-standard-mail-dialog";
 import {
@@ -213,6 +215,7 @@ export function CampaignWorkspace({ campaignId, preferredLeadId, voipSession = f
   const [meetingContactPhonePrivate, setMeetingContactPhonePrivate] = useState("");
   const [meetingCompanyName, setMeetingCompanyName] = useState("");
   const [meetingContactErrors, setMeetingContactErrors] = useState<MeetingContactFieldErrors>({});
+  const [meetingNotesRequiredOpen, setMeetingNotesRequiredOpen] = useState(false);
   const [callbackDialogOpen, setCallbackDialogOpen] = useState(false);
   const [callbackSubmitError, setCallbackSubmitError] = useState<string | null>(null);
   const [mailDialogOpen, setMailDialogOpen] = useState(false);
@@ -828,6 +831,10 @@ export function CampaignWorkspace({ campaignId, preferredLeadId, voipSession = f
     });
     if (!res.ok) {
       const j = await res.json().catch(() => ({}));
+      if (j?.code === "MEETING_NOTES_INSUFFICIENT") {
+        setMeetingNotesRequiredOpen(true);
+        return null;
+      }
       setError(j.error ?? "Kunne ikke gemme");
       return null;
     }
@@ -974,6 +981,16 @@ export function CampaignWorkspace({ campaignId, preferredLeadId, voipSession = f
       }
       if (!iso || contactErr) {
         setError(parts.join(" "));
+        return;
+      }
+
+      // Kræv rigtige noter ved ny booking-bekræftelse (samme regel som serveren).
+      const isNewBookingConfirm =
+        !meetingBookedAt ||
+        !activeLead.meetingScheduledFor ||
+        new Date(activeLead.meetingScheduledFor).getTime() !== new Date(iso).getTime();
+      if (isNewBookingConfirm && !isMeetingNotesSufficient(notes)) {
+        setMeetingNotesRequiredOpen(true);
         return;
       }
 
@@ -1890,6 +1907,10 @@ export function CampaignWorkspace({ campaignId, preferredLeadId, voipSession = f
         bottomBar={renderNextButton()}
       />
 
+      <MeetingNotesRequiredDialog
+        open={meetingNotesRequiredOpen}
+        onClose={() => setMeetingNotesRequiredOpen(false)}
+      />
       <CallbackScheduleDialog
         open={callbackDialogOpen}
         currentUserId={sessionUserId}

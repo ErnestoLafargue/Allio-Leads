@@ -4,10 +4,12 @@ import { useEffect, useState } from "react";
 import { LEAD_STATUS_LABELS, type LeadStatus } from "@/lib/lead-status";
 import { OUTCOME_ORDER, outcomeButtonClass } from "@/lib/lead-outcome-ui";
 import {
+  BOOKING_MEETING_BLOCK_BEFORE_MIN,
   getAvailableCopenhagenBookingSlots,
   parseOccupiedBlocksFromApi,
 } from "@/lib/booking/availability";
 import { toCopenhagenDateKey } from "@/lib/booking/mock-availability";
+import { MeetingNotesRequiredDialog } from "@/app/components/meeting-notes-required-dialog";
 
 type Props = {
   open: boolean;
@@ -36,6 +38,7 @@ export function LeadOutcomeModal({
   const [draftMeeting, setDraftMeeting] = useState(initialMeetingLocal);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [notesRequiredOpen, setNotesRequiredOpen] = useState(false);
 
   const count = leadIds.length;
   const single = count === 1;
@@ -47,22 +50,33 @@ export function LeadOutcomeModal({
     setError(null);
   }, [open, initialStatus, initialMeetingLocal]);
 
-  async function isMeetingTimeSelectable(meetingIso: string): Promise<boolean> {
+  async function isMeetingTimeSelectable(
+    meetingIso: string,
+  ): Promise<{ selectable: boolean; blockMinutes: number }> {
+    const fallback = { selectable: false, blockMinutes: BOOKING_MEETING_BLOCK_BEFORE_MIN };
     const dt = new Date(meetingIso);
-    if (Number.isNaN(dt.getTime())) return false;
+    if (Number.isNaN(dt.getTime())) return fallback;
     const dayKey = toCopenhagenDateKey(dt);
     const qs = new URLSearchParams({ date: dayKey });
     if (single && leadIds[0]) {
       qs.set("excludeLeadId", leadIds[0]);
     }
     const res = await fetch(`/api/booking/availability?${qs.toString()}`);
-    if (!res.ok) return false;
+    if (!res.ok) return fallback;
     const payload = (await res.json().catch(() => ({}))) as {
       blocks?: { start: string; end: string }[];
+      blockMinutes?: number;
     };
+    const blockMinutes =
+      typeof payload.blockMinutes === "number"
+        ? payload.blockMinutes
+        : BOOKING_MEETING_BLOCK_BEFORE_MIN;
     const occupied = parseOccupiedBlocksFromApi(Array.isArray(payload.blocks) ? payload.blocks : []);
     const available = getAvailableCopenhagenBookingSlots(dayKey, occupied);
-    return available.some((s) => Math.abs(s.utcMs - dt.getTime()) < 90_000);
+    return {
+      selectable: available.some((s) => Math.abs(s.utcMs - dt.getTime()) < 90_000),
+      blockMinutes,
+    };
   }
 
   async function save() {
@@ -78,11 +92,11 @@ export function LeadOutcomeModal({
         ? new Date(draftMeeting).toISOString()
         : undefined;
     if (draftStatus === "MEETING_BOOKED" && meetingIso) {
-      const selectable = await isMeetingTimeSelectable(meetingIso);
+      const { selectable, blockMinutes } = await isMeetingTimeSelectable(meetingIso);
       if (!selectable) {
         setSaving(false);
         setError(
-          "Det valgte mødetidspunkt overlapper buffer-reglen (75 min før / 75 min efter) eller er ikke længere ledigt. Vælg en ledig tid i kalenderen.",
+          `Det valgte mødetidspunkt overlapper buffer-reglen (${blockMinutes} min før / ${blockMinutes} min efter) eller er ikke længere ledigt. Vælg en ledig tid i kalenderen.`,
         );
         return;
       }
@@ -106,6 +120,10 @@ export function LeadOutcomeModal({
       setSaving(false);
       if (!res.ok) {
         const j = await res.json().catch(() => ({}));
+        if (j?.code === "MEETING_NOTES_INSUFFICIENT") {
+          setNotesRequiredOpen(true);
+          return;
+        }
         setError(typeof j.error === "string" ? j.error : "Kunne ikke gemme udfald");
         return;
       }
@@ -127,6 +145,10 @@ export function LeadOutcomeModal({
     setSaving(false);
     if (!res.ok) {
       const j = await res.json().catch(() => ({}));
+      if (j?.code === "MEETING_NOTES_INSUFFICIENT") {
+        setNotesRequiredOpen(true);
+        return;
+      }
       setError(typeof j.error === "string" ? j.error : "Kunne ikke gemme udfald");
       return;
     }
@@ -210,6 +232,10 @@ export function LeadOutcomeModal({
           </button>
         </div>
       </div>
+      <MeetingNotesRequiredDialog
+        open={notesRequiredOpen}
+        onClose={() => setNotesRequiredOpen(false)}
+      />
     </div>
   );
 }

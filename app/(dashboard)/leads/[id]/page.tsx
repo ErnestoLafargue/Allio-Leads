@@ -18,6 +18,8 @@ import {
   validateMeetingContactFields,
   type MeetingContactFieldErrors,
 } from "@/lib/meeting-contact-validation";
+import { isMeetingNotesSufficient } from "@/lib/meeting-notes-quality";
+import { MeetingNotesRequiredDialog } from "@/app/components/meeting-notes-required-dialog";
 import {
   meetingOutcomeBadgeClass,
   MEETING_OUTCOME_LABELS,
@@ -102,6 +104,7 @@ function LeadDetailInner() {
   const [meetingContactPhonePrivate, setMeetingContactPhonePrivate] = useState("");
   const [meetingCompanyName, setMeetingCompanyName] = useState("");
   const [meetingContactErrors, setMeetingContactErrors] = useState<MeetingContactFieldErrors>({});
+  const [meetingNotesRequiredOpen, setMeetingNotesRequiredOpen] = useState(false);
   const [meetingOutcomeStatus, setMeetingOutcomeStatus] = useState(MEETING_OUTCOME_PENDING);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
@@ -329,6 +332,16 @@ function LeadDetailInner() {
     if (status !== "MEETING_BOOKED") setMeetingContactErrors({});
   }, [status]);
 
+  /** Kræv rigtige noter ved nye booking-bekræftelser (samme regel som serveren). */
+  function meetingNotesBlockNewBooking(proposedIso: string | undefined): boolean {
+    const isNewBookingConfirm =
+      !lead?.meetingBookedAt ||
+      !lead?.meetingScheduledFor ||
+      (proposedIso != null &&
+        new Date(lead.meetingScheduledFor).getTime() !== new Date(proposedIso).getTime());
+    return isNewBookingConfirm && !isMeetingNotesSufficient(notes);
+  }
+
   async function onConfirmBookingFromPanel(detail: BookingConfirmPayload) {
     if (!lead || status !== "MEETING_BOOKED") return;
     const contactErr = validateMeetingContactFields(
@@ -343,6 +356,10 @@ function LeadDetailInner() {
       return;
     }
     setMeetingContactErrors({});
+    if (meetingNotesBlockNewBooking(detail.localDateTimeISO)) {
+      setMeetingNotesRequiredOpen(true);
+      return;
+    }
     setError(null);
     setSaving(true);
     const body: Record<string, unknown> = {
@@ -374,6 +391,10 @@ function LeadDetailInner() {
     setSaving(false);
     if (!res.ok) {
       const j = await res.json().catch(() => ({}));
+      if (j?.code === "MEETING_NOTES_INSUFFICIENT") {
+        setMeetingNotesRequiredOpen(true);
+        return;
+      }
       setError(j.error ?? "Kunne ikke gemme booking");
       return;
     }
@@ -413,6 +434,10 @@ function LeadDetailInner() {
         setError("Vælg dato og ledig tid i kalenderen nedenfor og tryk «Bekræft booking» (eller udfyld tidspunktet via booking-flowet først).");
         return;
       }
+      if (meetingNotesBlockNewBooking(new Date(meetingScheduledFor).toISOString())) {
+        setMeetingNotesRequiredOpen(true);
+        return;
+      }
     }
     setSaving(true);
     const body: Record<string, unknown> = {
@@ -443,6 +468,10 @@ function LeadDetailInner() {
     setSaving(false);
     if (!res.ok) {
       const j = await res.json().catch(() => ({}));
+      if (j?.code === "MEETING_NOTES_INSUFFICIENT") {
+        setMeetingNotesRequiredOpen(true);
+        return;
+      }
       setError(j.error ?? "Kunne ikke gemme");
       return;
     }
@@ -954,6 +983,10 @@ function LeadDetailInner() {
         reloadToken={activityReloadToken}
       />
 
+      <MeetingNotesRequiredDialog
+        open={meetingNotesRequiredOpen}
+        onClose={() => setMeetingNotesRequiredOpen(false)}
+      />
       <CallbackScheduleDialog
         open={callbackDialogOpen}
         currentUserId={myUserId}

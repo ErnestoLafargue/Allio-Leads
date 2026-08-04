@@ -12,12 +12,21 @@ import {
 } from "@/lib/lead-outcome-log";
 import { isLockedByOtherUser, releaseExpiredLocksEverywhere } from "@/lib/lead-lock";
 import { blockedTimeConflictMessage } from "@/lib/booking/availability";
+import { getMeetingBlockMinutes } from "@/lib/booking/meeting-block-setting";
 import { findBlockedTimeConflictInDb } from "@/lib/booking/meeting-slots";
 import { findLeadBookingOverlapInDb } from "@/lib/booking/overlap-db";
 import { getDefaultMeetingAssigneeId } from "@/lib/meeting-assignee";
 import { campaignIdForBookedMeetingOutcome } from "@/lib/meeting-campaign-routing";
 import { ensureStandardCampaignId } from "@/lib/ensure-system-campaigns";
 import { findBookingTimeConflict } from "@/lib/booking/availability";
+import {
+  isFutureMeetingTime,
+  isNewMeetingBookingConfirm,
+} from "@/lib/lead-meeting-archive";
+import {
+  isMeetingNotesSufficient,
+  MEETING_NOTES_REQUIRED_ERROR,
+} from "@/lib/meeting-notes-quality";
 
 const MAX_BULK = 500;
 
@@ -90,6 +99,30 @@ export async function POST(req: Request) {
 
     const logRows: { leadId: string; userId: string; status: string }[] = [];
 
+    if (status === "MEETING_BOOKED") {
+      // Kræv rigtige noter ved nye booking-bekræftelser (samme regel som leads PATCH).
+      for (const existing of existingRows) {
+        const proposed = meetingScheduledFor
+          ? new Date(meetingScheduledFor)
+          : existing.meetingScheduledFor;
+        const newMeetingConfirm =
+          isNewMeetingBookingConfirm(existing, proposed ?? null) &&
+          proposed != null &&
+          !Number.isNaN(proposed.getTime()) &&
+          isFutureMeetingTime(proposed);
+        const isNewBooking = !existing.meetingBookedAt || newMeetingConfirm;
+        if (isNewBooking && !isMeetingNotesSufficient(existing.notes)) {
+          return NextResponse.json(
+            {
+              error: `${MEETING_NOTES_REQUIRED_ERROR} (lead: ${existing.companyName || existing.id})`,
+              code: "MEETING_NOTES_INSUFFICIENT",
+            },
+            { status: 400 },
+          );
+        }
+      }
+    }
+
     for (const existing of existingRows) {
       const built = buildLeadOutcomeOnlyUpdate(existing, status, meetingScheduledFor, userId);
       if (!built.ok) {
@@ -140,13 +173,16 @@ export async function POST(req: Request) {
         }
       }
       const defaultAssigneeId = await getDefaultMeetingAssigneeId();
+      const blockMinutes = await getMeetingBlockMinutes();
       for (const p of proposals) {
-        const clash = await findLeadBookingOverlapInDb(p.start, { excludeLeadIds: idList });
+        const clash = await findLeadBookingOverlapInDb(p.start, {
+          excludeLeadIds: idList,
+          blockMinutes,
+        });
         if (clash) {
           return NextResponse.json(
             {
-              error:
-                "Mindst ét tidspunkt overlapper et eksisterende møde (75 min før/efter start). Vælg andre tider.",
+              error: `Mindst ét tidspunkt overlapper et eksisterende møde (${blockMinutes} min før/efter start). Vælg andre tider.`,
             },
             { status: 409 },
           );
@@ -168,12 +204,16 @@ export async function POST(req: Request) {
         for (let j = i + 1; j < proposals.length; j++) {
           const b = proposals[j]!;
           if (
-            findBookingTimeConflict(a.start, [
-              { id: b.id, meetingScheduledFor: b.start, meetingOutcomeStatus: "PENDING" },
-            ])
+            findBookingTimeConflict(
+              a.start,
+              [{ id: b.id, meetingScheduledFor: b.start, meetingOutcomeStatus: "PENDING" }],
+              { blockBeforeMinutes: blockMinutes, blockAfterMinutes: blockMinutes },
+            )
           ) {
             return NextResponse.json(
-              { error: "Flere valgte møder overlapper hinanden i tid (75 min før/efter pr. booking)." },
+              {
+                error: `Flere valgte møder overlapper hinanden i tid (${blockMinutes} min før/efter pr. booking).`,
+              },
               { status: 409 },
             );
           }

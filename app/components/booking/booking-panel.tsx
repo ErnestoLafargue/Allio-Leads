@@ -4,6 +4,7 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { BookingCalendar } from "@/app/components/booking/booking-calendar";
 import { BookingTimeSlots } from "@/app/components/booking/booking-time-slots";
 import {
+  BOOKING_MEETING_BLOCK_BEFORE_MIN,
   getCopenhagenBookingSlotsWithAvailability,
   parseOccupiedBlocksFromApi,
   type CopenhagenBookingSlotWithAvailability,
@@ -18,7 +19,7 @@ export type BookingConfirmPayload = {
   campaignId?: string;
   leadId?: string;
   /**
-   * Kun administrator: spring overlap-tjek over (75 min før/efter). Det nye møde får stadig sin egen blok i systemet.
+   * Kun administrator: spring overlap-tjek over (mødeblok-minutter før/efter). Det nye møde får stadig sin egen blok i systemet.
    */
   adminSkipBookingOverlap?: boolean;
 };
@@ -57,6 +58,7 @@ export function BookingPanel({
   const [slotOptions, setSlotOptions] = useState<CopenhagenBookingSlotWithAvailability[]>([]);
   const [slotsLoading, setSlotsLoading] = useState(false);
   const [adminAvailabilityOverride, setAdminAvailabilityOverride] = useState(false);
+  const [blockMinutes, setBlockMinutes] = useState<number>(BOOKING_MEETING_BLOCK_BEFORE_MIN);
   const [resolvedCalendarUserId, setResolvedCalendarUserId] = useState<string | undefined>(
     calendarUserIdProp,
   );
@@ -117,9 +119,17 @@ export function BookingPanel({
       const qs = new URLSearchParams({ date: dayKey, userId: calendarUserId });
       if (leadId) qs.set("excludeLeadId", leadId);
       const res = await fetch(`/api/booking/availability?${qs}`);
-      const occupied = res.ok
-        ? parseOccupiedBlocksFromApi((await res.json()).blocks as { start: string; end: string }[])
-        : [];
+      let occupied: ReturnType<typeof parseOccupiedBlocksFromApi> = [];
+      if (res.ok) {
+        const payload = (await res.json()) as {
+          blocks: { start: string; end: string }[];
+          blockMinutes?: number;
+        };
+        occupied = parseOccupiedBlocksFromApi(payload.blocks);
+        if (typeof payload.blockMinutes === "number" && !cancelled) {
+          setBlockMinutes(payload.blockMinutes);
+        }
+      }
       const allSlots = getCopenhagenBookingSlotsWithAvailability(dayKey, occupied);
       const display =
         allowAdminAvailabilityOverride && adminAvailabilityOverride
@@ -256,14 +266,14 @@ export function BookingPanel({
               >
                 Overskrid
                 <span className="mt-0.5 block font-normal text-slate-600">
-                  Vis alle tider inkl. optagne — book alligevel som admin (75 min blokering gælder stadig for det nye møde).
+                  Vis alle tider inkl. optagne — book alligevel som admin ({blockMinutes} min blokering gælder stadig for det nye møde).
                 </span>
               </button>
             </div>
           ) : null}
         </div>
         <p className="text-xs text-slate-600 sm:max-w-sm">
-          Hvert møde reserverer <strong>75 min før</strong> og <strong>75 min efter</strong> start (gitter 15 min).
+          Hvert møde reserverer <strong>{blockMinutes} min før</strong> og <strong>{blockMinutes} min efter</strong> start (gitter 15 min).
           {!adminAvailabilityOverride || !allowAdminAvailabilityOverride
             ? " Ledige tider er filtreret."
             : null}

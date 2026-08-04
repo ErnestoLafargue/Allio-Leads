@@ -39,7 +39,7 @@ export function toCopenhagenDateKey(d: Date): BookingDateKey {
 }
 
 /**
- * 15-min slots 09–17 Europe/Copenhagen uden 75-min bookinger (ingen DB — kun tom occupied).
+ * 15-min slots 09–17 Europe/Copenhagen uden mødeblok-bookinger (ingen DB — kun tom occupied).
  */
 export function getMockAvailableTimeSlots(date: Date): string[] {
   return getAvailableCopenhagenBookingSlots(toCopenhagenDateKey(date), []).map((s) => s.time);

@@ -1,11 +1,10 @@
 import { NextResponse } from "next/server";
 import { requireSession } from "@/lib/api-auth";
 import {
-  BOOKING_MEETING_BLOCK_AFTER_MIN,
-  BOOKING_MEETING_BLOCK_BEFORE_MIN,
   occupiedBlocksFromBlockedTimes,
   occupiedBlocksFromScheduledMeetings,
 } from "@/lib/booking/availability";
+import { getMeetingBlockMinutes } from "@/lib/booking/meeting-block-setting";
 import { getAvailableMeetingSlots } from "@/lib/booking/meeting-slots";
 import { copenhagenDayBoundsUtcFromDayKey } from "@/lib/copenhagen-day";
 import { getDefaultMeetingAssigneeId } from "@/lib/meeting-assignee";
@@ -14,7 +13,7 @@ import { MEETING_OUTCOME_PENDING } from "@/lib/meeting-outcome";
 
 /**
  * GET ?date=YYYY-MM-DD&userId=&excludeLeadId=
- * Returnerer samlede optagne blokke (globale møder ±75 + brugerens manuelle blokeringer).
+ * Returnerer samlede optagne blokke (globale møder ±mødeblok-minutter + brugerens manuelle blokeringer).
  */
 export async function GET(req: Request) {
   const { response } = await requireSession();
@@ -41,10 +40,10 @@ export async function GET(req: Request) {
 
   try {
     const { start, end } = copenhagenDayBoundsUtcFromDayKey(date);
-    const beforeMs = BOOKING_MEETING_BLOCK_BEFORE_MIN * 60 * 1000;
-    const afterMs = BOOKING_MEETING_BLOCK_AFTER_MIN * 60 * 1000;
-    const queryStart = new Date(start.getTime() - afterMs);
-    const queryEnd = new Date(end.getTime() + beforeMs);
+    const blockMinutes = await getMeetingBlockMinutes();
+    const blockMs = blockMinutes * 60 * 1000;
+    const queryStart = new Date(start.getTime() - blockMs);
+    const queryEnd = new Date(end.getTime() + blockMs);
 
     const [leads, blockedRows, slots] = await Promise.all([
       prisma.lead.findMany({
@@ -68,11 +67,14 @@ export async function GET(req: Request) {
         },
         select: { startDateTime: true, endDateTime: true },
       }),
-      getAvailableMeetingSlots(userId, date, { excludeLeadId }),
+      getAvailableMeetingSlots(userId, date, { excludeLeadId, blockMinutes }),
     ]);
 
     const occupied = [
-      ...occupiedBlocksFromScheduledMeetings(leads),
+      ...occupiedBlocksFromScheduledMeetings(leads, {
+        blockBeforeMinutes: blockMinutes,
+        blockAfterMinutes: blockMinutes,
+      }),
       ...occupiedBlocksFromBlockedTimes(blockedRows),
     ];
     const blocks = occupied.map((b) => ({
@@ -83,6 +85,7 @@ export async function GET(req: Request) {
     return NextResponse.json({
       blocks,
       userId,
+      blockMinutes,
       slots: slots.map((s) => ({
         time: s.time,
         utcMs: s.utcMs,

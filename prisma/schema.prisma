@@ -512,6 +512,13 @@ model CampaignImportLog {
   @@index([userId, createdAt])
 }
 
+/// Globale app-indstillinger som key/value (fx meeting_block_minutes).
+model AppSetting {
+  key       String   @id
+  value     String
+  updatedAt DateTime @updatedAt
+}
+
 /// Manuel blokering af kalender (per bruger) — fjernes fra ledige booking-tider.
 model BlockedTime {
   id              String   @id @default(cuid())

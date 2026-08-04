@@ -1,22 +1,23 @@
 import { prisma } from "@/lib/prisma";
 import { copenhagenDayBoundsUtcFromDayKey } from "@/lib/copenhagen-day";
 import {
-  BOOKING_MEETING_BLOCK_AFTER_MIN,
-  BOOKING_MEETING_BLOCK_BEFORE_MIN,
   findBlockedTimeConflict,
   getCopenhagenBookingSlotsWithAvailability,
   occupiedBlocksFromBlockedTimes,
   occupiedBlocksFromScheduledMeetings,
   type CopenhagenBookingSlotWithAvailability,
 } from "@/lib/booking/availability";
+import { getMeetingBlockMinutes } from "@/lib/booking/meeting-block-setting";
 import { MEETING_OUTCOME_PENDING } from "@/lib/meeting-outcome";
 
 export type GetAvailableMeetingSlotsOpts = {
   excludeLeadId?: string;
+  /** Mødeblok-minutter (±) — hentes fra AppSetting hvis ikke angivet. */
+  blockMinutes?: number;
 };
 
 /**
- * Ledige booking-slots for en bruger: globale mødeblokke (-75/+75) + brugerens manuelle blokeringer.
+ * Ledige booking-slots for en bruger: globale mødeblokke (±mødeblok-minutter) + brugerens manuelle blokeringer.
  */
 export async function getAvailableMeetingSlots(
   userId: string,
@@ -24,8 +25,9 @@ export async function getAvailableMeetingSlots(
   opts: GetAvailableMeetingSlotsOpts = {},
 ): Promise<CopenhagenBookingSlotWithAvailability[]> {
   const { start, end } = copenhagenDayBoundsUtcFromDayKey(dayKey);
-  const beforeMs = BOOKING_MEETING_BLOCK_BEFORE_MIN * 60 * 1000;
-  const afterMs = BOOKING_MEETING_BLOCK_AFTER_MIN * 60 * 1000;
+  const blockMinutes = opts.blockMinutes ?? (await getMeetingBlockMinutes());
+  const beforeMs = blockMinutes * 60 * 1000;
+  const afterMs = blockMinutes * 60 * 1000;
   const queryStart = new Date(start.getTime() - afterMs);
   const queryEnd = new Date(end.getTime() + beforeMs);
 
@@ -54,7 +56,10 @@ export async function getAvailableMeetingSlots(
   ]);
 
   const occupied = [
-    ...occupiedBlocksFromScheduledMeetings(leads),
+    ...occupiedBlocksFromScheduledMeetings(leads, {
+      blockBeforeMinutes: blockMinutes,
+      blockAfterMinutes: blockMinutes,
+    }),
     ...occupiedBlocksFromBlockedTimes(blockedRows),
   ];
   return getCopenhagenBookingSlotsWithAvailability(dayKey, occupied);

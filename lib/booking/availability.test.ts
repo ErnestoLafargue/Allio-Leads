@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   findBlockedTimeConflict,
+  findBookingTimeConflict,
   isSlotStartBlocked,
   occupiedBlocksFromBlockedTimes,
   occupiedBlocksFromScheduledMeetings,
@@ -56,7 +57,7 @@ describe("isSlotStartBlocked med blandet occupied", () => {
     expect(isSlotStartBlocked(new Date("2026-05-27T13:00:00.000Z").getTime(), 15, occupied)).toBe(true);
   });
 
-  it("mødeblok har ±75 min buffer", () => {
+  it("mødeblok har ±55 min buffer som default", () => {
     const occupied = occupiedBlocksFromScheduledMeetings([
       {
         meetingScheduledFor: new Date("2026-05-27T12:00:00.000Z"),
@@ -64,7 +65,46 @@ describe("isSlotStartBlocked med blandet occupied", () => {
       },
     ]);
     const meetingStart = new Date("2026-05-27T12:00:00.000Z").getTime();
+    const blockStart = meetingStart - 55 * 60 * 1000;
+    expect(isSlotStartBlocked(blockStart + 60_000, 15, occupied)).toBe(true);
+    // Uden for ±55-blokken (fx 60 min før) er tiden ledig.
+    expect(isSlotStartBlocked(meetingStart - 60 * 60 * 1000, 15, occupied)).toBe(false);
+  });
+
+  it("mødeblok kan overrides til ±75 min", () => {
+    const occupied = occupiedBlocksFromScheduledMeetings(
+      [
+        {
+          meetingScheduledFor: new Date("2026-05-27T12:00:00.000Z"),
+          meetingOutcomeStatus: "PENDING",
+        },
+      ],
+      { blockBeforeMinutes: 75, blockAfterMinutes: 75 },
+    );
+    const meetingStart = new Date("2026-05-27T12:00:00.000Z").getTime();
     const blockStart = meetingStart - 75 * 60 * 1000;
     expect(isSlotStartBlocked(blockStart + 60_000, 15, occupied)).toBe(true);
+  });
+});
+
+describe("findBookingTimeConflict med opts", () => {
+  it("respekterer blockBefore/AfterMinutes-override (75)", () => {
+    const existing = [
+      {
+        id: "l1",
+        meetingScheduledFor: new Date("2026-05-27T12:00:00.000Z"),
+        meetingOutcomeStatus: "PENDING",
+      },
+    ];
+    const proposed = new Date("2026-05-27T13:00:00.000Z"); // 60 min efter
+    // Default ±55: ingen konflikt.
+    expect(findBookingTimeConflict(proposed, existing)).toBeNull();
+    // Override ±75: konflikt.
+    expect(
+      findBookingTimeConflict(proposed, existing, {
+        blockBeforeMinutes: 75,
+        blockAfterMinutes: 75,
+      }),
+    ).toEqual({ id: "l1" });
   });
 });

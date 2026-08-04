@@ -6,10 +6,10 @@ import {
 
 /** 15-minutters gitter som i kalenderen */
 export const BOOKING_SLOT_STEP_MIN = 15;
-/** Hvert møde blokerer 75 min før start */
-export const BOOKING_MEETING_BLOCK_BEFORE_MIN = 75;
-/** Hvert møde blokerer 75 min efter start */
-export const BOOKING_MEETING_BLOCK_AFTER_MIN = 75;
+/** Default-fallback: hvert møde blokerer 55 min før start (aktuel værdi styres af AppSetting meeting_block_minutes). */
+export const BOOKING_MEETING_BLOCK_BEFORE_MIN = 55;
+/** Default-fallback: hvert møde blokerer 55 min efter start (aktuel værdi styres af AppSetting meeting_block_minutes). */
+export const BOOKING_MEETING_BLOCK_AFTER_MIN = 55;
 /** Bevares for kompatibilitet i ældre kaldesteder (efter-blok) */
 export const BOOKING_MEETING_BLOCK_MIN = BOOKING_MEETING_BLOCK_AFTER_MIN;
 
@@ -22,12 +22,18 @@ export type CopenhagenBookingSlot = { time: string; utcMs: number };
 
 export type CopenhagenBookingSlotWithAvailability = CopenhagenBookingSlot & { available: boolean };
 
-export function getMeetingBlockStartMs(startMs: number): number {
-  return startMs - BOOKING_MEETING_BLOCK_BEFORE_MIN * 60 * 1000;
+export function getMeetingBlockStartMs(
+  startMs: number,
+  blockBeforeMinutes: number = BOOKING_MEETING_BLOCK_BEFORE_MIN,
+): number {
+  return startMs - blockBeforeMinutes * 60 * 1000;
 }
 
-export function getMeetingBlockEndMs(startMs: number): number {
-  return startMs + BOOKING_MEETING_BLOCK_AFTER_MIN * 60 * 1000;
+export function getMeetingBlockEndMs(
+  startMs: number,
+  blockAfterMinutes: number = BOOKING_MEETING_BLOCK_AFTER_MIN,
+): number {
+  return startMs + blockAfterMinutes * 60 * 1000;
 }
 
 /** Åbne intervaller [aStart,aEnd) og [bStart,bEnd) */
@@ -59,7 +65,10 @@ export function occupiedBlocksFromScheduledMeetings(
     meetingScheduledFor: Date | null;
     meetingOutcomeStatus?: string | null;
   }[],
+  opts?: { blockBeforeMinutes?: number; blockAfterMinutes?: number },
 ): TimeBlockMs[] {
+  const blockBeforeMin = opts?.blockBeforeMinutes ?? BOOKING_MEETING_BLOCK_BEFORE_MIN;
+  const blockAfterMin = opts?.blockAfterMinutes ?? BOOKING_MEETING_BLOCK_AFTER_MIN;
   const out: TimeBlockMs[] = [];
   for (const row of rows) {
     if (!row.meetingScheduledFor) continue;
@@ -69,7 +78,10 @@ export function occupiedBlocksFromScheduledMeetings(
     }
     const startMs = row.meetingScheduledFor.getTime();
     if (Number.isNaN(startMs)) continue;
-    out.push({ startMs: getMeetingBlockStartMs(startMs), endMs: getMeetingBlockEndMs(startMs) });
+    out.push({
+      startMs: getMeetingBlockStartMs(startMs, blockBeforeMin),
+      endMs: getMeetingBlockEndMs(startMs, blockAfterMin),
+    });
   }
   return out;
 }
@@ -81,7 +93,7 @@ export function isPastCopenhagenDayKey(dayKey: string): boolean {
 
 /**
  * Alle 15-min starttider på en kalenderdag (København) inden for arbejdsvinduet,
- * med flag for om tiden er ledig ift. optagne mødeblokke (-75/+75).
+ * med flag for om tiden er ledig ift. optagne mødeblokke (±mødeblok-minutter).
  */
 export function getCopenhagenBookingSlotsWithAvailability(
   dayKey: string,

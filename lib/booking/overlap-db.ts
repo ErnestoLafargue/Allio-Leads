@@ -1,19 +1,17 @@
 import { prisma } from "@/lib/prisma";
-import {
-  BOOKING_MEETING_BLOCK_AFTER_MIN,
-  BOOKING_MEETING_BLOCK_BEFORE_MIN,
-  findBookingTimeConflict,
-} from "@/lib/booking/availability";
+import { findBookingTimeConflict } from "@/lib/booking/availability";
+import { getMeetingBlockMinutes } from "@/lib/booking/meeting-block-setting";
 import { MEETING_OUTCOME_PENDING } from "@/lib/meeting-outcome";
 
-/** DB-runde for overlappende mødeblokke (-75/+75) (undtagen annullerede). */
+/** DB-runde for overlappende mødeblokke (±mødeblok-minutter) (undtagen annullerede). */
 export async function findLeadBookingOverlapInDb(
   proposedStart: Date,
-  opts: { excludeLeadId?: string; excludeLeadIds?: string[] } = {},
+  opts: { excludeLeadId?: string; excludeLeadIds?: string[]; blockMinutes?: number } = {},
 ): Promise<{ id: string } | null> {
   const startMs = proposedStart.getTime();
   if (Number.isNaN(startMs)) return null;
-  const pad = (BOOKING_MEETING_BLOCK_BEFORE_MIN + BOOKING_MEETING_BLOCK_AFTER_MIN) * 60 * 1000;
+  const blockMinutes = opts.blockMinutes ?? (await getMeetingBlockMinutes());
+  const pad = 2 * blockMinutes * 60 * 1000;
   const exclude = opts.excludeLeadIds?.length
     ? opts.excludeLeadIds
     : opts.excludeLeadId
@@ -33,5 +31,8 @@ export async function findLeadBookingOverlapInDb(
     },
     select: { id: true, meetingScheduledFor: true, meetingOutcomeStatus: true },
   });
-  return findBookingTimeConflict(proposedStart, rows);
+  return findBookingTimeConflict(proposedStart, rows, {
+    blockBeforeMinutes: blockMinutes,
+    blockAfterMinutes: blockMinutes,
+  });
 }
