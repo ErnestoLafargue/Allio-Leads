@@ -57,10 +57,20 @@ export function MeetingNotesRequiredDialog({ open, onClose }: Props) {
           forberede næste møde — skriv hvad kunden fandt interessant, hvad der blev aftalt,
           og hvad der blev lovet på opkaldet.
         </p>
-        <p className="mt-3 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-800">
-          Tip: En e-mailadresse alene er ikke nok — skriv mindst {MEETING_NOTES_MIN_CHARS} tegn
-          rigtig tekst.
-        </p>
+        <div className="mt-3 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-800">
+          <p className="font-medium">Gode ting at få med:</p>
+          <ul className="mt-1 list-disc space-y-0.5 pl-4">
+            <li>Hvor længe har virksomheden eksisteret?</li>
+            <li>Hvor mange ansatte har de?</li>
+            <li>Kører de markedsføring i dag?</li>
+            <li>Hvilket bookingsystem bruger de — og hvor længe har de brugt det?</li>
+            <li>Hvad er prisen på en standardydelse?</li>
+          </ul>
+          <p className="mt-2 text-xs text-amber-700">
+            En e-mailadresse alene er ikke nok — skriv mindst {MEETING_NOTES_MIN_CHARS} tegn
+            rigtig tekst.
+          </p>
+        </div>
         <p className="mt-3 text-sm text-stone-600">
           Luk denne besked, skriv noterne i notefeltet, og prøv igen.
         </p>
