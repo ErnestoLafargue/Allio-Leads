@@ -8,11 +8,10 @@ import {
   meetingOutcomeBadgeClass,
   MEETING_OUTCOME_LABELS,
   MEETING_OUTCOME_PENDING,
-  MEETING_OUTCOME_SALE,
 } from "@/lib/meeting-outcome";
-import { COMMISSION_REBOOKING_FLAT_KR, rateKrPerHeldMeeting } from "@/lib/commission";
 import { DashboardTabs } from "@/app/components/dashboard-tabs";
 import { buildLeadDetailHref, KNOWN_LEAD_SOURCES } from "@/lib/lead-navigation";
+import { MeetingCountdown } from "./_components/meeting-countdown";
 import { UserViewSwitcher } from "./_components/user-view-switcher";
 
 type UserOption = { id: string; name: string; username: string; role?: string };
@@ -21,38 +20,16 @@ type LeadRow = {
   id: string;
   leadId?: string;
   companyName: string;
+  meetingContactName?: string;
   meetingScheduledFor: string | null;
   meetingBookedAt: string | null;
   meetingOutcomeStatus?: string;
-  meetingCommissionDayKey?: string;
   archived?: boolean;
   campaign?: { name: string };
 };
 
-type DaySummary = {
-  dayKey: string;
-  finalized: boolean;
-  heldCount: number;
-  heldRebookingCount?: number;
-  heldStandardCount?: number;
-  cancelledCount: number;
-  pendingCount: number;
-  kr: number;
-  ratePerHeld: number;
-  rateLabel?: string | null;
-  meetingCount: number;
-  possibleHeldCount?: number;
-  possibleRebookingCount?: number;
-  possibleStandardCount?: number;
-  forventetKr?: number;
-  forventetRatePerMeeting?: number;
-};
-
 type SalesPayload = {
   leads: LeadRow[];
-  daySummaries: DaySummary[];
-  tilUdbetalingKr: number;
-  forventetProvisionKr?: number;
   stats: {
     totalBooked: number;
     pending: number;
@@ -64,16 +41,25 @@ type SalesPayload = {
   viewingUser?: { id: string; name: string; username: string };
 };
 
-function formatDayKeyDa(dayKey: string): string {
-  const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(dayKey.trim());
-  if (!m) return dayKey;
-  const [, y, mo, d] = m;
-  return `${d}-${mo}-${y}`;
-}
-
 function outcomeLabel(raw?: string) {
   const k = String(raw ?? "").trim().toUpperCase() || MEETING_OUTCOME_PENDING;
   return MEETING_OUTCOME_LABELS[k] ?? MEETING_OUTCOME_LABELS[MEETING_OUTCOME_PENDING];
+}
+
+function isPendingOutcome(raw?: string) {
+  const k = String(raw ?? "").trim().toUpperCase() || MEETING_OUTCOME_PENDING;
+  return k === MEETING_OUTCOME_PENDING;
+}
+
+function formatDaDateTime(iso: string | null | undefined): string {
+  if (!iso) return "—";
+  return new Date(iso).toLocaleString("da-DK", {
+    day: "2-digit",
+    month: "2-digit",
+    year: "numeric",
+    hour: "2-digit",
+    minute: "2-digit",
+  });
 }
 
 export default function MineSalgPage() {
@@ -152,6 +138,27 @@ export default function MineSalgPage() {
 
   const viewingOtherUser = isAdmin && effectiveUserId !== myUserId;
 
+  const upcomingMeetings = useMemo(() => {
+    if (!data) return [];
+    return data.leads
+      .filter(
+        (l) => !l.archived && isPendingOutcome(l.meetingOutcomeStatus) && l.meetingScheduledFor,
+      )
+      .sort(
+        (a, b) =>
+          new Date(a.meetingScheduledFor!).getTime() - new Date(b.meetingScheduledFor!).getTime(),
+      );
+  }, [data]);
+
+  const allMeetings = useMemo(() => {
+    if (!data) return [];
+    return [...data.leads].sort((a, b) => {
+      const ta = a.meetingScheduledFor ? new Date(a.meetingScheduledFor).getTime() : 0;
+      const tb = b.meetingScheduledFor ? new Date(b.meetingScheduledFor).getTime() : 0;
+      return tb - ta;
+    });
+  }, [data]);
+
   if (sessionStatus === "loading") {
     return (
       <div className="space-y-6">
@@ -188,13 +195,7 @@ export default function MineSalgPage() {
     );
   }
 
-  const {
-    leads,
-    daySummaries,
-    tilUdbetalingKr,
-    forventetProvisionKr: forventetProvisionTotal = 0,
-    stats,
-  } = data;
+  const { stats } = data;
 
   return (
     <div className="space-y-8">
@@ -206,13 +207,12 @@ export default function MineSalgPage() {
           <p className="mt-1 text-sm text-stone-600">
             {viewingOtherUser ? (
               <>
-                Oversigt over møder booket af <strong>{viewingName}</strong>, deres status og provision der
-                løbende kan udbetales for afholdte møder.
+                Oversigt over møder booket af <strong>{viewingName}</strong> — status og kommende
+                møder.
               </>
             ) : (
               <>
-                Oversigt over de møder du har booket, deres status og provision der løbende kan udbetales
-                for afholdte møder.
+                Oversigt over de møder du har booket — hold dine kunder til ilden, så de dukker op.
               </>
             )}
           </p>
@@ -263,158 +263,112 @@ export default function MineSalgPage() {
         </div>
       </div>
 
-      <div className="grid gap-4 lg:grid-cols-3">
-        <div className="rounded-xl border border-emerald-200 bg-gradient-to-br from-emerald-50 to-white p-5 shadow-sm">
-          <h2 className="text-sm font-semibold text-emerald-950">Til udbetaling</h2>
-          <p className="mt-2 text-3xl font-bold tracking-tight text-emerald-900">
-            {tilUdbetalingKr.toLocaleString("da-DK")} kr
-          </p>
-          <p className="mt-2 text-xs text-emerald-900/80">Hvad der bliver udbetalt for afholdte møder.</p>
-        </div>
-        <div className="rounded-xl border border-sky-200 bg-gradient-to-br from-sky-50 to-white p-5 shadow-sm">
-          <h2 className="text-sm font-semibold text-sky-950">Forventet provision</h2>
-          <p className="mt-2 text-3xl font-bold tracking-tight text-sky-900">
-            {forventetProvisionTotal.toLocaleString("da-DK")} kr
-          </p>
-          <p className="mt-2 text-xs text-sky-900/85">
-            Hvis alle ikke-annullerede møder går igennem, udbetales der.
+      <div>
+        <div className="flex items-baseline justify-between">
+          <h2 className="text-sm font-semibold text-stone-900">
+            {viewingOtherUser ? `Kommende møder (${viewingName})` : "Dine kommende møder"}
+          </h2>
+          <p className="text-xs text-stone-500">
+            <span className="font-medium text-red-700">Rød</span> = under 48 timer ·{" "}
+            <span className="font-medium text-amber-700">Gul</span> = under 4 dage ·{" "}
+            <span className="font-medium text-emerald-700">Grøn</span> = mere end 4 dage
           </p>
         </div>
-        <div className="rounded-xl border border-stone-200 bg-white p-5 shadow-sm">
-          <h2 className="text-sm font-semibold text-stone-900">Bonus-trappe (pr. afholdt møde)</h2>
-          <ul className="mt-3 space-y-2 text-sm text-stone-700">
-            <li>
-              Møder booket fra <strong>genbooking-kampagnen</strong> → {COMMISSION_REBOOKING_FLAT_KR} kr pr.
-              afholdt (tæller ikke med i trappen).
-            </li>
-            <li>1 afholdt møde samme dag (øvrige) → {rateKrPerHeldMeeting(1)} kr pr. afholdt</li>
-            <li>2 afholdt samme dag (øvrige) → {rateKrPerHeldMeeting(2)} kr pr. afholdt</li>
-            <li>3 eller flere afholdt samme dag (øvrige) → {rateKrPerHeldMeeting(3)} kr pr. afholdt</li>
-          </ul>
-        </div>
+        {upcomingMeetings.length === 0 ? (
+          <div className="mt-3 rounded-xl border border-dashed border-stone-300 bg-white p-8 text-center text-sm text-stone-500">
+            {viewingOtherUser
+              ? "Ingen kommende møder for denne bruger."
+              : "Ingen kommende møder — book det næste!"}
+          </div>
+        ) : (
+          <div className="mt-3 grid gap-4 sm:grid-cols-2 xl:grid-cols-3">
+            {upcomingMeetings.map((l) => (
+              <div
+                key={l.id}
+                className="flex flex-col gap-3 rounded-xl border border-stone-200 bg-white p-4 shadow-sm transition-shadow hover:shadow-md"
+              >
+                <div className="flex items-start justify-between gap-2">
+                  <div className="min-w-0">
+                    <Link
+                      href={buildLeadDetailHref(l.leadId ?? l.id, KNOWN_LEAD_SOURCES.mineSalg)}
+                      className="block truncate font-semibold text-stone-900 hover:underline"
+                    >
+                      {l.companyName}
+                    </Link>
+                    <p className="mt-0.5 truncate text-sm text-stone-600">
+                      {l.meetingContactName?.trim() || "Kontaktperson ikke angivet"}
+                    </p>
+                  </div>
+                  <MeetingCountdown scheduledFor={l.meetingScheduledFor!} />
+                </div>
+                <dl className="grid grid-cols-2 gap-2 border-t border-stone-100 pt-3 text-sm">
+                  <div>
+                    <dt className="text-xs font-medium uppercase tracking-wide text-stone-400">
+                      Mødet afholdes
+                    </dt>
+                    <dd className="mt-0.5 font-medium text-stone-800">
+                      {formatDaDateTime(l.meetingScheduledFor)}
+                    </dd>
+                  </div>
+                  <div>
+                    <dt className="text-xs font-medium uppercase tracking-wide text-stone-400">
+                      Booket den
+                    </dt>
+                    <dd className="mt-0.5 text-stone-600">{formatDaDateTime(l.meetingBookedAt)}</dd>
+                  </div>
+                </dl>
+              </div>
+            ))}
+          </div>
+        )}
       </div>
 
       <div className="rounded-xl border border-blue-100 bg-blue-50/60 p-5 text-sm text-blue-950 shadow-sm">
-        <h2 className="font-semibold text-blue-950">Sådan fungerer provisionen</h2>
-        <ul className="mt-3 list-inside list-disc space-y-1.5 text-blue-900/90">
-          <li>Provision regnes pr. <strong>kalenderdag</strong>, som du har booket møder på (bookings-dato).</li>
+        <h2 className="font-semibold text-blue-950">Sådan tjener du</h2>
+        <ul className="mt-3 space-y-2 text-blue-900/90">
           <li>
-            Når <strong>alle</strong> møder fra den dag er registreret som enten afholdt, genbook eller ej mødt, kan dagen
-            afregnes.
+            <strong>300 kr</strong> pr. møde, hvor kunden dukker op.
           </li>
           <li>
-            Satsen pr. afholdt møde afhænger af, hvor mange møder der reelt blev <strong>afholdt</strong> den dag —
-            annullerede møder tæller ikke med i antallet, men skal stadig have udfald før dagen kan lukkes. Møder
-            booket fra genbooking giver fast {COMMISSION_REBOOKING_FLAT_KR} kr og indgår ikke i bonustrappen.
+            <strong>Op til 1.250 kr</strong> pr. møde der lukkes — svarende til 50 % af prisen på
+            den aftale, kunden lukkes på.
           </li>
           <li>
-            <strong>Forventet provision</strong> regnes kun på møder, der stadig kan blive afholdt — annullerede møder
-            tæller ikke med i muligt bonus-trin.
-          </li>
-          <li>
-            <strong>Forventet provision</strong>: hvis alle ikke-annullerede møder går igennem, udbetales der.
+            <strong>Op til 2.500 kr</strong> hvis du selv afholder mødet og lukker kunden —
+            svarende til 100 % af kundens betaling den første måned.
           </li>
         </ul>
-      </div>
-
-      <div>
-        <h2 className="text-sm font-semibold text-stone-900">Afregning pr. bookingsdag</h2>
-        <div className="mt-3 overflow-hidden rounded-lg border border-stone-200 bg-white shadow-sm">
-          <table className="w-full text-left text-sm">
-            <thead className="border-b border-stone-200 bg-stone-50 text-stone-600">
-              <tr>
-                <th className="px-3 py-2 font-medium">Bookingsdag</th>
-                <th className="px-3 py-2 font-medium">Møder</th>
-                <th className="px-3 py-2 font-medium">Afholdt / annull. / afventer</th>
-                <th className="px-3 py-2 font-medium">Sats (pr. afholdt)</th>
-                <th className="px-3 py-2 font-medium">Forventet provision</th>
-                <th className="px-3 py-2 font-medium">Til udbetaling</th>
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-stone-100">
-              {daySummaries.length === 0 ? (
-                <tr>
-                  <td colSpan={6} className="px-3 py-6 text-center text-stone-500">
-                    Ingen møder endnu.
-                  </td>
-                </tr>
-              ) : (
-                daySummaries.map((d) => (
-                  <tr key={d.dayKey}>
-                    <td className="px-3 py-2 text-stone-800">{formatDayKeyDa(d.dayKey)}</td>
-                    <td className="px-3 py-2 text-stone-700">{d.meetingCount}</td>
-                    <td className="px-3 py-2 text-stone-700">
-                      {d.heldCount} / {d.cancelledCount} / {d.pendingCount}
-                    </td>
-                    <td className="px-3 py-2 text-stone-700">
-                      {d.heldCount > 0 ? (d.rateLabel ?? `${d.ratePerHeld} kr`) : "—"}
-                    </td>
-                    <td className="px-3 py-2 text-sky-900">
-                      {d.meetingCount > 0 ? (
-                        <>
-                          <span className="font-medium">
-                            {(d.forventetKr ?? 0).toLocaleString("da-DK")} kr
-                          </span>
-                          <span className="mt-0.5 block text-xs text-stone-500">
-                            {(d.possibleRebookingCount ?? 0) > 0 || (d.possibleStandardCount ?? 0) > 0 ? (
-                              <>
-                                {(d.possibleRebookingCount ?? 0) > 0 && (
-                                  <span>
-                                    {COMMISSION_REBOOKING_FLAT_KR} kr × {d.possibleRebookingCount} (genbooking)
-                                    {(d.possibleStandardCount ?? 0) > 0 ? " · " : ""}
-                                  </span>
-                                )}
-                                {(d.possibleStandardCount ?? 0) > 0 && (
-                                  <span>
-                                    {(d.forventetRatePerMeeting ?? 0)} kr × {d.possibleStandardCount} (øvrige)
-                                  </span>
-                                )}
-                              </>
-                            ) : (
-                              <>0 kr × 0</>
-                            )}
-                          </span>
-                        </>
-                      ) : (
-                        "—"
-                      )}
-                    </td>
-                    <td className="px-3 py-2 font-medium text-stone-900">
-                      {d.kr > 0 ? `${d.kr.toLocaleString("da-DK")} kr` : "0 kr"}
-                    </td>
-                  </tr>
-                ))
-              )}
-            </tbody>
-          </table>
-        </div>
+        <p className="mt-3 text-xs text-blue-900/70">
+          Jo bedre du holder dine kunder til ilden inden mødet, desto større er chancen for, at de
+          tager telefonen og dukker op.
+        </p>
       </div>
 
       <div>
         <h2 className="text-sm font-semibold text-stone-900">
-          {viewingOtherUser ? `Bookede møder (${viewingName})` : "Dine bookede møder"}
+          {viewingOtherUser ? `Alle møder (${viewingName})` : "Alle dine møder"}
         </h2>
         <div className="mt-3 overflow-hidden rounded-lg border border-stone-200 bg-white shadow-sm">
           <table className="w-full text-left text-sm">
             <thead className="border-b border-stone-200 bg-stone-50 text-stone-600">
               <tr>
                 <th className="px-3 py-2 font-medium">Virksomhed</th>
-                <th className="px-3 py-2 font-medium">Møde tid</th>
+                <th className="px-3 py-2 font-medium">Kontaktperson</th>
+                <th className="px-3 py-2 font-medium">Mødetid</th>
                 <th className="px-3 py-2 font-medium">Booket</th>
-                <th className="px-3 py-2 font-medium">Kampagne</th>
                 <th className="px-3 py-2 font-medium">Udfald</th>
                 <th className="px-3 py-2 font-medium">Type</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-stone-100">
-              {leads.length === 0 ? (
+              {allMeetings.length === 0 ? (
                 <tr>
                   <td colSpan={6} className="px-3 py-6 text-center text-stone-500">
                     {viewingOtherUser ? "Ingen bookede møder for denne bruger." : "Du har ikke booket møder endnu."}
                   </td>
                 </tr>
               ) : (
-                leads.map((l) => (
+                allMeetings.map((l) => (
                   <tr key={l.id}>
                     <td className="px-3 py-2">
                       <Link
@@ -425,14 +379,10 @@ export default function MineSalgPage() {
                       </Link>
                     </td>
                     <td className="px-3 py-2 text-stone-700">
-                      {l.meetingScheduledFor
-                        ? new Date(l.meetingScheduledFor).toLocaleString("da-DK")
-                        : "—"}
+                      {l.meetingContactName?.trim() || "—"}
                     </td>
-                    <td className="px-3 py-2 text-stone-600">
-                      {l.meetingBookedAt ? new Date(l.meetingBookedAt).toLocaleString("da-DK") : "—"}
-                    </td>
-                    <td className="px-3 py-2 text-stone-600">{l.campaign?.name ?? "—"}</td>
+                    <td className="px-3 py-2 text-stone-700">{formatDaDateTime(l.meetingScheduledFor)}</td>
+                    <td className="px-3 py-2 text-stone-600">{formatDaDateTime(l.meetingBookedAt)}</td>
                     <td className="px-3 py-2">
                       <span
                         className={`inline-flex rounded-full px-2 py-0.5 text-xs font-semibold ${meetingOutcomeBadgeClass(l.meetingOutcomeStatus)}`}
