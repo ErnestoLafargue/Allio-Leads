@@ -14,13 +14,13 @@ function formatRemaining(diffMs: number): string {
 }
 
 function badgeClass(diffMs: number): string {
-  if (diffMs <= 0) return "bg-stone-100 text-stone-600 ring-stone-200";
+  if (diffMs <= 0) return "bg-stone-100 text-stone-700 ring-stone-300";
   if (diffMs < 48 * HOUR_MS) return "bg-red-100 text-red-800 ring-red-200";
   if (diffMs < 96 * HOUR_MS) return "bg-amber-100 text-amber-800 ring-amber-200";
   return "bg-emerald-100 text-emerald-800 ring-emerald-200";
 }
 
-/** Farvet nedtæller til mødetidspunkt: rød < 48 t, gul < 4 dage, ellers grøn. */
+/** Farvet nedtæller til mødetidspunkt: rød < 48 t, gul < 4 dage, ellers grøn. Passerede møder viser «For X siden». */
 export function MeetingCountdown({ scheduledFor }: { scheduledFor: string }) {
   const [now, setNow] = useState(() => Date.now());
 
@@ -30,11 +30,11 @@ export function MeetingCountdown({ scheduledFor }: { scheduledFor: string }) {
   }, []);
 
   const diffMs = new Date(scheduledFor).getTime() - now;
-  const label = diffMs <= 0 ? "Afventer udfald" : `Om ${formatRemaining(diffMs)}`;
+  const label = diffMs <= 0 ? `For ${formatRemaining(-diffMs)} siden` : `Om ${formatRemaining(diffMs)}`;
 
   return (
     <span
-      className={`inline-flex items-center gap-1 rounded-full px-2.5 py-1 text-xs font-semibold ring-1 ring-inset ${badgeClass(diffMs)}`}
+      className={`inline-flex shrink-0 items-center gap-1 whitespace-nowrap rounded-full px-2.5 py-1 text-xs font-semibold ring-1 ring-inset ${badgeClass(diffMs)}`}
       title={new Date(scheduledFor).toLocaleString("da-DK")}
     >
       {diffMs > 0 && (

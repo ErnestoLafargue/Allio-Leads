@@ -140,13 +140,20 @@ export default function MineSalgPage() {
 
   const upcomingMeetings = useMemo(() => {
     if (!data) return [];
+    const now = Date.now();
+    const overdueCutoff = now - 7 * 24 * 60 * 60 * 1000;
     return data.leads
-      .filter(
-        (l) => !l.archived && isPendingOutcome(l.meetingOutcomeStatus) && l.meetingScheduledFor,
-      )
+      .filter((l) => {
+        if (l.archived || !isPendingOutcome(l.meetingOutcomeStatus) || !l.meetingScheduledFor) {
+          return false;
+        }
+        // Vis også møder op til 7 dage efter mødedato, så bookeren kan følge op på afholdt/genbook.
+        return new Date(l.meetingScheduledFor).getTime() >= overdueCutoff;
+      })
       .sort(
         (a, b) =>
-          new Date(a.meetingScheduledFor!).getTime() - new Date(b.meetingScheduledFor!).getTime(),
+          Math.abs(new Date(a.meetingScheduledFor!).getTime() - now) -
+          Math.abs(new Date(b.meetingScheduledFor!).getTime() - now),
       );
   }, [data]);
 
@@ -284,7 +291,7 @@ export default function MineSalgPage() {
                   <div className="min-w-0">
                     <Link
                       href={buildLeadDetailHref(l.leadId ?? l.id, KNOWN_LEAD_SOURCES.mineSalg)}
-                      className="block truncate font-semibold text-stone-900 hover:underline"
+                      className="line-clamp-2 break-words font-semibold text-stone-900 hover:underline"
                     >
                       {l.companyName}
                     </Link>
@@ -310,6 +317,11 @@ export default function MineSalgPage() {
                     <dd className="mt-0.5 text-stone-600">{formatDaDateTime(l.meetingBookedAt)}</dd>
                   </div>
                 </dl>
+                {new Date(l.meetingScheduledFor!).getTime() < Date.now() && (
+                  <p className="rounded-lg bg-amber-50 px-3 py-2 text-xs text-amber-900 ring-1 ring-inset ring-amber-200/70">
+                    Mødedatoen er passeret — blev mødet afholdt, eller skal der genbookes?
+                  </p>
+                )}
               </div>
             ))}
           </div>
