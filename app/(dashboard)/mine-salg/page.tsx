@@ -287,7 +287,7 @@ export default function MineSalgPage() {
               : "Ingen kommende møder — book det næste!"}
           </div>
         ) : (
-          <div className="mt-3 grid gap-4 sm:grid-cols-2 xl:grid-cols-3">
+          <div className="mt-3 grid auto-rows-fr gap-4 sm:grid-cols-2 xl:grid-cols-3">
             {upcomingMeetings.map((l) => {
               const cancelled = isCancelledOutcome(l.meetingOutcomeStatus);
               return (
@@ -317,7 +317,7 @@ export default function MineSalgPage() {
                     <MeetingCountdown scheduledFor={l.meetingScheduledFor!} />
                   )}
                 </div>
-                <dl className="grid grid-cols-2 gap-2 border-t border-stone-100 pt-3 text-sm">
+                <dl className="mt-auto grid grid-cols-2 gap-2 border-t border-stone-100 pt-3 text-sm">
                   <div>
                     <dt className="text-xs font-medium uppercase tracking-wide text-stone-400">
                       Mødet afholdes
