@@ -1,7 +1,5 @@
 "use client";
 
-import { MEETING_NOTES_MIN_CHARS } from "@/lib/meeting-notes-quality";
-
 type Props = {
   open: boolean;
   onClose: () => void;
@@ -66,10 +64,6 @@ export function MeetingNotesRequiredDialog({ open, onClose }: Props) {
             <li>Hvilket bookingsystem bruger de — og hvor længe har de brugt det?</li>
             <li>Hvad er prisen på en standardydelse?</li>
           </ul>
-          <p className="mt-2 text-xs text-amber-700">
-            En e-mailadresse alene er ikke nok — skriv mindst {MEETING_NOTES_MIN_CHARS} tegn
-            rigtig tekst.
-          </p>
         </div>
         <p className="mt-3 text-sm text-stone-600">
           Luk denne besked, skriv noterne i notefeltet, og prøv igen.
