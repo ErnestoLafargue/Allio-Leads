@@ -264,16 +264,9 @@ export default function MineSalgPage() {
       </div>
 
       <div>
-        <div className="flex items-baseline justify-between">
-          <h2 className="text-sm font-semibold text-stone-900">
-            {viewingOtherUser ? `Kommende møder (${viewingName})` : "Dine kommende møder"}
-          </h2>
-          <p className="text-xs text-stone-500">
-            <span className="font-medium text-red-700">Rød</span> = under 48 timer ·{" "}
-            <span className="font-medium text-amber-700">Gul</span> = under 4 dage ·{" "}
-            <span className="font-medium text-emerald-700">Grøn</span> = mere end 4 dage
-          </p>
-        </div>
+        <h2 className="text-sm font-semibold text-stone-900">
+          {viewingOtherUser ? `Kommende møder (${viewingName})` : "Dine kommende møder"}
+        </h2>
         {upcomingMeetings.length === 0 ? (
           <div className="mt-3 rounded-xl border border-dashed border-stone-300 bg-white p-8 text-center text-sm text-stone-500">
             {viewingOtherUser
