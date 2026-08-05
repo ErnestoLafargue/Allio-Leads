@@ -1,6 +1,7 @@
 import { auth } from "@/auth";
 import { redirect } from "next/navigation";
 import { AppSidebar } from "@/app/components/app-sidebar";
+import { PresenceHeartbeat } from "@/app/components/presence-heartbeat";
 
 export default async function DashboardLayout({
   children,
@@ -12,6 +13,7 @@ export default async function DashboardLayout({
 
   return (
     <div className="min-h-full bg-stone-50">
+      <PresenceHeartbeat />
       <AppSidebar
         userName={session.user.name ?? session.user.email ?? ""}
         role={session.user.role}

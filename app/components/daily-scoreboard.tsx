@@ -1,7 +1,19 @@
 "use client";
 
 import { useSession } from "next-auth/react";
-import { useEffect, useState } from "react";
+import { Fragment, useEffect, useState } from "react";
+
+export type LeaderboardCampaignSlice = {
+  campaignId: string | null;
+  campaignName: string;
+  meetings: number;
+  conversations: number;
+  contacts: number;
+  talkSeconds: number;
+  dialerSeconds: number;
+  avgConversationSeconds: number;
+  buyRatePct: number;
+};
 
 export type LeaderboardRow = {
   userId: string;
@@ -11,12 +23,20 @@ export type LeaderboardRow = {
   meetings: number;
   conversations: number;
   contacts: number;
+  /** Kun i payload for admin */
+  talkSeconds?: number;
+  loginSeconds?: number;
+  dialerSeconds?: number;
+  avgConversationSeconds?: number;
+  buyRatePct?: number;
+  campaigns?: LeaderboardCampaignSlice[];
 };
 
 export type LeaderboardPayload = {
   dayKey: string;
   todayKey: string;
   dayLabel: string;
+  isAdmin?: boolean;
   rows: LeaderboardRow[];
 };
 
@@ -30,11 +50,35 @@ function shiftDayKey(dayKey: string, diffDays: number): string {
   return `${yy}-${mm}-${dd}`;
 }
 
+/** Login-/dialer-tid: "2 t 05 m" / "45 m" / "—" ved 0. */
+function formatPresence(seconds: number | undefined): string {
+  const s = seconds ?? 0;
+  if (s <= 0) return "—";
+  const totalMinutes = Math.round(s / 60);
+  if (totalMinutes < 1) return "< 1 m";
+  const h = Math.floor(totalMinutes / 60);
+  const m = totalMinutes % 60;
+  return h > 0 ? `${h} t ${m.toString().padStart(2, "0")} m` : `${m} m`;
+}
+
+/** Gns. samtaletid: "1:42" (m:ss), "—" ved 0. */
+function formatTalk(seconds: number | undefined): string {
+  const s = Math.round(seconds ?? 0);
+  if (s <= 0) return "—";
+  return `${Math.floor(s / 60)}:${(s % 60).toString().padStart(2, "0")}`;
+}
+
+function formatBuyRate(pct: number | undefined, conversations: number): string {
+  if (conversations <= 0) return "—";
+  return `${(pct ?? 0).toLocaleString("da-DK")} %`;
+}
+
 export function DailyScoreboard() {
   const { data: session, status } = useSession();
   const [data, setData] = useState<LeaderboardPayload | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [selectedDayKey, setSelectedDayKey] = useState<string>("");
+  const [expandedUserId, setExpandedUserId] = useState<string | null>(null);
 
   useEffect(() => {
     if (status !== "authenticated") return;
@@ -72,6 +116,8 @@ export function DailyScoreboard() {
   }
 
   const me = session?.user?.id;
+  const isAdmin = data.isAdmin === true;
+  const columnCount = isAdmin ? 10 : 6;
 
   return (
     <div className="space-y-3 rounded-xl border border-amber-200/80 bg-gradient-to-b from-amber-50/90 to-white p-6 shadow-sm">
@@ -107,7 +153,7 @@ export function DailyScoreboard() {
         </div>
       </div>
       <div className="overflow-x-auto rounded-lg border border-amber-100 bg-white/90">
-        <table className="w-full min-w-[28rem] text-left text-sm">
+        <table className={`w-full ${isAdmin ? "min-w-[64rem]" : "min-w-[28rem]"} text-left text-sm`}>
           <thead className="border-b border-amber-100 bg-amber-50/80 text-amber-950/80">
             <tr>
               <th className="w-10 px-3 py-2.5 font-medium">#</th>
@@ -116,45 +162,167 @@ export function DailyScoreboard() {
               <th className="px-3 py-2.5 text-right font-medium tabular-nums">Møder</th>
               <th className="px-3 py-2.5 text-right font-medium tabular-nums">Samtaler</th>
               <th className="px-3 py-2.5 text-right font-medium tabular-nums">Kontakter</th>
+              {isAdmin && (
+                <>
+                  <th className="px-3 py-2.5 text-right font-medium tabular-nums">Login-tid</th>
+                  <th className="px-3 py-2.5 text-right font-medium tabular-nums">Dialer-tid</th>
+                  <th className="px-3 py-2.5 text-right font-medium tabular-nums">Gns. samtale</th>
+                  <th className="px-3 py-2.5 text-right font-medium tabular-nums">Buyrate</th>
+                </>
+              )}
             </tr>
           </thead>
           <tbody className="divide-y divide-amber-50">
             {data.rows.map((r, i) => {
               const isMe = me != null && r.userId === me;
+              const isExpanded = isAdmin && expandedUserId === r.userId;
+              const hasCampaigns = (r.campaigns?.length ?? 0) > 0;
               return (
-                <tr
-                  key={r.userId}
-                  className={
-                    isMe ? "bg-sky-50/80 ring-1 ring-sky-200/60" : i === 0 ? "bg-amber-50/40" : undefined
-                  }
-                >
-                  <td className="px-3 py-2.5 text-stone-500">{i + 1}</td>
-                  <td className="px-3 py-2.5">
-                    <span className="font-medium text-stone-900">
-                      {r.name}
-                      {isMe ? (
-                        <span className="ml-2 rounded bg-sky-100 px-1.5 py-0.5 text-xs font-normal text-sky-900">
-                          Dig
-                        </span>
-                      ) : null}
-                    </span>
-                    <span className="mt-0.5 block text-xs text-stone-500">{r.username}</span>
-                  </td>
-                  <td className="px-3 py-2.5 text-stone-600">
-                    {r.role === "ADMIN" ? "Admin" : "Sælger"}
-                  </td>
-                  <td className="px-3 py-2.5 text-right tabular-nums text-stone-900">{r.meetings}</td>
-                  <td className="px-3 py-2.5 text-right tabular-nums text-stone-800">{r.conversations}</td>
-                  <td className="px-3 py-2.5 text-right tabular-nums text-stone-700">{r.contacts}</td>
-                </tr>
+                <Fragment key={r.userId}>
+                  <tr
+                    className={
+                      isMe
+                        ? "bg-sky-50/80 ring-1 ring-sky-200/60"
+                        : i === 0
+                          ? "bg-amber-50/40"
+                          : undefined
+                    }
+                  >
+                    <td className="px-3 py-2.5 text-stone-500">{i + 1}</td>
+                    <td className="px-3 py-2.5">
+                      {isAdmin ? (
+                        <button
+                          type="button"
+                          onClick={() =>
+                            setExpandedUserId((cur) => (cur === r.userId ? null : r.userId))
+                          }
+                          className="group flex items-center gap-1.5 text-left"
+                          title={
+                            hasCampaigns
+                              ? "Vis fordeling pr. kampagne"
+                              : "Ingen kampagneaktivitet denne dag"
+                          }
+                        >
+                          <span
+                            className={`text-[10px] text-amber-700 transition-transform ${
+                              isExpanded ? "rotate-90" : ""
+                            }`}
+                            aria-hidden
+                          >
+                            ▶
+                          </span>
+                          <span>
+                            <span className="font-medium text-stone-900 underline-offset-2 group-hover:underline">
+                              {r.name}
+                              {isMe ? (
+                                <span className="ml-2 rounded bg-sky-100 px-1.5 py-0.5 text-xs font-normal text-sky-900">
+                                  Dig
+                                </span>
+                              ) : null}
+                            </span>
+                            <span className="mt-0.5 block text-xs text-stone-500">
+                              {r.username}
+                            </span>
+                          </span>
+                        </button>
+                      ) : (
+                        <>
+                          <span className="font-medium text-stone-900">
+                            {r.name}
+                            {isMe ? (
+                              <span className="ml-2 rounded bg-sky-100 px-1.5 py-0.5 text-xs font-normal text-sky-900">
+                                Dig
+                              </span>
+                            ) : null}
+                          </span>
+                          <span className="mt-0.5 block text-xs text-stone-500">{r.username}</span>
+                        </>
+                      )}
+                    </td>
+                    <td className="px-3 py-2.5 text-stone-600">
+                      {r.role === "ADMIN" ? "Admin" : "Sælger"}
+                    </td>
+                    <td className="px-3 py-2.5 text-right tabular-nums text-stone-900">
+                      {r.meetings}
+                    </td>
+                    <td className="px-3 py-2.5 text-right tabular-nums text-stone-800">
+                      {r.conversations}
+                    </td>
+                    <td className="px-3 py-2.5 text-right tabular-nums text-stone-700">
+                      {r.contacts}
+                    </td>
+                    {isAdmin && (
+                      <>
+                        <td className="px-3 py-2.5 text-right tabular-nums text-stone-700">
+                          {formatPresence(r.loginSeconds)}
+                        </td>
+                        <td className="px-3 py-2.5 text-right tabular-nums text-stone-700">
+                          {formatPresence(r.dialerSeconds)}
+                        </td>
+                        <td className="px-3 py-2.5 text-right tabular-nums text-stone-700">
+                          {formatTalk(r.avgConversationSeconds)}
+                        </td>
+                        <td className="px-3 py-2.5 text-right tabular-nums text-stone-700">
+                          {formatBuyRate(r.buyRatePct, r.conversations)}
+                        </td>
+                      </>
+                    )}
+                  </tr>
+                  {isExpanded && (
+                    <>
+                      {hasCampaigns ? (
+                        r.campaigns!.map((c) => (
+                          <tr
+                            key={`${r.userId}-${c.campaignId ?? "none"}`}
+                            className="bg-stone-50/80 text-xs"
+                          >
+                            <td className="px-3 py-2" />
+                            <td className="py-2 pl-8 pr-3 text-stone-700" colSpan={2}>
+                              <span className="font-medium">{c.campaignName}</span>
+                            </td>
+                            <td className="px-3 py-2 text-right tabular-nums text-stone-800">
+                              {c.meetings}
+                            </td>
+                            <td className="px-3 py-2 text-right tabular-nums text-stone-700">
+                              {c.conversations}
+                            </td>
+                            <td className="px-3 py-2 text-right tabular-nums text-stone-600">
+                              {c.contacts}
+                            </td>
+                            <td className="px-3 py-2 text-right tabular-nums text-stone-400">—</td>
+                            <td className="px-3 py-2 text-right tabular-nums text-stone-600">
+                              {formatPresence(c.dialerSeconds)}
+                            </td>
+                            <td className="px-3 py-2 text-right tabular-nums text-stone-600">
+                              {formatTalk(c.avgConversationSeconds)}
+                            </td>
+                            <td className="px-3 py-2 text-right tabular-nums text-stone-600">
+                              {formatBuyRate(c.buyRatePct, c.conversations)}
+                            </td>
+                          </tr>
+                        ))
+                      ) : (
+                        <tr className="bg-stone-50/80 text-xs">
+                          <td className="px-3 py-2" />
+                          <td className="py-2 pl-8 pr-3 text-stone-500" colSpan={columnCount - 1}>
+                            Ingen kampagneaktivitet denne dag.
+                          </td>
+                        </tr>
+                      )}
+                    </>
+                  )}
+                </Fragment>
               );
             })}
           </tbody>
         </table>
       </div>
       <p className="text-xs text-stone-500">
-        Kontakter: opkaldsforsøg (max ét pr. 2 t. pr. lead); samtaler: ≥ 20 s. forbundet tale eller
-        optagelse; møder: booket møde via udfald.
+        Kontakter: opkaldsforsøg (max ét pr. 2 t. pr. lead); samtaler: ≥ 20 s. forbundet tale
+        (dage uden registreret taletid: udfald der kræver samtale); møder: booket møde via udfald.
+        {isAdmin
+          ? " Login-/dialer-tid måles mens fanen er åben; gns. samtale er taletid pr. samtale; buyrate er møder pr. samtale. Klik på en bruger for fordeling pr. kampagne."
+          : ""}
       </p>
       {data.rows.length === 0 && (
         <p className="text-sm text-stone-600">Ingen rækker denne dag (login eller aktivitet).</p>

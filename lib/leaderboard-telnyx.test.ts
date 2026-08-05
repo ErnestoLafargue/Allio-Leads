@@ -7,6 +7,7 @@ import {
   collapseNearDuplicateAttempts,
   dialerTalkSeconds,
   effectiveUserIdForDialerLog,
+  mergeConversationsWithOutcomeFallback,
   tallyContactsFromAttempts,
   tallyTelnyxLeaderboardMetrics,
   type ContactAttempt,
@@ -185,7 +186,49 @@ describe("tallyTelnyxLeaderboardMetrics", () => {
     expect(conversations.get("u1")).toBeUndefined();
   });
 
-  it("CALL_RECORDING med varighed ≥ 20 s når log ikke har samme leg", () => {
+  it("CALL_ATTEMPT med durationSeconds ≥ 20 tæller som samtale (WebRTC-taletid)", () => {
+    const { contacts, conversations, conversationPairs } = tallyTelnyxLeaderboardMetrics(
+      [],
+      [
+        {
+          kind: LEAD_ACTIVITY_KIND.CALL_ATTEMPT,
+          userId: "u1",
+          leadId: "l1",
+          createdAt: new Date("2026-05-01T10:00:00.000Z"),
+          durationSeconds: LEADERBOARD_MIN_CONVERSATION_SECONDS,
+        },
+      ],
+    );
+    expect(contacts.get("u1")).toBe(1);
+    expect(conversations.get("u1")).toBe(1);
+    expect(conversationPairs.has("u1\0l1")).toBe(true);
+  });
+
+  it("CALL_ATTEMPT under 20 s eller uden duration tæller kun som kontakt", () => {
+    const { contacts, conversations } = tallyTelnyxLeaderboardMetrics(
+      [],
+      [
+        {
+          kind: LEAD_ACTIVITY_KIND.CALL_ATTEMPT,
+          userId: "u1",
+          leadId: "l1",
+          createdAt: new Date("2026-05-01T10:00:00.000Z"),
+          durationSeconds: 5,
+        },
+        {
+          kind: LEAD_ACTIVITY_KIND.CALL_ATTEMPT,
+          userId: "u1",
+          leadId: "l2",
+          createdAt: new Date("2026-05-01T11:00:00.000Z"),
+          durationSeconds: null,
+        },
+      ],
+    );
+    expect(contacts.get("u1")).toBe(2);
+    expect(conversations.get("u1")).toBeUndefined();
+  });
+
+  it("CALL_RECORDING tæller ikke som samtale længere", () => {
     const { conversations } = tallyTelnyxLeaderboardMetrics(
       [],
       [
@@ -194,19 +237,18 @@ describe("tallyTelnyxLeaderboardMetrics", () => {
           userId: "u1",
           leadId: "l1",
           createdAt: new Date("2026-05-01T10:00:00.000Z"),
-          durationSeconds: LEADERBOARD_MIN_CONVERSATION_SECONDS,
-          telnyxCallLegId: "rec:abc",
+          durationSeconds: 120,
         },
       ],
     );
-    expect(conversations.get("u1")).toBe(1);
+    expect(conversations.get("u1")).toBeUndefined();
   });
 
-  it("springer CALL_RECORDING over hvis call_control_id allerede talt fra log", () => {
+  it("samme opkald fra både DialerCallLog og CALL_ATTEMPT foldes til én samtale", () => {
     const { conversations } = tallyTelnyxLeaderboardMetrics(
       [
         {
-          callControlId: "v3:same",
+          callControlId: "cc1",
           callSessionId: "s1",
           direction: "outbound-lead",
           leadId: "l1",
@@ -220,15 +262,109 @@ describe("tallyTelnyxLeaderboardMetrics", () => {
       ],
       [
         {
-          kind: LEAD_ACTIVITY_KIND.CALL_RECORDING,
+          kind: LEAD_ACTIVITY_KIND.CALL_ATTEMPT,
           userId: "u1",
           leadId: "l1",
           createdAt: new Date("2026-05-01T09:00:05.000Z"),
           durationSeconds: 30,
-          telnyxCallLegId: "v3:same",
         },
       ],
     );
     expect(conversations.get("u1")).toBe(1);
+  });
+
+  it("to separate opkald ≥ 20 s på samme lead tæller som to samtaler", () => {
+    const { conversations } = tallyTelnyxLeaderboardMetrics(
+      [],
+      [
+        {
+          kind: LEAD_ACTIVITY_KIND.CALL_ATTEMPT,
+          userId: "u1",
+          leadId: "l1",
+          createdAt: new Date("2026-05-01T09:00:00.000Z"),
+          durationSeconds: 30,
+        },
+        {
+          kind: LEAD_ACTIVITY_KIND.CALL_ATTEMPT,
+          userId: "u1",
+          leadId: "l1",
+          createdAt: new Date("2026-05-01T11:00:00.000Z"),
+          durationSeconds: 45,
+        },
+      ],
+    );
+    expect(conversations.get("u1")).toBe(2);
+  });
+});
+
+describe("talkSeconds i tallyTelnyxLeaderboardMetrics", () => {
+  it("summerer taletid pr. bruger og tager max ved foldede dubletter", () => {
+    const { talkSeconds, conversations } = tallyTelnyxLeaderboardMetrics(
+      [],
+      [
+        {
+          kind: LEAD_ACTIVITY_KIND.CALL_ATTEMPT,
+          userId: "u1",
+          leadId: "l1",
+          createdAt: new Date("2026-05-01T09:00:00.000Z"),
+          durationSeconds: 30,
+        },
+        /** Dublet af samme opkald inden for 60 s — max(30, 45) tæller */
+        {
+          kind: LEAD_ACTIVITY_KIND.CALL_ATTEMPT,
+          userId: "u1",
+          leadId: "l1",
+          createdAt: new Date("2026-05-01T09:00:10.000Z"),
+          durationSeconds: 45,
+        },
+        {
+          kind: LEAD_ACTIVITY_KIND.CALL_ATTEMPT,
+          userId: "u1",
+          leadId: "l2",
+          createdAt: new Date("2026-05-01T10:00:00.000Z"),
+          durationSeconds: 60,
+        },
+      ],
+    );
+    expect(conversations.get("u1")).toBe(2);
+    expect(talkSeconds.get("u1")).toBe(45 + 60);
+  });
+});
+
+describe("mergeConversationsWithOutcomeFallback", () => {
+  const talkTallies = (pairs: [string, string][], counts: [string, number][]) => ({
+    contacts: new Map<string, number>(),
+    conversations: new Map(counts),
+    conversationPairs: new Set(pairs.map(([u, l]) => `${u}\0${l}`)),
+    talkSeconds: new Map<string, number>(),
+  });
+
+  it("udfald med samtale tæller når leadet ikke har talk-samtale", () => {
+    const merged = mergeConversationsWithOutcomeFallback(talkTallies([], []), [
+      { userId: "u1", leadId: "l1", status: "MEETING_BOOKED" },
+      { userId: "u1", leadId: "l2", status: "NOT_INTERESTED" },
+      { userId: "u1", leadId: "l3", status: "VOICEMAIL" },
+    ]);
+    expect(merged.get("u1")).toBe(2);
+  });
+
+  it("springer udfald over for leads der allerede har talk-samtale (ingen dobbelttælling)", () => {
+    const merged = mergeConversationsWithOutcomeFallback(
+      talkTallies([["u1", "l1"]], [["u1", 1]]),
+      [
+        { userId: "u1", leadId: "l1", status: "MEETING_BOOKED" },
+        { userId: "u1", leadId: "l2", status: "CALLBACK_SCHEDULED" },
+      ],
+    );
+    expect(merged.get("u1")).toBe(2);
+  });
+
+  it("talk-samtale hos anden bruger blokerer ikke fallback", () => {
+    const merged = mergeConversationsWithOutcomeFallback(
+      talkTallies([["u2", "l1"]], [["u2", 1]]),
+      [{ userId: "u1", leadId: "l1", status: "NOT_INTERESTED" }],
+    );
+    expect(merged.get("u1")).toBe(1);
+    expect(merged.get("u2")).toBe(1);
   });
 });

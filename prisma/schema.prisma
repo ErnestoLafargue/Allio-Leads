@@ -55,6 +55,9 @@ model User {
 
   blockedTimes         BlockedTime[] @relation("BlockedTimeUser")
   blockedTimesCreated  BlockedTime[] @relation("BlockedTimeCreatedBy")
+
+  presenceDays         UserPresenceDay[]
+  campaignPresenceDays UserCampaignPresenceDay[]
 }
 
 /// Én række pr. bruger pr. kalenderdag (København) ved vellykket login.
@@ -68,6 +71,43 @@ model UserLoginDay {
   user User @relation(fields: [userId], references: [id], onDelete: Cascade)
 
   @@unique([userId, dayKey])
+  @@index([dayKey])
+}
+
+/// Akkumuleret login-tilstedeværelse pr. bruger pr. kalenderdag (København).
+/// Skrives af /api/presence/heartbeat (dashboardet pinger ~1 gang/min mens fanen er synlig).
+/// Bruges af scoreboardet og Plecto-eksporten — slettes ikke, så historik kan trækkes senere.
+model UserPresenceDay {
+  id           String   @id @default(cuid())
+  userId       String
+  /// YYYY-MM-DD (Europe/Copenhagen)
+  dayKey       String
+  /// Sekunder logget ind med aktiv fane (delta mellem heartbeats, cappet så pauser ikke tæller)
+  loginSeconds Int      @default(0)
+  lastSeenAt   DateTime @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, dayKey])
+  @@index([dayKey])
+}
+
+/// Dialer-tid pr. bruger pr. kampagne pr. kalenderdag (København) — heartbeat fra
+/// kampagnens arbejdsside. Summen pr. bruger = samlet dialer-tid på scoreboardet.
+model UserCampaignPresenceDay {
+  id            String   @id @default(cuid())
+  userId        String
+  campaignId    String
+  /// YYYY-MM-DD (Europe/Copenhagen)
+  dayKey        String
+  /// Sekunder på kampagnens arbejdsside (dialer åben)
+  dialerSeconds Int      @default(0)
+  lastSeenAt    DateTime @default(now())
+
+  user     User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  campaign Campaign @relation(fields: [campaignId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, campaignId, dayKey])
   @@index([dayKey])
 }
 
@@ -103,6 +143,7 @@ model Campaign {
   agentSessions    AgentSession[]
   dialerCallLogs   DialerCallLog[]
   dialerQueueItems DialerQueueItem[]
+  presenceDays     UserCampaignPresenceDay[]
 }
 
 model Lead {

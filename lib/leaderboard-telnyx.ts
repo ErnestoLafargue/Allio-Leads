@@ -4,6 +4,7 @@
  */
 
 import { LEAD_ACTIVITY_KIND } from "@/lib/lead-activity-kinds";
+import { leaderboardDeltasForOutcome, type ScoringOutcome } from "@/lib/lead-outcome-log";
 
 /** To forsøg inden for dette vindue på samme bruger+lead foldes til ét inden 2-timers bucket. */
 export const LEADERBOARD_SAME_ATTEMPT_COLLAPSE_MS = 60_000;
@@ -142,28 +143,34 @@ export type ActivityRowForLeaderboard = {
   leadId: string;
   createdAt: Date;
   durationSeconds: number | null;
-  telnyxCallLegId: string | null;
 };
 
 export type TelnyxLeaderboardTallies = {
   contacts: Map<string, number>;
   conversations: Map<string, number>;
+  /** `${userId}\0${leadId}` for par med mindst én talk-baseret samtale — bruges til udfalds-fallback-dedup. */
+  conversationPairs: Set<string>;
+  /** Samlet forbundet taletid (sekunder) pr. bruger over talk-baserede samtaler. */
+  talkSeconds: Map<string, number>;
 };
 
 /**
- * Saml kontakter (collapsed + 2h buckets) og samtaler (≥20s på outbound-lead + CALL_RECORDING).
+ * Saml kontakter (collapsed + 2h buckets) og samtaler (forbundet tale ≥ 20 s).
+ * Samtaler kommer fra `DialerCallLog`-taletid og fra `CALL_ATTEMPT.durationSeconds`
+ * (rapporteret af WebRTC-klienten) — IKKE fra lydoptagelser, som ikke altid
+ * synkroniseres fra Telnyx. Samme opkald set fra begge kilder foldes sammen
+ * via 60s-collapse pr. bruger+lead.
  */
 export function tallyTelnyxLeaderboardMetrics(
   dialerRows: DialerRowForLeaderboard[],
   activityRows: ActivityRowForLeaderboard[],
 ): TelnyxLeaderboardTallies {
   const contactAttempts: ContactAttempt[] = [];
+  type ConversationEvent = ContactAttempt & { seconds: number };
+  const conversationEvents: ConversationEvent[] = [];
 
-  /** call_control_id / call_session_id — optagelse må ikke dobbelttælle samme opkald */
-  const consumedConversationIds = new Set<string>();
   /** Én samtale pr. bruger pr. session/control fra DialerCallLog */
   const logConversationCounted = new Set<string>();
-  const conversationUserCounts = new Map<string, number>();
 
   for (const row of dialerRows) {
     if (row.direction !== "outbound-lead" || !row.leadId) continue;
@@ -183,16 +190,28 @@ export function tallyTelnyxLeaderboardMetrics(
       const pairKey = `${uid}\0${dedup}`;
       if (logConversationCounted.has(pairKey)) continue;
       logConversationCounted.add(pairKey);
-      consumedConversationIds.add(row.callControlId);
-      const sid = row.callSessionId?.trim();
-      if (sid) consumedConversationIds.add(sid);
-      conversationUserCounts.set(uid, (conversationUserCounts.get(uid) ?? 0) + 1);
+      conversationEvents.push({
+        userId: uid,
+        leadId: row.leadId,
+        at: row.startedAt,
+        seconds: Math.round(sec),
+      });
     }
   }
 
   for (const ev of activityRows) {
-    if (ev.kind === LEAD_ACTIVITY_KIND.CALL_ATTEMPT && ev.userId) {
-      contactAttempts.push({ userId: ev.userId, leadId: ev.leadId, at: ev.createdAt });
+    if (ev.kind !== LEAD_ACTIVITY_KIND.CALL_ATTEMPT || !ev.userId) continue;
+    contactAttempts.push({ userId: ev.userId, leadId: ev.leadId, at: ev.createdAt });
+    if (
+      typeof ev.durationSeconds === "number" &&
+      ev.durationSeconds >= LEADERBOARD_MIN_CONVERSATION_SECONDS
+    ) {
+      conversationEvents.push({
+        userId: ev.userId,
+        leadId: ev.leadId,
+        at: ev.createdAt,
+        seconds: ev.durationSeconds,
+      });
     }
   }
 
@@ -202,16 +221,58 @@ export function tallyTelnyxLeaderboardMetrics(
   );
   const contacts = tallyContactsFromAttempts(collapsed, LEADERBOARD_CONTACT_BUCKET_MS);
 
-  for (const ev of activityRows) {
-    if (ev.kind !== LEAD_ACTIVITY_KIND.CALL_RECORDING || !ev.userId) continue;
-    const dur = ev.durationSeconds;
-    if (typeof dur !== "number" || dur < LEADERBOARD_MIN_CONVERSATION_SECONDS) continue;
-    const leg = ev.telnyxCallLegId?.trim();
-    if (leg && consumedConversationIds.has(leg)) continue;
-    conversationUserCounts.set(ev.userId, (conversationUserCounts.get(ev.userId) ?? 0) + 1);
+  // Samme opkald kan optræde både som DialerCallLog og CALL_ATTEMPT — fold
+  // samtale-events inden for 60 s pr. bruger+lead til én samtale. Taletiden
+  // for en foldet gruppe er den længste rapporterede (samme opkald, to kilder).
+  const sortedConversations = [...conversationEvents].sort(
+    (a, b) => a.at.getTime() - b.at.getTime() || a.leadId.localeCompare(b.leadId),
+  );
+  const collapsedConversations: ConversationEvent[] = [];
+  for (const c of sortedConversations) {
+    const prev = collapsedConversations[collapsedConversations.length - 1];
+    if (
+      prev &&
+      prev.userId === c.userId &&
+      prev.leadId === c.leadId &&
+      c.at.getTime() - prev.at.getTime() < LEADERBOARD_SAME_ATTEMPT_COLLAPSE_MS
+    ) {
+      prev.seconds = Math.max(prev.seconds, c.seconds);
+      continue;
+    }
+    collapsedConversations.push({ ...c });
   }
 
-  return { contacts, conversations: conversationUserCounts };
+  const conversations = new Map<string, number>();
+  const conversationPairs = new Set<string>();
+  const talkSeconds = new Map<string, number>();
+  for (const c of collapsedConversations) {
+    conversations.set(c.userId, (conversations.get(c.userId) ?? 0) + 1);
+    conversationPairs.add(`${c.userId}\0${c.leadId}`);
+    talkSeconds.set(c.userId, (talkSeconds.get(c.userId) ?? 0) + c.seconds);
+  }
+
+  return { contacts, conversations, conversationPairs, talkSeconds };
+}
+
+/**
+ * Samtaler til scoreboardet: talk-baserede (≥ 20 s forbundet tale) plus fallback
+ * fra udfald der indebærer en samtale (møde booket, ikke interesseret, callback).
+ * Fallback gælder kun leads hvor brugeren IKKE har en talk-baseret samtale samme
+ * dag — så historiske dage uden gemt taletid ikke står med 0 samtaler, og nye
+ * dage ikke dobbelttæller.
+ */
+export function mergeConversationsWithOutcomeFallback(
+  telnyx: TelnyxLeaderboardTallies,
+  scoringOutcomes: ScoringOutcome[],
+): Map<string, number> {
+  const merged = new Map(telnyx.conversations);
+  for (const s of scoringOutcomes) {
+    const d = leaderboardDeltasForOutcome(s.status);
+    if (d.conversations <= 0) continue;
+    if (telnyx.conversationPairs.has(`${s.userId}\0${s.leadId}`)) continue;
+    merged.set(s.userId, (merged.get(s.userId) ?? 0) + d.conversations);
+  }
+  return merged;
 }
 
 export function mergeScoringUserIds(...maps: Map<string, number>[]): string[] {

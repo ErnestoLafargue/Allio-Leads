@@ -26,8 +26,9 @@ export default function ScoreboardPage() {
       <div>
         <h1 className="text-xl font-semibold text-stone-900">Scoreboard</h1>
         <p className="text-sm text-stone-500">
-          Tal for den valgte dag: hvert kontaktforsøg tælles; samme lead igen efter «Ny» tæller fornyet.
-          Inden for ét forsøg tæller kun seneste udfald.
+          Tal for den valgte dag: kontakter er opkaldsforsøg (max ét pr. lead pr. 2 timer),
+          samtaler er opkald med mindst 20 sekunders forbundet tale, og møder er bookede møder
+          via udfald.
         </p>
       </div>
       <DailyScoreboard />

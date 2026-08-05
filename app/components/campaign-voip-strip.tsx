@@ -261,6 +261,13 @@ export function CampaignVoipStrip({
   const [savingPhone, setSavingPhone] = useState(false);
   const endCallInitiatedByUsRef = useRef(false);
   const callHadConnectedRef = useRef(false);
+  /**
+   * Sat første gang linjen bliver "live" for det aktuelle opkald. Bruges til at
+   * rapportere forbundet taletid til scoreboardet (samtaler ≥ 20 s) når opkaldet
+   * lukkes. Læs-og-ryd i reportConnectedTalkSeconds sikrer at dobbelte luk-stier
+   * (hangUp + CLOSED-notifikation) aldrig dobbeltrapporterer.
+   */
+  const liveTalkRef = useRef<{ leadId: string; startedAt: number } | null>(null);
   const voipPhone = (leadPhone || "").trim();
 
   const [devices, setDevices] = useState<MediaDeviceInfo[]>([]);
@@ -1018,6 +1025,29 @@ export function CampaignVoipStrip({
     }
   }
 
+  /**
+   * Rapportér forbundet taletid (live → luk) til serveren, som gemmer den på
+   * opkaldets CALL_ATTEMPT. Scoreboardet tæller samtaler (≥ 20 s) derfra —
+   * WebRTC-opkald går uden om Call Control-webhooks, så serveren kender ellers
+   * ikke taletiden. Læs-og-ryd: kun første kald efter et live opkald sender.
+   */
+  function reportConnectedTalkSeconds() {
+    const talk = liveTalkRef.current;
+    liveTalkRef.current = null;
+    if (!talk) return;
+    const seconds = Math.round((Date.now() - talk.startedAt) / 1000);
+    if (seconds <= 0) return;
+    void fetch("/api/telnyx/webrtc/log-call-result", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ leadId: talk.leadId, connectedTalkSeconds: seconds }),
+      credentials: "same-origin",
+      keepalive: true,
+    }).catch(() => {
+      /* scoreboard-tælling — må ikke forstyrre opkald */
+    });
+  }
+
   function attachCallStreams(call: TelnyxCall | null) {
     if (!call) return;
     if (call.remoteStream) setRemoteStream(call.remoteStream);
@@ -1164,6 +1194,7 @@ export function CampaignVoipStrip({
             }
             const hadLive = callHadConnectedRef.current;
             callHadConnectedRef.current = false;
+            reportConnectedTalkSeconds();
             const sipCode = Number((maybeCall as TelnyxCall).sipCode) || 0;
             const cause = String((maybeCall as TelnyxCall).cause ?? "");
             const sipReason = String((maybeCall as TelnyxCall).sipReason ?? "");
@@ -1228,6 +1259,13 @@ export function CampaignVoipStrip({
           const mapped = callStateToLineStatus(maybeCall.state);
           if (mapped) {
             if (mapped === "live") {
+              if (!callHadConnectedRef.current) {
+                const talkLeadId =
+                  currentCallContextRef.current?.leadId ?? currentLeadIdRef.current;
+                if (talkLeadId) {
+                  liveTalkRef.current = { leadId: talkLeadId, startedAt: Date.now() };
+                }
+              }
               callHadConnectedRef.current = true;
             }
             setLineStatus(mapped);
@@ -1487,6 +1525,9 @@ export function CampaignVoipStrip({
       /* no-op */
     }
     activeCallRef.current = null;
+    // Manuel hangup nulstiller activeCallRef, så den senere CLOSED-notifikation
+    // ikke matcher det aktive opkald — rapportér taletiden her i stedet.
+    reportConnectedTalkSeconds();
     // Læs timerKey FØR vi nuller currentCallContextRef, så finalize binder til
     // den korrekte opkalds-instans (forældede CLOSED-callbacks der måtte komme
     // bagefter no-op'er fordi finalizeCallTimer er keyed).

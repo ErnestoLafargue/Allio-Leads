@@ -1,72 +1,18 @@
 import { NextResponse } from "next/server";
-import { prisma } from "@/lib/prisma";
 import { requireSession } from "@/lib/api-auth";
-import {
-  copenhagenDayBoundsUtc,
-  copenhagenDayBoundsUtcFromDayKey,
-  copenhagenDayKey,
-} from "@/lib/copenhagen-day";
-import { tallyMeetingsFromOutcomeEpisodes, warnIfScoreboardUserTallyInconsistent } from "@/lib/lead-outcome-log";
-import { LEAD_ACTIVITY_KIND } from "@/lib/lead-activity-kinds";
-import { mergeScoringUserIds, tallyTelnyxLeaderboardMetrics } from "@/lib/leaderboard-telnyx";
+import { copenhagenDayKey } from "@/lib/copenhagen-day";
+import { computeScoreboardForDay } from "@/lib/scoreboard-day";
+import { warnIfScoreboardUserTallyInconsistent } from "@/lib/lead-outcome-log";
 
-type PresentUser = {
-  userId: string;
-  user: { id: string; name: string; username: string; role: string };
-};
-
-function serverLocalDayBounds(): { start: Date; end: Date } {
-  const now = new Date();
-  const start = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 0, 0, 0, 0);
-  const end = new Date(start.getTime() + 24 * 60 * 60 * 1000);
-  return { start, end };
-}
-
-async function loadPresentUsers(dayKey: string): Promise<PresentUser[]> {
-  try {
-    const rows = await prisma.userLoginDay.findMany({
-      where: { dayKey },
-      include: {
-        user: { select: { id: true, name: true, username: true, role: true } },
-      },
-    });
-    return rows.map((p) => ({ userId: p.userId, user: p.user }));
-  } catch (e) {
-    console.warn("[leaderboard] UserLoginDay query failed (migration kørt?):", e);
-  }
-
-  const sellers = await prisma.user.findMany({
-    where: { role: "SELLER" },
-    select: { id: true, name: true, username: true, role: true },
-    orderBy: { name: "asc" },
-  });
-  return sellers.map((u) => ({ userId: u.id, user: u }));
-}
-
-async function mergePresentWithOutcomeUsers(
-  present: PresentUser[],
-  outcomeUserIds: string[],
-): Promise<PresentUser[]> {
-  const map = new Map<string, PresentUser>();
-  for (const p of present) {
-    map.set(p.userId, p);
-  }
-  const missingIds = outcomeUserIds.filter((id) => !map.has(id));
-  if (missingIds.length === 0) {
-    return Array.from(map.values());
-  }
-  const users = await prisma.user.findMany({
-    where: { id: { in: missingIds } },
-    select: { id: true, name: true, username: true, role: true },
-  });
-  for (const u of users) {
-    map.set(u.id, { userId: u.id, user: u });
-  }
-  return Array.from(map.values());
-}
-
+/**
+ * GET /api/users/leaderboard?dayKey=YYYY-MM-DD
+ *
+ * Dags-scoreboard. Alle ser møder/samtaler/kontakter; admin får derudover
+ * tidsmålinger (login-/dialer-tid, gns. samtaletid, buyrate) og fordeling
+ * pr. kampagne. Beregning ligger i lib/scoreboard-day.ts (delt med Plecto-eksport).
+ */
 export async function GET(req: Request) {
-  const { response } = await requireSession();
+  const { session, response } = await requireSession();
   if (response) return response;
 
   try {
@@ -74,114 +20,33 @@ export async function GET(req: Request) {
     const requestedDayKey = searchParams.get("dayKey")?.trim() ?? "";
     const dayKey =
       /^\d{4}-\d{2}-\d{2}$/.test(requestedDayKey) ? requestedDayKey : copenhagenDayKey();
-
-    let start: Date;
-    let end: Date;
-    try {
-      const b = requestedDayKey
-        ? copenhagenDayBoundsUtcFromDayKey(dayKey)
-        : copenhagenDayBoundsUtc();
-      start = b.start;
-      end = b.end;
-    } catch (e) {
-      console.warn("[leaderboard] copenhagenDayBoundsUtc failed, using serverlokal dag:", e);
-      const b = serverLocalDayBounds();
-      start = b.start;
-      end = b.end;
-    }
     const todayKey = copenhagenDayKey();
+    const isAdmin = session.user.role === "ADMIN";
 
-    const [logRows, dialerRows, activityRows] = await Promise.all([
-      prisma.leadOutcomeLog.findMany({
-        where: { createdAt: { gte: start, lt: end } },
-        select: { leadId: true, userId: true, status: true, createdAt: true },
-        orderBy: { createdAt: "asc" },
-      }),
-      prisma.dialerCallLog.findMany({
-        where: {
-          startedAt: { gte: start, lt: end },
-          leadId: { not: null },
-          direction: "outbound-lead",
-        },
-        select: {
-          callControlId: true,
-          callSessionId: true,
-          direction: true,
-          leadId: true,
-          agentUserId: true,
-          startedAt: true,
-          answeredAt: true,
-          bridgedAt: true,
-          endedAt: true,
-          lead: {
-            select: {
-              lockedByUserId: true,
-              lockedAt: true,
-              lockExpiresAt: true,
-              assignedUserId: true,
-            },
-          },
-        },
-      }),
-      prisma.leadActivityEvent.findMany({
-        where: {
-          createdAt: { gte: start, lt: end },
-          userId: { not: null },
-          kind: { in: [LEAD_ACTIVITY_KIND.CALL_ATTEMPT, LEAD_ACTIVITY_KIND.CALL_RECORDING] },
-        },
-        select: {
-          kind: true,
-          userId: true,
-          leadId: true,
-          createdAt: true,
-          durationSeconds: true,
-          telnyxCallLegId: true,
-        },
-      }),
-    ]);
+    const board = await computeScoreboardForDay(dayKey);
 
-    const meetingTallies = tallyMeetingsFromOutcomeEpisodes(logRows);
-    const telnyxTallies = tallyTelnyxLeaderboardMetrics(dialerRows, activityRows);
-
-    const scoringUserIds = mergeScoringUserIds(
-      telnyxTallies.contacts,
-      telnyxTallies.conversations,
-      meetingTallies,
-    );
-
-    let present = await loadPresentUsers(dayKey);
-    present = await mergePresentWithOutcomeUsers(present, scoringUserIds);
-
-    if (present.length === 0) {
-      const sellers = await prisma.user.findMany({
-        where: { role: "SELLER" },
-        select: { id: true, name: true, username: true, role: true },
-        orderBy: { name: "asc" },
-      });
-      present = sellers.map((u) => ({ userId: u.id, user: u }));
-    }
-
-    const board = present
-      .map((p) => {
-        const meetings = meetingTallies.get(p.userId) ?? 0;
-        const conversations = telnyxTallies.conversations.get(p.userId) ?? 0;
-        const contacts = telnyxTallies.contacts.get(p.userId) ?? 0;
-        warnIfScoreboardUserTallyInconsistent(p.userId, meetings, conversations, contacts);
-        return {
-          userId: p.user.id,
-          name: p.user.name,
-          username: p.user.username,
-          role: p.user.role,
-          meetings,
-          conversations,
-          contacts,
-        };
-      })
-      .sort((a, b) => {
-        if (b.meetings !== a.meetings) return b.meetings - a.meetings;
-        if (b.conversations !== a.conversations) return b.conversations - a.conversations;
-        return b.contacts - a.contacts;
-      });
+    const rows = board.rows.map((r) => {
+      warnIfScoreboardUserTallyInconsistent(r.userId, r.meetings, r.conversations, r.contacts);
+      const base = {
+        userId: r.userId,
+        name: r.name,
+        username: r.username,
+        role: r.role,
+        meetings: r.meetings,
+        conversations: r.conversations,
+        contacts: r.contacts,
+      };
+      if (!isAdmin) return base;
+      return {
+        ...base,
+        talkSeconds: r.talkSeconds,
+        loginSeconds: r.loginSeconds,
+        dialerSeconds: r.dialerSeconds,
+        avgConversationSeconds: r.avgConversationSeconds,
+        buyRatePct: r.buyRatePct,
+        campaigns: r.campaigns,
+      };
+    });
 
     const dayLabel = new Intl.DateTimeFormat("da-DK", {
       timeZone: "Europe/Copenhagen",
@@ -189,14 +54,15 @@ export async function GET(req: Request) {
       year: "numeric",
       month: "long",
       day: "numeric",
-    }).format(start);
+    }).format(board.start);
 
     return NextResponse.json({
       dayKey,
       todayKey,
       dayLabel,
-      start: start.toISOString(),
-      rows: board,
+      isAdmin,
+      start: board.start.toISOString(),
+      rows,
     });
   } catch (e) {
     const msg = e instanceof Error ? e.message : String(e);

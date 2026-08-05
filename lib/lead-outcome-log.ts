@@ -90,14 +90,21 @@ export type OutcomeLogRowForScoreboard = {
   createdAt: Date;
 };
 
+/** Ét scoring-udfald pr. kontakt-episode — med leadId så samtale-fallback kan deduplikere pr. lead. */
+export type ScoringOutcome = {
+  userId: string;
+  leadId: string;
+  status: string;
+};
+
 /**
- * Scoreboard pr. valgt dag: summer én gang pr. kontakt-episode pr. lead.
+ * Finder scoring-udfaldene pr. kontakt-episode pr. lead.
  * Episoder adskilles af log med status NEW (bruger eller system). Inden for én episode tæller kun seneste bruger-udfald (ikke NEW).
  * Samme lead kan give flere episoder samme dag (fx voicemail → auto Ny → ikke interesseret).
  */
-export function tallyScoreboardFromContactEpisodes(
+export function scoringOutcomesFromContactEpisodes(
   rows: OutcomeLogRowForScoreboard[],
-): Map<string, LeaderboardOutcomeDeltas> {
+): ScoringOutcome[] {
   const sorted = [...rows].sort((a, b) => a.createdAt.getTime() - b.createdAt.getTime());
   const byLead = new Map<string, OutcomeLogRowForScoreboard[]>();
   for (const r of sorted) {
@@ -106,17 +113,8 @@ export function tallyScoreboardFromContactEpisodes(
     byLead.set(r.leadId, arr);
   }
 
-  const tallies = new Map<string, LeaderboardOutcomeDeltas>();
-  function add(userId: string, d: LeaderboardOutcomeDeltas) {
-    const p = tallies.get(userId) ?? { meetings: 0, conversations: 0, contacts: 0 };
-    tallies.set(userId, {
-      meetings: p.meetings + d.meetings,
-      conversations: p.conversations + d.conversations,
-      contacts: p.contacts + d.contacts,
-    });
-  }
-
-  for (const [, logs] of byLead) {
+  const out: ScoringOutcome[] = [];
+  for (const [leadId, logs] of byLead) {
     let segment: OutcomeLogRowForScoreboard[] = [];
     const flushSegment = () => {
       const scoring = segment.filter((r) => {
@@ -125,7 +123,7 @@ export function tallyScoreboardFromContactEpisodes(
       });
       if (scoring.length > 0) {
         const last = scoring[scoring.length - 1]!;
-        add(last.userId!, leaderboardDeltasForOutcome(last.status));
+        out.push({ userId: last.userId!, leadId, status: last.status });
       }
       segment = [];
     };
@@ -140,6 +138,26 @@ export function tallyScoreboardFromContactEpisodes(
     flushSegment();
   }
 
+  return out;
+}
+
+/**
+ * Scoreboard pr. valgt dag: summer én gang pr. kontakt-episode pr. lead
+ * (se scoringOutcomesFromContactEpisodes for episode-reglerne).
+ */
+export function tallyScoreboardFromContactEpisodes(
+  rows: OutcomeLogRowForScoreboard[],
+): Map<string, LeaderboardOutcomeDeltas> {
+  const tallies = new Map<string, LeaderboardOutcomeDeltas>();
+  for (const s of scoringOutcomesFromContactEpisodes(rows)) {
+    const d = leaderboardDeltasForOutcome(s.status);
+    const p = tallies.get(s.userId) ?? { meetings: 0, conversations: 0, contacts: 0 };
+    tallies.set(s.userId, {
+      meetings: p.meetings + d.meetings,
+      conversations: p.conversations + d.conversations,
+      contacts: p.contacts + d.contacts,
+    });
+  }
   return tallies;
 }
 
