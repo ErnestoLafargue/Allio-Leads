@@ -55,7 +55,9 @@ export async function GET(req: Request) {
         contacts: r.contacts,
         talkSeconds: r.talkSeconds,
         loginSeconds: r.loginSeconds,
+        loginSecondsEstimated: r.loginSecondsEstimated,
         dialerSeconds: r.dialerSeconds,
+        dialerSecondsEstimated: r.dialerSecondsEstimated,
         avgConversationSeconds: r.avgConversationSeconds,
         buyRatePct: r.buyRatePct,
       };
@@ -74,7 +76,9 @@ export async function GET(req: Request) {
         contacts: c.contacts,
         talkSeconds: c.talkSeconds,
         loginSeconds: 0,
+        loginSecondsEstimated: false,
         dialerSeconds: c.dialerSeconds,
+        dialerSecondsEstimated: c.dialerSecondsEstimated,
         avgConversationSeconds: c.avgConversationSeconds,
         buyRatePct: c.buyRatePct,
       }));

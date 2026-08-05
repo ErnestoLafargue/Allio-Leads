@@ -25,6 +25,7 @@ import {
   type DialerRowForLeaderboard,
 } from "@/lib/leaderboard-telnyx";
 import { buildLeadCampaignAttribution } from "@/lib/lead-campaign-attribution";
+import { estimateActiveSeconds } from "@/lib/presence-estimate";
 
 export type ScoreboardCampaignSlice = {
   /** null = aktivitet på leads uden kampagne */
@@ -37,6 +38,8 @@ export type ScoreboardCampaignSlice = {
   talkSeconds: number;
   /** Tid på kampagnens arbejdsside (dialer åben) i sekunder */
   dialerSeconds: number;
+  /** true = `dialerSeconds` er estimeret fra aktivitet (dag uden heartbeat-måling) */
+  dialerSecondsEstimated: boolean;
   /** Gns. taletid pr. talk-baseret samtale, sekunder */
   avgConversationSeconds: number;
   /** Møder pr. samtale i procent */
@@ -53,7 +56,11 @@ export type ScoreboardUserRow = {
   contacts: number;
   talkSeconds: number;
   loginSeconds: number;
+  /** true = `loginSeconds` er estimeret fra aktivitet (dag uden heartbeat-måling) */
+  loginSecondsEstimated: boolean;
   dialerSeconds: number;
+  /** true = `dialerSeconds` er estimeret fra aktivitet (dag uden heartbeat-måling) */
+  dialerSecondsEstimated: boolean;
   avgConversationSeconds: number;
   buyRatePct: number;
   campaigns: ScoreboardCampaignSlice[];
@@ -163,7 +170,7 @@ export async function computeScoreboardForDay(dayKey: string): Promise<Scoreboar
   const visitRows = involvedLeadIds.length
     ? await prisma.leadVisitHistory.findMany({
         where: { leadId: { in: involvedLeadIds }, visitedAt: { lt: end } },
-        select: { leadId: true, campaignId: true, visitedAt: true },
+        select: { leadId: true, userId: true, campaignId: true, visitedAt: true },
         orderBy: { visitedAt: "asc" },
       })
     : [];
@@ -197,13 +204,28 @@ export async function computeScoreboardForDay(dayKey: string): Promise<Scoreboar
 
   const loginSecondsByUser = new Map(presenceRows.map((p) => [p.userId, p.loginSeconds]));
   const dialerSecondsByUserCampaign = new Map<string, number>();
-  const dialerSecondsByUser = new Map<string, number>();
   for (const p of campaignPresenceRows) {
     dialerSecondsByUserCampaign.set(`${p.userId}\0${p.campaignId}`, p.dialerSeconds);
-    dialerSecondsByUser.set(
-      p.userId,
-      (dialerSecondsByUser.get(p.userId) ?? 0) + p.dialerSeconds,
-    );
+  }
+
+  // ---- Tidsstempler til estimat af aktiv tid på dage uden heartbeat-måling ----
+  const eventTimesByUser = new Map<string, Date[]>();
+  const eventTimesByUserCampaign = new Map<string, Date[]>();
+  const addEventTime = (userId: string | null, campaignId: string | null, at: Date) => {
+    if (!userId) return;
+    (eventTimesByUser.get(userId) ?? eventTimesByUser.set(userId, []).get(userId)!).push(at);
+    const pairKey = `${userId}\0${keyOf(campaignId)}`;
+    (
+      eventTimesByUserCampaign.get(pairKey) ??
+      eventTimesByUserCampaign.set(pairKey, []).get(pairKey)!
+    ).push(at);
+  };
+  for (const r of activityRows) addEventTime(r.userId, r.campaignId, r.createdAt);
+  for (const r of logRows) addEventTime(r.userId, r.campaignId, r.createdAt);
+  for (const v of visitRows) {
+    if (v.visitedAt >= start && v.visitedAt < end) {
+      addEventTime(v.userId, v.campaignId, v.visitedAt);
+    }
   }
 
   // ---- Pr. kampagne: kør samme tallies på kampagne-udsnit af dagens rækker ----
@@ -245,6 +267,7 @@ export async function computeScoreboardForDay(dayKey: string): Promise<Scoreboar
       contacts: 0,
       talkSeconds: 0,
       dialerSeconds: 0,
+      dialerSecondsEstimated: false,
       avgConversationSeconds: 0,
       buyRatePct: 0,
     };
@@ -290,6 +313,21 @@ export async function computeScoreboardForDay(dayKey: string): Promise<Scoreboar
     slice.dialerSeconds = p.dialerSeconds;
   }
 
+  // Uden målt heartbeat-tid (dage før presence-målingen, eller kampagner hvor
+  // brugeren nåede at ringe uden at heartbeatet ramte) estimeres dialer-tiden
+  // ud fra aktivitetens tidsstempler og markeres som estimat.
+  for (const [userId, byCampaign] of slicesByUser) {
+    for (const [campaignKey, slice] of byCampaign) {
+      const measured = dialerSecondsByUserCampaign.get(`${userId}\0${campaignKey}`);
+      if (typeof measured === "number" && measured > 0) continue;
+      const times = eventTimesByUserCampaign.get(`${userId}\0${campaignKey}`) ?? [];
+      const estimated = estimateActiveSeconds(times);
+      if (estimated <= 0) continue;
+      slice.dialerSeconds = estimated;
+      slice.dialerSecondsEstimated = true;
+    }
+  }
+
   // ---- Kampagnenavne ----
   const campaignIds = [...campaignKeys].filter((k) => k !== NO_CAMPAIGN);
   const campaigns = campaignIds.length
@@ -307,7 +345,10 @@ export async function computeScoreboardForDay(dayKey: string): Promise<Scoreboar
     meetingTallies,
   );
   const presenceUserIds = [
-    ...new Set([...loginSecondsByUser.keys(), ...dialerSecondsByUser.keys()]),
+    ...new Set([
+      ...loginSecondsByUser.keys(),
+      ...campaignPresenceRows.map((p) => p.userId),
+    ]),
   ];
 
   const loginDayRows = await prisma.userLoginDay.findMany({
@@ -351,6 +392,18 @@ export async function computeScoreboardForDay(dayKey: string): Promise<Scoreboar
           if (b.conversations !== a.conversations) return b.conversations - a.conversations;
           return b.contacts - a.contacts;
         });
+      const measuredLogin = loginSecondsByUser.get(u.id) ?? 0;
+      const loginEstimate =
+        measuredLogin > 0 ? 0 : estimateActiveSeconds(eventTimesByUser.get(u.id) ?? []);
+      // Dialer-tid = summen af kampagne-udsnittene (målt hvor vi har heartbeats,
+      // ellers estimeret) — så totalen altid stemmer med de udfoldede rækker.
+      const dialerSeconds = campaignSlices.reduce((sum, s) => sum + s.dialerSeconds, 0);
+
+      // Man kan ikke ringe uden at være logget ind: et estimeret login-tal må
+      // aldrig ligge under den (også estimerede) dialer-tid.
+      const loginSeconds =
+        measuredLogin > 0 ? measuredLogin : Math.max(loginEstimate, dialerSeconds);
+
       return {
         userId: u.id,
         name: u.name,
@@ -360,8 +413,12 @@ export async function computeScoreboardForDay(dayKey: string): Promise<Scoreboar
         conversations,
         contacts,
         talkSeconds,
-        loginSeconds: loginSecondsByUser.get(u.id) ?? 0,
-        dialerSeconds: dialerSecondsByUser.get(u.id) ?? 0,
+        loginSeconds,
+        loginSecondsEstimated: measuredLogin <= 0 && loginSeconds > 0,
+        dialerSeconds,
+        dialerSecondsEstimated: campaignSlices.some(
+          (s) => s.dialerSecondsEstimated && s.dialerSeconds > 0,
+        ),
         avgConversationSeconds: avgSeconds(
           talkSeconds,
           telnyxTallies.conversations.get(u.id) ?? 0,

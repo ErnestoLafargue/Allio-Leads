@@ -11,6 +11,7 @@ export type LeaderboardCampaignSlice = {
   contacts: number;
   talkSeconds: number;
   dialerSeconds: number;
+  dialerSecondsEstimated?: boolean;
   avgConversationSeconds: number;
   buyRatePct: number;
 };
@@ -26,7 +27,9 @@ export type LeaderboardRow = {
   /** Kun i payload for admin */
   talkSeconds?: number;
   loginSeconds?: number;
+  loginSecondsEstimated?: boolean;
   dialerSeconds?: number;
+  dialerSecondsEstimated?: boolean;
   avgConversationSeconds?: number;
   buyRatePct?: number;
   campaigns?: LeaderboardCampaignSlice[];
@@ -50,16 +53,23 @@ function shiftDayKey(dayKey: string, diffDays: number): string {
   return `${yy}-${mm}-${dd}`;
 }
 
-/** Login-/dialer-tid: "2 t 05 m" / "45 m" / "—" ved 0. */
-function formatPresence(seconds: number | undefined): string {
+/** Login-/dialer-tid: "2 t 05 m" / "45 m" / "—" ved 0. Estimater får en stjerne. */
+function formatPresence(seconds: number | undefined, estimated?: boolean): string {
   const s = seconds ?? 0;
   if (s <= 0) return "—";
   const totalMinutes = Math.round(s / 60);
-  if (totalMinutes < 1) return "< 1 m";
-  const h = Math.floor(totalMinutes / 60);
-  const m = totalMinutes % 60;
-  return h > 0 ? `${h} t ${m.toString().padStart(2, "0")} m` : `${m} m`;
+  const label =
+    totalMinutes < 1
+      ? "< 1 m"
+      : (() => {
+          const h = Math.floor(totalMinutes / 60);
+          const m = totalMinutes % 60;
+          return h > 0 ? `${h} t ${m.toString().padStart(2, "0")} m` : `${m} m`;
+        })();
+  return estimated ? `${label}*` : label;
 }
+
+const ESTIMATE_TITLE = "Estimeret ud fra opkalds- og udfaldsaktivitet (ingen måling denne dag)";
 
 /** Gns. samtaletid: "1:42" (m:ss), "—" ved 0. */
 function formatTalk(seconds: number | undefined): string {
@@ -253,11 +263,17 @@ export function DailyScoreboard() {
                     </td>
                     {isAdmin && (
                       <>
-                        <td className="px-3 py-2.5 text-right tabular-nums text-stone-700">
-                          {formatPresence(r.loginSeconds)}
+                        <td
+                          className="px-3 py-2.5 text-right tabular-nums text-stone-700"
+                          title={r.loginSecondsEstimated ? ESTIMATE_TITLE : undefined}
+                        >
+                          {formatPresence(r.loginSeconds, r.loginSecondsEstimated)}
                         </td>
-                        <td className="px-3 py-2.5 text-right tabular-nums text-stone-700">
-                          {formatPresence(r.dialerSeconds)}
+                        <td
+                          className="px-3 py-2.5 text-right tabular-nums text-stone-700"
+                          title={r.dialerSecondsEstimated ? ESTIMATE_TITLE : undefined}
+                        >
+                          {formatPresence(r.dialerSeconds, r.dialerSecondsEstimated)}
                         </td>
                         <td className="px-3 py-2.5 text-right tabular-nums text-stone-700">
                           {formatTalk(r.avgConversationSeconds)}
@@ -290,8 +306,11 @@ export function DailyScoreboard() {
                               {c.contacts}
                             </td>
                             <td className="px-3 py-2 text-right tabular-nums text-stone-400">—</td>
-                            <td className="px-3 py-2 text-right tabular-nums text-stone-600">
-                              {formatPresence(c.dialerSeconds)}
+                            <td
+                              className="px-3 py-2 text-right tabular-nums text-stone-600"
+                              title={c.dialerSecondsEstimated ? ESTIMATE_TITLE : undefined}
+                            >
+                              {formatPresence(c.dialerSeconds, c.dialerSecondsEstimated)}
                             </td>
                             <td className="px-3 py-2 text-right tabular-nums text-stone-600">
                               {formatTalk(c.avgConversationSeconds)}
@@ -321,7 +340,7 @@ export function DailyScoreboard() {
         Kontakter: opkaldsforsøg (max ét pr. 2 t. pr. lead); samtaler: ≥ 20 s. forbundet tale
         (dage uden registreret taletid: udfald der kræver samtale); møder: booket møde via udfald.
         {isAdmin
-          ? " Login-/dialer-tid måles mens fanen er åben; gns. samtale er taletid pr. samtale; buyrate er møder pr. samtale. Klik på en bruger for fordeling pr. kampagne."
+          ? " Login-/dialer-tid måles mens Allio-fanen er åben; buyrate er møder pr. samtale. Stjerne (*) betyder estimeret tid ud fra opkaldsaktivitet på dage før målingen begyndte. Gns. samtale kræver registreret taletid og er derfor tom for dage før 5. august. Klik på en bruger for fordeling pr. kampagne."
           : ""}
       </p>
       {data.rows.length === 0 && (

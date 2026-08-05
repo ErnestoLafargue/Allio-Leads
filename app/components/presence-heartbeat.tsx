@@ -2,22 +2,26 @@
 
 import { usePathname } from "next/navigation";
 import { useEffect } from "react";
+import { getActiveDialerCampaign } from "@/lib/active-dialer-campaign";
 
 const HEARTBEAT_MS = 60_000;
 
 /**
  * Pinger /api/presence/heartbeat mens fanen er synlig, så login-tid (og
- * dialer-tid når man står på en kampagnes arbejdsside) akkumuleres pr. dag
- * til scoreboardet og Plecto-eksporten. Renderer intet.
+ * dialer-tid når man arbejder i en kampagne) akkumuleres pr. dag til
+ * scoreboardet og Plecto-eksporten. Renderer intet.
  */
 export function PresenceHeartbeat() {
   const pathname = usePathname();
-  const campaignId = pathname?.match(/^\/kampagner\/([^/]+)\/arbejd(?:\/|$)/)?.[1] ?? null;
+  const pathCampaignId = pathname?.match(/^\/kampagner\/([^/]+)\/arbejd(?:\/|$)/)?.[1] ?? null;
 
   useEffect(() => {
     let cancelled = false;
     const beat = () => {
       if (cancelled || document.visibilityState !== "visible") return;
+      // Aktiv VoIP-linje uden for arbejdssiden (fx lead-detaljesiden) tæller
+      // også som dialer-tid på den kampagne opkaldet hører til.
+      const campaignId = pathCampaignId ?? getActiveDialerCampaign();
       void fetch("/api/presence/heartbeat", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -40,7 +44,7 @@ export function PresenceHeartbeat() {
       window.clearInterval(intervalId);
       document.removeEventListener("visibilitychange", onVisibility);
     };
-  }, [campaignId]);
+  }, [pathCampaignId]);
 
   return null;
 }

@@ -23,6 +23,10 @@ import {
 } from "@/lib/voip-call-messages";
 import { decideClosedNotification } from "@/lib/voip-closed-decision";
 import { type VoipApiContext, VOIP_API_CONTEXT } from "@/lib/voip-api-context";
+import {
+  clearActiveDialerCampaignIfMatches,
+  setActiveDialerCampaign,
+} from "@/lib/active-dialer-campaign";
 
 type Props = {
   leadId: string;
@@ -253,6 +257,18 @@ export function CampaignVoipStrip({
   useEffect(() => {
     onLineStatusRef.current?.(lineStatus);
   }, [leadId, lineStatus]);
+
+  // Registrér kampagnen mens linjen er i brug, så heartbeatet krediterer
+  // dialer-tid også når opkaldet foretages fra lead-detaljesiden (uden for
+  // kampagnens arbejdsside, hvor pathname ellers er eneste kilde).
+  useEffect(() => {
+    if (lineStatus === "idle") {
+      clearActiveDialerCampaignIfMatches(campaignId);
+      return;
+    }
+    setActiveDialerCampaign(campaignId);
+    return () => clearActiveDialerCampaignIfMatches(campaignId);
+  }, [campaignId, lineStatus]);
   const [detail, setDetail] = useState<string | null>(null);
   const [voipToast, setVoipToast] = useState<string | null>(null);
   const [voipToastFading, setVoipToastFading] = useState(false);
