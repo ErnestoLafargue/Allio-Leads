@@ -58,6 +58,7 @@ model User {
 
   presenceDays         UserPresenceDay[]
   campaignPresenceDays UserCampaignPresenceDay[]
+  dashboardsCreated    Dashboard[]               @relation("DashboardCreatedBy")
 }
 
 /// Én række pr. bruger pr. kalenderdag (København) ved vellykket login.
@@ -109,6 +110,30 @@ model UserCampaignPresenceDay {
 
   @@unique([userId, campaignId, dayKey])
   @@index([dayKey])
+}
+
+/// Admin-oprettet TV-/KPI-dashboard. Layout + widgets gemmes som JSON.
+/// Offentlig adgang via uforudsigelig `publicToken` på /d/[token] (uden login).
+model Dashboard {
+  id             String   @id @default(cuid())
+  name           String
+  description    String?
+  /// Uforudsigelig token til offentlig TV-URL (kort nok til manuel indtastning)
+  publicToken    String   @unique
+  publicEnabled  Boolean  @default(true)
+  /// Polling-interval på offentlig TV-visning (sekunder)
+  refreshSeconds Int      @default(30)
+  /// react-grid-layout items: [{ i, x, y, w, h }]
+  layout         Json     @default("[]")
+  /// Widget-configs: [{ id, title, viz, metricId, period, groupBy, filters, target, ... }]
+  widgets        Json     @default("[]")
+  createdById    String?
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  createdBy User? @relation("DashboardCreatedBy", fields: [createdById], references: [id], onDelete: SetNull)
+
+  @@index([createdById])
 }
 
 model Campaign {

@@ -13,6 +13,7 @@ type SidebarSection =
       id: string;
       href: string;
       label: string;
+      adminOnly?: boolean;
       icon: (props: { className?: string }) => React.ReactElement;
     }
   | {
@@ -182,6 +183,28 @@ function MenuIcon({ open }: { open: boolean }) {
   );
 }
 
+function DashboardIcon({ className }: { className?: string }) {
+  return (
+    <svg
+      className={className}
+      width="22"
+      height="22"
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="1.8"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      aria-hidden
+    >
+      <rect x="3" y="3" width="7" height="9" rx="1" />
+      <rect x="14" y="3" width="7" height="5" rx="1" />
+      <rect x="14" y="12" width="7" height="9" rx="1" />
+      <rect x="3" y="16" width="7" height="5" rx="1" />
+    </svg>
+  );
+}
+
 const SIDEBAR_SECTIONS: SidebarSection[] = [
   {
     kind: "link",
@@ -196,6 +219,14 @@ const SIDEBAR_SECTIONS: SidebarSection[] = [
     href: "/scoreboard",
     label: "Scoreboard",
     icon: ScoreboardIcon,
+  },
+  {
+    kind: "link",
+    id: "dashboards",
+    href: "/dashboards",
+    label: "Dashboards",
+    icon: DashboardIcon,
+    adminOnly: true,
   },
   {
     kind: "group",
@@ -261,7 +292,11 @@ export function AppSidebar({
 
   const isAdmin = role === "ADMIN";
   const visibleSections = useMemo(
-    () => SIDEBAR_SECTIONS.filter((s) => (s.kind === "link" ? true : !s.adminOnly || isAdmin)),
+    () =>
+      SIDEBAR_SECTIONS.filter((s) => {
+        if (s.kind === "link") return !s.adminOnly || isAdmin;
+        return !s.adminOnly || isAdmin;
+      }),
     [isAdmin],
   );
 

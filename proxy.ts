@@ -9,6 +9,7 @@ import { getToken } from "next-auth/jwt";
 export async function proxy(request: NextRequest) {
   const path = request.nextUrl.pathname;
   const isLogin = path === "/login";
+  const isPublicDashboard = path === "/d" || path.startsWith("/d/");
 
   const secret = process.env.AUTH_SECRET ?? process.env.NEXTAUTH_SECRET;
   const useSecureCookies =
@@ -28,7 +29,7 @@ export async function proxy(request: NextRequest) {
     }
   }
 
-  if (!loggedIn && !isLogin) {
+  if (!loggedIn && !isLogin && !isPublicDashboard) {
     return NextResponse.redirect(new URL("/login", request.nextUrl.origin));
   }
   if (loggedIn && isLogin) {
