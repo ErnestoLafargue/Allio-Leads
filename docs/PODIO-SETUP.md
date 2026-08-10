@@ -92,30 +92,24 @@ node scripts/podio-register-hooks.mjs --list --url=https://allio-leads.vercel.ap
 
 ## Periodisk reconcile
 
-**Vercel Hobby** tillader kun daglige crons, så:
-
-- Vercel cron: `GET /api/cron/sync-podio-outcomes` dagligt kl. 03:30 UTC (sikkerhedsnet)
-- **GitHub Actions** (`.github/workflows/cron-15min.yml`): hvert **15. minut** — det er den primære synk
+Vercel cron kalder `GET /api/cron/sync-podio-outcomes` **én gang dagligt** (`30 3 * * *` ≈ 03:30 UTC).  
+(Hobby-planen tillader ikke oftere end 1×/døgn pr. cron-job.)
 
 Jobbet:
 
 - Finder bookede leads med `podioItemId`
 - Prioritérer **Afventende** (`PENDING`) først (manglende udfald i Allio)
 - Henter Status fra Podio og anvender samme mapping som webhooken
-- Behandler op til 50 leads pr. kørsel (næste tick fortsætter)
-
-Kræver GitHub secret `PODIO_WEBHOOK_SECRET` (eller `CRON_SECRET`).
+- Behandler op til 50 leads pr. kørsel
 
 Manuel trigger:
 
 ```bash
-curl -s -H "Authorization: Bearer $CRON_SECRET" \
+curl -s -H "Authorization: Bearer $AUTH_SECRET" \
   "https://allio-leads.vercel.app/api/cron/sync-podio-outcomes?limit=50"
 ```
 
-(eller `?token=$PODIO_WEBHOOK_SECRET` / `Authorization: Bearer $AUTH_SECRET`)
-
-# I Actions: Actions → «Cron 15 min» → Run workflow
+(eller `?token=$PODIO_WEBHOOK_SECRET` / `Authorization: Bearer $CRON_SECRET`)
 
 ## Idempotens
 
@@ -142,7 +136,7 @@ Alternativt: bekræft mødet igen på https://allio-leads.vercel.app (virker hvi
 | Intet item i Podio | Tjek `PODIO_MOEDER_*` i Vercel; se Vercel logs for `[podio-sync]` |
 | Møde link mangler | Tjek Cal.eu-nøgler; se log `podio_moede_link_efter_cal` |
 | Genbook synker ikke | Tjek webhook status=active; tjek token matcher secret |
-| Under Behandling synker ikke | Deploy med ny mapping; genafspil via `sync-podio-outcome` / vent på 15-min reconcile / skift status igen i Podio |
+| Under Behandling synker ikke | Deploy med ny mapping; genafspil via `sync-podio-outcome` / vent på daglig reconcile / skift status igen i Podio |
 | Cron sync-podio-outcomes 401 | Brug `CRON_SECRET` Bearer, Vercel cron-header, eller Podio-token |
 | Podio-udfald nulstilles til Afventer | Bør ikke ske efter sync-fix — tjek at kaldet ikke er en gammel build |
 | 401 på webhook | `PODIO_WEBHOOK_SECRET` i URL ≠ Vercel env |
