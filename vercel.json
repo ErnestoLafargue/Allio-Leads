@@ -16,10 +16,6 @@
       "schedule": "15 3 * * *"
     },
     {
-      "path": "/api/cron/sync-missing-recordings",
-      "schedule": "20 3 * * *"
-    },
-    {
       "path": "/api/cron/sync-podio-outcomes",
       "schedule": "*/15 * * * *"
     }

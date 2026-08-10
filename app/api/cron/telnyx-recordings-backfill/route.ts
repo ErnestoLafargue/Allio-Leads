@@ -1,9 +1,11 @@
 import { NextResponse } from "next/server";
 import { runRecordingsBackfill } from "@/lib/telnyx-recordings-backfill";
+import { syncMissingRecordingsBatch } from "@/lib/telnyx-recordings-auto-sync";
 
 /**
  * Periodisk indhentning af nylige Telnyx-optagelser (API-backfill) som supplement
  * til webhooks — idempotent opdatering af CALL_RECORDING / DialerCallLog.
+ * Kører også målrettet sync for leads med møde booket / lange samtaler uden lydfil.
  */
 export async function GET(req: Request) {
   const auth = req.headers.get("authorization")?.trim() ?? "";
@@ -44,10 +46,21 @@ export async function GET(req: Request) {
       );
     }
 
+    let missingSync: Awaited<ReturnType<typeof syncMissingRecordingsBatch>> | null = null;
+    try {
+      missingSync = await syncMissingRecordingsBatch({ limit: 20 });
+    } catch (err) {
+      console.error(
+        "[cron:telnyx-recordings-backfill] missing-sync failed:",
+        err instanceof Error ? err.message : err,
+      );
+    }
+
     return NextResponse.json({
       ok: true,
       hoursBack,
       result: out.result,
+      missingSync,
     });
   } catch (e) {
     const message = e instanceof Error ? e.message : String(e);
