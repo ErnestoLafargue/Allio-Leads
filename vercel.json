@@ -18,6 +18,10 @@
     {
       "path": "/api/cron/sync-missing-recordings",
       "schedule": "*/15 * * * *"
+    },
+    {
+      "path": "/api/cron/sync-podio-outcomes",
+      "schedule": "*/15 * * * *"
     }
   ]
 }
