@@ -17,7 +17,7 @@
     },
     {
       "path": "/api/cron/sync-missing-recordings",
-      "schedule": "*/15 * * * *"
+      "schedule": "20 3 * * *"
     },
     {
       "path": "/api/cron/sync-podio-outcomes",
