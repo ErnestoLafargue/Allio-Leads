@@ -90,14 +90,21 @@ node scripts/podio-register-hooks.mjs --list --url=https://allio-leads.vercel.ap
 3. Alternativt: `GET /api/cron/sync-podio-outcome?leadId=<id>` med cron-auth
 4. Bekræft at en Cal-link-opdatering **ikke** sætter Podio tilbage til «Afventer afholdelse»
 
-## Periodisk reconcile (hvert 15. min)
+## Periodisk reconcile
 
-Vercel cron kalder `GET /api/cron/sync-podio-outcomes` hvert 15. minut. Jobbet:
+**Vercel Hobby** tillader kun daglige crons, så:
+
+- Vercel cron: `GET /api/cron/sync-podio-outcomes` dagligt kl. 03:30 UTC (sikkerhedsnet)
+- **GitHub Actions** (`.github/workflows/cron-15min.yml`): hvert **15. minut** — det er den primære synk
+
+Jobbet:
 
 - Finder bookede leads med `podioItemId`
 - Prioritérer **Afventende** (`PENDING`) først (manglende udfald i Allio)
 - Henter Status fra Podio og anvender samme mapping som webhooken
 - Behandler op til 50 leads pr. kørsel (næste tick fortsætter)
+
+Kræver GitHub secret `PODIO_WEBHOOK_SECRET` (eller `CRON_SECRET`).
 
 Manuel trigger:
 
@@ -107,6 +114,8 @@ curl -s -H "Authorization: Bearer $CRON_SECRET" \
 ```
 
 (eller `?token=$PODIO_WEBHOOK_SECRET` / `Authorization: Bearer $AUTH_SECRET`)
+
+# I Actions: Actions → «Cron 15 min» → Run workflow
 
 ## Idempotens
 
