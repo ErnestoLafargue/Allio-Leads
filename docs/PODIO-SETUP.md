@@ -19,7 +19,7 @@ sequenceDiagram
   Allio->>Cal: Opret booking
   Allio->>Podio: Opdater Møde link + Item-id
   Podio-->>Allio: item.update (Status)
-  Allio->>Allio: Genbook / Tabt / Salg
+  Allio->>Allio: Genbooking / Tabt / Under behandling / Salg / Afventende
 ```
 
 ## Miljøvariabler (Vercel)
@@ -56,10 +56,13 @@ Navngiv felterne **præcis** sådan (Allio slår op via label):
 
 | Podio-status | Allio-udfald |
 |---|---|
-| Afventer afholdelse | (ingen ændring) |
-| Møde aflyst - Genbook | Genbook-kampagne |
-| Møde Tabt | Tabt |
-| Møde vundet | Salg |
+| Afventer afholdelse | Afventende (`PENDING`) |
+| Møde aflyst - Genbook | Genbooking (`REBOOK`) + genbook-kampagne |
+| Møde Tabt | Tabt (`LOST`) |
+| Under Behandling | Under behandling (`IN_PROGRESS`) |
+| Møde vundet | Salg (`SALE`) + Aktive kunder |
+
+> **Bemærk:** Ved opdatering af mødelink/dato fra Allio overskrives Podio-status **ikke**. Status sættes kun til «Afventer afholdelse» ved oprettelse af nyt Møder-item.
 
 ## Scripts
 
@@ -79,6 +82,13 @@ node scripts/podio-register-hooks.mjs --list --url=https://allio-leads.vercel.ap
 - **URL:** `https://allio-leads.vercel.app/api/webhooks/podio?token=<PODIO_WEBHOOK_SECRET>`
 - **Type:** `item.update` på Møder-appen
 - Deploy koden **før** hook registreres (Podio sender `hook.verify` ved oprettelse)
+
+### Verifikation efter deploy
+
+1. List hooks: `node scripts/podio-register-hooks.mjs --list --url=https://allio-leads.vercel.app` — forvent `status=active`
+2. Skift Status i Podio på et testmøde (fx til «Under Behandling») — badge i Allio (tidligere møder / Mine salg) skal opdatere
+3. Alternativt: `GET /api/cron/sync-podio-outcome?leadId=<id>` med cron-auth
+4. Bekræft at en Cal-link-opdatering **ikke** sætter Podio tilbage til «Afventer afholdelse»
 
 ## Idempotens
 
@@ -105,4 +115,6 @@ Alternativt: bekræft mødet igen på https://allio-leads.vercel.app (virker hvi
 | Intet item i Podio | Tjek `PODIO_MOEDER_*` i Vercel; se Vercel logs for `[podio-sync]` |
 | Møde link mangler | Tjek Cal.eu-nøgler; se log `podio_moede_link_efter_cal` |
 | Genbook synker ikke | Tjek webhook status=active; tjek token matcher secret |
+| Under Behandling synker ikke | Deploy med ny mapping; genafspil via `sync-podio-outcome` eller skift status igen i Podio |
+| Podio-udfald nulstilles til Afventer | Bør ikke ske efter sync-fix — tjek at kaldet ikke er en gammel build |
 | 401 på webhook | `PODIO_WEBHOOK_SECRET` i URL ≠ Vercel env |

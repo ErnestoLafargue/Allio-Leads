@@ -2,8 +2,11 @@ import { prisma } from "@/lib/prisma";
 import { moveLeadToRebooking } from "@/lib/calcom/webhook-apply";
 import { LEAD_ACTIVITY_KIND } from "@/lib/lead-activity-kinds";
 import {
+  MEETING_OUTCOME_IN_PROGRESS,
   MEETING_OUTCOME_LOST,
+  MEETING_OUTCOME_PENDING,
   MEETING_OUTCOME_SALE,
+  normalizeMeetingOutcomeStatus,
 } from "@/lib/meeting-outcome";
 import { getItem, readCategoryValue } from "@/lib/podio/client";
 import {
@@ -22,7 +25,51 @@ export type MoederItemUpdateResult = {
   itemId?: number;
 };
 
-async function applyLostOutcome(leadId: string): Promise<void> {
+async function currentOutcome(leadId: string): Promise<string | null> {
+  const lead = await prisma.lead.findUnique({
+    where: { id: leadId },
+    select: { meetingOutcomeStatus: true },
+  });
+  if (!lead) return null;
+  return normalizeMeetingOutcomeStatus(lead.meetingOutcomeStatus);
+}
+
+async function applyPendingOutcome(leadId: string): Promise<boolean> {
+  if ((await currentOutcome(leadId)) === MEETING_OUTCOME_PENDING) return false;
+  await prisma.lead.update({
+    where: { id: leadId },
+    data: { meetingOutcomeStatus: MEETING_OUTCOME_PENDING },
+  });
+  await prisma.leadActivityEvent.create({
+    data: {
+      leadId,
+      userId: null,
+      kind: LEAD_ACTIVITY_KIND.MEETING_OUTCOME_SET,
+      summary: "Møde sat til Afventer afholdelse i Podio.",
+    },
+  });
+  return true;
+}
+
+async function applyInProgressOutcome(leadId: string): Promise<boolean> {
+  if ((await currentOutcome(leadId)) === MEETING_OUTCOME_IN_PROGRESS) return false;
+  await prisma.lead.update({
+    where: { id: leadId },
+    data: { meetingOutcomeStatus: MEETING_OUTCOME_IN_PROGRESS },
+  });
+  await prisma.leadActivityEvent.create({
+    data: {
+      leadId,
+      userId: null,
+      kind: LEAD_ACTIVITY_KIND.MEETING_OUTCOME_SET,
+      summary: "Møde sat til Under Behandling i Podio.",
+    },
+  });
+  return true;
+}
+
+async function applyLostOutcome(leadId: string): Promise<boolean> {
+  if ((await currentOutcome(leadId)) === MEETING_OUTCOME_LOST) return false;
   await prisma.lead.update({
     where: { id: leadId },
     data: { meetingOutcomeStatus: MEETING_OUTCOME_LOST },
@@ -35,9 +82,11 @@ async function applyLostOutcome(leadId: string): Promise<void> {
       summary: "Møde sat til Tabt i Podio.",
     },
   });
+  return true;
 }
 
-async function applySaleOutcome(leadId: string): Promise<void> {
+async function applySaleOutcome(leadId: string): Promise<boolean> {
+  if ((await currentOutcome(leadId)) === MEETING_OUTCOME_SALE) return false;
   const { ensureSystemCampaignId } = await import("@/lib/ensure-system-campaigns");
   const activeCustomersId = await ensureSystemCampaignId("active_customers");
 
@@ -56,6 +105,7 @@ async function applySaleOutcome(leadId: string): Promise<void> {
       summary: "Møde sat til Vundet i Podio — flyttet til Aktive kunder.",
     },
   });
+  return true;
 }
 
 /** Anvend Podio Møder-item status på tilknyttet Allio-lead. */
@@ -90,13 +140,51 @@ export async function applyMoederItemUpdate(itemId: number): Promise<MoederItemU
   }
 
   if (statusKey === "tabt") {
-    await applyLostOutcome(leadId);
-    return { ok: true, handled: "item.update", action: "tabt", leadId, itemId, status: statusRaw };
+    const changed = await applyLostOutcome(leadId);
+    return {
+      ok: true,
+      handled: "item.update",
+      action: changed ? "tabt" : "noop",
+      leadId,
+      itemId,
+      status: statusRaw,
+    };
   }
 
   if (statusKey === "vundet") {
-    await applySaleOutcome(leadId);
-    return { ok: true, handled: "item.update", action: "vundet", leadId, itemId, status: statusRaw };
+    const changed = await applySaleOutcome(leadId);
+    return {
+      ok: true,
+      handled: "item.update",
+      action: changed ? "vundet" : "noop",
+      leadId,
+      itemId,
+      status: statusRaw,
+    };
+  }
+
+  if (statusKey === "underBehandling") {
+    const changed = await applyInProgressOutcome(leadId);
+    return {
+      ok: true,
+      handled: "item.update",
+      action: changed ? "underBehandling" : "noop",
+      leadId,
+      itemId,
+      status: statusRaw,
+    };
+  }
+
+  if (statusKey === "afventer") {
+    const changed = await applyPendingOutcome(leadId);
+    return {
+      ok: true,
+      handled: "item.update",
+      action: changed ? "afventer" : "noop",
+      leadId,
+      itemId,
+      status: statusRaw,
+    };
   }
 
   return {

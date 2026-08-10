@@ -4,6 +4,7 @@ import { requireSession } from "@/lib/api-auth";
 import {
   MEETING_OUTCOME_CANCELLED,
   MEETING_OUTCOME_HELD,
+  MEETING_OUTCOME_IN_PROGRESS,
   MEETING_OUTCOME_PENDING,
   MEETING_OUTCOME_REBOOK,
   MEETING_OUTCOME_SALE,
@@ -126,6 +127,9 @@ export async function GET(req: Request) {
       rebook: leads.filter((r) => normOutcome(r.meetingOutcomeStatus) === MEETING_OUTCOME_REBOOK)
         .length,
       sale: leads.filter((r) => normOutcome(r.meetingOutcomeStatus) === MEETING_OUTCOME_SALE).length,
+      inProgress: leads.filter(
+        (r) => normOutcome(r.meetingOutcomeStatus) === MEETING_OUTCOME_IN_PROGRESS,
+      ).length,
       cancelled: leads.filter(
         (r) => normOutcome(r.meetingOutcomeStatus) === MEETING_OUTCOME_CANCELLED,
       ).length,

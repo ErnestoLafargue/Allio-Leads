@@ -1,6 +1,7 @@
 import {
   MEETING_OUTCOME_CANCELLED,
   MEETING_OUTCOME_HELD,
+  MEETING_OUTCOME_IN_PROGRESS,
   MEETING_OUTCOME_PENDING,
   MEETING_OUTCOME_REBOOK,
   MEETING_OUTCOME_SALE,
@@ -23,7 +24,12 @@ export async function campaignIdForBookedMeetingOutcome(outcomeRaw: string): Pro
   if (o === MEETING_OUTCOME_SALE) {
     return ensureSystemCampaignId("active_customers");
   }
-  if (o === MEETING_OUTCOME_HELD || o === MEETING_OUTCOME_CANCELLED || o === MEETING_OUTCOME_LOST) {
+  if (
+    o === MEETING_OUTCOME_HELD ||
+    o === MEETING_OUTCOME_CANCELLED ||
+    o === MEETING_OUTCOME_LOST ||
+    o === MEETING_OUTCOME_IN_PROGRESS
+  ) {
     return ensureStandardCampaignId();
   }
   return null;

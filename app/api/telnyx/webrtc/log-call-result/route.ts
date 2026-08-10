@@ -2,6 +2,10 @@ import { NextResponse } from "next/server";
 import { requireSession } from "@/lib/api-auth";
 import { prisma } from "@/lib/prisma";
 import { LEAD_ACTIVITY_KIND } from "@/lib/lead-activity-kinds";
+import {
+  meetsAutoSyncTalkThreshold,
+  scheduleLeadRecordingSync,
+} from "@/lib/telnyx-recordings-auto-sync";
 
 /** Afvis åbenlyst korrupte klient-tal (fx frossen fane der vågner dagen efter). */
 const MAX_TALK_SECONDS = 6 * 60 * 60;
@@ -16,6 +20,8 @@ const ATTEMPT_LOOKBACK_MS = 2 * 60 * 60 * 1000;
  * rapporterer den her når et opkald med live-tale lukkes, og vi gemmer den på
  * det seneste CALL_ATTEMPT for samme bruger+lead. Scoreboardet tæller samtaler
  * (≥ 20 s) ud fra `durationSeconds`.
+ *
+ * Samtaler ≥ 60 s udløser desuden automatisk hentning af Telnyx-optagelse.
  */
 export async function POST(req: Request) {
   const { session, response } = await requireSession();
@@ -64,25 +70,30 @@ export async function POST(req: Request) {
         data: { durationSeconds: seconds },
       });
     }
-    return NextResponse.json({ ok: true });
+  } else {
+    // Intet CALL_ATTEMPT fundet (fx server-bridged opkald uden log-attempt) —
+    // opret ét med taletiden så både kontakt og samtale tælles.
+    const durationLabel = `${Math.floor(seconds / 60)}:${(seconds % 60)
+      .toString()
+      .padStart(2, "0")}`;
+    await prisma.leadActivityEvent.create({
+      data: {
+        leadId,
+        userId: session.user.id,
+        kind: LEAD_ACTIVITY_KIND.CALL_ATTEMPT,
+        summary: `Samtale afsluttet — varighed ${durationLabel}`,
+        durationSeconds: seconds,
+      },
+    });
   }
 
-  // Intet CALL_ATTEMPT fundet (fx server-bridged opkald uden log-attempt) —
-  // opret ét med taletiden så både kontakt og samtale tælles.
-  const durationLabel = `${Math.floor(seconds / 60)}:${(seconds % 60)
-    .toString()
-    .padStart(2, "0")}`;
-  await prisma.leadActivityEvent.create({
-    data: {
-      leadId,
-      userId: session.user.id,
-      kind: LEAD_ACTIVITY_KIND.CALL_ATTEMPT,
-      summary: `Samtale afsluttet — varighed ${durationLabel}`,
-      durationSeconds: seconds,
-    },
-  });
+  if (meetsAutoSyncTalkThreshold(seconds)) {
+    scheduleLeadRecordingSync(leadId, "webrtc_long_call");
+  }
+
   return NextResponse.json({ ok: true });
 }
 
 export const runtime = "nodejs";
-export const maxDuration = 30;
+/** after()-sync sover ~25 s før Telnyx-hentning. */
+export const maxDuration = 60;

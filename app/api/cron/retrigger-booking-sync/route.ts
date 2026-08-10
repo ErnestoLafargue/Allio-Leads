@@ -3,7 +3,7 @@ import { prisma } from "@/lib/prisma";
 import { isCalComConfigured, createCalComBooking } from "@/lib/calcom/client";
 import { syncPostBookingIntegrations } from "@/lib/booking/post-booking-sync";
 import { isPodioConfigured } from "@/lib/podio/client";
-import { updateMoedeInPodio, MOEDE_STATUS } from "@/lib/podio/meeting-sync";
+import { updateMoedeInPodio } from "@/lib/podio/meeting-sync";
 
 /**
  * Gentrig Podio + Cal.eu sync for et booket lead (production-only værktøj).
@@ -86,7 +86,6 @@ export async function GET(req: Request) {
         },
       });
       await updateMoedeInPodio(leadId, {
-        status: MOEDE_STATUS.afventer,
         newStart: leadForCal.meetingScheduledFor,
         meetingUrl: booking.meetingUrl,
       });

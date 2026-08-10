@@ -103,7 +103,7 @@ export async function moveLeadToRebooking(leadId: string): Promise<boolean> {
       leadId,
       userId: null,
       kind: LEAD_ACTIVITY_KIND.MEETING_OUTCOME_SET,
-      summary: "Møde sat til Genbook i Podio — flyttet til genbook-kampagnen i Allio.",
+      summary: "Møde sat til Genbooking i Podio — flyttet til genbook-kampagnen i Allio.",
     },
   });
 

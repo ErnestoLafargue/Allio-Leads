@@ -184,7 +184,7 @@ model Lead {
   meetingContactEmail        String @default("")
   meetingContactPhonePrivate String @default("")
 
-  /// PENDING | HELD | CANCELLED — kun relevant når status = MEETING_BOOKED (admin sætter udfald)
+  /// PENDING | HELD | CANCELLED | REBOOK | SALE | LOST | IN_PROGRESS — kun relevant når status = MEETING_BOOKED (admin sætter udfald)
   meetingOutcomeStatus        String  @default("PENDING")
   /// YYYY-MM-DD (Europe/Copenhagen) for den dag mødet blev booket — gruppering til provisions-bonus
   meetingCommissionDayKey     String  @default("")

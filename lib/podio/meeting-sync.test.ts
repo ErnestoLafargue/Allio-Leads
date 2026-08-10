@@ -45,7 +45,13 @@ describe("normalizeMoedeStatus", () => {
   it("maps Podio status labels", () => {
     expect(normalizeMoedeStatus(MOEDE_STATUS.genbook)).toBe("genbook");
     expect(normalizeMoedeStatus(MOEDE_STATUS.tabt)).toBe("tabt");
+    expect(normalizeMoedeStatus(MOEDE_STATUS.underBehandling)).toBe("underBehandling");
     expect(normalizeMoedeStatus(MOEDE_STATUS.vundet)).toBe("vundet");
     expect(normalizeMoedeStatus(MOEDE_STATUS.afventer)).toBe("afventer");
+  });
+
+  it("is case-insensitive for Under Behandling", () => {
+    expect(normalizeMoedeStatus("under behandling")).toBe("underBehandling");
+    expect(normalizeMoedeStatus("UNDER BEHANDLING")).toBe("underBehandling");
   });
 });

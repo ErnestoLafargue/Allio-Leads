@@ -61,9 +61,9 @@ function meetingContactDisplayName(meeting: MeetingCalendarRow): string {
 function meetingCardSurfaceClass(raw?: string | null): string {
   const badge = meetingOutcomeBadgeClass(raw);
   if (badge.includes("emerald")) return "border-emerald-200/90 bg-emerald-50/95 text-emerald-950";
-  if (badge.includes("red")) return "border-red-200/90 bg-red-50/95 text-red-950";
-  if (badge.includes("sky")) return "border-sky-200/90 bg-sky-50/95 text-sky-950";
-  if (badge.includes("violet")) return "border-violet-200/90 bg-violet-50/95 text-violet-950";
+  if (badge.includes("red-600")) return "border-red-700/90 bg-red-600 text-white";
+  if (badge.includes("red")) return "border-red-200/90 bg-red-50/95 text-red-900";
+  if (badge.includes("blue")) return "border-blue-200/90 bg-blue-50/95 text-blue-950";
   return "border-amber-200/90 bg-amber-50/95 text-amber-950";
 }
 

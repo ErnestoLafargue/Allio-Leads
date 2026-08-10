@@ -27,6 +27,7 @@ import {
   MEETING_OUTCOME_LOST,
   MEETING_OUTCOME_REBOOK,
   MEETING_OUTCOME_SALE,
+  MEETING_OUTCOME_IN_PROGRESS,
 } from "@/lib/meeting-outcome";
 import { defaultCampaignFieldConfigJson } from "@/lib/campaign-fields";
 import { isValidCVR } from "@/lib/cvr-import";
@@ -544,7 +545,7 @@ function LeadDetailInner() {
   }
 
   async function patchMeetingOutcome(
-    o: "PENDING" | "HELD" | "CANCELLED" | typeof MEETING_OUTCOME_REBOOK | typeof MEETING_OUTCOME_SALE | typeof MEETING_OUTCOME_LOST,
+    o: "PENDING" | "HELD" | "CANCELLED" | typeof MEETING_OUTCOME_REBOOK | typeof MEETING_OUTCOME_SALE | typeof MEETING_OUTCOME_LOST | typeof MEETING_OUTCOME_IN_PROGRESS,
   ) {
     if (!lead) return;
     setError(null);

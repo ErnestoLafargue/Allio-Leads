@@ -19,9 +19,14 @@ type Props = {
 
 /**
  * Afspiller samtaleoptagelse med tydelig varighed, play/pause og scrub (slider).
+ *
+ * `playbackSrc` fryses mens der spilles, så Telnyx-sync/webhook der skifter
+ * `recordingUrl` (Telnyx → Blob) ikke genstarter `<audio>` midt i — det
+ * blokerede ellers `play()` uden ny bruger-gesture og stoppede efter få sekunder.
  */
 export function LeadRecordingPlayer({ src, durationSecondsHint, variant = "default" }: Props) {
   const audioRef = useRef<HTMLAudioElement | null>(null);
+  const [playbackSrc, setPlaybackSrc] = useState(src);
   const [duration, setDuration] = useState<number | null>(
     typeof durationSecondsHint === "number" && durationSecondsHint > 0
       ? durationSecondsHint
@@ -32,40 +37,42 @@ export function LeadRecordingPlayer({ src, durationSecondsHint, variant = "defau
   const [ready, setReady] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  /** Spejler playing/current så src-skifte-effekten ikke skal have dem som deps. */
   const playingRef = useRef(false);
-  const currentRef = useRef(0);
   useEffect(() => {
     playingRef.current = playing;
   }, [playing]);
-  useEffect(() => {
-    currentRef.current = current;
-  }, [current]);
 
-  /** Ved src-skift midt i afspilning: genoptag fra samme position når ny metadata er klar. */
-  const resumeRef = useRef<{ time: number; play: boolean } | null>(null);
-  const prevSrcRef = useRef(src);
-
+  /** Opdatér intern src kun når der ikke spilles — ellers vent til pause/slut. */
+  const pendingSrcRef = useRef<string | null>(null);
   useEffect(() => {
-    if (prevSrcRef.current === src) return;
-    prevSrcRef.current = src;
-    // Samme optagelse kan få ny URL (fx frisk kopi efter Telnyx-sync) —
-    // afspilningen skal fortsætte hvor den var i stedet for at stoppe.
-    resumeRef.current = playingRef.current
-      ? { time: currentRef.current, play: true }
-      : null;
+    if (src === playbackSrc) {
+      pendingSrcRef.current = null;
+      return;
+    }
+    if (playingRef.current) {
+      pendingSrcRef.current = src;
+      return;
+    }
+    pendingSrcRef.current = null;
+    setPlaybackSrc(src);
     setReady(false);
     setError(null);
-    if (!resumeRef.current) {
-      setCurrent(0);
-      setPlaying(false);
-      if (typeof durationSecondsHint === "number" && durationSecondsHint > 0) {
-        setDuration(durationSecondsHint);
-      } else {
-        setDuration(null);
-      }
+    setCurrent(0);
+    if (typeof durationSecondsHint === "number" && durationSecondsHint > 0) {
+      setDuration(durationSecondsHint);
+    } else {
+      setDuration(null);
     }
-  }, [src, durationSecondsHint]);
+  }, [src, playbackSrc, durationSecondsHint]);
+
+  const applyPendingSrc = useCallback(() => {
+    const pending = pendingSrcRef.current;
+    if (!pending || pending === playbackSrc) return;
+    pendingSrcRef.current = null;
+    setPlaybackSrc(pending);
+    setReady(false);
+    setError(null);
+  }, [playbackSrc]);
 
   const onMeta = useCallback(() => {
     const el = audioRef.current;
@@ -75,25 +82,6 @@ export function LeadRecordingPlayer({ src, durationSecondsHint, variant = "defau
     }
     setReady(true);
     setError(null);
-
-    const resume = resumeRef.current;
-    if (resume) {
-      resumeRef.current = null;
-      if (resume.time > 0) {
-        try {
-          el.currentTime = resume.time;
-        } catch {
-          /* seek kan fejle før data er klar — afspil da forfra */
-        }
-      }
-      setCurrent(el.currentTime);
-      if (resume.play) {
-        void el.play().then(
-          () => setPlaying(true),
-          () => setPlaying(false),
-        );
-      }
-    }
   }, []);
 
   const onTime = useCallback(() => {
@@ -107,11 +95,45 @@ export function LeadRecordingPlayer({ src, durationSecondsHint, variant = "defau
     setCurrent(0);
     const el = audioRef.current;
     if (el) el.currentTime = 0;
+    applyPendingSrc();
+  }, [applyPendingSrc]);
+
+  const onPause = useCallback(() => {
+    const el = audioRef.current;
+    // Ignorér midlertidig pause under seek/buffer — kun sync når elementet
+    // faktisk er stoppet (ikke ended, som håndteres i onEnded).
+    if (el && !el.ended && el.paused) {
+      setPlaying(false);
+      applyPendingSrc();
+    }
+  }, [applyPendingSrc]);
+
+  const onPlay = useCallback(() => {
+    setPlaying(true);
+    setError(null);
+  }, []);
+
+  /** Ved buffer-hug: prøv at genoptage hvis brugeren stadig forventer afspilning. */
+  const onWaitingOrStalled = useCallback(() => {
+    if (!playingRef.current) return;
+    const el = audioRef.current;
+    if (!el || el.ended) return;
+    window.setTimeout(() => {
+      if (!playingRef.current || !audioRef.current) return;
+      const a = audioRef.current;
+      if (a.paused && !a.ended) {
+        void a.play().catch(() => {
+          /* autoplay kan fejle — brugeren trykker Afspil igen */
+          setPlaying(false);
+        });
+      }
+    }, 250);
   }, []);
 
   const onErr = useCallback(() => {
     setError("Kunne ikke indlæse lydfilen (tjek netværk eller om linket er udløbet).");
     setReady(false);
+    setPlaying(false);
   }, []);
 
   const togglePlay = useCallback(() => {
@@ -128,14 +150,17 @@ export function LeadRecordingPlayer({ src, durationSecondsHint, variant = "defau
     }
   }, [playing]);
 
-  const seekTo = useCallback((value: number) => {
-    const el = audioRef.current;
-    if (!el || !Number.isFinite(value)) return;
-    const max = Number.isFinite(el.duration) && el.duration > 0 ? el.duration : duration ?? 0;
-    const t = Math.min(Math.max(0, value), max || 0);
-    el.currentTime = t;
-    setCurrent(t);
-  }, [duration]);
+  const seekTo = useCallback(
+    (value: number) => {
+      const el = audioRef.current;
+      if (!el || !Number.isFinite(value)) return;
+      const max = Number.isFinite(el.duration) && el.duration > 0 ? el.duration : duration ?? 0;
+      const t = Math.min(Math.max(0, value), max || 0);
+      el.currentTime = t;
+      setCurrent(t);
+    },
+    [duration],
+  );
 
   const total = duration ?? 0;
   const sliderMax = total > 0 ? total : Math.max(current, 1);
@@ -149,13 +174,17 @@ export function LeadRecordingPlayer({ src, durationSecondsHint, variant = "defau
     <div className={`mt-2 ${wrap}`}>
       <audio
         ref={audioRef}
-        src={src}
+        src={playbackSrc}
         preload="metadata"
         className="hidden"
         onLoadedMetadata={onMeta}
         onDurationChange={onMeta}
         onTimeUpdate={onTime}
         onEnded={onEnded}
+        onPause={onPause}
+        onPlay={onPlay}
+        onWaiting={onWaitingOrStalled}
+        onStalled={onWaitingOrStalled}
         onError={onErr}
         aria-hidden
       >
@@ -166,7 +195,7 @@ export function LeadRecordingPlayer({ src, durationSecondsHint, variant = "defau
         <button
           type="button"
           onClick={() => void togglePlay()}
-          disabled={!src || !!error}
+          disabled={!playbackSrc || !!error}
           className="inline-flex h-9 min-w-[4.5rem] items-center justify-center rounded-md bg-stone-800 px-2.5 text-xs font-semibold text-white shadow-sm hover:bg-stone-900 disabled:opacity-40"
           aria-label={playing ? "Pause" : "Afspil"}
         >
@@ -187,7 +216,7 @@ export function LeadRecordingPlayer({ src, durationSecondsHint, variant = "defau
           step={0.1}
           value={Math.min(current, sliderMax)}
           onChange={(e) => seekTo(Number(e.target.value))}
-          disabled={!src || !!error}
+          disabled={!playbackSrc || !!error}
           className="h-1.5 w-full min-w-0 flex-1 cursor-pointer accent-stone-700 disabled:opacity-40"
           aria-label="Spol i optagelsen"
         />

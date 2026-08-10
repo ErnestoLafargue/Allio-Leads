@@ -24,10 +24,16 @@ import { requeuePowerDialerLeadAfterNonBridge } from "@/lib/power-dialer-requeue
 import { LEAD_ACTIVITY_KIND, formatPhoneForActivitySummary } from "@/lib/lead-activity-kinds";
 import { startTelnyxRecording } from "@/lib/telnyx-call-control";
 import { persistTelnyxRecordingToAllio } from "@/lib/telnyx-recording-storage";
+import { isVercelBlobUrl } from "@/lib/telnyx-recordings-backfill";
 import {
   findUniqueLeadIdByCallParties,
   resolveLeadContextForTelnyxRecording,
 } from "@/lib/telnyx-recording-lead-resolve";
+import {
+  meetsAutoSyncTalkThreshold,
+  scheduleLeadRecordingSync,
+  talkSecondsFromCallTimestamps,
+} from "@/lib/telnyx-recordings-auto-sync";
 
 /** Sidste 2 cifre til logs — ikke fuldt nummer. */
 function maskPhoneTailForLog(raw: string | null | undefined): string {
@@ -352,6 +358,7 @@ export async function POST(req: Request) {
       });
 
       // Find log igen for at hente leadId (kan være sat efter create) + agentUserId
+      const hangupAt = new Date();
       const log = await prisma.dialerCallLog.findUnique({
         where: { callControlId },
         select: {
@@ -361,11 +368,25 @@ export async function POST(req: Request) {
           direction: true,
           bridgeTargetId: true,
           bridgedAt: true,
+          answeredAt: true,
+          endedAt: true,
           amdResult: true,
         },
       });
 
       if (log) {
+        // Lange samtaler (≥ 60 s): hent optagelse automatisk hvis webhook-resolve missede.
+        if (log.leadId && log.direction === "outbound-lead") {
+          const talkSeconds = talkSecondsFromCallTimestamps({
+            endedAt: log.endedAt ?? hangupAt,
+            bridgedAt: log.bridgedAt,
+            answeredAt: log.answeredAt,
+          });
+          if (meetsAutoSyncTalkThreshold(talkSeconds)) {
+            scheduleLeadRecordingSync(log.leadId, "hangup_long_call");
+          }
+        }
+
         // Frigør queue-item på lead (uanset hvilken leg der lagde på)
         if (log.leadId) {
           await prisma.dialerQueueItem.deleteMany({
@@ -571,14 +592,22 @@ export async function POST(req: Request) {
       // i stedet for at oprette en ny — fx hvis Telnyx retry'er recording.saved.
       const existingActivity = await prisma.leadActivityEvent.findFirst({
         where: { leadId, telnyxCallLegId: callControlId },
-        select: { id: true },
+        select: { id: true, recordingUrl: true },
       });
+      // Behold eksisterende Vercel Blob-URL — Telnyx-links udløber, og et URL-skift
+      // midt i afspilning stopper spilleren (play uden bruger-gesture afvises).
+      const existingBlobUrl =
+        existingActivity?.recordingUrl && isVercelBlobUrl(existingActivity.recordingUrl)
+          ? existingActivity.recordingUrl
+          : null;
+      const activityRecordingUrl = existingBlobUrl ?? url;
+
       if (existingActivity) {
         await prisma.leadActivityEvent.update({
           where: { id: existingActivity.id },
           data: {
             summary,
-            recordingUrl: url,
+            recordingUrl: activityRecordingUrl,
             durationSeconds,
             userId: agentUserId,
           },
@@ -599,7 +628,8 @@ export async function POST(req: Request) {
 
       // Kopiér optagelsen til Vercel Blob i baggrunden og opdatér URL når den er klar,
       // så afspilning ikke afhænger af udløbende Telnyx-download-links.
-      if (telnyxRecordingUrl) {
+      // Skip hvis vi allerede har en Blob-kopi (undgår dubletter + URL-thrash).
+      if (telnyxRecordingUrl && !existingBlobUrl) {
         const sidForBlob = sessionIdForRec;
         after(() => {
           void (async () => {
@@ -610,6 +640,13 @@ export async function POST(req: Request) {
                 callControlId,
               });
               if (!storedOnAllio || playbackUrl === telnyxRecordingUrl) return;
+              // Overskriv ikke hvis en anden sti allerede lagde Blob-URL ind.
+              const current = await prisma.leadActivityEvent.findFirst({
+                where: { leadId, telnyxCallLegId: callControlId },
+                select: { recordingUrl: true },
+              });
+              if (current?.recordingUrl && isVercelBlobUrl(current.recordingUrl)) return;
+
               await prisma.leadActivityEvent.updateMany({
                 where: { leadId, telnyxCallLegId: callControlId },
                 data: { recordingUrl: playbackUrl },
@@ -651,3 +688,5 @@ export async function GET() {
 
 // Tving Node-runtime så vi kan bruge prisma + Buffer
 export const runtime = "nodejs";
+/** after()-sync af optagelser sover ~25 s før Telnyx-hentning. */
+export const maxDuration = 60;

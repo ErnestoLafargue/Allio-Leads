@@ -352,7 +352,7 @@ async function processOneRecording(
 
   const existing = await prisma.leadActivityEvent.findFirst({
     where: { leadId: located.leadId, telnyxCallLegId: idempotencyLegId },
-    select: { id: true, recordingUrl: true },
+    select: { id: true, recordingUrl: true, durationSeconds: true, summary: true, userId: true },
   });
 
   if (options.dryRun) {
@@ -396,13 +396,20 @@ async function processOneRecording(
   }
 
   if (existing) {
+    // Allerede Blob med samme URL + varighed: ingen DB-skriv, ingen `updated`-tæller
+    // (draweren reloader ved c+u > 0 og ville ellers forstyrre afspilning).
+    const durationUnchanged =
+      durationSeconds == null || existing.durationSeconds === durationSeconds;
+    if (existingBlobUrl && existing.recordingUrl === playbackUrl && durationUnchanged) {
+      return;
+    }
     await prisma.leadActivityEvent.update({
       where: { id: existing.id },
       data: {
         summary,
         recordingUrl: playbackUrl,
-        durationSeconds,
-        userId: located.agentUserId,
+        durationSeconds: durationSeconds ?? existing.durationSeconds,
+        userId: located.agentUserId ?? existing.userId,
       },
     });
     stats.updated += 1;

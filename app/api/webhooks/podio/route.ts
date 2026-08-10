@@ -9,9 +9,11 @@ import { applyMoederItemUpdate } from "@/lib/podio/moeder-item-update";
  * Indgående Podio-webhook (Podio → Allio) for Møder-appen i Salg-workspace.
  *
  * Status ændres i Podio → opdater mødeudfald i Allio:
- *   - Møde aflyst - Genbook → Genbook-kampagne
- *   - Møde Tabt → udfald Tabt
- *   - Møde vundet → udfald Salg
+ *   - Afventer afholdelse → Afventende
+ *   - Møde aflyst - Genbook → Genbooking-kampagne
+ *   - Møde Tabt → Tabt
+ *   - Under Behandling → Under behandling
+ *   - Møde vundet → Salg
  */
 
 function expectedToken(): string {

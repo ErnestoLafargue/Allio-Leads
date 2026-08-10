@@ -15,6 +15,7 @@ import { canAccessCallbackLead } from "@/lib/lead-callback-access";
 import { copenhagenDayKey } from "@/lib/copenhagen-day";
 import {
   MEETING_OUTCOME_CANCELLED,
+  MEETING_OUTCOME_IN_PROGRESS,
   MEETING_OUTCOME_LABELS,
   MEETING_OUTCOME_PENDING,
   MEETING_OUTCOME_LOST,
@@ -47,6 +48,7 @@ import {
   isMeetingNotesSufficient,
   MEETING_NOTES_REQUIRED_ERROR,
 } from "@/lib/meeting-notes-quality";
+import { scheduleLeadRecordingSync } from "@/lib/telnyx-recordings-auto-sync";
 
 type Params = { params: Promise<{ id: string }> };
 
@@ -202,7 +204,8 @@ export async function PATCH(req: Request, { params }: Params) {
       o !== "CANCELLED" &&
       o !== MEETING_OUTCOME_REBOOK &&
       o !== MEETING_OUTCOME_SALE &&
-      o !== MEETING_OUTCOME_LOST
+      o !== MEETING_OUTCOME_LOST &&
+      o !== MEETING_OUTCOME_IN_PROGRESS
     ) {
       return NextResponse.json({ error: "Ugyldigt mødeudfald." }, { status: 400 });
     }
@@ -795,6 +798,14 @@ export async function PATCH(req: Request, { params }: Params) {
     });
   }
 
+  // Hent manglende Telnyx-optagelse når møde bookes (webhook kan have misset leadet).
+  if (
+    status === "MEETING_BOOKED" &&
+    (existing.status !== "MEETING_BOOKED" || shouldSyncIntegrations)
+  ) {
+    scheduleLeadRecordingSync(id, "meeting_booked");
+  }
+
   const apiKey = process.env.TELNYX_API_KEY?.trim();
   if (
     apiKey &&
@@ -820,3 +831,6 @@ export async function DELETE() {
     { status: 403 },
   );
 }
+
+/** after()-sync af optagelser sover ~25 s før Telnyx-hentning. */
+export const maxDuration = 60;

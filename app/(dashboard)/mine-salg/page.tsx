@@ -37,6 +37,7 @@ type SalesPayload = {
     held: number;
     rebook?: number;
     sale: number;
+    inProgress?: number;
     cancelled: number;
   };
   viewingUser?: { id: string; name: string; username: string };
@@ -249,26 +250,30 @@ export default function MineSalgPage() {
       )}
       {error && <p className="text-sm text-red-600">{error}</p>}
 
-      <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-6">
+      <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 2xl:grid-cols-7">
         <div className="rounded-xl border border-stone-200 bg-white p-4 shadow-sm">
           <p className="text-xs font-medium uppercase tracking-wide text-stone-500">Bookede møder i alt</p>
           <p className="mt-1 text-2xl font-semibold text-stone-900">{stats.totalBooked}</p>
         </div>
-        <div className="rounded-xl border border-amber-200/80 bg-amber-50/50 p-4 shadow-sm">
-          <p className="text-xs font-medium uppercase tracking-wide text-amber-900/80">Afventende udfald</p>
-          <p className="mt-1 text-2xl font-semibold text-amber-950">{stats.pending}</p>
+        <div className="rounded-xl border border-blue-200/80 bg-blue-50/50 p-4 shadow-sm">
+          <p className="text-xs font-medium uppercase tracking-wide text-blue-900/80">Afventende udfald</p>
+          <p className="mt-1 text-2xl font-semibold text-blue-950">{stats.pending}</p>
         </div>
         <div className="rounded-xl border border-emerald-200/80 bg-emerald-50/50 p-4 shadow-sm">
           <p className="text-xs font-medium uppercase tracking-wide text-emerald-900/80">Afholdt</p>
           <p className="mt-1 text-2xl font-semibold text-emerald-950">{stats.held}</p>
         </div>
-        <div className="rounded-xl border border-violet-200/80 bg-violet-50/50 p-4 shadow-sm">
-          <p className="text-xs font-medium uppercase tracking-wide text-violet-900/80">Salg</p>
-          <p className="mt-1 text-2xl font-semibold text-violet-950">{stats.sale ?? 0}</p>
+        <div className="rounded-xl border border-emerald-200/80 bg-emerald-50/50 p-4 shadow-sm">
+          <p className="text-xs font-medium uppercase tracking-wide text-emerald-900/80">Salg</p>
+          <p className="mt-1 text-2xl font-semibold text-emerald-950">{stats.sale ?? 0}</p>
         </div>
-        <div className="rounded-xl border border-sky-200/80 bg-sky-50/50 p-4 shadow-sm">
-          <p className="text-xs font-medium uppercase tracking-wide text-sky-900/80">Genbook</p>
-          <p className="mt-1 text-2xl font-semibold text-sky-950">{stats.rebook ?? 0}</p>
+        <div className="rounded-xl border border-amber-200/80 bg-amber-50/50 p-4 shadow-sm">
+          <p className="text-xs font-medium uppercase tracking-wide text-amber-900/80">Under behandling</p>
+          <p className="mt-1 text-2xl font-semibold text-amber-950">{stats.inProgress ?? 0}</p>
+        </div>
+        <div className="rounded-xl border border-red-200/80 bg-red-50/40 p-4 shadow-sm">
+          <p className="text-xs font-medium uppercase tracking-wide text-red-800/80">Genbooking</p>
+          <p className="mt-1 text-2xl font-semibold text-red-900">{stats.rebook ?? 0}</p>
         </div>
         <div className="rounded-xl border border-red-200/80 bg-red-50/40 p-4 shadow-sm">
           <p className="text-xs font-medium uppercase tracking-wide text-red-900/80">Ej mødt</p>

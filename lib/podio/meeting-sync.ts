@@ -38,6 +38,7 @@ export const MOEDE_STATUS = {
   afventer: "Afventer afholdelse",
   genbook: "Møde aflyst - Genbook",
   tabt: "Møde Tabt",
+  underBehandling: "Under Behandling",
   vundet: "Møde vundet",
 } as const;
 
@@ -124,8 +125,10 @@ async function buildMoedeFields(
     }
   }
 
-  const status = opts?.status ?? MOEDE_STATUS.afventer;
-  await setCategory(fields, MOEDE_FIELDS.status, status);
+  // Status kun når eksplicit angivet — undgå at overskrive Podio-udfald ved sync-updates.
+  if (opts?.status) {
+    await setCategory(fields, MOEDE_FIELDS.status, opts.status);
+  }
 
   try {
     await setCategory(fields, MOEDE_FIELDS.produkter, DEFAULT_PRODUKT);
@@ -188,22 +191,30 @@ export async function ensureMoedeInPodio(leadId: string): Promise<void> {
 
   try {
     let itemId = await resolveMoedeItemId(lead.id, lead.podioItemId);
-    const fields = await buildMoedeFields(lead, {
-      status: MOEDE_STATUS.afventer,
-      meetingUrl: lead.calComMeetingUrl,
-      itemId: itemId ?? undefined,
-    });
 
     if (itemId) {
+      const fields = await buildMoedeFields(lead, {
+        meetingUrl: lead.calComMeetingUrl,
+        itemId,
+      });
       await updateItemValues("moeder", itemId, fields);
     } else {
+      const fields = await buildMoedeFields(lead, {
+        status: MOEDE_STATUS.afventer,
+        meetingUrl: lead.calComMeetingUrl,
+      });
       try {
         itemId = await createItem("moeder", { externalId: lead.id, fields });
       } catch (createErr) {
         const existing = await findItemIdByExternalId("moeder", lead.id);
         if (!existing) throw createErr;
         itemId = existing;
-        await updateItemValues("moeder", itemId, fields);
+        // Eksisterende item — opdater uden at nulstille Status.
+        const updateFields = await buildMoedeFields(lead, {
+          meetingUrl: lead.calComMeetingUrl,
+          itemId,
+        });
+        await updateItemValues("moeder", itemId, updateFields);
       }
     }
 
@@ -284,6 +295,7 @@ export function normalizeMoedeStatus(status: string | null | undefined): string 
   const s = norm(status);
   if (s === norm(MOEDE_STATUS.genbook)) return "genbook";
   if (s === norm(MOEDE_STATUS.tabt)) return "tabt";
+  if (s === norm(MOEDE_STATUS.underBehandling)) return "underBehandling";
   if (s === norm(MOEDE_STATUS.vundet)) return "vundet";
   if (s === norm(MOEDE_STATUS.afventer)) return "afventer";
   return s;

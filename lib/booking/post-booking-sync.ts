@@ -1,7 +1,7 @@
 import { prisma } from "@/lib/prisma";
 import { calBookingNeedsRefresh } from "@/lib/calcom/fetch-booking";
 import { ensureCalComBookingForLead } from "@/lib/calcom/sync-lead-booking";
-import { ensureMoedeInPodio, MOEDE_STATUS, updateMoedeInPodio } from "@/lib/podio/meeting-sync";
+import { ensureMoedeInPodio, updateMoedeInPodio } from "@/lib/podio/meeting-sync";
 import { acquirePodioSyncLock, releasePodioSyncLock } from "@/lib/podio/sync-lock";
 
 function syncLog(leadId: string, step: string, startedMs: number): void {
@@ -49,12 +49,12 @@ export async function syncPostBookingIntegrations(leadId: string): Promise<void>
     });
 
     if (afterPodio?.meetingScheduledFor) {
+      // Opdater dato/link uden Status — bevar evt. Podio-udfald sat af medarbejder.
       await updateMoedeInPodio(leadId, {
-        status: MOEDE_STATUS.afventer,
         newStart: afterPodio.meetingScheduledFor,
         meetingUrl: afterPodio.calComMeetingUrl,
       });
-      syncLog(leadId, "podio_moede_status", t0);
+      syncLog(leadId, "podio_moede_fields", t0);
     }
 
     const needsCal =
@@ -85,7 +85,6 @@ export async function syncPostBookingIntegrations(leadId: string): Promise<void>
 
       if (refreshed?.meetingScheduledFor) {
         await updateMoedeInPodio(leadId, {
-          status: MOEDE_STATUS.afventer,
           newStart: refreshed.meetingScheduledFor,
           meetingUrl: refreshed.calComMeetingUrl,
         });
