@@ -6,6 +6,7 @@ import { useCallback, useEffect, useState } from "react";
 import {
   FIELD_GROUPS,
   FIELD_GROUP_LABELS,
+  FIXED_EMAIL_ANNONCER_FIELDS,
   parseFieldConfig,
   type FieldGroupKey,
 } from "@/lib/campaign-fields";
@@ -67,13 +68,23 @@ function detailReasonLabel(r: ImportDetailReason): string {
 function buildMappingSelectOptions(fieldConfigJson: string) {
   const cfg = parseFieldConfig(fieldConfigJson);
   const opts: { id: string; label: string }[] = [...STANDARD_MAPPING_OPTIONS];
+  const seen = new Set<string>();
   for (const g of FIELD_GROUPS) {
     for (const f of cfg.extensions[g] ?? []) {
+      seen.add(f.key);
       opts.push({
         id: `custom:${f.key}`,
         label: `${f.label} (${FIELD_GROUP_LABELS[g]})`,
       });
     }
+  }
+  // Annoncer kan mappes uden at være slået til — import slår dem til/fra ud fra om der indsættes data.
+  for (const f of FIXED_EMAIL_ANNONCER_FIELDS) {
+    if (seen.has(f.key)) continue;
+    opts.push({
+      id: `custom:${f.key}`,
+      label: `${f.label} (${FIELD_GROUP_LABELS.email})`,
+    });
   }
   return opts;
 }

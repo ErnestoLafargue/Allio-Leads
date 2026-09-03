@@ -8,10 +8,15 @@ import { useEffect, useState } from "react";
 import {
   FIELD_GROUPS,
   FIELD_GROUP_LABELS,
+  FIXED_EMAIL_ANNONCER_FIELDS,
   type FieldGroupKey,
   type CampaignExtraField,
+  disableAnnoncerEmailFields,
+  enableAnnoncerEmailFields,
+  hasAnnoncerEmailFields,
   isFixedCvrExtensionKey,
   isFixedCompanyNameExtensionKey,
+  isFixedEmailAnnoncerKey,
   parseFieldConfig,
   serializeFieldConfig,
   slugifyKey,
@@ -277,6 +282,21 @@ export default function RedigerKampagnePage() {
       ...prev,
       [g]: prev[g].filter((r) => r.draftId !== draftId),
     }));
+  }
+
+  function setAnnoncerEnabled(enabled: boolean) {
+    setExt((prev) => {
+      const cfg = { extensions: Object.fromEntries(
+        FIELD_GROUPS.map((g) => [g, prev[g].map(({ key, label }) => ({ key, label }))]),
+      ) as Partial<Record<FieldGroupKey, CampaignExtraField[]>> };
+      const nextCfg = enabled ? enableAnnoncerEmailFields(cfg) : disableAnnoncerEmailFields(cfg);
+      const next: Record<FieldGroupKey, Row[]> = { ...prev };
+      next.email = (nextCfg.extensions.email ?? []).map((f) => ({
+        ...f,
+        draftId: uid(),
+      }));
+      return next;
+    });
   }
 
   async function onExportCampaign() {
@@ -740,6 +760,12 @@ export default function RedigerKampagnePage() {
               );
             }
 
+            const annoncerOn =
+              g === "email" &&
+              hasAnnoncerEmailFields({
+                extensions: { email: ext.email.map(({ key, label }) => ({ key, label })) },
+              });
+
             return (
               <section key={g} className="rounded-lg border border-stone-200 bg-white p-6 shadow-sm">
                 <div className="flex flex-wrap items-start justify-between gap-3">
@@ -757,6 +783,15 @@ export default function RedigerKampagnePage() {
                           </span>
                         </>
                       ) : null}
+                      {g === "email" ? (
+                        <>
+                          {" "}
+                          <span className="text-stone-600">
+                            Slå <strong className="font-medium text-stone-700">Annoncer</strong> til for at vise
+                            status, kanaler, antal kampagner og egenkapital under e-mail i dialeren.
+                          </span>
+                        </>
+                      ) : null}
                     </p>
                   </div>
                   <button
@@ -768,6 +803,51 @@ export default function RedigerKampagnePage() {
                   </button>
                 </div>
 
+                {g === "email" ? (
+                  <div className="mt-4 max-w-md rounded-md border border-stone-100 bg-stone-50/80 px-4 py-3">
+                    <p className="text-sm font-medium text-stone-800">Annoncer</p>
+                    <div className="mt-2 flex items-center gap-4">
+                      <span
+                        className={`text-sm font-medium tabular-nums transition-colors ${!annoncerOn ? "text-stone-900" : "text-stone-400"}`}
+                      >
+                        Fra
+                      </span>
+                      <button
+                        type="button"
+                        role="switch"
+                        aria-checked={annoncerOn}
+                        aria-label={annoncerOn ? "Annoncer: til" : "Annoncer: fra"}
+                        disabled={saving}
+                        onClick={() => setAnnoncerEnabled(!annoncerOn)}
+                        className={[
+                          "relative h-9 w-[3.5rem] shrink-0 rounded-full border border-transparent transition-colors",
+                          "focus:outline-none focus-visible:ring-2 focus-visible:ring-stone-400 focus-visible:ring-offset-2",
+                          annoncerOn ? "bg-emerald-600" : "bg-stone-300",
+                          saving ? "cursor-not-allowed opacity-50" : "cursor-pointer",
+                        ].join(" ")}
+                      >
+                        <span
+                          aria-hidden
+                          className={[
+                            "absolute top-1 left-1 block h-7 w-7 rounded-full bg-white shadow-md ring-1 ring-black/5 transition-transform duration-200 ease-out",
+                            annoncerOn ? "translate-x-[1.375rem]" : "translate-x-0",
+                          ].join(" ")}
+                        />
+                      </button>
+                      <span
+                        className={`text-sm font-medium tabular-nums transition-colors ${annoncerOn ? "text-emerald-800" : "text-stone-400"}`}
+                      >
+                        Til
+                      </span>
+                    </div>
+                    <p className="mt-2 text-xs leading-relaxed text-stone-600">
+                      Tilføjer {FIXED_EMAIL_ANNONCER_FIELDS.map((f) => f.label).join(", ")} som låste
+                      standardfelter. Ved import slås de automatisk til, hvis der indsættes data — ellers
+                      forbliver de fra. Lead-data bevares, hvis du slår dem fra igen.
+                    </p>
+                  </div>
+                ) : null}
+
                 {ext[g].length > 0 && (
                   <ul className="mt-4 space-y-3">
                     {ext[g].map((row) => {
@@ -775,7 +855,9 @@ export default function RedigerKampagnePage() {
                       const fixedCompanyName =
                         g === "companyName" &&
                         isFixedCompanyNameExtensionKey(row.key, row.label);
-                      const fixedField = fixedCvr || fixedCompanyName;
+                      const fixedEmailAnnoncer =
+                        g === "email" && isFixedEmailAnnoncerKey(row.key);
+                      const fixedField = fixedCvr || fixedCompanyName || fixedEmailAnnoncer;
                       return (
                         <li key={row.draftId} className="flex flex-wrap items-end gap-3 rounded-md bg-stone-50 p-3">
                           <div className="min-w-[180px] flex-1">

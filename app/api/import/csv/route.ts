@@ -1,7 +1,14 @@
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { requireAdmin } from "@/lib/api-auth";
-import { parseFieldConfig } from "@/lib/campaign-fields";
+import {
+  customFieldsHaveAnnoncerData,
+  disableAnnoncerEmailFields,
+  enableAnnoncerEmailFields,
+  mappingTargetsAnnoncerFields,
+  parseFieldConfig,
+  serializeFieldConfig,
+} from "@/lib/campaign-fields";
 import { stringifyCustomFields } from "@/lib/custom-fields";
 import { getUploadedBlob, uploadFilename } from "@/lib/form-upload";
 import { parseImportFile } from "@/lib/import-parse";
@@ -76,7 +83,11 @@ export async function POST(req: Request) {
     return NextResponse.json({ error: "Kampagne findes ikke" }, { status: 400 });
   }
 
-  const fieldCfg = parseFieldConfig(campaign.fieldConfig);
+  const fieldCfgBase = parseFieldConfig(campaign.fieldConfig);
+  const wantsAnnoncer = mappingTargetsAnnoncerFields(mapping);
+  // Midlertidigt aktiver Annoncer-felter under import, så collectCustomFromRow kan gemme værdier
+  // — kampagnen sættes først permanent til/fra efter om der faktisk blev indsat data.
+  const fieldCfg = wantsAnnoncer ? enableAnnoncerEmailFields(fieldCfgBase) : fieldCfgBase;
 
   const parsed = await parseImportFile(blob, uploadName);
   if (!parsed.ok) {
@@ -125,6 +136,11 @@ export async function POST(req: Request) {
       const handledCvrsInFile = new Set<string>();
       const overwriteHandledCvrs = new Set<string>();
       const progressStep = Math.max(1, Math.floor(totalRows / 100));
+      let annoncerDataWritten = false;
+
+      function noteAnnoncerCustom(custom: Record<string, string>) {
+        if (customFieldsHaveAnnoncerData(custom)) annoncerDataWritten = true;
+      }
 
       function pushDetail(row: ImportDetailRow) {
         if (summary.details.length < MAX_DETAIL_ROWS) summary.details.push(row);
@@ -233,6 +249,7 @@ export async function POST(req: Request) {
                     });
                   } else {
                     const custom = collectCustomFromRow(n, fieldCfg);
+                    noteAnnoncerCustom(custom);
                     const created = await prisma.lead.create({
                       data: pickLeadCreateData({
                         campaignId,
@@ -282,6 +299,7 @@ export async function POST(req: Request) {
               });
             } else {
               const custom = collectCustomFromRow(n, fieldCfg);
+              noteAnnoncerCustom(custom);
               const created = await prisma.lead.create({
                 data: pickLeadCreateData({
                   campaignId,
@@ -313,6 +331,18 @@ export async function POST(req: Request) {
           if (processed === totalRows || processed % progressStep === 0) {
             pushProgress(processed);
           }
+        }
+
+        // Annoncer: kun slå til på kampagnen hvis importen faktisk indsætte data i felterne.
+        // Mappede men tomme værdier → slå fra. Uden Annoncer-mapping → rør ikke kampagne-indstillingen.
+        if (wantsAnnoncer) {
+          const synced = annoncerDataWritten
+            ? enableAnnoncerEmailFields(parseFieldConfig(campaign.fieldConfig))
+            : disableAnnoncerEmailFields(parseFieldConfig(campaign.fieldConfig));
+          await prisma.campaign.update({
+            where: { id: campaignId },
+            data: { fieldConfig: serializeFieldConfig(synced) },
+          });
         }
 
         await prisma.campaignImportLog.create({

@@ -55,10 +55,71 @@ export const DEFAULT_CVR_EXTENSION_FIELDS: CampaignExtraField[] = [
   { key: "virksomhedsform", label: "Virksomhedsform" },
 ];
 
+/**
+ * Valgfrie standardfelter under E-mail — kun når Annoncer er slået til på kampagnen.
+ * Merges ikke automatisk ind i alle kampagner (i modsætning til Stifter/CVR).
+ */
+export const FIXED_EMAIL_ANNONCER_FIELDS: CampaignExtraField[] = [
+  { key: "annoncer", label: "Annoncer" },
+  { key: "kanaler", label: "Kanaler" },
+  { key: "antal_kampagner", label: "Antal kampagner" },
+  { key: "egenkapital", label: "Egenkapital" },
+];
+
 const DEFAULT_CVR_KEYS = new Set(DEFAULT_CVR_EXTENSION_FIELDS.map((f) => f.key));
+const FIXED_EMAIL_ANNONCER_KEYS = new Set(FIXED_EMAIL_ANNONCER_FIELDS.map((f) => f.key));
 
 export function isFixedCvrExtensionKey(key: string): boolean {
   return DEFAULT_CVR_KEYS.has(key.trim());
+}
+
+export function isFixedEmailAnnoncerKey(key: string): boolean {
+  return FIXED_EMAIL_ANNONCER_KEYS.has(key.trim());
+}
+
+/** True hvis kampagnens fieldConfig har alle Annoncer-standardfelter under e-mail. */
+export function hasAnnoncerEmailFields(cfg: CampaignFieldConfig): boolean {
+  const email = cfg.extensions.email ?? [];
+  return FIXED_EMAIL_ANNONCER_FIELDS.every((fixed) => email.some((f) => f.key === fixed.key));
+}
+
+/** Indsætter Annoncer-felterne øverst under e-mail (bevarer øvrige e-mail-felter). */
+export function enableAnnoncerEmailFields(cfg: CampaignFieldConfig): CampaignFieldConfig {
+  const existing = cfg.extensions.email ?? [];
+  const withoutFixed = existing.filter((f) => !isFixedEmailAnnoncerKey(f.key));
+  return {
+    extensions: {
+      ...cfg.extensions,
+      email: [...FIXED_EMAIL_ANNONCER_FIELDS, ...withoutFixed],
+    },
+  };
+}
+
+/** Fjerner kun Annoncer-nøglerne under e-mail (bevarer øvrige felter og lead-data). */
+export function disableAnnoncerEmailFields(cfg: CampaignFieldConfig): CampaignFieldConfig {
+  const existing = cfg.extensions.email ?? [];
+  const next = existing.filter((f) => !isFixedEmailAnnoncerKey(f.key));
+  const extensions: CampaignFieldConfig["extensions"] = { ...cfg.extensions };
+  if (next.length) extensions.email = next;
+  else delete extensions.email;
+  return { extensions };
+}
+
+/** True hvis import-mapping pege på mindst ét Annoncer-felt (`custom:annoncer` osv.). */
+export function mappingTargetsAnnoncerFields(
+  mapping: Record<string, string> | null | undefined,
+): boolean {
+  if (!mapping) return false;
+  for (const target of Object.values(mapping)) {
+    if (typeof target !== "string" || !target.startsWith("custom:")) continue;
+    if (isFixedEmailAnnoncerKey(target.slice("custom:".length))) return true;
+  }
+  return false;
+}
+
+/** True hvis mindst ét Annoncer-felt har en ikke-tom værdi. */
+export function customFieldsHaveAnnoncerData(custom: Record<string, string>): boolean {
+  return FIXED_EMAIL_ANNONCER_FIELDS.some((f) => (custom[f.key] ?? "").trim().length > 0);
 }
 
 const FIXED_PERSON_KEYS = new Set(FIXED_PERSON_EXTENSION_FIELDS.map((f) => f.key));
@@ -122,6 +183,23 @@ export function mergeDefaultExtensions(cfg: CampaignFieldConfig): CampaignFieldC
         if (!DEFAULT_CVR_KEYS.has(f.key)) merged.push(f);
       }
       extensions.cvr = merged;
+      continue;
+    }
+    if (g === "email") {
+      // Annoncer-felter merges ikke automatisk — kun når de allerede ligger i config.
+      // Hvis de findes, sikres kanonisk rækkefølge (status → kanaler → antal → egenkapital) først.
+      const existing = cfg.extensions.email ?? [];
+      if (!existing.length) continue;
+      const hasAnyAnnoncer = existing.some((f) => isFixedEmailAnnoncerKey(f.key));
+      if (!hasAnyAnnoncer) {
+        extensions.email = existing;
+        continue;
+      }
+      const withoutFixed = existing.filter((f) => !isFixedEmailAnnoncerKey(f.key));
+      const presentFixed = FIXED_EMAIL_ANNONCER_FIELDS.filter((fixed) =>
+        existing.some((f) => f.key === fixed.key),
+      );
+      extensions.email = [...presentFixed, ...withoutFixed];
       continue;
     }
     const list = cfg.extensions[g];

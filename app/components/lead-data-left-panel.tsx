@@ -4,6 +4,7 @@ import { useEffect, useRef, useState } from "react";
 import { FIELD_GROUP_LABELS, parseFieldConfig, type FieldGroupKey } from "@/lib/campaign-fields";
 import { ExternalSearchButton } from "@/app/components/external-search-button";
 import { isKrakPersonFieldLabel, isWebsiteFieldLabel } from "@/lib/external-search-urls";
+import { formatAnnoncerKanaler, formatAnnoncerStatus } from "@/lib/annoncer-display";
 
 type Props = {
   fieldConfigJson: string;
@@ -36,6 +37,79 @@ const inputCls =
   "w-full rounded-md border border-stone-200 bg-white px-3 py-2 text-sm text-stone-900 shadow-sm outline-none ring-stone-400 focus:ring-2";
 
 const TOP_GROUPS: FieldGroupKey[] = ["companyName", "phone", "email"];
+
+const ANNONCER_STATUS_BADGE_CLASS: Record<"aktiv" | "inaktiv" | "ikke_registreret", string> = {
+  aktiv: "border-emerald-300 bg-emerald-100 text-emerald-900",
+  inaktiv: "border-red-300 bg-red-100 text-red-900",
+  ikke_registreret: "border-stone-300 bg-stone-100 text-stone-700",
+};
+
+function ExtensionFieldRow({
+  fieldKey,
+  label,
+  value,
+  onChange,
+  noData,
+}: {
+  fieldKey: string;
+  label: string;
+  value: string;
+  onChange: (value: string) => void;
+  noData?: "show" | "fade";
+}) {
+  if (fieldKey === "annoncer") {
+    const status = formatAnnoncerStatus(value);
+    return (
+      <div>
+        <label className="mb-1 block text-xs font-medium text-stone-600">{label}</label>
+        <div
+          className={`inline-flex min-h-[2.5rem] items-center rounded-md border px-3 py-2 text-sm font-semibold ${ANNONCER_STATUS_BADGE_CLASS[status.kind]}`}
+          title={value.trim() ? `Råværdi: ${value}` : undefined}
+        >
+          {status.label}
+        </div>
+      </div>
+    );
+  }
+
+  if (fieldKey === "kanaler") {
+    const display = formatAnnoncerKanaler(value);
+    return (
+      <div>
+        <label className="mb-1 block text-xs font-medium text-stone-600">{label}</label>
+        <div
+          className={`${inputCls} min-h-[2.5rem] whitespace-pre-wrap break-words text-stone-800`}
+          title={value.trim() ? `Råværdi: ${value}` : undefined}
+        >
+          {display || "—"}
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div>
+      <label className="mb-1 block text-xs font-medium text-stone-600">{label}</label>
+      <div className="relative min-w-0 flex-1">
+        <input
+          className={`${inputCls} min-w-0 flex-1`}
+          value={value}
+          onChange={(e) => onChange(e.target.value)}
+          placeholder={label}
+        />
+        {noData ? (
+          <span
+            className={`pointer-events-none absolute inset-y-0 left-3 flex items-center text-sm text-stone-400 transition-opacity duration-500 ${
+              noData === "fade" ? "opacity-0" : "opacity-100"
+            }`}
+          >
+            - INTET AT HENTE -
+          </span>
+        ) : null}
+      </div>
+    </div>
+  );
+}
 
 export function LeadDataLeftPanel({
   fieldConfigJson,
@@ -184,6 +258,32 @@ export function LeadDataLeftPanel({
               const showWebsite =
                 g === "companyName" && isWebsiteFieldLabel(f.label) && extVal.trim().length > 0;
               const noData = !extVal.trim() && noDataPhase[f.key];
+
+              if (g === "email" && (f.key === "annoncer" || f.key === "kanaler")) {
+                return (
+                  <ExtensionFieldRow
+                    key={f.key}
+                    fieldKey={f.key}
+                    label={f.label}
+                    value={extVal}
+                    onChange={(v) => onCustom(f.key, v)}
+                  />
+                );
+              }
+
+              if (g === "email" && (f.key === "antal_kampagner" || f.key === "egenkapital")) {
+                return (
+                  <ExtensionFieldRow
+                    key={f.key}
+                    fieldKey={f.key}
+                    label={f.label}
+                    value={extVal}
+                    onChange={(v) => onCustom(f.key, v)}
+                    noData={noData || undefined}
+                  />
+                );
+              }
+
               return (
                 <div key={f.key}>
                   <label className="mb-1 block text-xs font-medium text-stone-600">{f.label}</label>

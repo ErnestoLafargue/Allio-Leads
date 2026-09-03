@@ -54,6 +54,33 @@ export function suggestColumnMapping(columns: string[]): Record<string, string> 
     ) {
       t = "custom:virksomhedsform";
     } else if (
+      n === "annoncer" ||
+      n === "ads_active" ||
+      n === "ads_status" ||
+      n === "active_ads" ||
+      (n.includes("annoncer") && (n.includes("aktiv") || n.includes("status")))
+    ) {
+      t = "custom:annoncer";
+    } else if (
+      n === "kanaler" ||
+      n === "channels" ||
+      n === "ad_channels" ||
+      n === "ads_channels" ||
+      n === "ad_kanaler" ||
+      n === "annonce_kanaler"
+    ) {
+      t = "custom:kanaler";
+    } else if (
+      n === "antal_kampagner" ||
+      n === "antalkampagner" ||
+      n === "campaign_count" ||
+      n === "campaigns_count" ||
+      (n.includes("antal") && n.includes("kampagn"))
+    ) {
+      t = "custom:antal_kampagner";
+    } else if (n === "egenkapital" || n === "equity" || n.includes("egenkapital")) {
+      t = "custom:egenkapital";
+    } else if (
       n.includes("virksomhedsnavn") ||
       n.includes("firmanavn") ||
       n.includes("firma_navn") ||
