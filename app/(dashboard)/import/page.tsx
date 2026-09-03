@@ -121,6 +121,7 @@ export default function ImportPage() {
   const [overwriteExistingCvrs, setOverwriteExistingCvrs] = useState(false);
   const [allowMissingCvr, setAllowMissingCvr] = useState(false);
   const [allowMissingCompanyName, setAllowMissingCompanyName] = useState(false);
+  const [patchMissingOnly, setPatchMissingOnly] = useState(false);
   const [overwritePreview, setOverwritePreview] = useState<PreviewResponse["overwritePreview"]>(null);
   const [showAllInCampaignLoading, setShowAllInCampaignLoading] = useState(false);
   const [showAllInCampaignError, setShowAllInCampaignError] = useState<string | null>(null);
@@ -311,6 +312,7 @@ export default function ImportPage() {
     fd.append("overwriteExistingCvrs", overwriteExistingCvrs ? "1" : "0");
     fd.append("allowMissingCvr", allowMissingCvr ? "1" : "0");
     fd.append("allowMissingCompanyName", allowMissingCompanyName ? "1" : "0");
+    fd.append("patchMissingOnly", patchMissingOnly ? "1" : "0");
     const res = await fetch("/api/import/csv", { method: "POST", body: fd });
     if (!res.ok) {
       setLoadingImport(false);
@@ -804,6 +806,21 @@ export default function ImportPage() {
                   <span className="mt-0.5 block text-xs text-stone-600">
                     Når slået til er CVR ikke påkrævet. Rækker uden CVR importeres som nye leads og kan ikke matches
                     mod eksisterende via CVR.
+                  </span>
+                </span>
+              </label>
+
+              <label className="flex items-start gap-3 rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-stone-800">
+                <input
+                  type="checkbox"
+                  checked={patchMissingOnly}
+                  onChange={(e) => setPatchMissingOnly(e.target.checked)}
+                  className="mt-0.5 h-4 w-4 rounded border-stone-300 text-amber-700 focus:ring-amber-400"
+                />
+                <span>
+                  Patch kun manglende email/domæne
+                  <span className="mt-0.5 block text-xs text-stone-600">
+                    Matcher leads på CVR og opdaterer kun tomme email- og domæne-felter. Status, noter og øvrige data bevares.
                   </span>
                 </span>
               </label>

@@ -32,6 +32,38 @@ function nonEmptyRow(r: Record<string, string>) {
 }
 
 /**
+ * Efterbehandler et XLSX-worksheet: for celler der har et hyperlink (`cell.l.Target`)
+ * og en tom eller ren tekst-værdi, injicerer vi hyperlink-target som celleværdi.
+ * Dækker bl.a. mailto:-links (email) og https:-links (domæne/hjemmeside).
+ */
+function patchHyperlinksIntoSheet(sheet: XLSX.WorkSheet): void {
+  const range = XLSX.utils.decode_range(sheet["!ref"] ?? "A1");
+  for (let R = range.s.r; R <= range.e.r; R++) {
+    for (let C = range.s.c; C <= range.e.c; C++) {
+      const addr = XLSX.utils.encode_cell({ r: R, c: C });
+      const cell = sheet[addr];
+      if (!cell || !cell.l || typeof cell.l.Target !== "string") continue;
+      const target = cell.l.Target.trim();
+      const currentVal = (cell.w ?? cell.v ?? "").toString().trim();
+      if (currentVal) continue;
+
+      if (target.toLowerCase().startsWith("mailto:")) {
+        const email = target.slice("mailto:".length).split("?")[0].trim();
+        if (email) {
+          cell.v = email;
+          cell.w = email;
+          cell.t = "s";
+        }
+      } else if (target.startsWith("http://") || target.startsWith("https://")) {
+        cell.v = target;
+        cell.w = target;
+        cell.t = "s";
+      }
+    }
+  }
+}
+
+/**
  * Læser første ark i Excel eller CSV med overskriftsrække.
  * `filename` bruges til filtype (Blob har ikke altid .name).
  */
@@ -73,6 +105,7 @@ export async function parseImportFile(
         return { ok: false, error: "Excel-filen indeholder ingen ark" };
       }
       const sheet = wb.Sheets[wb.SheetNames[0]];
+      patchHyperlinksIntoSheet(sheet);
       const rawRows = XLSX.utils.sheet_to_json<Record<string, unknown>>(sheet, {
         defval: "",
         raw: false,
@@ -144,6 +177,7 @@ export async function previewImportFile(file: File | Blob, filename: string): Pr
         return { ok: false, error: "Excel-filen indeholder ingen ark" };
       }
       const sheet = wb.Sheets[wb.SheetNames[0]];
+      patchHyperlinksIntoSheet(sheet);
       const dataRows = XLSX.utils.sheet_to_json<Record<string, unknown>>(sheet, {
         defval: "",
         raw: false,

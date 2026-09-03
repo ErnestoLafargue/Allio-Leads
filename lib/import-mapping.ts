@@ -174,6 +174,7 @@ export function applyColumnMapping(
         break;
       case "domain":
         flat.domain = v;
+        flat.domaene = v;
         break;
       case "address":
         flat.adresse = v;

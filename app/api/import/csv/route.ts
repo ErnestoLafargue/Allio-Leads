@@ -9,7 +9,8 @@ import {
   parseFieldConfig,
   serializeFieldConfig,
 } from "@/lib/campaign-fields";
-import { stringifyCustomFields } from "@/lib/custom-fields";
+import { parseCustomFields, stringifyCustomFields } from "@/lib/custom-fields";
+import { leadDomainFromCustomFields } from "@/lib/custom-fields";
 import { getUploadedBlob, uploadFilename } from "@/lib/form-upload";
 import { parseImportFile } from "@/lib/import-parse";
 import { buildNormRow } from "@/lib/import-parse-helpers";
@@ -60,6 +61,7 @@ export async function POST(req: Request) {
   const overwriteExistingCvrs = form.get("overwriteExistingCvrs") === "1";
   const allowMissingCvr = form.get("allowMissingCvr") === "1";
   const allowMissingCompanyName = form.get("allowMissingCompanyName") === "1";
+  const patchMissingOnly = form.get("patchMissingOnly") === "1";
   let mapping: MappingRecord | null = null;
   if (typeof mappingRaw === "string" && mappingRaw.trim()) {
     try {
@@ -168,6 +170,68 @@ export async function POST(req: Request) {
               : buildNormRow(row);
           const base = pickBaseFromNorm(n);
           const cvrNorm = normalizeCVR(base.cvr);
+
+          // --- patch-missing-only mode: kun opdater email/domæne på eksisterende leads ---
+          if (patchMissingOnly) {
+            if (!cvrNorm) {
+              summary.skippedInvalid += 1;
+              pushDetail({ dataRow, cvr: "—", reason: "invalid_row", note: "CVR mangler (patch kræver CVR)" });
+            } else {
+              const campaignMatches = campaignLeadsByCvr.get(cvrNorm) ?? [];
+              if (campaignMatches.length === 0) {
+                summary.skippedAlreadyInCampaign += 1;
+                pushDetail({ dataRow, cvr: cvrNorm, reason: "already_in_campaign", note: "Ikke fundet i kampagnen" });
+              } else {
+                const custom = collectCustomFromRow(n, fieldCfg);
+                noteAnnoncerCustom(custom);
+                for (const match of campaignMatches) {
+                  const lead = await prisma.lead.findUnique({
+                    where: { id: match.id },
+                    select: { id: true, email: true, customFields: true },
+                  });
+                  if (!lead) continue;
+                  const patch: Record<string, unknown> = {};
+                  // Patch email if empty
+                  if (!lead.email.trim() && base.email.trim()) {
+                    patch.email = base.email;
+                  }
+                  // Patch domæne in customFields if missing
+                  const existingCustom = parseCustomFields(lead.customFields);
+                  const existingDomain = leadDomainFromCustomFields(lead.customFields);
+                  let mergedCustom = { ...existingCustom };
+                  let customChanged = false;
+                  if (!existingDomain.trim()) {
+                    const newDomain = custom["domaene"] || custom["domain"] || base.email.split("@")[1] || "";
+                    if (newDomain.trim()) {
+                      mergedCustom.domaene = newDomain.trim();
+                      customChanged = true;
+                    }
+                  }
+                  // Also patch any other custom fields that are empty in lead but present in import
+                  for (const [k, v] of Object.entries(custom)) {
+                    if (v.trim() && !(existingCustom[k] ?? "").trim()) {
+                      mergedCustom[k] = v;
+                      customChanged = true;
+                    }
+                  }
+                  if (customChanged) {
+                    patch.customFields = stringifyCustomFields(mergedCustom);
+                  }
+                  if (Object.keys(patch).length > 0) {
+                    await prisma.lead.update({ where: { id: lead.id }, data: patch });
+                    summary.existingAttached += 1;
+                  }
+                }
+              }
+              handledCvrsInFile.add(cvrNorm);
+            }
+            const processed = i + 1;
+            if (processed === totalRows || processed % progressStep === 0) {
+              pushProgress(processed);
+            }
+            continue;
+          }
+          // --- end patch-missing-only ---
 
           if (!cvrNorm && !allowMissingCvr) {
             summary.skippedInvalid += 1;
