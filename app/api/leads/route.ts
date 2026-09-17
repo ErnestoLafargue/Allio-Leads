@@ -183,6 +183,7 @@ export async function GET(req: Request) {
         industry: l.industry ?? "",
         customFields: l.customFields,
         meetingScheduledFor: l.meetingScheduledFor,
+        postalCode: l.postalCode ?? "",
       }));
       const narrowed = getActiveCampaignLeads(mapped, campaignFieldConfig, campaignActiveQueue);
       const allow = new Set(narrowed.map((r) => r.id));

@@ -86,7 +86,7 @@ export function isLeadInPowerPredictiveCampaignTable(
   return true;
 }
 
-type QueueOrderFields = {
+export type QueueOrderFields = {
   status: string;
   importedAt: string;
   lastOutcomeAt?: string;

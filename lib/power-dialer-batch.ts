@@ -5,8 +5,11 @@
 
 import type { Prisma } from "@prisma/client";
 import type { PrismaClient } from "@prisma/client";
-import { getActiveCampaignLeads } from "@/lib/active-campaign-queue";
-import { sortLeadsForCampaignCallQueue } from "@/lib/lead-queue";
+import {
+  getActiveCampaignLeads,
+  parseActiveCampaignQueueView,
+  sortLeadsByActivePostalQueue,
+} from "@/lib/active-campaign-queue";
 import { getLeadIdsWithOutcomeLogToday } from "@/lib/lead-outcome-today";
 import { filterLeadsByCampaignProtectedSetting } from "@/lib/reklamebeskyttet-filter";
 import { filterLeadsByCampaignPhoneSetting } from "@/lib/lead-phone-filter";
@@ -81,6 +84,7 @@ export async function claimDispatchLeadBatch(
       industry: true,
       customFields: true,
       meetingScheduledFor: true,
+      postalCode: true,
       importedAt: true,
       lastOutcomeAt: true,
       lastDialAttemptAt: true,
@@ -93,12 +97,14 @@ export async function claimDispatchLeadBatch(
     typeof campaign.fieldConfig === "string" ? campaign.fieldConfig : "{}";
   const viewRaw =
     typeof campaign.activeQueueFilter === "string" ? campaign.activeQueueFilter : "{}";
+  const serverView = parseActiveCampaignQueueView(viewRaw);
   let pool = getActiveCampaignLeads(
     candidatesRaw.map((r) => ({
       id: r.id,
       industry: r.industry ?? "",
       customFields: r.customFields,
       meetingScheduledFor: r.meetingScheduledFor,
+      postalCode: r.postalCode ?? "",
     })),
     fieldConfigJson,
     viewRaw,
@@ -115,15 +121,17 @@ export async function claimDispatchLeadBatch(
     industry: r.industry ?? "",
     customFields: r.customFields,
     meetingScheduledFor: r.meetingScheduledFor,
+    postalCode: r.postalCode ?? "",
   }));
 
   const outcomeToday = await getLeadIdsWithOutcomeLogToday(pool.map((p) => p.id));
   const byId = new Map(candidatesRaw.map((r) => [r.id, r]));
-  const queueOrdered = sortLeadsForCampaignCallQueue(
+  const queueOrdered = sortLeadsByActivePostalQueue(
     pool.map((p) => {
       const r = byId.get(p.id);
       return {
         id: p.id,
+        postalCode: p.postalCode ?? r?.postalCode ?? "",
         status: "NEW" as const,
         hasOutcomeLogToday: outcomeToday.has(p.id),
         importedAt:
@@ -134,6 +142,7 @@ export async function claimDispatchLeadBatch(
           r?.lastDialAttemptAt instanceof Date ? r.lastDialAttemptAt.toISOString() : undefined,
       };
     }),
+    serverView,
   );
   const candidates = queueOrdered
     .map((row) => byId.get(row.id))

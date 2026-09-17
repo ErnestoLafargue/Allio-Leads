@@ -1,11 +1,14 @@
 import type { PrismaClient } from "@prisma/client";
 import { parseFieldConfig, FIELD_GROUPS, findStartDateExtensionField } from "@/lib/campaign-fields";
 import { parseCustomFields } from "@/lib/custom-fields";
+import { compareLeadQueueOrder, type QueueOrderFields } from "@/lib/lead-queue";
 import { localDayKeyFromMs, parseDateStringLoose, timestampForSort } from "@/lib/parse-date-string";
 import { leadMatchesWorkspaceStartDateFilter } from "@/lib/workspace-start-date-filter";
 import type { WorkspaceStartDateFilterState } from "@/lib/workspace-start-date-filter";
 
 const VIEW_VERSION = 1 as const;
+
+export type PostalRange = { from: string; to: string };
 
 /**
  * Det der gemmes på `Campaign.activeQueueFilter` når man trykker «Gem filter/sortering».
@@ -23,6 +26,10 @@ export type ActiveCampaignQueueViewV1 = {
   dynamicFromDate: string;
   dynamicToDate: string;
   dynamicDateInvert: boolean;
+  /** Postnummer-filter: begrænser liste + dialerkø til valgte intervaller. */
+  postalFilterEnabled: boolean;
+  postalSortDir: "asc" | "desc";
+  postalRanges: PostalRange[];
 };
 
 export const EMPTY_ACTIVE_CAMPAIGN_QUEUE_VIEW: ActiveCampaignQueueViewV1 = {
@@ -37,7 +44,56 @@ export const EMPTY_ACTIVE_CAMPAIGN_QUEUE_VIEW: ActiveCampaignQueueViewV1 = {
   dynamicFromDate: "",
   dynamicToDate: "",
   dynamicDateInvert: false,
+  postalFilterEnabled: false,
+  postalSortDir: "asc",
+  postalRanges: [{ from: "", to: "" }],
 };
+
+function parsePostalRanges(raw: unknown): PostalRange[] {
+  if (!Array.isArray(raw) || raw.length === 0) return [{ from: "", to: "" }];
+  const out: PostalRange[] = [];
+  for (const item of raw) {
+    if (!item || typeof item !== "object") continue;
+    const o = item as Record<string, unknown>;
+    out.push({
+      from: typeof o.from === "string" ? o.from : "",
+      to: typeof o.to === "string" ? o.to : "",
+    });
+  }
+  return out.length > 0 ? out : [{ from: "", to: "" }];
+}
+
+/** Udtræk numerisk postnr (stripper ikke-cifre). */
+export function postalCodeDigits(raw: string | null | undefined): number | null {
+  const digits = String(raw ?? "").replace(/\D/g, "");
+  if (!digits) return null;
+  const n = Number(digits);
+  return Number.isFinite(n) ? n : null;
+}
+
+function boundDigits(raw: string): number | null {
+  const t = raw.trim();
+  if (!t) return null;
+  return postalCodeDigits(t);
+}
+
+/** True hvis postnr matcher mindst ét interval (åbne grænser tilladt). Tomme intervaller matcher intet. */
+export function leadMatchesPostalRanges(
+  postalCode: string | null | undefined,
+  ranges: PostalRange[],
+): boolean {
+  const n = postalCodeDigits(postalCode);
+  if (n == null) return false;
+  for (const r of ranges) {
+    const from = boundDigits(r.from);
+    const to = boundDigits(r.to);
+    if (from == null && to == null) continue;
+    if (from != null && n < from) continue;
+    if (to != null && n > to) continue;
+    return true;
+  }
+  return false;
+}
 
 export function parseActiveCampaignQueueView(
   raw: string | null | undefined,
@@ -62,6 +118,9 @@ export function parseActiveCampaignQueueView(
       dynamicFromDate: typeof o.dynamicFromDate === "string" ? o.dynamicFromDate : "",
       dynamicToDate: typeof o.dynamicToDate === "string" ? o.dynamicToDate : "",
       dynamicDateInvert: o.dynamicDateInvert === true,
+      postalFilterEnabled: o.postalFilterEnabled === true,
+      postalSortDir: o.postalSortDir === "desc" ? "desc" : "asc",
+      postalRanges: parsePostalRanges(o.postalRanges),
     };
   } catch {
     return { ...EMPTY_ACTIVE_CAMPAIGN_QUEUE_VIEW };
@@ -73,6 +132,7 @@ export function parseActiveCampaignQueueView(
  */
 export function hasActiveQueueViewConstraints(v: ActiveCampaignQueueViewV1 | null | undefined): boolean {
   if (!v) return false;
+  if (v.postalFilterEnabled) return true;
   if (v.filterMeetingStart) {
     if (v.campaignFilterMode === "industry") return true; // også tom liste = 0 træf
     if (v.campaignFilterMode === "startdate" && (v.meetingStartFrom.trim() || v.meetingStartTo.trim())) {
@@ -139,6 +199,7 @@ type LeadRowInput = {
   industry: string;
   customFields: string;
   meetingScheduledFor: Date | string | null;
+  postalCode?: string | null;
 };
 
 /**
@@ -149,6 +210,10 @@ export function leadMatchesActiveCampaignQueueView(
   fieldConfigJson: string,
   view: ActiveCampaignQueueViewV1,
 ): boolean {
+  if (view.postalFilterEnabled) {
+    if (!leadMatchesPostalRanges(lead.postalCode, view.postalRanges)) return false;
+  }
+
   if (view.filterMeetingStart && view.campaignFilterMode === "startdate") {
     const startField = findStartDateExtensionField(parseFieldConfig(fieldConfigJson));
     if (startField && (view.meetingStartFrom.trim() || view.meetingStartTo.trim())) {
@@ -202,6 +267,28 @@ export function leadMatchesActiveCampaignQueueView(
   return true;
 }
 
+/**
+ * Når postnummer-filter er aktivt: sorter primært på postnr (asc/desc), ellers eksisterende kø-orden.
+ * Tomt/ugyldigt postnr lægges sidst (bør allerede være filtreret væk).
+ */
+export function sortLeadsByActivePostalQueue<
+  T extends QueueOrderFields & { hasOutcomeLogToday: boolean; postalCode?: string | null },
+>(leads: T[], view: ActiveCampaignQueueViewV1 | null | undefined): T[] {
+  if (!view?.postalFilterEnabled) {
+    return [...leads].sort(compareLeadQueueOrder);
+  }
+  const dir = view.postalSortDir === "desc" ? -1 : 1;
+  return [...leads].sort((a, b) => {
+    const na = postalCodeDigits(a.postalCode);
+    const nb = postalCodeDigits(b.postalCode);
+    if (na == null && nb == null) return compareLeadQueueOrder(a, b);
+    if (na == null) return 1;
+    if (nb == null) return -1;
+    if (na !== nb) return (na - nb) * dir;
+    return compareLeadQueueOrder(a, b);
+  });
+}
+
 export function filterLeadsByActiveCampaignQueueView<T extends LeadRowInput>(
   rows: T[],
   fieldConfigJson: string,
@@ -231,6 +318,7 @@ export async function assertLeadMatchesActiveCampaignQueueOr403(
       industry: true,
       customFields: true,
       meetingScheduledFor: true,
+      postalCode: true,
       campaign: { select: { activeQueueFilter: true, fieldConfig: true } },
     },
   });
@@ -248,6 +336,7 @@ export async function assertLeadMatchesActiveCampaignQueueOr403(
       industry: lead.industry ?? "",
       customFields: lead.customFields ?? "",
       meetingScheduledFor: lead.meetingScheduledFor,
+      postalCode: lead.postalCode ?? "",
     },
     lead.campaign.fieldConfig ?? "{}",
     view,

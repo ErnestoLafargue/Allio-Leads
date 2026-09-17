@@ -5,7 +5,7 @@ import { applyLeadCooldownResets, markCallbackSeenByAssignee } from "@/lib/lead-
 import { filterLeadsByCampaignProtectedSetting } from "@/lib/reklamebeskyttet-filter";
 import { filterLeadsByCampaignPhoneSetting } from "@/lib/lead-phone-filter";
 import { getLeadIdsWithOutcomeLogToday } from "@/lib/lead-outcome-today";
-import { isLeadInRebookingDialerPool, sortLeadsForCampaignCallQueue } from "@/lib/lead-queue";
+import { isLeadInRebookingDialerPool } from "@/lib/lead-queue";
 import { MEETING_OUTCOME_REBOOK, normalizeMeetingOutcomeStatus } from "@/lib/meeting-outcome";
 import { releaseExpiredLocksEverywhere, releaseLeadLock, tryAcquireLeadLock } from "@/lib/lead-lock";
 import {
@@ -17,6 +17,7 @@ import {
   getActiveCampaignLeads,
   hasActiveQueueViewConstraints,
   parseActiveCampaignQueueView,
+  sortLeadsByActivePostalQueue,
 } from "@/lib/active-campaign-queue";
 import { normalizeCampaignDialMode } from "@/lib/dial-mode";
 import { powerDialerEligibleOrPastWhere } from "@/lib/power-dialer-batch";
@@ -222,6 +223,7 @@ export async function POST(req: Request, { params }: Params) {
         phone: true,
         meetingScheduledFor: true,
         industry: true,
+        postalCode: true,
       },
     });
 
@@ -236,6 +238,7 @@ export async function POST(req: Request, { params }: Params) {
       customFields: r.customFields,
       phone: r.phone,
       meetingScheduledFor: r.meetingScheduledFor,
+      postalCode: r.postalCode,
       status: r.status,
       meetingOutcomeStatus: r.meetingOutcomeStatus,
       importedAt: r.importedAt,
@@ -258,9 +261,10 @@ export async function POST(req: Request, { params }: Params) {
       campaign.includeLeadsWithoutPhone,
     );
     const outcomeToday = await getLeadIdsWithOutcomeLogToday(filtered.map((r) => r.id));
-    const sorted = sortLeadsForCampaignCallQueue(
+    const sorted = sortLeadsByActivePostalQueue(
       filtered.map((r) => ({
         id: r.id,
+        postalCode: r.postalCode ?? "",
         status:
           campaign.systemCampaignType === "rebooking" &&
           normalizeMeetingOutcomeStatus(r.meetingOutcomeStatus ?? "") === MEETING_OUTCOME_REBOOK
@@ -274,6 +278,7 @@ export async function POST(req: Request, { params }: Params) {
         lastDialAttemptAt:
           r.lastDialAttemptAt instanceof Date ? r.lastDialAttemptAt.toISOString() : undefined,
       })),
+      serverView,
     );
 
     if (preferLeadId) {

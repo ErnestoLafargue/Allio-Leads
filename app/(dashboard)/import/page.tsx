@@ -875,21 +875,34 @@ export default function ImportPage() {
               Bekræft import
             </h3>
             <p className="mt-2 text-sm text-stone-600">
-              Leads med samme CVR (8 cifre) springes over som standard.{" "}
-              {attachExistingCvrsToCampaign
-                ? "Leads med matchende CVR flyttes fra andre kampagner til denne kampagne. "
-                : ""}
-              {importDuplicateCvrs
-                ? "Rækker med CVR der allerede findes importeres også som nye leads (dublet-CVR tilladt). "
-                : ""}
-              {overwriteExistingCvrs
-                ? "Ved overskrivning slettes kun leads uden noter og uden beskyttede udfald; beskyttede CVR'er springes over."
-                : ""}{" "}
-              Leads med udfald Ikke interesseret eller Ukvalificeret springes altid over. Dubletter i filen springes
-              over. {allowMissingCvr ? "Leads uden CVR importeres som nye leads." : "Leads uden CVR springes over."}{" "}
-              {allowMissingCompanyName
-                ? "Leads uden virksomhedsnavn importeres med standardnavn."
-                : "Leads uden virksomhedsnavn springes over."}{" "}
+              {patchMissingOnly ? (
+                <>
+                  Patch-tilstand: matcher eksisterende leads på CVR og udfylder kun tomme email- og
+                  domæne-felter. Status, noter og øvrige data bevares. Nye leads oprettes ikke. Rækker
+                  uden CVR eller uden match i kampagnen springes over.{" "}
+                </>
+              ) : (
+                <>
+                  Leads med samme CVR (8 cifre) springes over som standard.{" "}
+                  {attachExistingCvrsToCampaign
+                    ? "Leads med matchende CVR flyttes fra andre kampagner til denne kampagne. "
+                    : ""}
+                  {importDuplicateCvrs
+                    ? "Rækker med CVR der allerede findes importeres også som nye leads (dublet-CVR tilladt). "
+                    : ""}
+                  {overwriteExistingCvrs
+                    ? "Ved overskrivning slettes kun leads uden noter og uden beskyttede udfald; beskyttede CVR'er springes over."
+                    : ""}{" "}
+                  Leads med udfald Ikke interesseret eller Ukvalificeret springes altid over. Dubletter i
+                  filen springes over.{" "}
+                  {allowMissingCvr
+                    ? "Leads uden CVR importeres som nye leads."
+                    : "Leads uden CVR springes over."}{" "}
+                  {allowMissingCompanyName
+                    ? "Leads uden virksomhedsnavn importeres med standardnavn."
+                    : "Leads uden virksomhedsnavn springes over."}{" "}
+                </>
+              )}
               Bekræfter import til{" "}
               <strong className="text-stone-800">{campaigns.find((c) => c.id === campaignId)?.name ?? "—"}</strong>
               ?
