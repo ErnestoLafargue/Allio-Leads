@@ -54,7 +54,7 @@ describe("leadMatchesPostalRanges", () => {
 });
 
 describe("parseActiveCampaignQueueView postal", () => {
-  it("parser postal-felter", () => {
+  it("parser postal-felter og synker mode", () => {
     const raw = JSON.stringify({
       version: 1,
       postalFilterEnabled: true,
@@ -63,8 +63,23 @@ describe("parseActiveCampaignQueueView postal", () => {
     });
     const v = parseActiveCampaignQueueView(raw);
     expect(v.postalFilterEnabled).toBe(true);
+    expect(v.filterMeetingStart).toBe(true);
+    expect(v.campaignFilterMode).toBe("postal");
     expect(v.postalSortDir).toBe("desc");
     expect(v.postalRanges).toEqual([{ from: "1000", to: "2999" }]);
+  });
+
+  it("parser mode=postal", () => {
+    const raw = JSON.stringify({
+      version: 1,
+      filterMeetingStart: true,
+      campaignFilterMode: "postal",
+      postalRanges: [{ from: "6000", to: "9000" }],
+      postalSortDir: "asc",
+    });
+    const v = parseActiveCampaignQueueView(raw);
+    expect(v.campaignFilterMode).toBe("postal");
+    expect(v.postalFilterEnabled).toBe(true);
   });
 
   it("defaults uden postal-felter", () => {

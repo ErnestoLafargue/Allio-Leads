@@ -10,6 +10,8 @@ const VIEW_VERSION = 1 as const;
 
 export type PostalRange = { from: string; to: string };
 
+export type CampaignFilterMode = "startdate" | "industry" | "postal";
+
 /**
  * Det der gemmes på `Campaign.activeQueueFilter` når man trykker «Gem filter/sortering».
  * Matcher semantik i `leads-bulk-panel` (sortedLeads uden tabel-klik-sortering).
@@ -17,7 +19,7 @@ export type PostalRange = { from: string; to: string };
 export type ActiveCampaignQueueViewV1 = {
   version: typeof VIEW_VERSION;
   filterMeetingStart: boolean;
-  campaignFilterMode: "startdate" | "industry";
+  campaignFilterMode: CampaignFilterMode;
   meetingStartFrom: string;
   meetingStartTo: string;
   selectedCampaignIndustries: string[];
@@ -26,7 +28,11 @@ export type ActiveCampaignQueueViewV1 = {
   dynamicFromDate: string;
   dynamicToDate: string;
   dynamicDateInvert: boolean;
-  /** Postnummer-filter: begrænser liste + dialerkø til valgte intervaller. */
+  /**
+   * Postnummer-filter aktivt. Holdes synket med
+   * `filterMeetingStart && campaignFilterMode === "postal"` ved gem.
+   * Ældre gemte views kan have flaget sat uden mode=postal.
+   */
   postalFilterEnabled: boolean;
   postalSortDir: "asc" | "desc";
   postalRanges: PostalRange[];
@@ -95,6 +101,21 @@ export function leadMatchesPostalRanges(
   return false;
 }
 
+function parseCampaignFilterMode(raw: unknown, postalFilterEnabled: boolean): CampaignFilterMode {
+  if (raw === "postal") return "postal";
+  if (raw === "industry") return "industry";
+  // Ældre views: postalFilterEnabled uden mode=postal
+  if (postalFilterEnabled) return "postal";
+  return "startdate";
+}
+
+/** True når postnummer-køfilteret er aktivt (ny mode eller legacy-flag). */
+export function isPostalQueueFilterActive(v: ActiveCampaignQueueViewV1 | null | undefined): boolean {
+  if (!v) return false;
+  if (v.postalFilterEnabled) return true;
+  return v.filterMeetingStart === true && v.campaignFilterMode === "postal";
+}
+
 export function parseActiveCampaignQueueView(
   raw: string | null | undefined,
 ): ActiveCampaignQueueViewV1 {
@@ -104,10 +125,19 @@ export function parseActiveCampaignQueueView(
     if (!j || typeof j !== "object") return { ...EMPTY_ACTIVE_CAMPAIGN_QUEUE_VIEW };
     const o = j as Record<string, unknown>;
     if (o.version !== VIEW_VERSION) return { ...EMPTY_ACTIVE_CAMPAIGN_QUEUE_VIEW };
+    const postalFlag = o.postalFilterEnabled === true;
+    let filterMeetingStart = o.filterMeetingStart === true;
+    let campaignFilterMode = parseCampaignFilterMode(o.campaignFilterMode, postalFlag);
+    if (postalFlag) {
+      filterMeetingStart = true;
+      campaignFilterMode = "postal";
+    }
+    const postalFilterEnabled =
+      postalFlag || (filterMeetingStart && campaignFilterMode === "postal");
     return {
       version: VIEW_VERSION,
-      filterMeetingStart: o.filterMeetingStart === true,
-      campaignFilterMode: o.campaignFilterMode === "industry" ? "industry" : "startdate",
+      filterMeetingStart,
+      campaignFilterMode,
       meetingStartFrom: typeof o.meetingStartFrom === "string" ? o.meetingStartFrom : "",
       meetingStartTo: typeof o.meetingStartTo === "string" ? o.meetingStartTo : "",
       selectedCampaignIndustries: Array.isArray(o.selectedCampaignIndustries)
@@ -118,7 +148,7 @@ export function parseActiveCampaignQueueView(
       dynamicFromDate: typeof o.dynamicFromDate === "string" ? o.dynamicFromDate : "",
       dynamicToDate: typeof o.dynamicToDate === "string" ? o.dynamicToDate : "",
       dynamicDateInvert: o.dynamicDateInvert === true,
-      postalFilterEnabled: o.postalFilterEnabled === true,
+      postalFilterEnabled,
       postalSortDir: o.postalSortDir === "desc" ? "desc" : "asc",
       postalRanges: parsePostalRanges(o.postalRanges),
     };
@@ -132,7 +162,7 @@ export function parseActiveCampaignQueueView(
  */
 export function hasActiveQueueViewConstraints(v: ActiveCampaignQueueViewV1 | null | undefined): boolean {
   if (!v) return false;
-  if (v.postalFilterEnabled) return true;
+  if (isPostalQueueFilterActive(v)) return true;
   if (v.filterMeetingStart) {
     if (v.campaignFilterMode === "industry") return true; // også tom liste = 0 træf
     if (v.campaignFilterMode === "startdate" && (v.meetingStartFrom.trim() || v.meetingStartTo.trim())) {
@@ -210,7 +240,7 @@ export function leadMatchesActiveCampaignQueueView(
   fieldConfigJson: string,
   view: ActiveCampaignQueueViewV1,
 ): boolean {
-  if (view.postalFilterEnabled) {
+  if (isPostalQueueFilterActive(view)) {
     if (!leadMatchesPostalRanges(lead.postalCode, view.postalRanges)) return false;
   }
 
@@ -274,7 +304,7 @@ export function leadMatchesActiveCampaignQueueView(
 export function sortLeadsByActivePostalQueue<
   T extends QueueOrderFields & { hasOutcomeLogToday: boolean; postalCode?: string | null },
 >(leads: T[], view: ActiveCampaignQueueViewV1 | null | undefined): T[] {
-  if (!view?.postalFilterEnabled) {
+  if (!view || !isPostalQueueFilterActive(view)) {
     return [...leads].sort(compareLeadQueueOrder);
   }
   const dir = view.postalSortDir === "desc" ? -1 : 1;
