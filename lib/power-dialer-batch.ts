@@ -68,12 +68,16 @@ export async function claimDispatchLeadBatch(
     })
   ).map((q) => q.leadId);
 
+  // Hele Ny-puljen — samme som listPowerDialerCandidates / reserve-next.
+  // En importedAt-take ville holde nyere, aldrig-ringede leads ude og
+  // recirkulere de ældste voicemails forrest efter cooldown.
   const candidatesRaw = await prisma.lead.findMany({
     where: {
       campaignId,
       status: "NEW",
       lockedByUserId: null,
       id: queuedLeadIds.length > 0 ? { notIn: queuedLeadIds } : undefined,
+      callbackScheduledFor: null,
       callbackReservedByUserId: null,
       ...(restrictPowerDialerEligibleAfter ? powerDialerEligibleOrPastWhere(now) : {}),
       ...unansweredAttemptsWithinMaxWhere(campaign.maxContactAttempts),
@@ -90,9 +94,8 @@ export async function claimDispatchLeadBatch(
       importedAt: true,
       lastOutcomeAt: true,
       lastDialAttemptAt: true,
+      unansweredAttempts: true,
     },
-    orderBy: [{ importedAt: "asc" }],
-    take: Math.min(500, Math.max(newCallsNeeded * 25, 50)),
   });
 
   const fieldConfigJson =
@@ -145,6 +148,7 @@ export async function claimDispatchLeadBatch(
           r?.lastOutcomeAt instanceof Date ? r.lastOutcomeAt.toISOString() : undefined,
         lastDialAttemptAt:
           r?.lastDialAttemptAt instanceof Date ? r.lastDialAttemptAt.toISOString() : undefined,
+        unansweredAttempts: r?.unansweredAttempts ?? 0,
       };
     }),
     serverView,
@@ -231,6 +235,7 @@ export async function listPowerDialerCandidates(
       importedAt: true,
       lastOutcomeAt: true,
       lastDialAttemptAt: true,
+      unansweredAttempts: true,
     },
   });
   if (rows.length === 0) return [];
@@ -263,6 +268,7 @@ export async function listPowerDialerCandidates(
       importedAt: r.importedAt.toISOString(),
       lastOutcomeAt: r.lastOutcomeAt ? r.lastOutcomeAt.toISOString() : undefined,
       lastDialAttemptAt: r.lastDialAttemptAt ? r.lastDialAttemptAt.toISOString() : undefined,
+      unansweredAttempts: r.unansweredAttempts,
     })),
     serverView,
   );

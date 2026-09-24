@@ -104,6 +104,50 @@ describe("compareLeadQueueOrder", () => {
     expect(compareLeadQueueOrder(recentOutcome, oldDial)).toBeGreaterThan(0);
   });
 
+  it("lægger voicemail-genbrug (udfald i dag) bagerst efter leads der endnu ikke er kontaktet i dag", () => {
+    const neverCalled = {
+      status: "NEW",
+      id: "fresh",
+      importedAt: "2025-01-01T00:00:00.000Z",
+      hasOutcomeLogToday: false,
+    };
+    const overdialedNoOutcome = {
+      status: "NEW",
+      id: "overdial",
+      importedAt: "2025-01-01T00:00:00.000Z",
+      hasOutcomeLogToday: false,
+      lastDialAttemptAt: "2025-06-01T10:00:00.000Z",
+    };
+    const voicemailRecycle = {
+      status: "NEW",
+      id: "vm",
+      importedAt: "2024-01-01T00:00:00.000Z",
+      hasOutcomeLogToday: true,
+      lastOutcomeAt: "2025-06-01T08:00:00.000Z",
+      unansweredAttempts: 1,
+    };
+    expect(compareLeadQueueOrder(neverCalled, voicemailRecycle)).toBeLessThan(0);
+    expect(compareLeadQueueOrder(overdialedNoOutcome, voicemailRecycle)).toBeLessThan(0);
+    expect(compareLeadQueueOrder(voicemailRecycle, neverCalled)).toBeGreaterThan(0);
+  });
+
+  it("behandler unansweredAttempts som «forsøgt» når timestamps mangler", () => {
+    const virgin = {
+      status: "NEW",
+      id: "a",
+      importedAt: "2025-01-01T00:00:00.000Z",
+      hasOutcomeLogToday: false,
+    };
+    const recycledWithoutTs = {
+      status: "NEW",
+      id: "b",
+      importedAt: "2026-01-01T00:00:00.000Z",
+      hasOutcomeLogToday: false,
+      unansweredAttempts: 2,
+    };
+    expect(compareLeadQueueOrder(virgin, recycledWithoutTs)).toBeLessThan(0);
+  });
+
   it("bruger seneste af lastOutcomeAt og lastDialAttemptAt som touch-tidspunkt", () => {
     const dialedAfterOutcome = {
       status: "NEW",

@@ -62,6 +62,10 @@ export async function applyLeadCooldownResets(): Promise<void> {
         updatedAt: touchedAt,
       },
     });
+    await prisma.lead.updateMany({
+      where: { id: { in: ids }, lastOutcomeAt: null },
+      data: { lastOutcomeAt: touchedAt },
+    });
     await prisma.leadOutcomeLog.createMany({
       data: ids.map((leadId) => ({ leadId, userId: null, status: "NEW" })),
     });
@@ -97,6 +101,10 @@ export async function applyLeadCooldownResets(): Promise<void> {
         notHomeMarkedAt: null,
         updatedAt: touchedAt,
       },
+    });
+    await prisma.lead.updateMany({
+      where: { id: { in: ids }, lastOutcomeAt: null },
+      data: { lastOutcomeAt: touchedAt },
     });
     await prisma.leadOutcomeLog.createMany({
       data: ids.map((leadId) => ({ leadId, userId: null, status: "NEW" })),

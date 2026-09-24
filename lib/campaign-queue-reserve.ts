@@ -245,6 +245,7 @@ export async function reserveNextNewLeadFromCampaign(
       importedAt: true,
       lastOutcomeAt: true,
       lastDialAttemptAt: true,
+      unansweredAttempts: true,
       customFields: true,
       phone: true,
       meetingScheduledFor: true,
@@ -272,6 +273,7 @@ export async function reserveNextNewLeadFromCampaign(
     importedAt: r.importedAt,
     lastOutcomeAt: r.lastOutcomeAt,
     lastDialAttemptAt: r.lastDialAttemptAt,
+    unansweredAttempts: r.unansweredAttempts,
   }));
   const afterStartDate = useServerView
     ? getActiveCampaignLeads(mapped, fieldConfigJson, campaign.activeQueueFilter)
@@ -306,6 +308,7 @@ export async function reserveNextNewLeadFromCampaign(
         r.lastOutcomeAt instanceof Date ? r.lastOutcomeAt.toISOString() : undefined,
       lastDialAttemptAt:
         r.lastDialAttemptAt instanceof Date ? r.lastDialAttemptAt.toISOString() : undefined,
+      unansweredAttempts: r.unansweredAttempts,
     })),
     serverView,
   );

@@ -96,6 +96,11 @@ export type QueueOrderFields = {
    * (no_answer / originate_failed / timeout / busy), ikke loops til toppen.
    */
   lastDialAttemptAt?: string;
+  /**
+   * Tidligere usvarede forsøg (voicemail / ikke hjemme). Fallback når
+   * lastOutcomeAt mangler, så genåbnede leads ikke ser «jomfruelige» ud.
+   */
+  unansweredAttempts?: number;
   id: string;
   hasOutcomeLogToday?: boolean;
 };
@@ -111,20 +116,32 @@ function touchedAtMs(row: QueueOrderFields): number {
   return Number.NaN;
 }
 
-/** Fælles sortering: status-rang → uden touch (udfald eller dial) først → ældst touch først → senest importeret → id */
+function hasBeenTried(row: QueueOrderFields): boolean {
+  if (Number.isFinite(touchedAtMs(row))) return true;
+  return (row.unansweredAttempts ?? 0) > 0;
+}
+
+/**
+ * Fælles sortering på tværs af Click-to-call, pulje, Power og Predictive:
+ * status-rang → ikke kontaktet i dag først → aldrig forsøgt først → ældst touch
+ * først → senest importeret → id.
+ *
+ * Voicemail / ikke-hjemme der er genåbnet efter cooldown skal kunne ringes
+ * igen, men ligger bagerst til alle endnu-ikke-kontaktede i dag er taget.
+ */
 export function compareLeadQueueOrder(a: QueueOrderFields, b: QueueOrderFields): number {
   const ra = queueRank(a.status);
   const rb = queueRank(b.status);
   if (ra !== rb) return ra - rb;
-  const tA = touchedAtMs(a);
-  const tB = touchedAtMs(b);
-  const aTouched = Number.isFinite(tA) ? 1 : 0;
-  const bTouched = Number.isFinite(tB) ? 1 : 0;
-  if (aTouched !== bTouched) return aTouched - bTouched;
-  if (aTouched && bTouched && tA !== tB) return tA - tB;
   const ha = a.hasOutcomeLogToday === true ? 1 : 0;
   const hb = b.hasOutcomeLogToday === true ? 1 : 0;
   if (ha !== hb) return ha - hb;
+  const aTried = hasBeenTried(a) ? 1 : 0;
+  const bTried = hasBeenTried(b) ? 1 : 0;
+  if (aTried !== bTried) return aTried - bTried;
+  const tA = touchedAtMs(a);
+  const tB = touchedAtMs(b);
+  if (Number.isFinite(tA) && Number.isFinite(tB) && tA !== tB) return tA - tB;
   const ta = new Date(a.importedAt).getTime();
   const tb = new Date(b.importedAt).getTime();
   if (ta !== tb) return tb - ta;
@@ -136,9 +153,8 @@ export function sortLeadsForQueue<T extends QueueOrderFields>(leads: T[]): T[] {
 }
 
 /**
- * Opkaldskø på kampagne-arbejde: samme status-rækkefølge, men stabilt bindeled (senest tilføjet først + id)
- * så et gem ikke flytter leadet foran de andre — undgår at «Næste» afslutter for tidligt eller springer leads over.
- * Leads uden tidligere udfald kommer først; derefter dem med ældste udfald først.
+ * Opkaldskø på kampagne-arbejde: samme compareLeadQueueOrder som reserve-next /
+ * Power / Predictive. Ikke-kontaktede i dag først; voicemail-genbrug bagerst.
  */
 export function sortLeadsForCampaignCallQueue<T extends QueueOrderFields & { hasOutcomeLogToday: boolean }>(
   leads: T[],
