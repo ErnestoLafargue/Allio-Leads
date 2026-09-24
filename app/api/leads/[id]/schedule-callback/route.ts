@@ -8,6 +8,7 @@ import { normalizeLeaderboardOutcomeStatus } from "@/lib/lead-outcome-log";
 import { LEAD_ACTIVITY_KIND } from "@/lib/lead-activity-kinds";
 import { logNoteUpdateSession } from "@/lib/note-activity";
 import { LEAD_STATUS_LABELS } from "@/lib/lead-status";
+import { applyPostalCityFromAddressFields } from "@/lib/postal-from-address";
 
 type Params = { params: Promise<{ id: string }> };
 
@@ -110,6 +111,12 @@ export async function POST(req: Request, { params }: Params) {
     const nextNotesTrim = String(nextNotesForLead ?? "").trim();
     const notesChangedForActivity = prevNotesTrim !== nextNotesTrim;
 
+    const filled = applyPostalCityFromAddressFields({
+      address: typeof body?.address === "string" ? body.address : lead.address,
+      postalCode: typeof body?.postalCode === "string" ? body.postalCode : lead.postalCode,
+      city: typeof body?.city === "string" ? body.city : lead.city,
+    });
+
     const updated = await prisma.$transaction(async (tx) => {
       const u = await tx.lead.update({
       where: { id },
@@ -118,9 +125,9 @@ export async function POST(req: Request, { params }: Params) {
         phone: typeof body?.phone === "string" ? body.phone.trim() : lead.phone,
         email: typeof body?.email === "string" ? body.email : lead.email,
         cvr: typeof body?.cvr === "string" ? body.cvr : lead.cvr,
-        address: typeof body?.address === "string" ? body.address : lead.address,
-        postalCode: typeof body?.postalCode === "string" ? body.postalCode : lead.postalCode,
-        city: typeof body?.city === "string" ? body.city : lead.city,
+        address: filled.address,
+        postalCode: filled.postalCode,
+        city: filled.city,
         industry: typeof body?.industry === "string" ? body.industry : lead.industry,
         notes: nextNotesForLead,
         customFields: mergedCustom,

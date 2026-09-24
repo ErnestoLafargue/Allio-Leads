@@ -42,6 +42,7 @@ import { LEAD_ACTIVITY_KIND } from "@/lib/lead-activity-kinds";
 import { logNoteUpdateSession } from "@/lib/note-activity";
 import { hangupActiveOutboundLeadLegsForLead } from "@/lib/dialer-bridge";
 import { canonicalLeadPhoneForStorage } from "@/lib/phone-e164";
+import { applyPostalCityFromAddressFields } from "@/lib/postal-from-address";
 import { syncPostBookingIntegrations } from "@/lib/booking/post-booking-sync";
 import { leadNeedsPostBookingSync } from "@/lib/booking/post-booking-sync-needs";
 import {
@@ -249,10 +250,14 @@ export async function PATCH(req: Request, { params }: Params) {
     typeof body?.phone === "string" ? canonicalLeadPhoneForStorage(body.phone) : existing.phone;
   const email = typeof body?.email === "string" ? body.email : existing.email;
   const cvr = typeof body?.cvr === "string" ? body.cvr : existing.cvr;
-  const address = typeof body?.address === "string" ? body.address : existing.address;
-  const postalCode =
-    typeof body?.postalCode === "string" ? body.postalCode : existing.postalCode;
-  const city = typeof body?.city === "string" ? body.city : existing.city;
+  const filled = applyPostalCityFromAddressFields({
+    address: typeof body?.address === "string" ? body.address : existing.address,
+    postalCode: typeof body?.postalCode === "string" ? body.postalCode : existing.postalCode,
+    city: typeof body?.city === "string" ? body.city : existing.city,
+  });
+  const address = filled.address;
+  const postalCode = filled.postalCode;
+  const city = filled.city;
   const industry = typeof body?.industry === "string" ? body.industry : existing.industry;
   const notes = typeof body?.notes === "string" ? body.notes : existing.notes;
   const prevNotesTrim = String(existing.notes ?? "").trim();

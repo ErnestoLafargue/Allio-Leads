@@ -79,3 +79,25 @@ export function effectiveCity(
   if (String(postalCode ?? "").trim()) return "";
   return extractDanishPostalFromAddress(address)?.city ?? "";
 }
+
+/**
+ * Udfyld tomt postnr/by fra adresse ved create/update/import.
+ * Rører ikke eksisterende postalCode/city hvis de allerede er sat.
+ */
+export function applyPostalCityFromAddressFields(fields: {
+  address?: string | null;
+  postalCode?: string | null;
+  city?: string | null;
+}): { address: string; postalCode: string; city: string } {
+  const address = String(fields.address ?? "").trim();
+  let postalCode = String(fields.postalCode ?? "").trim();
+  let city = String(fields.city ?? "").trim();
+  if (!postalCode) {
+    const parsed = extractDanishPostalFromAddress(address);
+    if (parsed) {
+      postalCode = parsed.postalCode;
+      if (!city && parsed.city) city = parsed.city;
+    }
+  }
+  return { address, postalCode, city };
+}

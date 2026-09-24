@@ -13,6 +13,7 @@ import { findBlockedTimeConflictInDb } from "@/lib/booking/meeting-slots";
 import { findLeadBookingOverlapInDb } from "@/lib/booking/overlap-db";
 import { requireDefaultMeetingAssigneeId } from "@/lib/meeting-assignee";
 import { canonicalLeadPhoneForStorage } from "@/lib/phone-e164";
+import { applyPostalCityFromAddressFields } from "@/lib/postal-from-address";
 import { syncPostBookingIntegrations } from "@/lib/booking/post-booking-sync";
 import {
   isMeetingNotesSufficient,
@@ -67,7 +68,14 @@ export async function POST(req: Request) {
   const companyName = "Direkte møde";
   const phone = phoneFromBody || meetingContactPhonePrivate;
   const email = emailFromBody || meetingContactEmail;
-  const address = addressFromBody;
+  const filled = applyPostalCityFromAddressFields({
+    address: addressFromBody,
+    postalCode: "",
+    city: "",
+  });
+  const address = filled.address;
+  const postalCode = filled.postalCode;
+  const city = filled.city;
 
   if (!scheduledRaw) {
     return NextResponse.json({ error: "Angiv dato og tid for mødet." }, { status: 400 });
@@ -114,8 +122,8 @@ export async function POST(req: Request) {
           email,
           cvr: "",
           address,
-          postalCode: "",
-          city: "",
+          postalCode,
+          city,
           industry: "",
           notes,
           customFields: stringifyCustomFields({}),

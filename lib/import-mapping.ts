@@ -2,7 +2,7 @@ import { buildNormRow, normKey } from "./import-parse-helpers";
 import { canonicalLeadPhoneForStorage } from "./phone-e164";
 import { parseFieldConfig } from "./campaign-fields";
 import type { FieldGroupKey } from "./campaign-fields";
-import { extractDanishPostalFromAddress } from "./postal-from-address";
+import { extractDanishPostalFromAddress, applyPostalCityFromAddressFields } from "./postal-from-address";
 
 export type StandardMappingId =
   | "skip"
@@ -224,7 +224,7 @@ export function pickBaseFromNorm(n: Record<string, string>) {
   const email = n["email"] || n["e_mail"] || n["mail"] || "";
   const cvr = n["cvr"] || n["cvr_nummer"] || n["cvrnummer"] || "";
   const address = (n["adresse"] || n["address"] || n["addr"] || "").trim();
-  let postalCode = (
+  const postalCodeRaw = (
     n["postnr"] ||
     n["postnummer"] ||
     n["postal_code"] ||
@@ -233,14 +233,12 @@ export function pickBaseFromNorm(n: Record<string, string>) {
     n["postcode"] ||
     ""
   ).trim();
-  let city = (n["by"] || n["city"] || n["town"] || n["sted"] || "").trim();
-  if (!postalCode) {
-    const fromAddr = extractDanishPostalFromAddress(address);
-    if (fromAddr) {
-      postalCode = fromAddr.postalCode;
-      if (!city && fromAddr.city) city = fromAddr.city;
-    }
-  }
+  const cityRaw = (n["by"] || n["city"] || n["town"] || n["sted"] || "").trim();
+  const filled = applyPostalCityFromAddressFields({
+    address,
+    postalCode: postalCodeRaw,
+    city: cityRaw,
+  });
   const industry = n["branche"] || n["industry"] || n["sektor"] || "";
   const notes = n["noter"] || n["notes"] || n["kommentar"] || "";
   return {
@@ -248,9 +246,9 @@ export function pickBaseFromNorm(n: Record<string, string>) {
     phone: canonicalLeadPhoneForStorage(phone),
     email: email.trim(),
     cvr: cvr.trim(),
-    address,
-    postalCode,
-    city,
+    address: filled.address,
+    postalCode: filled.postalCode,
+    city: filled.city,
     industry: industry.trim(),
     notes: notes.trim(),
   };

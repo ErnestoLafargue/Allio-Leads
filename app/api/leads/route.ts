@@ -18,6 +18,7 @@ import {
 } from "@/lib/active-campaign-queue";
 import { requireDefaultMeetingAssigneeId } from "@/lib/meeting-assignee";
 import { canonicalLeadPhoneForStorage } from "@/lib/phone-e164";
+import { applyPostalCityFromAddressFields } from "@/lib/postal-from-address";
 
 export async function GET(req: Request) {
   const { session, response } = await requireSession();
@@ -253,9 +254,14 @@ export async function POST(req: Request) {
 
   const email = typeof body?.email === "string" ? body.email : "";
   const cvr = typeof body?.cvr === "string" ? body.cvr : "";
-  const address = typeof body?.address === "string" ? body.address : "";
-  const postalCode = typeof body?.postalCode === "string" ? body.postalCode : "";
-  const city = typeof body?.city === "string" ? body.city : "";
+  const filled = applyPostalCityFromAddressFields({
+    address: typeof body?.address === "string" ? body.address : "",
+    postalCode: typeof body?.postalCode === "string" ? body.postalCode : "",
+    city: typeof body?.city === "string" ? body.city : "",
+  });
+  const address = filled.address;
+  const postalCode = filled.postalCode;
+  const city = filled.city;
   const industry = typeof body?.industry === "string" ? body.industry : "";
   const notes = typeof body?.notes === "string" ? body.notes : "";
   const rawStatus = typeof body?.status === "string" ? body.status.trim().toUpperCase() : "";

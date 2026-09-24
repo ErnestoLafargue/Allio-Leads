@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+  applyPostalCityFromAddressFields,
   effectivePostalCode,
   extractDanishPostalFromAddress,
 } from "./postal-from-address";
@@ -37,5 +38,35 @@ describe("effectivePostalCode", () => {
   it("falder tilbage til adresse", () => {
     expect(effectivePostalCode("", "Gade 1, 2100 København Ø")).toBe("2100");
     expect(effectivePostalCode("  ", "Nørrevænget 51, 6933 Kibæk")).toBe("6933");
+  });
+});
+
+describe("applyPostalCityFromAddressFields", () => {
+  it("udflder tomt postnr og by fra adresse", () => {
+    expect(
+      applyPostalCityFromAddressFields({
+        address: "Gade 1, 2100 København Ø",
+        postalCode: "",
+        city: "",
+      }),
+    ).toEqual({
+      address: "Gade 1, 2100 København Ø",
+      postalCode: "2100",
+      city: "København Ø",
+    });
+  });
+
+  it("bevarer eksisterende postnr", () => {
+    expect(
+      applyPostalCityFromAddressFields({
+        address: "Gade 1, 2100 København",
+        postalCode: "8000",
+        city: "Aarhus",
+      }),
+    ).toEqual({
+      address: "Gade 1, 2100 København",
+      postalCode: "8000",
+      city: "Aarhus",
+    });
   });
 });
