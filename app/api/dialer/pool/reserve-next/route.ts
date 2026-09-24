@@ -2,7 +2,7 @@ import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { requireSession } from "@/lib/api-auth";
 import { applyLeadCooldownResets } from "@/lib/lead-cooldown";
-import { releaseExpiredLocksEverywhere } from "@/lib/lead-lock";
+import { releaseExpiredLocksEverywhere, releaseLeadLock } from "@/lib/lead-lock";
 import {
   dialPoolCampaignIdsForUser,
   orderDialPoolRoundRobin,
@@ -12,6 +12,7 @@ import {
   campaignReserveSelect,
   reserveNextNewLeadFromCampaign,
   reserveNextPendingCallback,
+  tryReserveLead,
 } from "@/lib/campaign-queue-reserve";
 
 /**
@@ -27,6 +28,7 @@ export async function POST(req: Request) {
 
   const body = await req.json().catch(() => null);
   const preferLeadId = typeof body?.preferLeadId === "string" ? body.preferLeadId.trim() : "";
+  const explicitLeadId = typeof body?.explicitLeadId === "string" ? body.explicitLeadId.trim() : "";
   const excludeLeadId = typeof body?.excludeLeadId === "string" ? body.excludeLeadId.trim() : "";
   const afterCampaignId =
     typeof body?.afterCampaignId === "string" ? body.afterCampaignId.trim() : "";
@@ -63,6 +65,41 @@ export async function POST(req: Request) {
     );
     const now = new Date();
     const allowedSet = new Set(poolIds);
+
+    if (explicitLeadId) {
+      const preferLead = await prisma.lead.findUnique({
+        where: { id: explicitLeadId },
+        select: { id: true, campaignId: true },
+      });
+      const preferCid = preferLead?.campaignId ?? null;
+      const camp = preferCid ? byId.get(preferCid) : null;
+      if (preferCid && allowedSet.has(preferCid) && camp) {
+        const got = await tryReserveLead({
+          leadId: explicitLeadId,
+          userId,
+          now,
+          systemCampaignType: camp.systemCampaignType,
+          explicitOpen: true,
+        });
+        // #region agent log
+        fetch('http://127.0.0.1:7517/ingest/1bbc5f7f-d2bf-4f94-a413-704594bbabb0',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'53cc8d'},body:JSON.stringify({sessionId:'53cc8d',runId:'post-fix',hypothesisId:'B',location:'pool/reserve-next:explicit',message:'pool explicit lead open',data:{explicitLeadId,returnedLeadId:got?.id??null,returnedStatus:got?.status??null},timestamp:Date.now()})}).catch(()=>{});
+        // #endregion
+        if (got) {
+          return NextResponse.json({
+            lead: got,
+            campaignId: camp.id,
+            dialMode: normalizeCampaignDialMode(camp.dialMode),
+          });
+        }
+      }
+      if (preferCid) {
+        await releaseLeadLock(prisma, explicitLeadId, userId);
+      }
+      return NextResponse.json(
+        { error: "Kunne ikke åbne det valgte lead.", lead: null },
+        { status: 409 },
+      );
+    }
 
     const callbackLead = await reserveNextPendingCallback({
       userId,

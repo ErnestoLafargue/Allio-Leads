@@ -2,13 +2,14 @@ import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { requireSession } from "@/lib/api-auth";
 import { applyLeadCooldownResets } from "@/lib/lead-cooldown";
-import { releaseExpiredLocksEverywhere } from "@/lib/lead-lock";
+import { releaseExpiredLocksEverywhere, releaseLeadLock } from "@/lib/lead-lock";
 import { parseWorkspaceStartDateFilterFromRequestBody } from "@/lib/workspace-start-date-filter";
 import { userCanAccessCampaign } from "@/lib/campaign-access";
 import {
   campaignReserveSelect,
   reserveNextNewLeadFromCampaign,
   reserveNextPendingCallback,
+  tryReserveLead,
 } from "@/lib/campaign-queue-reserve";
 
 type Params = { params: Promise<{ id: string }> };
@@ -26,6 +27,7 @@ export async function POST(req: Request, { params }: Params) {
 
   const body = await req.json().catch(() => null);
   const preferLeadId = typeof body?.preferLeadId === "string" ? body.preferLeadId.trim() : "";
+  const explicitLeadId = typeof body?.explicitLeadId === "string" ? body.explicitLeadId.trim() : "";
   const excludeLeadId = typeof body?.excludeLeadId === "string" ? body.excludeLeadId.trim() : "";
   const rawExcludeLeadIds: unknown[] = Array.isArray(body?.excludeLeadIds) ? body.excludeLeadIds : [];
   const excludeLeadIds = rawExcludeLeadIds
@@ -66,6 +68,30 @@ export async function POST(req: Request, { params }: Params) {
 
     const now = new Date();
 
+    if (explicitLeadId) {
+      const explicitLead = await tryReserveLead({
+        leadId: explicitLeadId,
+        userId,
+        now,
+        systemCampaignType: campaign.systemCampaignType,
+        explicitOpen: true,
+      });
+      const explicitCampaignId = explicitLead?.campaign?.id ?? explicitLead?.campaignId ?? null;
+      // #region agent log
+      fetch('http://127.0.0.1:7517/ingest/1bbc5f7f-d2bf-4f94-a413-704594bbabb0',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'53cc8d'},body:JSON.stringify({sessionId:'53cc8d',runId:'post-fix',hypothesisId:'B',location:'reserve-next/route.ts:explicit',message:'explicit lead open',data:{campaignId,explicitLeadId,returnedLeadId:explicitLead?.id??null,returnedStatus:explicitLead?.status??null,sameCampaign:explicitCampaignId===campaignId},timestamp:Date.now()})}).catch(()=>{});
+      // #endregion
+      if (!explicitLead || explicitCampaignId !== campaignId) {
+        if (explicitLead) {
+          await releaseLeadLock(prisma, explicitLeadId, userId);
+        }
+        return NextResponse.json(
+          { error: "Kunne ikke åbne det valgte lead.", lead: null },
+          { status: 409 },
+        );
+      }
+      return NextResponse.json({ lead: explicitLead });
+    }
+
     const callbackLead = await reserveNextPendingCallback({
       userId,
       now,
@@ -73,6 +99,9 @@ export async function POST(req: Request, { params }: Params) {
       allowedCampaignIds: null,
     });
     if (callbackLead) {
+      // #region agent log
+      fetch('http://127.0.0.1:7517/ingest/1bbc5f7f-d2bf-4f94-a413-704594bbabb0',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'53cc8d'},body:JSON.stringify({sessionId:'53cc8d',runId:'pre-fix',hypothesisId:'A',location:'reserve-next/route.ts:callback',message:'callback won over prefer',data:{campaignId,preferLeadId:preferLeadId||null,returnedLeadId:callbackLead.id,returnedStatus:callbackLead.status},timestamp:Date.now()})}).catch(()=>{});
+      // #endregion
       return NextResponse.json({ lead: callbackLead });
     }
 
@@ -84,6 +113,9 @@ export async function POST(req: Request, { params }: Params) {
       excludedLeadIds: excludedLeadSet,
       workspaceStartFilter,
     });
+    // #region agent log
+    fetch('http://127.0.0.1:7517/ingest/1bbc5f7f-d2bf-4f94-a413-704594bbabb0',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'53cc8d'},body:JSON.stringify({sessionId:'53cc8d',runId:'pre-fix',hypothesisId:'A',location:'reserve-next/route.ts:new',message:'reserve-next returned new lead',data:{campaignId,preferLeadId:preferLeadId||null,returnedLeadId:newLead?.id??null,returnedStatus:newLead?.status??null,mismatch:Boolean(preferLeadId)&&preferLeadId!==newLead?.id},timestamp:Date.now()})}).catch(()=>{});
+    // #endregion
 
     return NextResponse.json({ lead: newLead });
   } catch (e) {

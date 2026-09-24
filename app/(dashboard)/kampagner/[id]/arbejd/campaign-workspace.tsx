@@ -109,6 +109,7 @@ async function postReserveNext(opts: {
   campaignId: string;
   afterCampaignId?: string | null;
   preferLeadId?: string;
+  explicitLeadId?: string;
   excludeLeadId?: string;
   excludeLeadIds?: string[];
 }): Promise<ReserveNextResult> {
@@ -116,6 +117,7 @@ async function postReserveNext(opts: {
     const body: Record<string, unknown> = {};
     if (opts.afterCampaignId) body.afterCampaignId = opts.afterCampaignId;
     if (opts.preferLeadId) body.preferLeadId = opts.preferLeadId;
+    if (opts.explicitLeadId) body.explicitLeadId = opts.explicitLeadId;
     if (opts.excludeLeadId) body.excludeLeadId = opts.excludeLeadId;
     if (opts.excludeLeadIds?.length) body.excludeLeadIds = opts.excludeLeadIds;
     const res = await fetch("/api/dialer/pool/reserve-next", {
@@ -151,6 +153,7 @@ async function postReserveNext(opts: {
     headers: { "Content-Type": "application/json" },
     body: buildReserveNextRequestBody(opts.campaignId, {
       preferLeadId: opts.preferLeadId,
+      explicitLeadId: opts.explicitLeadId,
       excludeLeadId: opts.excludeLeadId,
       excludeLeadIds: opts.excludeLeadIds,
     }),
@@ -520,12 +523,14 @@ export function CampaignWorkspace({
       if (poolMode) {
         const preferRaw =
           typeof window !== "undefined" ? sessionStorage.getItem(preferKeyFor("")) : null;
-        const preferLeadId = preferredLeadId?.trim() || preferRaw?.trim() || undefined;
+        const explicitLeadId = preferredLeadId?.trim() || undefined;
+        const preferLeadId = explicitLeadId ? undefined : preferRaw?.trim() || undefined;
         const rj = await postReserveNext({
           poolMode: true,
           campaignId: "",
           afterCampaignId: afterCampaignIdRef.current,
           preferLeadId,
+          explicitLeadId,
         });
         if (cancelled) return;
         if (!rj.ok) {
@@ -576,7 +581,11 @@ export function CampaignWorkspace({
         typeof window !== "undefined" && !skipReserveForPowerAuto
           ? sessionStorage.getItem(preferKeyFor(campaignId))
           : null;
-      const preferLeadId = preferredLeadId?.trim() || preferRaw?.trim() || undefined;
+      const explicitLeadId = preferredLeadId?.trim() || undefined;
+      const preferLeadId = explicitLeadId ? undefined : preferRaw?.trim() || undefined;
+      // #region agent log
+      fetch('http://127.0.0.1:7517/ingest/1bbc5f7f-d2bf-4f94-a413-704594bbabb0',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'53cc8d'},body:JSON.stringify({sessionId:'53cc8d',runId:'post-fix',hypothesisId:'C',location:'campaign-workspace.tsx:load',message:'workspace reserve prefer',data:{campaignId,urlPreferredLeadId:preferredLeadId??null,sessionPrefer:preferRaw,explicitLeadId:explicitLeadId??null,resolvedPreferLeadId:preferLeadId??null,voipSession:Boolean(voipSession),skipReserveForPowerAuto},timestamp:Date.now()})}).catch(()=>{});
+      // #endregion
 
       setCampaignName(c.name ?? "");
       setCampaignDialMode(dialMode);
@@ -606,6 +615,7 @@ export function CampaignWorkspace({
         poolMode: false,
         campaignId,
         preferLeadId,
+        explicitLeadId,
       });
       if (cancelled) return;
       if (!rj.ok) {
@@ -615,6 +625,9 @@ export function CampaignWorkspace({
         return;
       }
       if (rj.lead) {
+        // #region agent log
+        fetch('http://127.0.0.1:7517/ingest/1bbc5f7f-d2bf-4f94-a413-704594bbabb0',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'53cc8d'},body:JSON.stringify({sessionId:'53cc8d',runId:'post-fix',hypothesisId:'C',location:'campaign-workspace.tsx:reserved',message:'workspace reserved lead',data:{preferLeadId:preferLeadId??null,explicitLeadId:explicitLeadId??null,reservedLeadId:rj.lead.id,reservedStatus:rj.lead.status,mismatch:Boolean(explicitLeadId||preferLeadId)&&(explicitLeadId||preferLeadId)!==rj.lead.id},timestamp:Date.now()})}).catch(()=>{});
+        // #endregion
         setActiveLead(rj.lead);
         try {
           sessionStorage.setItem(preferKeyFor(campaignId), rj.lead.id);

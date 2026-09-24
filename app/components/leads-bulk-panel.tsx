@@ -911,6 +911,12 @@ export function LeadsBulkPanel({
     }
     return `/leads/${lead.id}${leadDetailSearchSuffix || ""}`;
   }
+  function logLeadOpenClick(lead: LeadRow, source: string) {
+    const href = leadOpenHref(lead);
+    // #region agent log
+    fetch('http://127.0.0.1:7517/ingest/1bbc5f7f-d2bf-4f94-a413-704594bbabb0',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'53cc8d'},body:JSON.stringify({sessionId:'53cc8d',runId:'pre-fix',hypothesisId:'E',location:'leads-bulk-panel.tsx:leadOpenClick',message:'clicked lead open',data:{source,clickedLeadId:lead.id,clickedStatus:lead.status,hrefHasLeadId:href.includes(`leadId=${lead.id}`),hrefLeadId:(/leadId=([^&]+)/.exec(href)||[])[1]??null,campaignId:campaignId??null},timestamp:Date.now()})}).catch(()=>{});
+    // #endregion
+  }
   const actionsBtnClass =
     "rounded-md border border-stone-200 bg-white px-3 py-1.5 text-sm font-medium text-stone-800 shadow-sm hover:bg-stone-50";
 
@@ -939,6 +945,7 @@ export function LeadsBulkPanel({
             <Link
               href={leadOpenHref(selectedOne)}
               className={actionsBtnClass}
+              onClick={() => logLeadOpenClick(selectedOne, "toolbar")}
             >
               Åbn lead
             </Link>
@@ -1613,6 +1620,7 @@ export function LeadsBulkPanel({
                             ? "text-amber-900/90"
                             : "text-stone-900"
                         }`}
+                        onClick={() => logLeadOpenClick(l, "row-name")}
                       >
                         {l.companyName}
                       </Link>
