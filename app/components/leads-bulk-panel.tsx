@@ -41,6 +41,7 @@ import {
   type ActiveCampaignQueueViewV1,
   type PostalRange,
 } from "@/lib/active-campaign-queue";
+import { effectivePostalCode } from "@/lib/postal-from-address";
 import { isLeadInPowerPredictiveCampaignTable } from "@/lib/lead-queue";
 import type { CampaignDialMode } from "@/lib/dial-mode";
 import { leadExceedsMaxAttemptsWarning } from "@/lib/lead-attempts";
@@ -731,7 +732,9 @@ export function LeadsBulkPanel({
       }
 
       if (campaignId && postalFilterEnabled) {
-        out = out.filter((l) => leadMatchesPostalRanges(l.postalCode, postalRanges));
+        out = out.filter((l) =>
+          leadMatchesPostalRanges(effectivePostalCode(l.postalCode, l.address), postalRanges),
+        );
       }
 
       if (selectedDynamicField && selectedDynamicField.kind === "date" && (dynamicFromDate || dynamicToDate)) {
@@ -770,8 +773,8 @@ export function LeadsBulkPanel({
     if (campaignId && postalFilterEnabled) {
       const dirMul = postalSortDir === "asc" ? 1 : -1;
       return [...out].sort((a, b) => {
-        const an = postalCodeDigits(a.postalCode);
-        const bn = postalCodeDigits(b.postalCode);
+        const an = postalCodeDigits(effectivePostalCode(a.postalCode, a.address));
+        const bn = postalCodeDigits(effectivePostalCode(b.postalCode, b.address));
         const aHas = an != null;
         const bHas = bn != null;
         if (aHas !== bHas) return aHas ? -1 : 1;

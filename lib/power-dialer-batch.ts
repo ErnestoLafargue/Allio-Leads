@@ -86,6 +86,7 @@ export async function claimDispatchLeadBatch(
       customFields: true,
       meetingScheduledFor: true,
       postalCode: true,
+      address: true,
       importedAt: true,
       lastOutcomeAt: true,
       lastDialAttemptAt: true,
@@ -106,6 +107,7 @@ export async function claimDispatchLeadBatch(
       customFields: r.customFields,
       meetingScheduledFor: r.meetingScheduledFor,
       postalCode: r.postalCode ?? "",
+      address: r.address ?? "",
     })),
     fieldConfigJson,
     viewRaw,
@@ -123,6 +125,7 @@ export async function claimDispatchLeadBatch(
     customFields: r.customFields,
     meetingScheduledFor: r.meetingScheduledFor,
     postalCode: r.postalCode ?? "",
+    address: r.address ?? "",
   }));
 
   const outcomeToday = await getLeadIdsWithOutcomeLogToday(pool.map((p) => p.id));
@@ -133,6 +136,7 @@ export async function claimDispatchLeadBatch(
       return {
         id: p.id,
         postalCode: p.postalCode ?? r?.postalCode ?? "",
+        address: p.address ?? r?.address ?? "",
         status: "NEW" as const,
         hasOutcomeLogToday: outcomeToday.has(p.id),
         importedAt:
@@ -223,6 +227,7 @@ export async function listPowerDialerCandidates(
       customFields: true,
       meetingScheduledFor: true,
       postalCode: true,
+      address: true,
       importedAt: true,
       lastOutcomeAt: true,
       lastDialAttemptAt: true,
@@ -238,6 +243,7 @@ export async function listPowerDialerCandidates(
       ...r,
       industry: r.industry ?? "",
       postalCode: r.postalCode ?? "",
+      address: r.address ?? "",
     })),
     fieldConfigJson,
     viewRaw,
@@ -251,6 +257,7 @@ export async function listPowerDialerCandidates(
     filtered.map((r) => ({
       id: r.id,
       postalCode: r.postalCode ?? "",
+      address: (r as { address?: string | null }).address ?? "",
       status: "NEW" as const,
       hasOutcomeLogToday: outcomeToday.has(r.id),
       importedAt: r.importedAt.toISOString(),

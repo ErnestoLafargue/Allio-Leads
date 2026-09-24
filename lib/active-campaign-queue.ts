@@ -5,6 +5,7 @@ import { compareLeadQueueOrder, type QueueOrderFields } from "@/lib/lead-queue";
 import { localDayKeyFromMs, parseDateStringLoose, timestampForSort } from "@/lib/parse-date-string";
 import { leadMatchesWorkspaceStartDateFilter } from "@/lib/workspace-start-date-filter";
 import type { WorkspaceStartDateFilterState } from "@/lib/workspace-start-date-filter";
+import { effectivePostalCode } from "@/lib/postal-from-address";
 
 const VIEW_VERSION = 1 as const;
 
@@ -289,6 +290,7 @@ type LeadRowInput = {
   customFields: string;
   meetingScheduledFor: Date | string | null;
   postalCode?: string | null;
+  address?: string | null;
 };
 
 /**
@@ -301,7 +303,8 @@ export function leadMatchesActiveCampaignQueueView(
 ): boolean {
   // AND: alle tændte filtre skal bestås
   if (isPostalQueueFilterActive(view)) {
-    if (!leadMatchesPostalRanges(lead.postalCode, view.postalRanges)) return false;
+    const postal = effectivePostalCode(lead.postalCode, lead.address);
+    if (!leadMatchesPostalRanges(postal, view.postalRanges)) return false;
   }
 
   if (isStartdateQueueFilterActive(view)) {
@@ -362,15 +365,19 @@ export function leadMatchesActiveCampaignQueueView(
  * Tomt/ugyldigt postnr lægges sidst (bør allerede være filtreret væk).
  */
 export function sortLeadsByActivePostalQueue<
-  T extends QueueOrderFields & { hasOutcomeLogToday: boolean; postalCode?: string | null },
+  T extends QueueOrderFields & {
+    hasOutcomeLogToday: boolean;
+    postalCode?: string | null;
+    address?: string | null;
+  },
 >(leads: T[], view: ActiveCampaignQueueViewV1 | null | undefined): T[] {
   if (!view || !isPostalQueueFilterActive(view)) {
     return [...leads].sort(compareLeadQueueOrder);
   }
   const dir = view.postalSortDir === "desc" ? -1 : 1;
   return [...leads].sort((a, b) => {
-    const na = postalCodeDigits(a.postalCode);
-    const nb = postalCodeDigits(b.postalCode);
+    const na = postalCodeDigits(effectivePostalCode(a.postalCode, a.address));
+    const nb = postalCodeDigits(effectivePostalCode(b.postalCode, b.address));
     if (na == null && nb == null) return compareLeadQueueOrder(a, b);
     if (na == null) return 1;
     if (nb == null) return -1;
@@ -409,6 +416,7 @@ export async function assertLeadMatchesActiveCampaignQueueOr403(
       customFields: true,
       meetingScheduledFor: true,
       postalCode: true,
+      address: true,
       campaign: { select: { activeQueueFilter: true, fieldConfig: true } },
     },
   });
@@ -427,6 +435,7 @@ export async function assertLeadMatchesActiveCampaignQueueOr403(
       customFields: lead.customFields ?? "",
       meetingScheduledFor: lead.meetingScheduledFor,
       postalCode: lead.postalCode ?? "",
+      address: lead.address ?? "",
     },
     lead.campaign.fieldConfig ?? "{}",
     view,

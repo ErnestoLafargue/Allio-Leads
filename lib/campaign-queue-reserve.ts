@@ -250,6 +250,7 @@ export async function reserveNextNewLeadFromCampaign(
       meetingScheduledFor: true,
       industry: true,
       postalCode: true,
+      address: true,
     },
   });
 
@@ -265,6 +266,7 @@ export async function reserveNextNewLeadFromCampaign(
     phone: r.phone,
     meetingScheduledFor: r.meetingScheduledFor,
     postalCode: r.postalCode,
+    address: r.address,
     status: r.status,
     meetingOutcomeStatus: r.meetingOutcomeStatus,
     importedAt: r.importedAt,
@@ -291,6 +293,7 @@ export async function reserveNextNewLeadFromCampaign(
     filtered.map((r) => ({
       id: r.id,
       postalCode: r.postalCode ?? "",
+      address: (r as { address?: string | null }).address ?? "",
       status:
         campaign.systemCampaignType === "rebooking" &&
         normalizeMeetingOutcomeStatus(r.meetingOutcomeStatus ?? "") === MEETING_OUTCOME_REBOOK

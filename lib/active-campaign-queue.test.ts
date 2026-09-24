@@ -235,13 +235,26 @@ describe("leadMatchesActiveCampaignQueueView AND", () => {
     expect(leadMatchesActiveCampaignQueueView(baseLead, "{}", view)).toBe(true);
   });
 
-  it("branche tændt + tom liste = 0 træf", () => {
+  it("bruger postnr fra adresse når postalCode er tom", () => {
     const view: ActiveCampaignQueueViewV1 = {
       ...EMPTY_ACTIVE_CAMPAIGN_QUEUE_VIEW,
-      industryEnabled: true,
-      selectedCampaignIndustries: [],
+      postalFilterEnabled: true,
+      postalRanges: [{ from: "1000", to: "2999" }],
     };
-    expect(leadMatchesActiveCampaignQueueView(baseLead, "{}", view)).toBe(false);
+    expect(
+      leadMatchesActiveCampaignQueueView(
+        { ...baseLead, postalCode: "", address: "Gade 1, 2100 København" },
+        "{}",
+        view,
+      ),
+    ).toBe(true);
+    expect(
+      leadMatchesActiveCampaignQueueView(
+        { ...baseLead, postalCode: "", address: "Gade 1, 8000 Aarhus" },
+        "{}",
+        view,
+      ),
+    ).toBe(false);
   });
 });
 
