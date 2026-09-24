@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   campaignWhereForUser,
   isAdminRole,
+  isAssignableDialerRole,
   isDialPoolMode,
   orderDialPoolRoundRobin,
 } from "./campaign-access";
@@ -11,6 +12,15 @@ describe("isAdminRole", () => {
     expect(isAdminRole("ADMIN")).toBe(true);
     expect(isAdminRole("SELLER")).toBe(false);
     expect(isAdminRole(undefined)).toBe(false);
+  });
+});
+
+describe("isAssignableDialerRole", () => {
+  it("sælgere og admin kan tildeles kampagner", () => {
+    expect(isAssignableDialerRole("SELLER")).toBe(true);
+    expect(isAssignableDialerRole("ADMIN")).toBe(true);
+    expect(isAssignableDialerRole("")).toBe(false);
+    expect(isAssignableDialerRole(undefined)).toBe(false);
   });
 });
 

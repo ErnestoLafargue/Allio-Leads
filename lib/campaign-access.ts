@@ -19,6 +19,13 @@ export function isAdminRole(role: string | null | undefined): boolean {
   return role === "ADMIN";
 }
 
+/** Brugere der kan tildeles en kampagne at ringe på (sælgere og admin). */
+export const ASSIGNABLE_DIALER_ROLES = ["SELLER", "ADMIN"] as const;
+
+export function isAssignableDialerRole(role: string | null | undefined): boolean {
+  return role === "SELLER" || role === "ADMIN";
+}
+
 /**
  * Prisma `where` for Campaign-lister.
  * ADMIN: alle. SELLER: kun kampagner med CampaignAssignment for brugeren.

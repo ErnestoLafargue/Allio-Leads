@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { requireAdmin } from "@/lib/api-auth";
 import {
+  ASSIGNABLE_DIALER_ROLES,
   campaignIdsAssignedToUser,
   intersectionAssignedUserIds,
 } from "@/lib/campaign-access";
@@ -47,7 +48,7 @@ export async function GET(req: Request) {
     userIds.length === 0
       ? []
       : await prisma.user.findMany({
-          where: { id: { in: userIds }, role: "SELLER" },
+          where: { id: { in: userIds }, role: { in: [...ASSIGNABLE_DIALER_ROLES] } },
           select: { id: true, name: true, username: true, role: true },
           orderBy: { name: "asc" },
         });
@@ -96,13 +97,13 @@ export async function PUT(req: Request) {
     return NextResponse.json({ error: "En eller flere kampagner findes ikke" }, { status: 404 });
   }
 
-  const sellers = await prisma.user.findMany({
-    where: { id: { in: userIds }, role: "SELLER" },
+  const assignees = await prisma.user.findMany({
+    where: { id: { in: userIds }, role: { in: [...ASSIGNABLE_DIALER_ROLES] } },
     select: { id: true },
   });
-  if (sellers.length !== userIds.length) {
+  if (assignees.length !== userIds.length) {
     return NextResponse.json(
-      { error: "Kun sælgere (SELLER) kan tildeles kampagner — tjek bruger-id'er" },
+      { error: "Kun sælgere og administratorer kan tildeles kampagner — tjek bruger-id'er" },
       { status: 400 },
     );
   }

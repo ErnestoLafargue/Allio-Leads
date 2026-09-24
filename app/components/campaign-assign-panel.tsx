@@ -17,6 +17,21 @@ type SellerRow = {
   role: string;
 };
 
+function AssigneeLabel({ user }: { user: SellerRow }) {
+  return (
+    <span className="flex min-w-0 items-center gap-1.5">
+      <span className="truncate">
+        {user.name} <span className="text-stone-400">({user.username})</span>
+      </span>
+      {user.role === "ADMIN" ? (
+        <span className="shrink-0 rounded bg-stone-200 px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-stone-700">
+          Admin
+        </span>
+      ) : null}
+    </span>
+  );
+}
+
 export function CampaignAssignPanel() {
   const { data: session, status } = useSession();
   const router = useRouter();
@@ -70,7 +85,11 @@ export function CampaignAssignPanel() {
       );
       const uJson = (await uRes.json()) as SellerRow[] | { users?: SellerRow[] };
       const usersList = Array.isArray(uJson) ? uJson : Array.isArray(uJson.users) ? uJson.users : [];
-      setSellers(usersList.filter((u) => u.role === "SELLER"));
+      setSellers(
+        usersList
+          .filter((u) => u.role === "SELLER" || u.role === "ADMIN")
+          .sort((a, b) => a.name.localeCompare(b.name, "da")),
+      );
     } catch (e) {
       setError(e instanceof Error ? e.message : "Noget gik galt");
     } finally {
@@ -251,6 +270,7 @@ export function CampaignAssignPanel() {
           <p className="mt-1 max-w-2xl text-sm text-stone-600">
             Kampagner har fokus. Markér én eller flere kampagner for at se sælgere på dem alle
             (fællesmængde), eller ryd kampagnevalg og søg en sælger for at se hans kampagner.
+            Administratorer vises også, så de kan tildeles og ringe med.
           </p>
         </div>
         <div className="flex flex-wrap gap-2">
@@ -391,10 +411,7 @@ export function CampaignAssignPanel() {
                               onChange={() => toggleSellerInCampaignFocus(u.id)}
                               className="rounded border-stone-300"
                             />
-                            <span className="truncate">
-                              {u.name}{" "}
-                              <span className="text-stone-400">({u.username})</span>
-                            </span>
+                            <AssigneeLabel user={u} />
                           </label>
                         </li>
                       ))
@@ -418,10 +435,7 @@ export function CampaignAssignPanel() {
                               onChange={() => toggleSellerInCampaignFocus(u.id)}
                               className="rounded border-stone-300"
                             />
-                            <span className="truncate">
-                              {u.name}{" "}
-                              <span className="text-stone-400">({u.username})</span>
-                            </span>
+                            <AssigneeLabel user={u} />
                           </label>
                         </li>
                       ))
@@ -454,6 +468,11 @@ export function CampaignAssignPanel() {
                         >
                           <span className="truncate font-medium">{u.name}</span>
                           <span className="truncate text-stone-400">({u.username})</span>
+                          {u.role === "ADMIN" ? (
+                            <span className="shrink-0 rounded bg-stone-200 px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-stone-700">
+                              Admin
+                            </span>
+                          ) : null}
                         </button>
                       </li>
                     );
