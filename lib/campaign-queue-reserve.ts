@@ -321,9 +321,7 @@ export async function reserveNextNewLeadFromCampaign(
   const prefer = preferLeadId?.trim() ?? "";
   if (prefer) {
     const allowed = new Set(sorted.map((r) => r.id));
-    const preferInPool = allowed.has(prefer);
-    let preferReserveOk = false;
-    if (preferInPool) {
+    if (allowed.has(prefer)) {
       const got = await tryReserveLead({
         db,
         leadId: prefer,
@@ -331,15 +329,7 @@ export async function reserveNextNewLeadFromCampaign(
         now,
         systemCampaignType: campaign.systemCampaignType,
       });
-      preferReserveOk = Boolean(got);
-      // #region agent log
-      fetch('http://127.0.0.1:7517/ingest/1bbc5f7f-d2bf-4f94-a413-704594bbabb0',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'53cc8d'},body:JSON.stringify({sessionId:'53cc8d',runId:'pre-fix',hypothesisId:'B',location:'campaign-queue-reserve.ts:prefer',message:'prefer lead reserve attempt',data:{prefer,preferInPool,preferReserveOk,poolSize:sorted.length,firstPoolId:sorted[0]?.id??null},timestamp:Date.now()})}).catch(()=>{});
-      // #endregion
       if (got) return got;
-    } else {
-      // #region agent log
-      fetch('http://127.0.0.1:7517/ingest/1bbc5f7f-d2bf-4f94-a413-704594bbabb0',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'53cc8d'},body:JSON.stringify({sessionId:'53cc8d',runId:'pre-fix',hypothesisId:'B',location:'campaign-queue-reserve.ts:prefer-miss',message:'prefer lead not in NEW pool',data:{prefer,preferInPool,poolSize:sorted.length,firstPoolId:sorted[0]?.id??null},timestamp:Date.now()})}).catch(()=>{});
-      // #endregion
     }
   }
 

@@ -81,9 +81,6 @@ export async function POST(req: Request) {
           systemCampaignType: camp.systemCampaignType,
           explicitOpen: true,
         });
-        // #region agent log
-        fetch('http://127.0.0.1:7517/ingest/1bbc5f7f-d2bf-4f94-a413-704594bbabb0',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'53cc8d'},body:JSON.stringify({sessionId:'53cc8d',runId:'post-fix',hypothesisId:'B',location:'pool/reserve-next:explicit',message:'pool explicit lead open',data:{explicitLeadId,returnedLeadId:got?.id??null,returnedStatus:got?.status??null},timestamp:Date.now()})}).catch(()=>{});
-        // #endregion
         if (got) {
           return NextResponse.json({
             lead: got,
