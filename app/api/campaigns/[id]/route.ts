@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { requireSession, requireAdmin } from "@/lib/api-auth";
+import { userCanAccessCampaign } from "@/lib/campaign-access";
 import { parseFieldConfig, serializeFieldConfig } from "@/lib/campaign-fields";
 import {
   canDeleteCampaign,
@@ -9,6 +10,12 @@ import {
 import { workableCampaignLeadsWhere } from "@/lib/campaign-workable-leads";
 import { DIAL_MODES, normalizeCampaignDialMode, type CampaignDialMode } from "@/lib/dial-mode";
 import { parseMaxContactAttemptsInput, parseUnansweredCooldownHoursInput } from "@/lib/lead-attempts";
+import {
+  applyPowerDialerSettingsPatch,
+  POWER_DIALER_CAMPAIGN_SELECT,
+  powerDialerSettingsFromCampaign,
+  powerDialerSettingsToColumns,
+} from "@/lib/power-dialer-settings";
 
 type Params = { params: Promise<{ id: string }> };
 
@@ -31,6 +38,7 @@ export async function GET(_req: Request, { params }: Params) {
       dialMode: true,
       maxContactAttempts: true,
       unansweredCooldownHours: true,
+      ...POWER_DIALER_CAMPAIGN_SELECT,
       createdAt: true,
       updatedAt: true,
       _count: {
@@ -41,12 +49,9 @@ export async function GET(_req: Request, { params }: Params) {
     },
   });
   if (!campaign) return NextResponse.json({ error: "Ikke fundet" }, { status: 404 });
-  if (
-    campaign.systemCampaignType === "active_customers" &&
-    session!.user.role !== "ADMIN"
-  ) {
+  if (!(await userCanAccessCampaign(session!.user, id))) {
     return NextResponse.json(
-      { error: "Kun administratorer har adgang til «Aktive kunder»." },
+      { error: "Du har ikke adgang til denne kampagne." },
       { status: 403 },
     );
   }
@@ -65,6 +70,7 @@ export async function GET(_req: Request, { params }: Params) {
 
   return NextResponse.json({
     ...campaign,
+    powerDialer: powerDialerSettingsFromCampaign(campaign),
     contactAttemptStats: {
       totalWorkableLeads,
       eligibleForDialing,
@@ -162,6 +168,14 @@ export async function PATCH(req: Request, { params }: Params) {
     unansweredCooldownHours = parsed;
   }
 
+  const powerPatch = applyPowerDialerSettingsPatch(
+    powerDialerSettingsFromCampaign(existing),
+    body?.powerDialer,
+  );
+  if (!powerPatch.ok) {
+    return NextResponse.json({ error: powerPatch.error }, { status: 400 });
+  }
+
   let fieldConfigStr = existing.fieldConfig;
   if (body?.fieldConfig !== undefined) {
     const raw =
@@ -185,6 +199,7 @@ export async function PATCH(req: Request, { params }: Params) {
       dialMode,
       maxContactAttempts,
       unansweredCooldownHours,
+      ...powerDialerSettingsToColumns(powerPatch.settings),
     },
     select: {
       id: true,
@@ -195,9 +210,10 @@ export async function PATCH(req: Request, { params }: Params) {
       dialMode: true,
       maxContactAttempts: true,
       unansweredCooldownHours: true,
+      ...POWER_DIALER_CAMPAIGN_SELECT,
       updatedAt: true,
     },
   });
 
-  return NextResponse.json(campaign);
+  return NextResponse.json({ ...campaign, powerDialer: powerDialerSettingsFromCampaign(campaign) });
 }

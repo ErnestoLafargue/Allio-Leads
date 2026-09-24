@@ -23,6 +23,8 @@ export type DialerClientStateV1 = {
   userId?: string;
   linkedCallControlId?: string;
   dispatchId?: string;
+  /** Sat på agent-ben fra Power Dialer, så webhooken kan route dem til Power-håndteringen. */
+  dialMode?: "POWER_DIALER" | "PREDICTIVE";
 };
 
 /** Lead-leg fra server-side dispatch — udvidet kontekst til logs, recording og idempotens. */

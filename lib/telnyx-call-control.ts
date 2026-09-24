@@ -17,7 +17,8 @@ function resolveOutboundCallToField(to: string): string {
   return normalizePhoneToE164ForDial(t) ?? stripDialFormatting(t);
 }
 
-const TELNYX_API_BASE = "https://api.telnyx.com/v2";
+/** `TELNYX_API_BASE_URL` må kun sættes til en lokal mock ved test af Power Dialer-flowet. */
+const TELNYX_API_BASE = process.env.TELNYX_API_BASE_URL?.trim() || "https://api.telnyx.com/v2";
 
 /** Call Control application id (portal kalder det ofte Application ID). */
 export function getTelnyxConnectionId(): string | null {
@@ -145,6 +146,8 @@ export type TelnyxCredentialInfo = {
   expired?: boolean;
   expiresAt?: string | null;
   connectionId?: string | null;
+  /** Telephony credentialets SIP-brugernavn (gencred…) — WebRTC-klientens registrering. */
+  sipUsername?: string | null;
   createdAt?: string | null;
   updatedAt?: string | null;
   tag?: string | null;
@@ -162,6 +165,7 @@ export type TelnyxCredentialSummary = {
   connectionId: string | null;
   tag: string | null;
   createdAt: string | null;
+  sipUsername: string | null;
 };
 
 function normalizeCredentialRecord(d: Record<string, unknown>): TelnyxCredentialSummary | null {
@@ -185,6 +189,7 @@ function normalizeCredentialRecord(d: Record<string, unknown>): TelnyxCredential
     connectionId: toStr(d.connection_id),
     tag: toStr(d.tag),
     createdAt: toStr(d.created_at),
+    sipUsername: toStr(d.sip_username),
   };
 }
 
@@ -444,6 +449,8 @@ export async function patchTelnyxCredentialConnection(params: {
   connectionId: string;
   outboundVoiceProfileId?: string;
   anchorsiteOverride?: string;
+  /** Power Dialer: `internal` lader vores egen Call Control-app ringe sælgerens WebRTC op via SIP-URI. */
+  sipUriCallingPreference?: "disabled" | "internal" | "unrestricted";
 }): Promise<TelnyxPatchResult> {
   const body: Record<string, unknown> = {};
   if (params.outboundVoiceProfileId) {
@@ -451,6 +458,9 @@ export async function patchTelnyxCredentialConnection(params: {
   }
   if (params.anchorsiteOverride) {
     body.anchorsite_override = params.anchorsiteOverride;
+  }
+  if (params.sipUriCallingPreference) {
+    body.sip_uri_calling_preference = params.sipUriCallingPreference;
   }
   if (Object.keys(body).length === 0) {
     return { ok: true, raw: null };
@@ -540,6 +550,8 @@ export async function createTelnyxCredentialConnection(params: {
     user_name: userName,
     password,
     anchorsite_override: "Frankfurt, Germany",
+    // Power Dialer ringer sælgerens WebRTC op via sip:gencred…@sip.telnyx.com — kræver SIP URI-opkald.
+    sip_uri_calling_preference: "internal",
   };
   if (params.tag) body.tags = [sanitize(params.tag)];
   if (params.outboundVoiceProfileId) {
@@ -723,6 +735,7 @@ export async function getTelnyxCredentialInfo(params: {
             : undefined,
       expiresAt: toStr(d.expires_at),
       connectionId: toStr(d.connection_id),
+      sipUsername: toStr(d.sip_username),
       createdAt: toStr(d.created_at),
       updatedAt: toStr(d.updated_at),
       tag: toStr(d.tag),
@@ -855,13 +868,22 @@ export async function dialTelnyxOutbound(params: {
   webhookUrl?: string;
   /// AMD-konfig. Aktivér med `mode: "premium"` for at få call.machine.detection.ended events.
   amd?: AmdConfig;
-  /// Maks ringe-tid (sek) før Telnyx selv hangup'er. Default Telnyx er 60 sek.
+  /// Maks ringe-tid (sek) før Telnyx selv hangup'er. Default Telnyx er 30 sek.
   timeoutSecs?: number;
-  /// Hvor længe der må gå før det første call.answered/call.hangup event (sek). Default 30.
+  /// false: ringetiden er en hård grænse (ingen alternative ruter efter timeout_secs; hangup_cause no_answer).
+  retryOnTimeout?: boolean;
+  /// Maks. varighed af benet efter svar (sek). Default Telnyx er 4 timer.
   timeLimitSecs?: number;
-  /// Hvis true: link dette opkald til en eksisterende call (originate-and-bridge mønster).
-  /// Telnyx svarer 200, kører AMD/answer i baggrunden, og bridger automatisk når begge legs er live.
+  /// Del call session med et eksisterende opkald. Bridger IKKE af sig selv — se `bridgeOnAnswer`.
   linkTo?: string;
+  /// Hensigt om at bridge med `linkTo` (Telnyx overskriver `from` med det linkede opkalds from).
+  bridgeIntent?: boolean;
+  /// Bridge automatisk med `linkTo`, når dette opkald besvares.
+  bridgeOnAnswer?: boolean;
+  /// Læg på i stedet for at bridge, hvis `linkTo` allerede er bridget.
+  preventDoubleBridge?: boolean;
+  /// Telnyx ignorerer dial-kommandoer med samme command_id (idempotens ved dobbelte webhooks).
+  commandId?: string;
 }): Promise<DialResult> {
   const from = resolveOutboundCallFromField(params.from);
   const to = resolveOutboundCallToField(params.to);
@@ -873,7 +895,12 @@ export async function dialTelnyxOutbound(params: {
   if (params.clientState) payload.client_state = params.clientState;
   if (params.webhookUrl) payload.webhook_url = params.webhookUrl;
   if (params.linkTo) payload.link_to = params.linkTo;
+  if (params.bridgeIntent) payload.bridge_intent = true;
+  if (params.bridgeOnAnswer) payload.bridge_on_answer = true;
+  if (params.preventDoubleBridge) payload.prevent_double_bridge = true;
+  if (params.commandId) payload.command_id = params.commandId;
   if (typeof params.timeoutSecs === "number") payload.timeout_secs = params.timeoutSecs;
+  if (typeof params.retryOnTimeout === "boolean") payload.retry_on_timeout = params.retryOnTimeout;
   if (typeof params.timeLimitSecs === "number") payload.time_limit_secs = params.timeLimitSecs;
 
   const amdMode: AmdMode = params.amd?.mode ?? "off";
@@ -997,9 +1024,11 @@ export async function hangupTelnyxCall(params: {
   apiKey: string;
   callControlId: string;
   clientState?: string;
+  commandId?: string;
 }): Promise<ActionResult> {
   const body: Record<string, unknown> = {};
   if (params.clientState) body.client_state = params.clientState;
+  if (params.commandId) body.command_id = params.commandId;
 
   try {
     const res = await fetch(
@@ -1108,6 +1137,7 @@ export async function startTelnyxRecording(params: {
   channels?: "single" | "dual";
   /// Brug client_state til at sende kontekst med — fx hvilken agent der talte med leadet.
   clientState?: string;
+  commandId?: string;
 }): Promise<ActionResult> {
   const body: Record<string, unknown> = {
     format: params.format ?? "mp3",
@@ -1115,6 +1145,7 @@ export async function startTelnyxRecording(params: {
     play_beep: false,
   };
   if (params.clientState) body.client_state = params.clientState;
+  if (params.commandId) body.command_id = params.commandId;
 
   try {
     const res = await fetch(
@@ -1149,5 +1180,41 @@ export async function startTelnyxRecording(params: {
       status: 0,
       message: err instanceof Error ? err.message : "Ukendt fejl ved start af recording.",
     };
+  }
+}
+
+/**
+ * GET /v2/call_control_applications/{id} — udgående kanalgrænse for appen (null = ingen grænse sat).
+ * Power Dialer bruger den som loft for samtidige lead-opkald på tværs af kampagner.
+ */
+export async function getTelnyxCallControlOutboundChannelLimit(params: {
+  apiKey: string;
+  applicationId: string;
+}): Promise<{ ok: true; channelLimit: number | null } | { ok: false; message: string }> {
+  try {
+    const res = await fetch(
+      `${TELNYX_API_BASE}/call_control_applications/${encodeURIComponent(params.applicationId)}`,
+      {
+        method: "GET",
+        headers: { Authorization: `Bearer ${params.apiKey}`, Accept: "application/json" },
+      },
+    );
+    const json: unknown = await res.json().catch(() => null);
+    if (!res.ok) {
+      return { ok: false, message: formatTelnyxError(json) || `Telnyx HTTP ${res.status}` };
+    }
+    const data =
+      json && typeof json === "object" && "data" in json
+        ? ((json as { data: unknown }).data as Record<string, unknown> | null)
+        : null;
+    const outbound =
+      data && typeof data.outbound === "object" && data.outbound
+        ? (data.outbound as Record<string, unknown>)
+        : null;
+    const raw = outbound?.channel_limit;
+    const channelLimit = typeof raw === "number" && Number.isFinite(raw) && raw > 0 ? raw : null;
+    return { ok: true, channelLimit };
+  } catch (err) {
+    return { ok: false, message: err instanceof Error ? err.message : "Ukendt fejl ved hentning af app." };
   }
 }

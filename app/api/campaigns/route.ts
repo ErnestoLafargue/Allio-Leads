@@ -2,21 +2,11 @@ import { NextResponse } from "next/server";
 import { Prisma } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
 import { requireSession, requireAdmin } from "@/lib/api-auth";
+import { campaignWhereForUser } from "@/lib/campaign-access";
 import { defaultCampaignFieldConfigJson } from "@/lib/campaign-fields";
 import { sortCampaignsForDisplay } from "@/lib/campaign-list-sort";
 import { workableCampaignLeadsWhere } from "@/lib/campaign-workable-leads";
 import { PRESENCE_FRESH_WINDOW_MS } from "@/lib/dialer-shared";
-
-/** Sælgere: alle kampagner undtagen «Aktive kunder». Almindelige kampagner har typisk systemCampaignType = null — `NOT (kolonne = …)` udelukker NULL i SQL, så vi skal eksplicit inkludere null. */
-function campaignWhereForRole(role: string | undefined) {
-  if (role === "ADMIN") return {};
-  return {
-    OR: [
-      { systemCampaignType: null },
-      { NOT: { systemCampaignType: "active_customers" } },
-    ],
-  };
-}
 
 export async function GET() {
   const { session, response } = await requireSession();
@@ -24,7 +14,7 @@ export async function GET() {
 
   try {
     const rows = await prisma.campaign.findMany({
-      where: campaignWhereForRole(session!.user.role),
+      where: campaignWhereForUser(session!.user),
       orderBy: { name: "asc" },
       select: {
         id: true,

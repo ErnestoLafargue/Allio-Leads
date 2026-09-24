@@ -1,26 +1,22 @@
 import { NextResponse, after } from "next/server";
 import { prisma } from "@/lib/prisma";
 import {
-  appendRawEvent,
   decodeDialerClientState,
-  isDuplicateEvent,
   pickCallControlId,
   type TelnyxWebhookEnvelope,
 } from "@/lib/dialer-shared";
+import { handleAmdHuman, handleAmdMachine } from "@/lib/dialer-bridge";
 import {
-  handleAmdHuman,
-  handleAmdMachine,
-  handlePowerDialerAmdUncertain,
-} from "@/lib/dialer-bridge";
-import {
-  isPowerDialerUncertain,
   mapTelnyxAmdResult,
   shouldBridgeToAgent,
   shouldMarkVoicemail,
 } from "@/lib/telnyx-amd-result";
-import { normalizeCampaignDialMode } from "@/lib/dial-mode";
-import { resolveParallelDialModeFromClientState } from "@/lib/resolve-parallel-dial-mode";
-import { requeuePowerDialerLeadAfterNonBridge } from "@/lib/power-dialer-requeue";
+import { appendDialerEventOnce } from "@/lib/dialer-webhook-ingest";
+import {
+  POWER_EVENT_TYPES,
+  processPowerDialerEvent,
+  resolvePowerLegKind,
+} from "@/lib/power-dialer-events";
 import { LEAD_ACTIVITY_KIND, formatPhoneForActivitySummary } from "@/lib/lead-activity-kinds";
 import { startTelnyxRecording } from "@/lib/telnyx-call-control";
 import { persistTelnyxRecordingToAllio } from "@/lib/telnyx-recording-storage";
@@ -53,11 +49,9 @@ function maskPhoneTailForLog(raw: string | null | undefined): string {
  *   Failover URL = (valgfrit) /api/telnyx/voice/events/failover
  *   API version = "API v2"
  *
- * Idempotens: Telnyx kan retrye events op til 5 gange. Vi gemmer event-id i
- * DialerCallLog.rawEventsJson og dropper duplikater. updateMany er idempotent.
- *
- * Vi svarer 200 så hurtigt som muligt og laver "fire-and-forget" bridge for at undgå
- * at Telnyx-webhooken timer ud (max 10 sek).
+ * Idempotens: Telnyx garanterer hverken rækkefølge eller at et event kun kommer én gang
+ * (retry efter ~2 sek.). Event-id tilføjes atomisk til DialerCallLog.rawEventsJson, og dubletter
+ * droppes før nogen side-effekt. Power Dialer-ben behandles i `after()` efter et hurtigt 200-svar.
  */
 
 function safeJsonParse(raw: string): TelnyxWebhookEnvelope | null {
@@ -98,45 +92,57 @@ export async function POST(req: Request) {
       campaignId: true,
       leadId: true,
       direction: true,
-      rawEventsJson: true,
     },
   });
 
-  if (existing && isDuplicateEvent(existing.rawEventsJson, eventId)) {
-    return NextResponse.json({ ok: true, skipped: "duplicate" });
-  }
-
-  const rawEventsJson = appendRawEvent(existing?.rawEventsJson, {
-    type: eventType,
-    id: eventId,
-    at: occurredAt,
-    payload,
-  });
-
-  // Sørg for at en log eksisterer — vi tager direction fra client_state hvis det er nyt
+  // Sørg for at en log eksisterer — ON CONFLICT DO NOTHING, så et samtidigt insert fra dispatch
+  // ikke giver 500 (Telnyx ville så prøve igen og til sidst sende eventet til failover).
   if (!existing && clientState) {
     const v1UserId = clientState.v === 1 ? clientState.userId : undefined;
     const v1Bridge = clientState.v === 1 ? clientState.linkedCallControlId : undefined;
-    await prisma.dialerCallLog.create({
-      data: {
-        campaignId: clientState.campaignId,
-        leadId: clientState.leadId ?? null,
-        agentUserId: v1UserId ?? null,
-        callControlId,
-        callSessionId: payload.call_session_id ?? null,
-        direction: clientState.kind === "agent" ? "outbound-agent" : "outbound-lead",
-        state: "initiated",
-        bridgeTargetId: v1Bridge ?? null,
-        fromNumber: payload.from ?? null,
-        toNumber: payload.to ?? null,
-        rawEventsJson,
-      },
+    await prisma.dialerCallLog.createMany({
+      data: [
+        {
+          campaignId: clientState.campaignId,
+          leadId: clientState.leadId ?? null,
+          agentUserId: v1UserId ?? null,
+          callControlId,
+          callSessionId: payload.call_session_id ?? null,
+          direction: clientState.kind === "agent" ? "outbound-agent" : "outbound-lead",
+          state: "initiated",
+          bridgeTargetId: v1Bridge ?? null,
+          fromNumber: payload.from ?? null,
+          toNumber: payload.to ?? null,
+        },
+      ],
+      skipDuplicates: true,
     });
-  } else if (existing) {
-    await prisma.dialerCallLog.update({
-      where: { id: existing.id },
-      data: { rawEventsJson },
+  }
+
+  // Atomisk append + dedupe på event-id (ingen read-modify-write der mister samtidige events).
+  if (existing || clientState) {
+    const fresh = await appendDialerEventOnce(callControlId, eventId, {
+      type: eventType,
+      id: eventId,
+      at: occurredAt,
+      payload,
     });
+    if (!fresh) {
+      return NextResponse.json({ ok: true, skipped: "duplicate" });
+    }
+  }
+
+  const powerLeg = await resolvePowerLegKind(clientState, existing);
+  if (powerLeg && POWER_EVENT_TYPES.has(eventType)) {
+    const queueItemId = clientState?.v === 2 ? clientState.queueItemId : null;
+    after(async () => {
+      try {
+        await processPowerDialerEvent({ kind: powerLeg, eventType, callControlId, payload, queueItemId });
+      } catch (err) {
+        console.error("[telnyx:webhook] Power Dialer-håndtering fejlede:", eventType, err);
+      }
+    });
+    return NextResponse.json({ ok: true, eventType, power: true });
   }
 
   // State-transition håndtering
@@ -268,6 +274,7 @@ export async function POST(req: Request) {
           eventType === "call.machine.premium.greeting.ended") &&
         shouldMarkVoicemail(amdResult);
 
+      // Power Dialer-ben håndteres ovenfor (processPowerDialerEvent); her kun predictive-dispatch.
       if (
         clientState?.kind === "lead" &&
         clientState.campaignId &&
@@ -276,46 +283,7 @@ export async function POST(req: Request) {
       ) {
         const apiKey = process.env.TELNYX_API_KEY?.trim();
         if (apiKey) {
-          const parallelMode = await resolveParallelDialModeFromClientState(prisma, clientState);
-          const isPowerDial = parallelMode === "POWER_DIALER";
-
-          if (isPowerDial) {
-            if (shouldMarkVoicemail(amdResult)) {
-              queueMicrotask(() => {
-                handleAmdMachine({
-                  apiKey,
-                  campaignId: clientState.campaignId,
-                  leadId: clientState.leadId!,
-                  leadCallControlId: callControlId,
-                }).catch((err) => {
-                  console.error("[telnyx:webhook] handleAmdMachine fejlede:", err);
-                });
-              });
-            } else if (amdResult === "human") {
-              queueMicrotask(() => {
-                handleAmdHuman({
-                  apiKey,
-                  campaignId: clientState.campaignId,
-                  leadId: clientState.leadId!,
-                  leadCallControlId: callControlId,
-                  webhookUrl: process.env.TELNYX_CALL_WEBHOOK_URL?.trim() || undefined,
-                }).catch((err) => {
-                  console.error("[telnyx:webhook] handleAmdHuman fejlede:", err);
-                });
-              });
-            } else if (isPowerDialerUncertain(amdResult)) {
-              queueMicrotask(() => {
-                handlePowerDialerAmdUncertain({
-                  apiKey,
-                  campaignId: clientState.campaignId,
-                  leadId: clientState.leadId!,
-                  leadCallControlId: callControlId,
-                }).catch((err) => {
-                  console.error("[telnyx:webhook] handlePowerDialerAmdUncertain fejlede:", err);
-                });
-              });
-            }
-          } else if (shouldBridgeToAgent(amdResult)) {
+          if (shouldBridgeToAgent(amdResult)) {
             queueMicrotask(() => {
               handleAmdHuman({
                 apiKey,
@@ -429,24 +397,6 @@ export async function POST(req: Request) {
               currentLeadId: null,
             },
           });
-        }
-
-        // Power Dialer: lead-leg lagt på uden bridge og uden AMD-udfald → undgå øjeblikkelig re-dial.
-        if (
-          log.direction === "outbound-lead" &&
-          log.leadId &&
-          log.campaignId &&
-          !log.bridgedAt &&
-          !log.agentUserId &&
-          (log.amdResult == null || String(log.amdResult).trim() === "")
-        ) {
-          const c = await prisma.campaign.findUnique({
-            where: { id: log.campaignId },
-            select: { dialMode: true },
-          });
-          if (normalizeCampaignDialMode(c?.dialMode) === "POWER_DIALER") {
-            await requeuePowerDialerLeadAfterNonBridge(prisma, { leadId: log.leadId });
-          }
         }
 
         // Hvis agent-leggen fejler med user_busy (typisk når agent-endpointet ikke svarer),

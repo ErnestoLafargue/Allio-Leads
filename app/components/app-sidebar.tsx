@@ -207,11 +207,14 @@ function DashboardIcon({ className }: { className?: string }) {
 
 const SIDEBAR_SECTIONS: SidebarSection[] = [
   {
-    kind: "link",
+    kind: "group",
     id: "dialer",
-    href: "/kampagner",
     label: "Dialer",
     icon: DialerIcon,
+    items: [
+      { href: "/kampagner", label: "Dialer" },
+      { href: "/kampagner/uddel", label: "Uddel kampagner", adminOnly: true },
+    ],
   },
   {
     kind: "link",
@@ -306,7 +309,15 @@ export function AppSidebar({
   );
 
   const linkActive = useCallback(
-    (href: string) => pathname === href || pathname.startsWith(`${href}/`),
+    (href: string) => {
+      if (href === "/kampagner") {
+        const p = pathname ?? "";
+        if (p === "/kampagner") return true;
+        if (p.startsWith("/kampagner/uddel")) return false;
+        return p.startsWith("/kampagner/");
+      }
+      return pathname === href || (pathname ?? "").startsWith(`${href}/`);
+    },
     [pathname],
   );
 
@@ -323,6 +334,27 @@ export function AppSidebar({
 
   const leadsActive = useMemo(() => (pathname ?? "").startsWith("/leads"), [pathname]);
   const ticketsActive = useMemo(() => (pathname ?? "").startsWith("/tickets"), [pathname]);
+  const dialerActive = useMemo(() => (pathname ?? "").startsWith("/kampagner"), [pathname]);
+
+  /** Seller: Dialer som enkelt link (uden tom undermenu). Admin: gruppe med Uddel. */
+  const navSections = useMemo((): SidebarSection[] => {
+    return visibleSections.flatMap((s) => {
+      if (s.kind !== "group" || s.id !== "dialer") return [s];
+      const items = visibleGroupItems(s.items);
+      if (!isAdmin) {
+        return [
+          {
+            kind: "link" as const,
+            id: "dialer",
+            href: "/kampagner",
+            label: "Dialer",
+            icon: DialerIcon,
+          },
+        ];
+      }
+      return [{ ...s, items }];
+    });
+  }, [visibleSections, visibleGroupItems, isAdmin]);
 
   useEffect(() => {
     if (!mobileOpen) return;
@@ -377,7 +409,7 @@ export function AppSidebar({
               <span className="text-base font-semibold tracking-tight">Allio Leads</span>
             </div>
             <nav className="flex flex-col gap-1" aria-label="Mobil hovednavigation">
-              {visibleSections.map((s) => {
+              {navSections.map((s) => {
                 if (s.kind === "link") {
                   const active = linkActive(s.href);
                   const Icon = s.icon;
@@ -409,6 +441,7 @@ export function AppSidebar({
                 const isMeetingsGroup = s.id === "meetings";
                 const isLeadsGroup = s.id === "leads";
                 const isTicketsGroup = s.id === "tickets";
+                const isDialerGroup = s.id === "dialer";
                 const open = isAdminGroup
                   ? mobileOpenGroupId === s.id || adminActive
                   : isMeetingsGroup
@@ -417,7 +450,9 @@ export function AppSidebar({
                       ? mobileOpenGroupId === s.id || leadsActive
                       : isTicketsGroup
                         ? mobileOpenGroupId === s.id || ticketsActive
-                        : false;
+                        : isDialerGroup
+                          ? mobileOpenGroupId === s.id || dialerActive
+                          : false;
                 return (
                   <div key={s.id}>
                     <button
@@ -543,7 +578,7 @@ export function AppSidebar({
 
         {/* Navigation */}
         <nav className="flex flex-1 flex-col gap-1 px-2 pt-2">
-          {visibleSections.map((s) => {
+          {navSections.map((s) => {
             if (s.kind === "link") {
               const active = linkActive(s.href);
               const Icon = s.icon;
@@ -582,6 +617,7 @@ export function AppSidebar({
             const isMeetingsGroup = s.id === "meetings";
             const isLeadsGroup = s.id === "leads";
             const isTicketsGroup = s.id === "tickets";
+            const isDialerGroup = s.id === "dialer";
             const groupHighlighted = isAdminGroup
               ? adminActive
               : isMeetingsGroup
@@ -590,7 +626,9 @@ export function AppSidebar({
                   ? leadsActive
                   : isTicketsGroup
                     ? ticketsActive
-                    : false;
+                    : isDialerGroup
+                      ? dialerActive
+                      : false;
             const open = expanded
               ? isAdminGroup
                 ? desktopOpenGroupId === s.id || adminActive
@@ -600,7 +638,9 @@ export function AppSidebar({
                     ? desktopOpenGroupId === s.id || leadsActive
                     : isTicketsGroup
                       ? desktopOpenGroupId === s.id || ticketsActive
-                    : false
+                      : isDialerGroup
+                        ? desktopOpenGroupId === s.id || dialerActive
+                        : false
               : false;
             return (
               <div key={s.id} className="flex flex-col">

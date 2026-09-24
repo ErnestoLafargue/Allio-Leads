@@ -10,7 +10,7 @@ import {
 } from "@/lib/dial-mode";
 import { VoipAudioSettingsButton } from "@/app/components/voip-audio-settings-button";
 import { DashboardTabs } from "@/app/components/dashboard-tabs";
-import { buildCampaignArbejdHref, KNOWN_LEAD_SOURCES } from "@/lib/lead-navigation";
+import { buildCampaignArbejdHref, buildPoolArbejdHref, KNOWN_LEAD_SOURCES } from "@/lib/lead-navigation";
 
 type Campaign = {
   id: string;
@@ -136,8 +136,23 @@ export default function StartPage() {
     }
     return null;
   });
+  const [dialPoolCount, setDialPoolCount] = useState<number | null>(null);
 
   const isAdmin = session?.user.role === "ADMIN";
+
+  const loadDialPool = useCallback(async () => {
+    try {
+      const res = await fetch("/api/dialer/pool");
+      if (!res.ok) {
+        setDialPoolCount(0);
+        return;
+      }
+      const j = (await res.json()) as { count?: number };
+      setDialPoolCount(typeof j.count === "number" ? j.count : 0);
+    } catch {
+      setDialPoolCount(0);
+    }
+  }, []);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -151,6 +166,7 @@ export default function StartPage() {
         const data = await res.json();
         setCampaigns(Array.isArray(data) ? data : []);
         setLoading(false);
+        void loadDialPool();
         return;
       }
 
@@ -203,7 +219,7 @@ export default function StartPage() {
     }
 
     setLoading(false);
-  }, []);
+  }, [loadDialPool]);
 
   useEffect(() => {
     void load();
@@ -270,6 +286,35 @@ export default function StartPage() {
         </div>
         <div className="flex flex-wrap items-center gap-2">
           {hasVoipCampaign ? <VoipAudioSettingsButton /> : null}
+          {dialPoolCount !== null && dialPoolCount > 0 ? (
+            <Link
+              href={buildPoolArbejdHref({
+                openedFrom: { ...KNOWN_LEAD_SOURCES.kampagner, source: "dialer" },
+                voipSession: true,
+              })}
+              className="inline-flex items-center gap-1.5 rounded-lg border border-emerald-600 bg-emerald-600 px-3 py-2 text-sm font-medium text-white shadow-sm hover:bg-emerald-700"
+            >
+              <PhonePlayIcon className="size-4" />
+              Ring alle tildelte
+              <span className="rounded-md bg-emerald-800/40 px-1.5 py-0.5 text-[11px] tabular-nums">
+                {dialPoolCount}
+              </span>
+            </Link>
+          ) : (
+            <button
+              type="button"
+              disabled
+              title={
+                dialPoolCount === 0
+                  ? "Ingen tildelte klik-til-opkald/predictive-kampagner"
+                  : "Indlæser pulje…"
+              }
+              className="inline-flex items-center gap-1.5 rounded-lg border border-stone-200 bg-stone-100 px-3 py-2 text-sm font-medium text-stone-400"
+            >
+              <PhonePlayIcon className="size-4" />
+              Ring alle tildelte
+            </button>
+          )}
           <input
             type="search"
             value={search}

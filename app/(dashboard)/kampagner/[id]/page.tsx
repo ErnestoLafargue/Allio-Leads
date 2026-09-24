@@ -53,6 +53,8 @@ import {
   type CampaignDialMode,
   normalizeCampaignDialMode,
 } from "@/lib/dial-mode";
+import { POWER_DIALER_DEFAULTS, type PowerDialerSettings } from "@/lib/power-dialer-settings";
+import { PowerDialerSettingsFields } from "@/app/components/power-dialer-settings-fields";
 
 /** Samme gruppering som i lead-formular: vej + postnr + by i én ramme. */
 const KAMPAGNE_FORM_GROUPS = FIELD_GROUPS.filter((g) => g !== "postalCode" && g !== "city");
@@ -107,6 +109,7 @@ export default function RedigerKampagnePage() {
   const [exporting, setExporting] = useState(false);
   const [exportMessage, setExportMessage] = useState<string | null>(null);
   const [dialMode, setDialMode] = useState<CampaignDialMode>("NO_DIAL");
+  const [powerDialer, setPowerDialer] = useState<PowerDialerSettings>({ ...POWER_DIALER_DEFAULTS });
   const [maxContactAttempts, setMaxContactAttempts] = useState("");
   const [unansweredCooldownHours, setUnansweredCooldownHours] = useState("2");
   const [contactAttemptStats, setContactAttemptStats] = useState<{
@@ -147,6 +150,14 @@ export default function RedigerKampagnePage() {
       setIncludeProtectedBusinesses(Boolean(c.includeProtectedBusinesses));
       setIncludeLeadsWithoutPhone(c.includeLeadsWithoutPhone !== false);
       setDialMode(normalizeCampaignDialMode(c.dialMode));
+      if (c.powerDialer && typeof c.powerDialer === "object") {
+        setPowerDialer({
+          ...POWER_DIALER_DEFAULTS,
+          ...c.powerDialer,
+        });
+      } else {
+        setPowerDialer({ ...POWER_DIALER_DEFAULTS });
+      }
       setMaxContactAttempts(
         c.maxContactAttempts != null && c.maxContactAttempts !== undefined
           ? String(c.maxContactAttempts)
@@ -380,6 +391,7 @@ export default function RedigerKampagnePage() {
         dialMode,
         maxContactAttempts: maxContactAttempts.trim() === "" ? null : Number.parseInt(maxContactAttempts, 10),
         unansweredCooldownHours: cooldownParsed,
+        powerDialer,
       }),
     });
     setSaving(false);
@@ -512,6 +524,17 @@ export default function RedigerKampagnePage() {
           ))}
         </fieldset>
       </section>
+
+      {dialMode === "POWER_DIALER" ? (
+        <section className="rounded-lg border border-emerald-200 bg-emerald-50/40 p-6 shadow-sm">
+          <h2 className="text-sm font-semibold text-stone-900">Power Dialer</h2>
+          <p className="mt-1 text-xs text-stone-600">
+            Standardværdierne er sat til at fem sælgere kan ringe på samme kampagne. Du kan skrue på dem her —
+            ændringer gælder næste gang der ringes op.
+          </p>
+          <PowerDialerSettingsFields value={powerDialer} onChange={setPowerDialer} disabled={saving} />
+        </section>
+      ) : null}
 
       <section className="rounded-lg border border-stone-200 bg-white p-6 shadow-sm">
         <h2 className="text-sm font-semibold text-stone-900">Max kontaktforsøg</h2>

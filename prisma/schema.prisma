@@ -28,6 +28,10 @@ model User {
   telnyxSipUsername  String? @unique
   /// Telnyx credential_connections.id (Call Control) for samme WebRTC-connection som telnyxCredentialId. Cache for bridge uden ekstra API-kald.
   telnyxCredentialConnectionId String?
+  /// Telephony credentialets sip_username (gencred…) — den SIP-identitet browserens WebRTC registrerer sig som (Power Dialer ringer den op).
+  telnyxCredentialSipUsername  String?
+  /// Sat når SIP URI-opkald (`internal`) er slået til på brugerens credential connection (krav for at Power Dialer kan ringe WebRTC op).
+  telnyxSipUriCallingEnabledAt DateTime?
 
   bookedMeetings            Lead[]                    @relation("LeadBookedBy")
   archivedMeetingRecords    LeadMeetingRecord[]       @relation("LeadMeetingRecordBookedBy")
@@ -59,6 +63,8 @@ model User {
   presenceDays         UserPresenceDay[]
   campaignPresenceDays UserCampaignPresenceDay[]
   dashboardsCreated    Dashboard[]               @relation("DashboardCreatedBy")
+  campaignAssignments  CampaignAssignment[]
+  campaignAssignmentsCreated CampaignAssignment[] @relation("CampaignAssignmentCreatedBy")
 }
 
 /// Én række pr. bruger pr. kalenderdag (København) ved vellykket login.
@@ -157,6 +163,24 @@ model Campaign {
   maxContactAttempts         Int?
   /// Timer før VOICEMAIL / TRÆFFES IKKE auto-sættes tilbage til Ny i denne kampagne (min. 1, default 2).
   unansweredCooldownHours    Int      @default(2)
+  /// Power Dialer: linjer (samtidige udgående opkald) pr. klar sælger. 1–8.
+  powerDialRatio               Float   @default(5)
+  /// Power Dialer: maks. samtidige ubesvarede/uforbundne lead-opkald i kampagnen.
+  powerMaxInFlight             Int     @default(50)
+  /// Power Dialer: sekunder et lead-opkald må ringe, før det opgives (Telnyx timeout_secs).
+  powerRingTimeoutSecs         Int     @default(25)
+  /// Power Dialer: automatisk telefonsvarer-genkendelse (Telnyx premium AMD).
+  powerAmdEnabled              Boolean @default(true)
+  /// Power Dialer: CONNECT | REQUEUE — hvad der sker, når AMD er usikker (not_sure/silence).
+  powerAmdUncertainAction      String  @default("CONNECT")
+  /// Power Dialer: om en genkendt telefonsvarer tæller som kontaktforsøg.
+  powerAmdMachineCountsAttempt Boolean @default(true)
+  /// Power Dialer: drop-loft i procent (menneske svarede, ingen ledig sælger). 0 = fra.
+  powerMaxDropRatePct          Int     @default(3)
+  /// Power Dialer: sekunder efter gemt udfald, før sælgeren er klar igen.
+  powerWrapUpSeconds           Int     @default(0)
+  /// Power Dialer: DRAIN | HANGUP_RINGING — hvad «Pause» gør ved igangværende opkald.
+  powerPauseMode               String  @default("DRAIN")
   createdAt                  DateTime @default(now())
   updatedAt                  DateTime @updatedAt
 
@@ -169,6 +193,25 @@ model Campaign {
   dialerCallLogs   DialerCallLog[]
   dialerQueueItems DialerQueueItem[]
   presenceDays     UserCampaignPresenceDay[]
+  assignments      CampaignAssignment[]
+}
+
+/// Tildeling af kampagne til sælger (ACL for dialer/lister). Admin bypasser uden rows.
+model CampaignAssignment {
+  id          String   @id @default(cuid())
+  userId      String
+  campaignId  String
+  createdAt   DateTime @default(now())
+  createdById String?
+
+  user        User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  campaign    Campaign @relation(fields: [campaignId], references: [id], onDelete: Cascade)
+  createdBy   User?    @relation("CampaignAssignmentCreatedBy", fields: [createdById], references: [id], onDelete: SetNull)
+
+  @@unique([userId, campaignId])
+  @@index([userId])
+  @@index([campaignId])
+  @@index([createdById])
 }
 
 model Lead {
@@ -393,11 +436,13 @@ model AgentSession {
   id                        String   @id @default(cuid())
   userId                    String
   campaignId                String
-  /// "ready" | "ringing" | "talking" | "wrap_up" | "offline"
+  /// "ready" | "ringing" | "talking" | "wrap_up" | "draining" | "paused" | "offline"
   /// - ready: agent er online og klar til at modtage et bridge
-  /// - ringing: server har ringet ud til agentens SIP-URI, venter på svar
-  /// - talking: agent er i samtale (lineStatus=live i browseren)
-  /// - wrap_up: agent registrerer udfald, bør ikke få nye bridges endnu
+  /// - ringing: server har reserveret agenten og ringer agentens WebRTC op (serverstyret)
+  /// - talking: agent er i samtale (serverstyret via webhooks)
+  /// - wrap_up: efterbehandling — lead er åbent eller pause mellem opkald løber
+  /// - draining: Power-pause — kan stadig forbindes til igangværende opkald indtil drainUntil
+  /// - paused: Power-pause — hverken nye opkald eller forbindelser
   /// - offline: heartbeat er udløbet eller agent er logget ud
   status                    String   @default("offline")
   /// Telnyx call_control_id for det aktuelle bridged opkald (lead-leg). Sættes når et bridge sker.
@@ -411,8 +456,21 @@ model AgentSession {
   /// Bruges til observabilitet, fejlsøgning og fremtidig «bridge til eksisterende leg»-optimering.
   /// Rydes når opkaldet slutter (klient sender null).
   webRtcCallControlId       String?
-  lastHeartbeat             DateTime @updatedAt
+  /// Sættes kun af heartbeats (ikke af webhooks), så en lukket browser ikke ser «frisk» ud.
+  lastHeartbeat             DateTime @default(now())
   createdAt                 DateTime @default(now())
+  /// Power: seneste gang sælgeren blev klar — længst ledige sælger forbindes først.
+  readySince                DateTime?
+  /// Power: tidspunkt serveren reserverede sælgeren til et opkald (stale-oprydning).
+  reservedAt                DateTime?
+  /// Power: sælgeren er ikke klar før dette tidspunkt (pause mellem opkald / back-off).
+  wrapUpUntil               DateTime?
+  /// Power: pause med «afslut igangværende» — kan forbindes indtil dette tidspunkt.
+  drainUntil                DateTime?
+  /// Power: browserens WebRTC er registreret hos Telnyx, og lyd er klar.
+  webrtcReady               Boolean  @default(false)
+  /// Power: browserfanen der ejer sessionen (nyeste «Start» vinder).
+  clientInstanceId          String?
 
   user     User     @relation(fields: [userId], references: [id], onDelete: Cascade)
   campaign Campaign @relation(fields: [campaignId], references: [id], onDelete: Cascade)
@@ -452,8 +510,17 @@ model DialerCallLog {
   hangupCause    String?
   hangupSource   String?
   recordingUrl   String?
-  /// JSON-array (string) af de seneste N webhook-payloads — debugging
+  /// JSON-array (string) af webhook-payloads — debugging og idempotens (event-id)
   rawEventsJson  String?
+  /// Power: sat atomisk når serveren begynder at forbinde leadet til en sælger (CAS mod dobbelt-events).
+  bridgeRequestedAt DateTime?
+  /// Power: antal forsøg på at forbinde en sælger til dette lead-ben.
+  agentAttempts     Int       @default(0)
+  /// Power: sat atomisk når leadets udfald for dette opkald er afgjort (CAS).
+  resolvedAt        DateTime?
+  /// Power: vores årsag (hangupCause er Telnyx'): CONNECTED | NO_ANSWER | INVALID_NUMBER | VOICEMAIL |
+  /// AMD_UNCERTAIN_REQUEUE | DROP_NO_AGENT | DROP_LEAD_HUNGUP | CANCELLED_OVERDIAL | TECHNICAL
+  resolution        String?
 
   campaign Campaign @relation(fields: [campaignId], references: [id], onDelete: Cascade)
   lead     Lead?    @relation(fields: [leadId], references: [id], onDelete: SetNull)
@@ -463,6 +530,8 @@ model DialerCallLog {
   @@index([leadId])
   @@index([agentUserId, startedAt])
   @@index([state, startedAt])
+  @@index([campaignId, direction, endedAt])
+  @@index([campaignId, resolvedAt])
 }
 
 /// Reservation af leads i dispatcherens kø — sikrer at samme lead ikke dispatches to gange
@@ -479,12 +548,15 @@ model DialerQueueItem {
   lastResult          String?
   /// call_control_id for det opkald der reserverede dette lead
   activeCallControlId String?
+  /// Power: lead-benet er bridget til en sælger — tæller ikke længere som uforbundet in-flight (men optager stadig en kanal).
+  connectedAt         DateTime?
 
   campaign Campaign @relation(fields: [campaignId], references: [id], onDelete: Cascade)
   lead     Lead     @relation(fields: [leadId], references: [id], onDelete: Cascade)
 
   @@index([campaignId, reservedAt])
   @@index([expiresAt])
+  @@index([activeCallControlId])
 }
 
 /// Internt ticketsystem — opgavestyring for teamet (uafhængigt af leads/møder).

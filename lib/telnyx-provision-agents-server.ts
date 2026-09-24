@@ -155,6 +155,8 @@ export async function provisionTelnyxAgentsForUsers(options: {
         telnyxCredentialId: tc.credential.id,
         telnyxSipUsername: sipUsername,
         telnyxCredentialConnectionId: cc.connection.id,
+        telnyxCredentialSipUsername: tc.credential.sipUsername,
+        telnyxSipUriCallingEnabledAt: new Date(),
       },
     });
 

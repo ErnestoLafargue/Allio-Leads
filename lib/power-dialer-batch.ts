@@ -3,6 +3,7 @@
  * Genbruger kø-filter, sortering og DialerQueueItem som soft-lock.
  */
 
+import { randomUUID } from "node:crypto";
 import type { Prisma } from "@prisma/client";
 import type { PrismaClient } from "@prisma/client";
 import {
@@ -182,4 +183,140 @@ export async function claimDispatchLeadBatch(
   }
 
   return reserved;
+}
+
+export type PowerDialerCandidate = {
+  leadId: string;
+  e164: string;
+  lastDialAttemptAt: Date | null;
+};
+
+type PowerCandidateCampaign = CampaignQueueFields;
+
+/**
+ * Power Dialer-kø i samme rækkefølge som den manuelle kø (kampagnens gemte filter + sortering):
+ * Ny, ikke låst, ingen callback, ikke i cooldown, inden for maks. kontaktforsøg, ikke allerede i
+ * dispatcherens kø. Returnerer op til `limit` leads med gyldigt nummer.
+ */
+export async function listPowerDialerCandidates(
+  db: PrismaClient,
+  params: { campaign: PowerCandidateCampaign; limit: number; now: Date },
+): Promise<PowerDialerCandidate[]> {
+  const { campaign, limit, now } = params;
+  if (limit <= 0) return [];
+
+  const rows = await db.lead.findMany({
+    where: {
+      campaignId: campaign.id,
+      status: "NEW",
+      lockedByUserId: null,
+      callbackScheduledFor: null,
+      callbackReservedByUserId: null,
+      dialerQueueItem: { is: null },
+      ...powerDialerEligibleOrPastWhere(now),
+      ...unansweredAttemptsWithinMaxWhere(campaign.maxContactAttempts),
+    },
+    select: {
+      id: true,
+      phone: true,
+      industry: true,
+      customFields: true,
+      meetingScheduledFor: true,
+      postalCode: true,
+      importedAt: true,
+      lastOutcomeAt: true,
+      lastDialAttemptAt: true,
+    },
+  });
+  if (rows.length === 0) return [];
+
+  const fieldConfigJson = typeof campaign.fieldConfig === "string" ? campaign.fieldConfig : "{}";
+  const viewRaw = typeof campaign.activeQueueFilter === "string" ? campaign.activeQueueFilter : "{}";
+  const serverView = parseActiveCampaignQueueView(viewRaw);
+  const inView = getActiveCampaignLeads(
+    rows.map((r) => ({
+      ...r,
+      industry: r.industry ?? "",
+      postalCode: r.postalCode ?? "",
+    })),
+    fieldConfigJson,
+    viewRaw,
+  );
+  const filtered = filterLeadsByCampaignPhoneSetting(
+    filterLeadsByCampaignProtectedSetting(inView, campaign.includeProtectedBusinesses),
+    campaign.includeLeadsWithoutPhone,
+  );
+  const outcomeToday = await getLeadIdsWithOutcomeLogToday(filtered.map((r) => r.id));
+  const sorted = sortLeadsByActivePostalQueue(
+    filtered.map((r) => ({
+      id: r.id,
+      postalCode: r.postalCode ?? "",
+      status: "NEW" as const,
+      hasOutcomeLogToday: outcomeToday.has(r.id),
+      importedAt: r.importedAt.toISOString(),
+      lastOutcomeAt: r.lastOutcomeAt ? r.lastOutcomeAt.toISOString() : undefined,
+      lastDialAttemptAt: r.lastDialAttemptAt ? r.lastDialAttemptAt.toISOString() : undefined,
+    })),
+    serverView,
+  );
+  const byId = new Map(filtered.map((r) => [r.id, r]));
+  const out: PowerDialerCandidate[] = [];
+  for (const s of sorted) {
+    if (out.length >= limit) break;
+    const r = byId.get(s.id);
+    if (!r) continue;
+    const e164 = normalizePhoneToE164ForDial(r.phone);
+    if (!e164) continue;
+    out.push({ leadId: r.id, e164, lastDialAttemptAt: r.lastDialAttemptAt });
+  }
+  return out;
+}
+
+export type ClaimedPowerLead = PowerDialerCandidate & { queueItemId: string };
+
+/**
+ * Reservér kandidater atomisk (kaldes inde i dispatch-transaktionen under kampagnens advisory-lås):
+ * leadet skal stadig være Ny og ulåst, og kø-reservationen oprettes med ON CONFLICT DO NOTHING.
+ */
+export async function claimPowerDialerLeads(
+  tx: Prisma.TransactionClient,
+  params: {
+    campaignId: string;
+    candidates: PowerDialerCandidate[];
+    count: number;
+    now: Date;
+    expiresAt: Date;
+  },
+): Promise<ClaimedPowerLead[]> {
+  const claimed: ClaimedPowerLead[] = [];
+  for (const c of params.candidates) {
+    if (claimed.length >= params.count) break;
+    const upd = await tx.lead.updateMany({
+      where: {
+        id: c.leadId,
+        campaignId: params.campaignId,
+        status: "NEW",
+        lockedByUserId: null,
+        callbackReservedByUserId: null,
+        ...powerDialerEligibleOrPastWhere(params.now),
+      },
+      data: { lastDialAttemptAt: params.now },
+    });
+    if (upd.count !== 1) continue;
+    const id = randomUUID();
+    const inserted = await tx.$queryRaw<{ id: string }[]>`
+      INSERT INTO "DialerQueueItem" ("id", "campaignId", "leadId", "reservedAt", "expiresAt", "attempts")
+      VALUES (${id}, ${params.campaignId}, ${c.leadId}, ${params.now}, ${params.expiresAt}, 0)
+      ON CONFLICT ("leadId") DO NOTHING
+      RETURNING "id"`;
+    if (inserted.length !== 1) {
+      await tx.lead.updateMany({
+        where: { id: c.leadId, lastDialAttemptAt: params.now },
+        data: { lastDialAttemptAt: c.lastDialAttemptAt },
+      });
+      continue;
+    }
+    claimed.push({ ...c, queueItemId: id });
+  }
+  return claimed;
 }

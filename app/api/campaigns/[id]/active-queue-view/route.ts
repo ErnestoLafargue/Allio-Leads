@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { requireSession } from "@/lib/api-auth";
+import { userCanAccessCampaign } from "@/lib/campaign-access";
 import { EMPTY_ACTIVE_CAMPAIGN_QUEUE_VIEW, type ActiveCampaignQueueViewV1 } from "@/lib/active-campaign-queue";
 
 type Params = { params: Promise<{ id: string }> };
@@ -27,14 +28,14 @@ export async function POST(req: Request, { params }: Params) {
 
   const existing = await prisma.campaign.findUnique({
     where: { id: campaignId },
-    select: { id: true, systemCampaignType: true },
+    select: { id: true },
   });
   if (!existing) {
     return NextResponse.json({ error: "Kampagne findes ikke" }, { status: 404 });
   }
-  if (existing.systemCampaignType === "active_customers" && session!.user.role !== "ADMIN") {
+  if (!(await userCanAccessCampaign(session!.user, campaignId))) {
     return NextResponse.json(
-      { error: "Kun administratorer har adgang til «Aktive kunder»." },
+      { error: "Du har ikke adgang til denne kampagne." },
       { status: 403 },
     );
   }

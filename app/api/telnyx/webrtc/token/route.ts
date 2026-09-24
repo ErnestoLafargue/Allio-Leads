@@ -13,6 +13,11 @@ import {
 } from "@/lib/telnyx-call-control";
 import { ensureTelnyxCredentialConnectionIdCached } from "@/lib/telnyx-cache-credential-connection";
 import { provisionTelnyxAgentsForUsers } from "@/lib/telnyx-provision-agents-server";
+import { userCanAccessCampaign } from "@/lib/campaign-access";
+import { ensurePowerDialerAgentTelnyx } from "@/lib/telnyx-power-agent";
+
+/** Power Dialer-session: WebRTC uden lead — sælgeren venter på indgående forbindelser. */
+const POWER_SESSION_CONTEXT = "power_session";
 
 export async function POST(req: Request) {
   const { session, response } = await requireSession();
@@ -22,38 +27,64 @@ export async function POST(req: Request) {
   const body = await req.json().catch(() => null);
   const leadId = typeof body?.leadId === "string" ? body.leadId.trim() : "";
   const campaignIdFromBody = typeof body?.campaignId === "string" ? body.campaignId.trim() : "";
+  const isPowerSession = body?.voipApiContext === POWER_SESSION_CONTEXT;
   const voipApiContext = parseVoipApiContext(body);
-  if (!leadId) {
-    return NextResponse.json({ error: "leadId er påkrævet" }, { status: 400 });
-  }
 
-  await releaseExpiredLocksEverywhere(prisma);
-  const lead = await prisma.lead.findUnique({
-    where: { id: leadId },
-    include: {
-      campaign: { select: { id: true, dialMode: true } },
-    },
-  });
-  if (!lead) {
-    return NextResponse.json({ error: "Lead findes ikke" }, { status: 404 });
-  }
-  if (campaignIdFromBody && lead.campaignId !== campaignIdFromBody) {
-    return NextResponse.json({ error: "Lead hører ikke til den angivne kampagne." }, { status: 403 });
-  }
+  let mode: ReturnType<typeof normalizeCampaignDialMode>;
+  let routingKey: string;
+  if (isPowerSession) {
+    if (!campaignIdFromBody) {
+      return NextResponse.json({ error: "campaignId er påkrævet" }, { status: 400 });
+    }
+    const campaign = await prisma.campaign.findUnique({
+      where: { id: campaignIdFromBody },
+      select: { id: true, dialMode: true },
+    });
+    if (!campaign) {
+      return NextResponse.json({ error: "Kampagne findes ikke" }, { status: 404 });
+    }
+    if (!(await userCanAccessCampaign(session!.user, campaign.id))) {
+      return NextResponse.json({ error: "Du har ikke adgang til denne kampagne." }, { status: 403 });
+    }
+    mode = normalizeCampaignDialMode(campaign.dialMode);
+    if (mode !== "POWER_DIALER") {
+      return NextResponse.json({ error: "Kampagnen er ikke sat til Power Dialer." }, { status: 409 });
+    }
+    routingKey = campaign.id;
+  } else {
+    if (!leadId) {
+      return NextResponse.json({ error: "leadId er påkrævet" }, { status: 400 });
+    }
 
-  if (isGlobalLeadPageVoipContext(voipApiContext) && !lead.campaignId) {
-    return NextResponse.json(
-      { error: "Leadet skal være tilknyttet en kampagne for at bruge VoIP (webhooks/aktivitet)." },
-      { status: 409 },
-    );
-  }
+    await releaseExpiredLocksEverywhere(prisma);
+    const lead = await prisma.lead.findUnique({
+      where: { id: leadId },
+      include: {
+        campaign: { select: { id: true, dialMode: true } },
+      },
+    });
+    if (!lead) {
+      return NextResponse.json({ error: "Lead findes ikke" }, { status: 404 });
+    }
+    if (campaignIdFromBody && lead.campaignId !== campaignIdFromBody) {
+      return NextResponse.json({ error: "Lead hører ikke til den angivne kampagne." }, { status: 403 });
+    }
 
-  const mode = normalizeCampaignDialMode(lead.campaign?.dialMode);
-  if (voipApiContext !== VOIP_API_CONTEXT.GLOBAL_LEAD_PAGE && !campaignUsesVoipUi(mode)) {
-    return NextResponse.json({ error: "Kampagnen er ikke sat til et opkalds-mode (VoIP)." }, { status: 409 });
-  }
-  if (!sellerMayEditLead(session!.user.role, sessionUserId, lead)) {
-    return NextResponse.json({ error: "Leadet er låst af en anden bruger." }, { status: 409 });
+    if (isGlobalLeadPageVoipContext(voipApiContext) && !lead.campaignId) {
+      return NextResponse.json(
+        { error: "Leadet skal være tilknyttet en kampagne for at bruge VoIP (webhooks/aktivitet)." },
+        { status: 409 },
+      );
+    }
+
+    mode = normalizeCampaignDialMode(lead.campaign?.dialMode);
+    if (voipApiContext !== VOIP_API_CONTEXT.GLOBAL_LEAD_PAGE && !campaignUsesVoipUi(mode)) {
+      return NextResponse.json({ error: "Kampagnen er ikke sat til et opkalds-mode (VoIP)." }, { status: 409 });
+    }
+    if (!sellerMayEditLead(session!.user.role, sessionUserId, lead)) {
+      return NextResponse.json({ error: "Leadet er låst af en anden bruger." }, { status: 409 });
+    }
+    routingKey = leadId;
   }
 
   const apiKey = process.env.TELNYX_API_KEY?.trim();
@@ -109,8 +140,19 @@ export async function POST(req: Request) {
     );
   }
 
+  if (isPowerSession && sharedFallback) {
+    return NextResponse.json(
+      {
+        code: "TELNYX_PERSONAL_CREDENTIAL_REQUIRED",
+        error:
+          "Power Dialer kræver en personlig Telnyx-konto til sælgeren. Provisionér under Administration → Telnyx.",
+      },
+      { status: 409 },
+    );
+  }
+
   const fromPool = getTelnyxFromPoolInfo();
-  const callerNumber = pickTelnyxFromNumber(leadId, { userId: sessionUserId });
+  const callerNumber = pickTelnyxFromNumber(routingKey, { userId: sessionUserId });
   if (!callerNumber) {
     return NextResponse.json(
       {
@@ -218,7 +260,20 @@ export async function POST(req: Request) {
     );
   }
 
-  if (token.ok && !sharedFallback && sessionUserId && telephonyCredentialId) {
+  // Power Dialer: sælgerens WebRTC skal kunne ringes op via sip:gencred…@sip.telnyx.com.
+  const power = isPowerSession
+    ? await ensurePowerDialerAgentTelnyx({ userId: sessionUserId, apiKey }).catch((err) => ({
+        ok: false,
+        sipUsername: null,
+        sipUriCallingEnabled: false,
+        message: err instanceof Error ? err.message : "Kunne ikke klargøre Telnyx til Power Dialer.",
+      }))
+    : null;
+  if (power && !power.ok) {
+    console.error("[telnyx:webrtc-token] Power Dialer-klargøring fejlede", { message: power.message });
+  }
+
+  if (token.ok && !sharedFallback && sessionUserId && telephonyCredentialId && !isPowerSession) {
     void ensureTelnyxCredentialConnectionIdCached({
       userId: sessionUserId,
       telephonyCredentialId,
@@ -239,5 +294,15 @@ export async function POST(req: Request) {
     sipUsername: userRow?.telnyxSipUsername ?? null,
     sharedCredential: sharedFallback,
     autoProvisioned,
+    ...(power
+      ? {
+          power: {
+            ready: power.ok,
+            sipUriCallingEnabled: power.sipUriCallingEnabled,
+            hasSipUsername: Boolean(power.sipUsername),
+            message: power.message ?? null,
+          },
+        }
+      : {}),
   });
 }

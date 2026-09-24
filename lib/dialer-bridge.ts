@@ -1,13 +1,9 @@
 /**
- * Server-side bridge-flow.
+ * Bridge-flow for predictive server-dispatch (kun ved manuelt kald af /api/dialer/dispatch).
+ * Power Dialer bruger `lib/power-dialer-engine.ts` (bridge_on_answer, CAS, retry, overskudsregel).
  *
- * Når et lead-opkald har AMD=human reagerer vi her: find en ledig agent,
- * placer et nyt udgående mod agentens SIP-URI med `link_to: leadCallControlId`,
- * så Telnyx automatisk bridger så snart agenten svarer.
- *
- * Hvis ingen ledig agent findes inden 8 sek → hangup lead og marker som "no-agent" (sjældent
- * — pacing-algoritmen skal sikre at det ikke sker, men vi vil hellere droppe end at lade
- * et menneske vente i tomgang).
+ * Bemærk: `link_to` alene deler kun call session — Telnyx bridger ikke automatisk uden
+ * `bridge_on_answer`. Ingen ledig agent → lead-opkaldet lægges straks på («no-agent»).
  */
 
 import { prisma } from "@/lib/prisma";
@@ -24,7 +20,6 @@ import {
   startTelnyxRecording,
 } from "@/lib/telnyx-call-control";
 import { encodeDialerClientState, PRESENCE_FRESH_WINDOW_MS } from "@/lib/dialer-shared";
-import { requeuePowerDialerLeadAfterNonBridge } from "@/lib/power-dialer-requeue";
 
 /** Statusser hvor et sent AMD=machine stadig må sætte VOICEMAIL (leadet er stadig i «åben» dialer-pulje). */
 const AMD_VOICEMAIL_ALLOWED: ReadonlySet<LeadStatus> = new Set(["NEW", "NOT_HOME"]);
@@ -397,38 +392,6 @@ export async function handleAmdMachine(params: {
   } else {
     await prisma.$transaction(cleanupOps);
   }
-}
-
-/**
- * Power Dialer: AMD usikkert (not_sure, silence, …) — ingen bridge, lead forbliver NEW,
- * cooldown + bagerst i kø via `powerDialerEligibleAfter` / `lastDialAttemptAt`.
- */
-export async function handlePowerDialerAmdUncertain(params: {
-  apiKey: string;
-  campaignId: string;
-  leadId: string;
-  leadCallControlId: string;
-}) {
-  await hangupTelnyxCall({
-    apiKey: params.apiKey,
-    callControlId: params.leadCallControlId,
-  });
-
-  await requeuePowerDialerLeadAfterNonBridge(prisma, { leadId: params.leadId });
-
-  await prisma.$transaction([
-    prisma.dialerCallLog.updateMany({
-      where: { callControlId: params.leadCallControlId },
-      data: {
-        state: "hangup",
-        endedAt: new Date(),
-        hangupCause: "power_amd_uncertain",
-      },
-    }),
-    prisma.dialerQueueItem.deleteMany({
-      where: { leadId: params.leadId, campaignId: params.campaignId },
-    }),
-  ]);
 }
 
 /**

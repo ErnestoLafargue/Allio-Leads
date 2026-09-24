@@ -17,105 +17,29 @@ import {
 } from "@/lib/dialer-pacing";
 import {
   computeDispatchNewCallsNeeded,
-  computePowerDialerReplenishNewCalls,
   MAX_IN_FLIGHT_PER_CAMPAIGN,
   parseTelnyxOutboundChannelLimitFromEnv,
-  POWER_DIALER_LEADS_PER_READY_AGENT,
 } from "@/lib/dialer-dispatch-math";
 import { claimDispatchLeadBatch } from "@/lib/power-dialer-batch";
+import { userCanAccessCampaign } from "@/lib/campaign-access";
+import { loadPowerCampaign, runPowerDispatch } from "@/lib/power-dialer-engine";
 
 /**
- * Server-side parallel dialer — placerer N udgående opkald baseret på antal ledige agenter
- * og pacing-ratio. AMD aktiveret pr. opkald så svaremaskiner droppes automatisk.
+ * Server-side parallel dialer.
  *
- * POST {
- *   campaignId: string,
- *   maxNewCalls?: number,   // override af pacing-beregning (default: auto)
- *   amd?: "premium" | "detect" | "off"  // default "premium" (Telnyx-feltværdier)
- * }
+ * POWER_DIALER: udløses af den klare sælgers eget heartbeat. Pacing, AMD og ringetid læses fra
+ * kampagnens Power-indstillinger (se `lib/power-dialer-engine.ts`); klientens body-parametre ignoreres.
  *
- * Returnerer:
- *   { ok: true, dispatched: N, attempted: N, ready: agentCount, inFlight: callCount, errors: [] }
- *
- * Idempotens: kan kaldes hyppigt — hver call tjekker reelle in-flight tællinger og
- * placerer kun nye hvis der er kapacitet. DialerQueueItem.leadId er unique så samme
- * lead aldrig dispatches to gange samtidig.
- *
- * In-flight ben afbrydes ikke når `readyCount` falder — kun færre *nye* dials startes.
- *
- * Kaldes typisk fra workspace heartbeat (hver 5 sek) eller fra en cron-trigger.
+ * PREDICTIVE (kun ved manuelt kald — arbejdsfladen bruger WebRTC): dynamisk 1.0–3.0 ratio mod
+ * DIALER_ABANDON_TARGET, `maxNewCalls` og `amd` fra body som før.
  */
 
-const DEFAULT_AMD: AmdConfig = {
+const DEFAULT_PREDICTIVE_AMD: AmdConfig = {
   mode: "premium",
   totalAnalysisTimeMs: 5000,
   afterGreetingSilenceMs: 1000,
   greetingTotalAnalysisTimeMs: 4500,
 };
-
-/**
- * Pacing-ratio: hvor mange opkald pr. ledig agent der må være i luften.
- * - POWER_DIALER: 5 (power dialer — parallel op til kundens svar)
- * - PREDICTIVE:   dynamisk 1.0–3.0 baseret på rullende 1h-vindue (bridges vs. no-agent abandons);
- *   sigter mod DIALER_ABANDON_TARGET (~3 %)
- */
-async function targetPacingRatio(
-  dialMode: string,
-  campaignId: string,
-): Promise<{
-  ratio: number;
-  abandonRate: number | null;
-  sampleSize: number;
-  bridgeCount: number;
-  noAgentAbandonCount: number;
-  heldLowSample: boolean;
-}> {
-  if (dialMode === "PREDICTIVE") {
-    return getTargetPacingRatioAndStats(prisma, { campaignId, dialMode: "PREDICTIVE" });
-  }
-  if (dialMode === "POWER_DIALER") {
-    return {
-      ratio: POWER_DIALER_LEADS_PER_READY_AGENT,
-      abandonRate: null,
-      sampleSize: 0,
-      bridgeCount: 0,
-      noAgentAbandonCount: 0,
-      heldLowSample: false,
-    };
-  }
-  return {
-    ratio: 0,
-    abandonRate: null,
-    sampleSize: 0,
-    bridgeCount: 0,
-    noAgentAbandonCount: 0,
-    heldLowSample: false,
-  };
-}
-
-function pacingJson(
-  mode: string,
-  pacing: Awaited<ReturnType<typeof targetPacingRatio>>,
-  extras?: { targetTotal?: number; replenishBudget?: number; telnyxChannelLimit?: number | null },
-) {
-  return {
-    mode,
-    targetAbandonRate: DIALER_ABANDON_TARGET,
-    windowMs: PACING_WINDOW_MS,
-    minSampleBeforeTune: MIN_PACING_SAMPLE_BEFORE_TUNE,
-    ratio: pacing.ratio,
-    abandonRate1h: pacing.abandonRate,
-    sampleSize1h: pacing.sampleSize,
-    bridges1h: pacing.bridgeCount,
-    noAgentAbandons1h: pacing.noAgentAbandonCount,
-    heldLowSample: pacing.heldLowSample,
-    ...(extras?.targetTotal !== undefined ? { targetTotal: extras.targetTotal } : {}),
-    ...(extras?.replenishBudget !== undefined ? { replenishBudget: extras.replenishBudget } : {}),
-    ...(extras?.telnyxChannelLimit !== undefined
-      ? { telnyxChannelLimit: extras.telnyxChannelLimit }
-      : {}),
-  };
-}
 
 export async function POST(req: Request) {
   const { session, response } = await requireSession();
@@ -123,17 +47,71 @@ export async function POST(req: Request) {
 
   const body = await req.json().catch(() => null);
   const campaignId = typeof body?.campaignId === "string" ? body.campaignId.trim() : "";
-  const maxNewCallsOverride =
-    typeof body?.maxNewCalls === "number" && body.maxNewCalls > 0
-      ? Math.min(Math.floor(body.maxNewCalls), 20)
-      : null;
-  const amdMode: "premium" | "detect" | "off" =
-    body?.amd === "off" || body?.amd === "detect" ? body.amd : "premium";
 
   if (!campaignId) {
     return NextResponse.json({ error: "campaignId er påkrævet" }, { status: 400 });
   }
 
+  if (!(await userCanAccessCampaign(session!.user, campaignId))) {
+    return NextResponse.json(
+      { error: "Du har ikke adgang til denne kampagne." },
+      { status: 403 },
+    );
+  }
+
+  const campaignRow = await prisma.campaign.findUnique({
+    where: { id: campaignId },
+    select: { id: true, dialMode: true },
+  });
+  if (!campaignRow) {
+    return NextResponse.json({ error: "Kampagne findes ikke" }, { status: 404 });
+  }
+  const mode = normalizeCampaignDialMode(campaignRow.dialMode);
+
+  if (mode === "POWER_DIALER") {
+    const campaign = await loadPowerCampaign(campaignId);
+    if (!campaign) {
+      return NextResponse.json({ error: "Kampagne findes ikke" }, { status: 404 });
+    }
+    const result = await runPowerDispatch({ campaign, callerUserId: session!.user.id });
+    if (result.code === "TELNYX_NOT_CONFIGURED") {
+      return NextResponse.json(
+        { ...result, error: "TELNYX_API_KEY eller TELNYX_CONNECTION_ID mangler." },
+        { status: 503 },
+      );
+    }
+    return NextResponse.json(result);
+  }
+
+  if (mode !== "PREDICTIVE") {
+    return NextResponse.json(
+      {
+        error: campaignUsesVoipUi(mode)
+          ? `dialMode=${mode} understøtter ikke server-side dispatch.`
+          : "Kampagnen er ikke sat til et opkalds-mode (VoIP).",
+      },
+      { status: 409 },
+    );
+  }
+
+  return predictiveDispatch({
+    campaignId,
+    userId: session!.user.id,
+    maxNewCallsOverride:
+      typeof body?.maxNewCalls === "number" && body.maxNewCalls > 0
+        ? Math.min(Math.floor(body.maxNewCalls), 20)
+        : null,
+    amdMode: body?.amd === "off" || body?.amd === "detect" ? body.amd : "premium",
+  });
+}
+
+async function predictiveDispatch(params: {
+  campaignId: string;
+  userId: string;
+  maxNewCallsOverride: number | null;
+  amdMode: "premium" | "detect" | "off";
+}) {
+  const { campaignId, maxNewCallsOverride, amdMode } = params;
   const campaign = await prisma.campaign.findUnique({
     where: { id: campaignId },
     select: {
@@ -149,13 +127,6 @@ export async function POST(req: Request) {
   if (!campaign) {
     return NextResponse.json({ error: "Kampagne findes ikke" }, { status: 404 });
   }
-  const mode = normalizeCampaignDialMode(campaign.dialMode);
-  if (!campaignUsesVoipUi(mode)) {
-    return NextResponse.json(
-      { error: "Kampagnen er ikke sat til et opkalds-mode (VoIP)." },
-      { status: 409 },
-    );
-  }
 
   const apiKey = process.env.TELNYX_API_KEY?.trim();
   const connectionId = getTelnyxConnectionId();
@@ -169,7 +140,6 @@ export async function POST(req: Request) {
     );
   }
 
-  // 1) Tæl ledige agenter (ready, frisk heartbeat) — agenter med SIP-username
   const cutoff = new Date(Date.now() - PRESENCE_FRESH_WINDOW_MS);
   const readyAgents = await prisma.agentSession.findMany({
     where: {
@@ -181,12 +151,10 @@ export async function POST(req: Request) {
       user: { select: { telnyxSipUsername: true, telnyxCredentialId: true } },
     },
   });
-  const provisionedReady = readyAgents.filter(
+  const readyCount = readyAgents.filter(
     (s) => s.user.telnyxSipUsername && s.user.telnyxCredentialId,
-  );
-  const readyCount = provisionedReady.length;
+  ).length;
 
-  // 2) Tæl in-flight lead-opkald
   const inFlightCalls = await prisma.dialerCallLog.count({
     where: {
       campaignId,
@@ -196,10 +164,24 @@ export async function POST(req: Request) {
     },
   });
 
-  const pacing = await targetPacingRatio(mode, campaignId);
+  const pacing = await getTargetPacingRatioAndStats(prisma, { campaignId, dialMode: "PREDICTIVE" });
   const channelLimit = parseTelnyxOutboundChannelLimitFromEnv(
     process.env.TELNYX_OUTBOUND_CHANNEL_LIMIT,
   );
+  const pacingJson = (extras?: { targetTotal?: number }) => ({
+    mode: "PREDICTIVE",
+    targetAbandonRate: DIALER_ABANDON_TARGET,
+    windowMs: PACING_WINDOW_MS,
+    minSampleBeforeTune: MIN_PACING_SAMPLE_BEFORE_TUNE,
+    ratio: pacing.ratio,
+    abandonRate1h: pacing.abandonRate,
+    sampleSize1h: pacing.sampleSize,
+    bridges1h: pacing.bridgeCount,
+    noAgentAbandons1h: pacing.noAgentAbandonCount,
+    heldLowSample: pacing.heldLowSample,
+    telnyxChannelLimit: channelLimit,
+    ...(extras?.targetTotal !== undefined ? { targetTotal: extras.targetTotal } : {}),
+  });
 
   if (readyCount === 0) {
     return NextResponse.json({
@@ -209,50 +191,18 @@ export async function POST(req: Request) {
       ready: 0,
       inFlight: inFlightCalls,
       reason: "Ingen ledige agenter (provisioneret + ready + frisk heartbeat).",
-      pacing: pacingJson(mode, pacing, { telnyxChannelLimit: channelLimit }),
+      pacing: pacingJson(),
     });
   }
 
-  const { ratio } = pacing;
-  if (ratio <= 0) {
-    return NextResponse.json({
-      ok: true,
-      dispatched: 0,
-      attempted: 0,
-      reason: `dialMode=${mode} understøtter ikke server-side dispatch`,
-      pacing: pacingJson(mode, pacing, { telnyxChannelLimit: channelLimit }),
-    });
-  }
-
-  const isPowerDialer = mode === "POWER_DIALER";
-  let newCallsNeeded: number;
-  let targetTotal: number;
-  let replenishBudget: number | undefined;
-
-  if (isPowerDialer) {
-    const replenish = computePowerDialerReplenishNewCalls({
-      readyCount,
-      ratio,
-      inFlightCalls,
-      maxInFlightCap: MAX_IN_FLIGHT_PER_CAMPAIGN,
-      maxNewCallsOverride,
-      channelLimit,
-    });
-    replenishBudget = replenish.replenishBudget;
-    newCallsNeeded = replenish.newCallsNeeded;
-    targetTotal = inFlightCalls + replenish.replenishBudget;
-  } else {
-    const pacingResult = computeDispatchNewCallsNeeded({
-      readyCount,
-      ratio,
-      inFlightCalls,
-      maxInFlightCap: MAX_IN_FLIGHT_PER_CAMPAIGN,
-      maxNewCallsOverride,
-      channelLimit,
-    });
-    targetTotal = pacingResult.targetTotal;
-    newCallsNeeded = pacingResult.newCallsNeeded;
-  }
+  const { targetTotal, newCallsNeeded } = computeDispatchNewCallsNeeded({
+    readyCount,
+    ratio: pacing.ratio,
+    inFlightCalls,
+    maxInFlightCap: MAX_IN_FLIGHT_PER_CAMPAIGN,
+    maxNewCallsOverride,
+    channelLimit,
+  });
 
   if (newCallsNeeded === 0) {
     return NextResponse.json({
@@ -264,21 +214,15 @@ export async function POST(req: Request) {
       reason:
         channelLimit !== null && inFlightCalls >= channelLimit
           ? `Telnyx channel-limit nået (${inFlightCalls}/${channelLimit}) — ingen nye nu.`
-          : isPowerDialer
-            ? `Ingen kapacitet til ${replenishBudget ?? readyCount * ratio} nye opkald denne tick (${inFlightCalls} allerede i luften).`
-            : `Allerede ${inFlightCalls}/${targetTotal} i luften — ingen nye nu.`,
-      pacing: pacingJson(mode, pacing, {
-        targetTotal,
-        replenishBudget,
-        telnyxChannelLimit: channelLimit,
-      }),
+          : `Allerede ${inFlightCalls}/${targetTotal} i luften — ingen nye nu.`,
+      pacing: pacingJson({ targetTotal }),
     });
   }
 
   const reserved = await claimDispatchLeadBatch(prisma, {
     campaign,
     newCallsNeeded,
-    restrictPowerDialerEligibleAfter: mode === "POWER_DIALER",
+    restrictPowerDialerEligibleAfter: false,
   });
 
   if (reserved.length === 0) {
@@ -289,22 +233,17 @@ export async function POST(req: Request) {
       ready: readyCount,
       inFlight: inFlightCalls,
       reason: "Ingen flere ledige leads at dispatche (alle er allerede i kø, låst eller ugyldige numre).",
-      pacing: pacingJson(mode, pacing, {
-        targetTotal,
-        replenishBudget,
-        telnyxChannelLimit: channelLimit,
-      }),
+      pacing: pacingJson({ targetTotal }),
     });
   }
 
   const webhookUrl = process.env.TELNYX_CALL_WEBHOOK_URL?.trim() || undefined;
-  const dispatchId = `disp_${Date.now()}_${session!.user.id.slice(-4)}`;
-  const dialModeToken = mode === "PREDICTIVE" ? "PREDICTIVE" : "POWER_DIALER";
+  const dispatchId = `disp_${Date.now()}_${params.userId.slice(-4)}`;
 
   const dialResults = await Promise.all(
     reserved.map(async (r) => {
       const fromE164 = pickTelnyxFromNumber(r.leadId, {
-        userId: session!.user.id,
+        userId: params.userId,
         extraSalt: dispatchId,
       });
       if (!fromE164) {
@@ -317,7 +256,7 @@ export async function POST(req: Request) {
         leadId: r.leadId,
         queueItemId: r.queueItemId,
         batchId: dispatchId,
-        dialMode: dialModeToken,
+        dialMode: "PREDICTIVE",
         phoneE164: r.e164,
       });
       const dial = await dialTelnyxOutbound({
@@ -327,7 +266,7 @@ export async function POST(req: Request) {
         apiKey,
         clientState,
         webhookUrl,
-        amd: amdMode === "off" ? undefined : { ...DEFAULT_AMD, mode: amdMode },
+        amd: amdMode === "off" ? undefined : { ...DEFAULT_PREDICTIVE_AMD, mode: amdMode },
         timeoutSecs: 25,
       });
       if (!dial.ok) {
@@ -344,12 +283,12 @@ export async function POST(req: Request) {
     }),
   );
 
-  const successes: typeof dialResults = [];
   const failures: { leadId: string; error: string }[] = [];
+  let successes = 0;
 
   for (const r of dialResults) {
     if (r.ok) {
-      successes.push(r);
+      successes += 1;
       await prisma
         .$transaction([
           prisma.dialerCallLog.upsert({
@@ -389,19 +328,15 @@ export async function POST(req: Request) {
 
   return NextResponse.json({
     ok: true,
-    dispatched: successes.length,
+    dispatched: successes,
     attempted: reserved.length,
     failed: failures.length,
     ready: readyCount,
-    inFlight: inFlightCalls + successes.length,
+    inFlight: inFlightCalls + successes,
     target: targetTotal,
     dispatchId,
     errors: failures.length > 0 ? failures : undefined,
-    pacing: pacingJson(mode, pacing, {
-      targetTotal,
-      replenishBudget,
-      telnyxChannelLimit: channelLimit,
-    }),
+    pacing: pacingJson({ targetTotal }),
   });
 }
 
@@ -414,9 +349,10 @@ export async function DELETE() {
   if (response) return response;
   const now = new Date();
   const expired = await prisma.dialerQueueItem.deleteMany({
-    where: { expiresAt: { lt: now } },
+    where: { expiresAt: { lt: now }, connectedAt: null },
   });
   return NextResponse.json({ ok: true, cleaned: expired.count });
 }
 
 export const runtime = "nodejs";
+export const maxDuration = 60;

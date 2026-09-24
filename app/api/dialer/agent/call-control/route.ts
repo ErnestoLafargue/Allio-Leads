@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { requireSession } from "@/lib/api-auth";
 import { prisma } from "@/lib/prisma";
+import { userCanAccessCampaign } from "@/lib/campaign-access";
 
 /**
  * POST { campaignId: string, callControlId: string | null }
@@ -26,6 +27,13 @@ export async function POST(req: Request) {
 
   if (!campaignId) {
     return NextResponse.json({ error: "campaignId er påkrævet" }, { status: 400 });
+  }
+
+  if (!(await userCanAccessCampaign(session!.user, campaignId))) {
+    return NextResponse.json(
+      { error: "Du har ikke adgang til denne kampagne." },
+      { status: 403 },
+    );
   }
 
   const updated = await prisma.agentSession.updateMany({

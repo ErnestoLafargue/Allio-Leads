@@ -1,37 +1,17 @@
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { requireSession } from "@/lib/api-auth";
-import { applyLeadCooldownResets, markCallbackSeenByAssignee } from "@/lib/lead-cooldown";
-import { filterLeadsByCampaignProtectedSetting } from "@/lib/reklamebeskyttet-filter";
-import { filterLeadsByCampaignPhoneSetting } from "@/lib/lead-phone-filter";
-import { getLeadIdsWithOutcomeLogToday } from "@/lib/lead-outcome-today";
-import { isLeadInRebookingDialerPool } from "@/lib/lead-queue";
-import { MEETING_OUTCOME_REBOOK, normalizeMeetingOutcomeStatus } from "@/lib/meeting-outcome";
-import { releaseExpiredLocksEverywhere, releaseLeadLock, tryAcquireLeadLock } from "@/lib/lead-lock";
+import { applyLeadCooldownResets } from "@/lib/lead-cooldown";
+import { releaseExpiredLocksEverywhere } from "@/lib/lead-lock";
+import { parseWorkspaceStartDateFilterFromRequestBody } from "@/lib/workspace-start-date-filter";
+import { userCanAccessCampaign } from "@/lib/campaign-access";
 import {
-  filterLeadsByWorkspaceStartDate,
-  parseWorkspaceStartDateFilterFromRequestBody,
-} from "@/lib/workspace-start-date-filter";
-import { copenhagenDayKey } from "@/lib/copenhagen-day";
-import {
-  getActiveCampaignLeads,
-  hasActiveQueueViewConstraints,
-  parseActiveCampaignQueueView,
-  sortLeadsByActivePostalQueue,
-} from "@/lib/active-campaign-queue";
-import { normalizeCampaignDialMode } from "@/lib/dial-mode";
-import { powerDialerEligibleOrPastWhere } from "@/lib/power-dialer-batch";
-import { unansweredAttemptsWithinMaxWhere } from "@/lib/lead-attempts";
-import { LEAD_VISIT_DEDUPE_WINDOW_MS } from "@/lib/lead-visit-dedupe";
+  campaignReserveSelect,
+  reserveNextNewLeadFromCampaign,
+  reserveNextPendingCallback,
+} from "@/lib/campaign-queue-reserve";
 
 type Params = { params: Promise<{ id: string }> };
-
-const leadInclude = {
-  bookedByUser: { select: { id: true, name: true, username: true } as const },
-  campaign: { select: { id: true, name: true, fieldConfig: true } as const },
-  lockedByUser: { select: { id: true, name: true, username: true } as const },
-  callbackReservedByUser: { select: { id: true, name: true, username: true } as const },
-} as const;
 
 /**
  * Atomisk reservation: først alle aktive planlagte callbacks for denne bruger (på tværs af kampagner), derefter «Ny»-køen.
@@ -49,9 +29,9 @@ export async function POST(req: Request, { params }: Params) {
   const excludeLeadId = typeof body?.excludeLeadId === "string" ? body.excludeLeadId.trim() : "";
   const rawExcludeLeadIds: unknown[] = Array.isArray(body?.excludeLeadIds) ? body.excludeLeadIds : [];
   const excludeLeadIds = rawExcludeLeadIds
-        .filter((v: unknown): v is string => typeof v === "string")
-        .map((v) => v.trim())
-        .filter(Boolean)
+    .filter((v: unknown): v is string => typeof v === "string")
+    .map((v) => v.trim())
+    .filter(Boolean);
   const excludedLeadSet = new Set<string>([excludeLeadId, ...excludeLeadIds].filter(Boolean));
   const workspaceStartFilter = parseWorkspaceStartDateFilterFromRequestBody(body);
   if (
@@ -72,230 +52,40 @@ export async function POST(req: Request, { params }: Params) {
 
     const campaign = await prisma.campaign.findUnique({
       where: { id: campaignId },
-      select: {
-        id: true,
-        dialMode: true,
-        includeProtectedBusinesses: true,
-        includeLeadsWithoutPhone: true,
-        systemCampaignType: true,
-        fieldConfig: true,
-        activeQueueFilter: true,
-        maxContactAttempts: true,
-      },
+      select: campaignReserveSelect,
     });
     if (!campaign) {
       return NextResponse.json({ error: "Kampagne findes ikke" }, { status: 404 });
     }
-    if (
-      campaign.systemCampaignType === "active_customers" &&
-      session!.user.role !== "ADMIN"
-    ) {
+    if (!(await userCanAccessCampaign(session!.user, campaignId))) {
       return NextResponse.json(
-        { error: "Kun administratorer kan arbejde i «Aktive kunder»." },
+        { error: "Du har ikke adgang til denne kampagne." },
         { status: 403 },
       );
     }
 
-    const systemCampaignType = campaign.systemCampaignType;
     const now = new Date();
-    const powerDialEligible =
-      normalizeCampaignDialMode(campaign.dialMode) === "POWER_DIALER"
-        ? powerDialerEligibleOrPastWhere(now)
-        : {};
-    const contactAttemptsEligible = unansweredAttemptsWithinMaxWhere(campaign.maxContactAttempts);
 
-    async function tryReserve(id: string) {
-      const ok = await tryAcquireLeadLock(prisma, id, userId, now);
-      if (!ok) return null;
-      const lead = await prisma.lead.findUnique({
-        where: { id },
-        include: leadInclude,
-      });
-      if (!lead) return null;
-
-      const isCallbackCandidate =
-        lead.status === "CALLBACK_SCHEDULED" &&
-        lead.callbackStatus === "PENDING" &&
-        lead.callbackReservedByUserId === userId;
-
-      if (!isCallbackCandidate) {
-        if (systemCampaignType === "rebooking") {
-          if (
-            !isLeadInRebookingDialerPool({
-              status: lead.status,
-              meetingOutcomeStatus: lead.meetingOutcomeStatus,
-            })
-          ) {
-            await releaseLeadLock(prisma, id, userId);
-            return null;
-          }
-        } else if (
-          lead.status !== "NEW" ||
-          lead.callbackScheduledFor != null ||
-          lead.callbackReservedByUserId != null
-        ) {
-          await releaseLeadLock(prisma, id, userId);
-          return null;
-        }
-      }
-
-      const recentVisit = await prisma.leadVisitHistory.findFirst({
-        where: {
-          leadId: lead.id,
-          userId,
-          visitedAt: { gte: new Date(now.getTime() - LEAD_VISIT_DEDUPE_WINDOW_MS) },
-        },
-        select: { id: true },
-      });
-
-      if (!recentVisit) {
-        await prisma.leadVisitHistory.create({
-          data: {
-            leadId: lead.id,
-            userId,
-            campaignId: lead.campaign?.id ?? null,
-            companyName: lead.companyName,
-            statusAtVisit: lead.status,
-            dayKey: copenhagenDayKey(now),
-            visitedAt: now,
-          },
-        });
-      }
-      return lead;
+    const callbackLead = await reserveNextPendingCallback({
+      userId,
+      now,
+      excludedLeadIds: excludedLeadSet,
+      allowedCampaignIds: null,
+    });
+    if (callbackLead) {
+      return NextResponse.json({ lead: callbackLead });
     }
 
-    const pendingCallbacks = await prisma.lead.findMany({
-      where: {
-        status: "CALLBACK_SCHEDULED",
-        callbackStatus: "PENDING",
-        callbackReservedByUserId: userId,
-        /** Et tilbagekald må først komme tilbage i køen, når tidspunktet er nået. */
-        callbackScheduledFor: { lte: now },
-      },
-      orderBy: { callbackScheduledFor: "asc" },
-      select: { id: true },
+    const newLead = await reserveNextNewLeadFromCampaign({
+      userId,
+      now,
+      campaign,
+      preferLeadId: preferLeadId || undefined,
+      excludedLeadIds: excludedLeadSet,
+      workspaceStartFilter,
     });
 
-    for (const row of pendingCallbacks) {
-      if (excludedLeadSet.has(row.id)) continue;
-      const got = await tryReserve(row.id);
-      if (got) {
-        await markCallbackSeenByAssignee(got.id, userId);
-        const refreshed = await prisma.lead.findUnique({
-          where: { id: got.id },
-          include: leadInclude,
-        });
-        return NextResponse.json({ lead: refreshed ?? got });
-      }
-    }
-
-    /** «Ny» i køen må ikke have hængende tilbagekald-metadata (defensivt ved racedata / fejl). */
-    const newInDialerPool = {
-      status: "NEW" as const,
-      callbackScheduledFor: null,
-      callbackReservedByUserId: null,
-    };
-
-    const rawQueue = await prisma.lead.findMany({
-      where:
-        campaign.systemCampaignType === "rebooking"
-          ? {
-              campaignId,
-              /** Afsluttede udfald skal aldrig trækkes som næste lead (ses stadig i kampagne-layout). */
-              NOT: { status: { in: ["NOT_INTERESTED", "UNQUALIFIED"] } },
-              OR: [
-                { status: "MEETING_BOOKED", meetingOutcomeStatus: MEETING_OUTCOME_REBOOK },
-                /** Efter opkald/gem som «Ny» (eller auto fra voicemail) — stadig under genbook-kampagnen */
-                newInDialerPool,
-              ],
-              ...powerDialEligible,
-              ...contactAttemptsEligible,
-            }
-          : { campaignId, ...newInDialerPool, ...powerDialEligible, ...contactAttemptsEligible },
-      select: {
-        id: true,
-        status: true,
-        meetingOutcomeStatus: true,
-        importedAt: true,
-        lastOutcomeAt: true,
-        lastDialAttemptAt: true,
-        customFields: true,
-        phone: true,
-        meetingScheduledFor: true,
-        industry: true,
-        postalCode: true,
-      },
-    });
-
-    const fieldConfigJson = typeof campaign.fieldConfig === "string" ? campaign.fieldConfig : "{}";
-    const serverView = parseActiveCampaignQueueView(
-      typeof campaign.activeQueueFilter === "string" ? campaign.activeQueueFilter : "{}",
-    );
-    const useServerView = hasActiveQueueViewConstraints(serverView);
-    const mapped = rawQueue.map((r) => ({
-      id: r.id,
-      industry: r.industry,
-      customFields: r.customFields,
-      phone: r.phone,
-      meetingScheduledFor: r.meetingScheduledFor,
-      postalCode: r.postalCode,
-      status: r.status,
-      meetingOutcomeStatus: r.meetingOutcomeStatus,
-      importedAt: r.importedAt,
-      lastOutcomeAt: r.lastOutcomeAt,
-      lastDialAttemptAt: r.lastDialAttemptAt,
-    }));
-    const afterStartDate = useServerView
-      ? getActiveCampaignLeads(mapped, fieldConfigJson, campaign.activeQueueFilter)
-      : filterLeadsByWorkspaceStartDate(mapped, fieldConfigJson, workspaceStartFilter);
-
-    const filtered = filterLeadsByCampaignPhoneSetting(
-      campaign.systemCampaignType === "rebooking"
-        ? afterStartDate
-            .filter((r) => isLeadInRebookingDialerPool(r))
-            .map((r) => ({ ...r, customFields: r.customFields, phone: r.phone }))
-        : filterLeadsByCampaignProtectedSetting(
-            afterStartDate.map((r) => ({ ...r, customFields: r.customFields, phone: r.phone })),
-            campaign.includeProtectedBusinesses,
-          ),
-      campaign.includeLeadsWithoutPhone,
-    );
-    const outcomeToday = await getLeadIdsWithOutcomeLogToday(filtered.map((r) => r.id));
-    const sorted = sortLeadsByActivePostalQueue(
-      filtered.map((r) => ({
-        id: r.id,
-        postalCode: r.postalCode ?? "",
-        status:
-          campaign.systemCampaignType === "rebooking" &&
-          normalizeMeetingOutcomeStatus(r.meetingOutcomeStatus ?? "") === MEETING_OUTCOME_REBOOK
-            ? "NEW"
-            : r.status,
-        hasOutcomeLogToday: outcomeToday.has(r.id),
-        importedAt:
-          r.importedAt instanceof Date ? r.importedAt.toISOString() : String(r.importedAt),
-        lastOutcomeAt:
-          r.lastOutcomeAt instanceof Date ? r.lastOutcomeAt.toISOString() : undefined,
-        lastDialAttemptAt:
-          r.lastDialAttemptAt instanceof Date ? r.lastDialAttemptAt.toISOString() : undefined,
-      })),
-      serverView,
-    );
-
-    if (preferLeadId) {
-      const allowed = new Set(sorted.map((r) => r.id));
-      if (allowed.has(preferLeadId)) {
-        const got = await tryReserve(preferLeadId);
-        if (got) return NextResponse.json({ lead: got });
-      }
-    }
-
-    for (const row of sorted) {
-      if (excludedLeadSet.has(row.id)) continue;
-      const got = await tryReserve(row.id);
-      if (got) return NextResponse.json({ lead: got });
-    }
-
-    return NextResponse.json({ lead: null });
+    return NextResponse.json({ lead: newLead });
   } catch (e) {
     const msg = e instanceof Error ? e.message : String(e);
     const migrationHint =

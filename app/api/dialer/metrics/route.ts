@@ -12,7 +12,9 @@ import {
   PACING_WINDOW_MS,
 } from "@/lib/dialer-pacing";
 import { normalizeCampaignDialMode } from "@/lib/dial-mode";
-import { POWER_DIALER_LEADS_PER_READY_AGENT } from "@/lib/dialer-dispatch-math";
+import { getPowerCampaignStats, loadPowerCampaign } from "@/lib/power-dialer-engine";
+import { POWER_DROP_BRAKE_MIN_SAMPLE, POWER_DROP_BRAKE_WINDOW_MS } from "@/lib/power-dialer-constants";
+import { POWER_RESOLUTIONS } from "@/lib/power-dialer-outcomes";
 
 /**
  * GET ?campaignId=... — admin: aggregerede dialer-metrics til dashboard.
@@ -37,6 +39,42 @@ export async function GET(req: Request) {
 
   const mode = normalizeCampaignDialMode(campaign.dialMode);
   const since = new Date(Date.now() - PACING_WINDOW_MS);
+
+  if (mode === "POWER_DIALER") {
+    const power = await loadPowerCampaign(campaignId);
+    if (!power) return NextResponse.json({ error: "Kampagne findes ikke" }, { status: 404 });
+    const [stats, bridges1h, amd1h, resolutions] = await Promise.all([
+      getPowerCampaignStats(power),
+      countBridgesInWindow(prisma, { campaignId, since }),
+      countAmdMachineInWindow(prisma, { campaignId, since }),
+      prisma.dialerCallLog.groupBy({
+        by: ["resolution"],
+        where: { campaignId, direction: "outbound-lead", resolvedAt: { gte: since } },
+        _count: { _all: true },
+      }),
+    ]);
+    const byResolution = Object.fromEntries(POWER_RESOLUTIONS.map((r) => [r, 0])) as Record<string, number>;
+    for (const row of resolutions) {
+      if (row.resolution) byResolution[row.resolution] = row._count._all;
+    }
+    return NextResponse.json({
+      campaign: { id: campaign.id, name: campaign.name, dialMode: mode },
+      power: {
+        settings: power.settings,
+        stats,
+        brake: {
+          windowMs: POWER_DROP_BRAKE_WINDOW_MS,
+          minSample: POWER_DROP_BRAKE_MIN_SAMPLE,
+        },
+        lastHour: {
+          bridges: bridges1h,
+          amdMachineOrFax: amd1h,
+          byResolution,
+        },
+      },
+    });
+  }
+
   const cutoff = new Date(Date.now() - PRESENCE_FRESH_WINDOW_MS);
 
   const [
@@ -74,7 +112,7 @@ export async function GET(req: Request) {
     mode === "PREDICTIVE"
       ? await getTargetPacingRatioAndStats(prisma, { campaignId, dialMode: "PREDICTIVE" })
       : {
-          ratio: mode === "POWER_DIALER" ? POWER_DIALER_LEADS_PER_READY_AGENT : 0,
+          ratio: 0,
           abandonRate: null as number | null,
           sampleSize: 0,
           bridgeCount: bridges1h,

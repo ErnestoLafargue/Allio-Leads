@@ -149,7 +149,7 @@ export async function GET(req: Request) {
       where: {
         direction: "outbound-lead",
         startedAt: { gte: start, lt: endExclusive },
-        hangupCause: "no_agent_available",
+        OR: [{ hangupCause: "no_agent_available" }, { resolution: "DROP_NO_AGENT" }],
       },
     }),
     prisma.dialerCallLog.count({
