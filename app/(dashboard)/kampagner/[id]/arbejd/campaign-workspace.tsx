@@ -42,6 +42,7 @@ import { PowerDialerPhone, type PowerPhoneState } from "@/app/components/power-d
 import { useActivityRecordingPoll } from "@/lib/use-activity-recording-poll";
 import { scrollWorkspaceToTop } from "@/lib/scroll-workspace-to-top";
 import { KNOWN_LEAD_SOURCES, parseLeadNavigation } from "@/lib/lead-navigation";
+import { DIALER_AUTO_PAUSED_KEY, DIALER_START_PATH, markDialerPauseExit } from "@/lib/dialer-pause-exit";
 
 type Lead = {
   id: string;
@@ -250,7 +251,7 @@ export function CampaignWorkspace({
   const [autoDialPaused, setAutoDialPaused] = useState<boolean>(() => {
     if (typeof sessionStorage === "undefined") return false;
     try {
-      return sessionStorage.getItem("allio-voip-auto-paused") === "1";
+      return sessionStorage.getItem(DIALER_AUTO_PAUSED_KEY) === "1";
     } catch {
       return false;
     }
@@ -504,6 +505,10 @@ export function CampaignWorkspace({
    */
   const isPowerAutoDialSession =
     !poolMode && campaignDialMode === "POWER_DIALER" && voipSession && !initialPreferredLeadId;
+  /** Pause er slået til: næste gem lukker kampagnen og sender sælgeren til Start. */
+  const leaveAfterSave = isPowerAutoDialSession
+    ? powerIntent === "pause"
+    : autoDialPaused;
 
   useEffect(() => {
     let cancelled = false;
@@ -698,8 +703,8 @@ export function CampaignWorkspace({
   useEffect(() => {
     if (typeof sessionStorage === "undefined") return;
     try {
-      if (autoDialPaused) sessionStorage.setItem("allio-voip-auto-paused", "1");
-      else sessionStorage.removeItem("allio-voip-auto-paused");
+      if (autoDialPaused) sessionStorage.setItem(DIALER_AUTO_PAUSED_KEY, "1");
+      else sessionStorage.removeItem(DIALER_AUTO_PAUSED_KEY);
     } catch {
       /* no-op */
     }
@@ -924,6 +929,11 @@ export function CampaignWorkspace({
   }
 
   async function advanceToNextReservedAfterSave(savedLeadId: string) {
+    if (leaveAfterSave) {
+      await releaseLockHttp(savedLeadId);
+      leaveDialerAfterPause();
+      return;
+    }
     if (isPowerAutoDialSession) {
       await releaseLockHttp(savedLeadId);
       setActiveLead(null);
@@ -1022,6 +1032,12 @@ export function CampaignWorkspace({
     if (pid) void releaseLockHttp(pid);
   }, []);
 
+  function leaveDialerAfterPause() {
+    clearPrefetchReservation();
+    const path = markDialerPauseExit({ preferStorageKey: preferKeyFor(campaignId) });
+    window.location.assign(path || DIALER_START_PATH);
+  }
+
   async function onNext(
     meetingScheduledForISO?: string,
     adminSkipBookingOverlap?: boolean,
@@ -1088,6 +1104,12 @@ export function CampaignWorkspace({
         setMeetingScheduledFor(local.toISOString().slice(0, 16));
       }
 
+      if (leaveAfterSave) {
+        void releaseLockHttp(currentId);
+        leaveDialerAfterPause();
+        return;
+      }
+
       if (usePrefetch && pf) {
         setPrefetchedLead(null);
         prefetchInFlightRef.current = false;
@@ -1134,6 +1156,10 @@ export function CampaignWorkspace({
         clearPrefetchReservation();
         queueBackgroundPatch(currentId, patchBody);
         void releaseLockHttp(currentId);
+        if (leaveAfterSave) {
+          leaveDialerAfterPause();
+          return;
+        }
         setActiveLead(null);
         resetFormForPowerWaiting();
         setDone(false);
@@ -1156,6 +1182,14 @@ export function CampaignWorkspace({
     setNextAdvanceBusy(true);
 
     try {
+      if (leaveAfterSave) {
+        clearPrefetchReservation();
+        queueBackgroundPatch(currentId, patchBody);
+        void releaseLockHttp(currentId);
+        leaveDialerAfterPause();
+        return;
+      }
+
       const pf = prefetchedLeadRef.current;
       const usePrefetch =
         Boolean(pf && pf.id !== currentId && !backgroundLockLeadIdsRef.current.includes(pf.id));
@@ -1551,13 +1585,22 @@ export function CampaignWorkspace({
         String(current.callbackStatus ?? "PENDING").trim().toUpperCase() === "PENDING"));
 
   const showNextForMeeting = status !== "MEETING_BOOKED";
-  const nextLabel = saving ? "Henter næste…" : nextAdvanceBusy ? "Skifter…" : "Gem og næste";
+  const nextLabel = leaveAfterSave
+    ? saving || nextAdvanceBusy
+      ? "Gemmer…"
+      : "Gem og gå til pause"
+    : saving
+      ? "Henter næste…"
+      : nextAdvanceBusy
+        ? "Skifter…"
+        : "Gem og næste";
   const showBackgroundSaveHint = backgroundLockLeadIds.length > 0;
-  const nextButtonClass =
-    "rounded-xl bg-stone-900 px-6 py-3 text-sm font-semibold text-white shadow-md transition hover:bg-stone-800 disabled:opacity-60 shrink-0";
+  const nextButtonClass = leaveAfterSave
+    ? "rounded-xl bg-amber-800 px-6 py-3 text-sm font-semibold text-white shadow-md transition hover:bg-amber-900 disabled:opacity-60 shrink-0"
+    : "rounded-xl bg-stone-900 px-6 py-3 text-sm font-semibold text-white shadow-md transition hover:bg-stone-800 disabled:opacity-60 shrink-0";
 
   function renderNextButton() {
-    if (isPowerAutoDialSession) return null;
+    if (isPowerAutoDialSession && !leaveAfterSave) return null;
     if (!showNextForMeeting) return null;
     return (
       <button
@@ -1619,7 +1662,7 @@ export function CampaignWorkspace({
                   ? `Efterbehandling — klar om ${Math.ceil(wrapUpMsLeft / 1000)} sek.`
                   : "Gemmer udfald — du er snart klar igen."
                 : powerServer?.status === "draining" || powerIntent === "pause"
-                  ? "Pause: der startes ikke nye opkald. Igangværende opkald får lov at lande."
+                  ? "Pause: der startes ikke nye opkald. Når et lead åbner og du gemmer, lukkes kampagnen."
                   : powerDialerConnecting || powerServer?.status === "ringing"
                     ? "Forbinder samtale…"
                     : "Power Dialer ringer flere numre parallelt — lead åbnes når nogen svarer."}
@@ -1716,6 +1759,15 @@ export function CampaignWorkspace({
         </Link>
         <div className="mt-2 flex flex-wrap items-center gap-3">
           <h1 className="text-xl font-semibold text-stone-900">{campaignName}</h1>
+          {!showAutoDialBadge && autoDialPaused ? (
+            <span
+              className="inline-flex items-center gap-1.5 rounded-full bg-amber-100 px-2.5 py-1 text-xs font-semibold text-amber-900"
+              aria-live="polite"
+            >
+              <span className="h-1.5 w-1.5 rounded-full bg-amber-600" aria-hidden="true" />
+              På pause
+            </span>
+          ) : null}
           {showAutoDialBadge ? (
             <span
               className={`inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-xs font-semibold ${
@@ -1774,6 +1826,20 @@ export function CampaignWorkspace({
               aria-pressed={powerIntent === "pause"}
             >
               {powerIntent === "pause" ? "Fortsæt" : "Pause"}
+            </button>
+          ) : null}
+          {!showAutoDialBadge && !isPowerAutoDialSession ? (
+            <button
+              type="button"
+              onClick={() => setAutoDialPaused((p) => !p)}
+              className={`inline-flex items-center rounded-md border px-2.5 py-1 text-xs font-semibold shadow-sm transition ${
+                autoDialPaused
+                  ? "border-emerald-700 bg-emerald-700 text-white hover:bg-emerald-800"
+                  : "border-stone-300 bg-white text-stone-800 hover:border-stone-400 hover:bg-stone-50"
+              }`}
+              aria-pressed={autoDialPaused}
+            >
+              {autoDialPaused ? "Fortsæt" : "Pause"}
             </button>
           ) : null}
           {isPowerAutoDialSession && powerServer?.status === "wrap_up" && wrapUpMsLeft > 0 ? (
@@ -1858,6 +1924,11 @@ export function CampaignWorkspace({
           eller reservere det samme nummer samtidig. Når du går videre eller lukker fanen, frigives låset. Mens du
           arbejder her, fornyes det automatisk.
         </p>
+        {leaveAfterSave ? (
+          <p className="mt-2 rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-950">
+            Pause er slået til. Når du gemmer, lukkes kampagnen, og du kommer tilbage til starten.
+          </p>
+        ) : null}
         {current.status === "CALLBACK_SCHEDULED" && current.callbackScheduledFor && (
           <div className="mt-3 rounded-lg border border-violet-200 bg-violet-50/90 px-3 py-2 text-xs text-violet-950">
             <strong>Planlagt genopkald:</strong>{" "}

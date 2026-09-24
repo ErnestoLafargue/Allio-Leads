@@ -11,6 +11,7 @@ import {
 import { VoipAudioSettingsButton } from "@/app/components/voip-audio-settings-button";
 import { DashboardTabs } from "@/app/components/dashboard-tabs";
 import { buildCampaignArbejdHref, buildPoolArbejdHref, KNOWN_LEAD_SOURCES } from "@/lib/lead-navigation";
+import { DIALER_PAUSE_FLASH_KEY } from "@/lib/dialer-pause-exit";
 
 type Campaign = {
   id: string;
@@ -126,9 +127,9 @@ export default function StartPage() {
   const [powerDialerPauseFlash, setPowerDialerPauseFlash] = useState<string | null>(() => {
     if (typeof window === "undefined") return null;
     try {
-      const msg = sessionStorage.getItem("allio-power-dialer-flash");
+      const msg = sessionStorage.getItem(DIALER_PAUSE_FLASH_KEY);
       if (msg) {
-        sessionStorage.removeItem("allio-power-dialer-flash");
+        sessionStorage.removeItem(DIALER_PAUSE_FLASH_KEY);
         return msg;
       }
     } catch {
