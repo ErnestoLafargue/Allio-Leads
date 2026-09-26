@@ -116,32 +116,36 @@ function touchedAtMs(row: QueueOrderFields): number {
   return Number.NaN;
 }
 
-function hasBeenTried(row: QueueOrderFields): boolean {
-  if (Number.isFinite(touchedAtMs(row))) return true;
-  return (row.unansweredAttempts ?? 0) > 0;
+function attemptCount(row: QueueOrderFields): number {
+  const n = row.unansweredAttempts;
+  if (typeof n !== "number" || !Number.isFinite(n) || n <= 0) return 0;
+  return Math.floor(n);
+}
+
+/** Seneste reelle forsøg. Aldrig forsøgt = -∞, så de kommer først i samme forsøgs-gruppe. */
+function lastTryMs(row: QueueOrderFields): number {
+  const t = touchedAtMs(row);
+  return Number.isFinite(t) ? t : Number.NEGATIVE_INFINITY;
 }
 
 /**
- * Fælles sortering på tværs af Click-to-call, pulje, Power og Predictive:
- * status-rang → ikke kontaktet i dag først → aldrig forsøgt først → ældst touch
- * først → senest importeret → id.
+ * Default kø på tværs af Click-to-call, pulje, Power og Predictive:
+ * status-rang → færrest unansweredAttempts først → ældst sidste forsøg først
+ * → senest importeret → id.
  *
- * Voicemail / ikke-hjemme der er genåbnet efter cooldown skal kunne ringes
- * igen, men ligger bagerst til alle endnu-ikke-kontaktede i dag er taget.
+ * Voicemail / ikke-hjemme bliver ringbare efter cooldown, men ligger bag
+ * leads med færre kontaktforsøg, så man ikke kører i en 2-timers-ring.
  */
 export function compareLeadQueueOrder(a: QueueOrderFields, b: QueueOrderFields): number {
   const ra = queueRank(a.status);
   const rb = queueRank(b.status);
   if (ra !== rb) return ra - rb;
-  const ha = a.hasOutcomeLogToday === true ? 1 : 0;
-  const hb = b.hasOutcomeLogToday === true ? 1 : 0;
-  if (ha !== hb) return ha - hb;
-  const aTried = hasBeenTried(a) ? 1 : 0;
-  const bTried = hasBeenTried(b) ? 1 : 0;
-  if (aTried !== bTried) return aTried - bTried;
-  const tA = touchedAtMs(a);
-  const tB = touchedAtMs(b);
-  if (Number.isFinite(tA) && Number.isFinite(tB) && tA !== tB) return tA - tB;
+  const attA = attemptCount(a);
+  const attB = attemptCount(b);
+  if (attA !== attB) return attA - attB;
+  const tA = lastTryMs(a);
+  const tB = lastTryMs(b);
+  if (tA !== tB) return tA - tB;
   const ta = new Date(a.importedAt).getTime();
   const tb = new Date(b.importedAt).getTime();
   if (ta !== tb) return tb - ta;
@@ -154,7 +158,7 @@ export function sortLeadsForQueue<T extends QueueOrderFields>(leads: T[]): T[] {
 
 /**
  * Opkaldskø på kampagne-arbejde: samme compareLeadQueueOrder som reserve-next /
- * Power / Predictive. Ikke-kontaktede i dag først; voicemail-genbrug bagerst.
+ * Power / Predictive. Færrest kontaktforsøg først; ældst sidste forsøg derefter.
  */
 export function sortLeadsForCampaignCallQueue<T extends QueueOrderFields & { hasOutcomeLogToday: boolean }>(
   leads: T[],

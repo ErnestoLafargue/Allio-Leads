@@ -42,7 +42,7 @@ import {
   type PostalRange,
 } from "@/lib/active-campaign-queue";
 import { effectivePostalCode } from "@/lib/postal-from-address";
-import { isLeadInPowerPredictiveCampaignTable } from "@/lib/lead-queue";
+import { compareLeadQueueOrder, isLeadInPowerPredictiveCampaignTable } from "@/lib/lead-queue";
 import type { CampaignDialMode } from "@/lib/dial-mode";
 import { leadExceedsMaxAttemptsWarning } from "@/lib/lead-attempts";
 import { buildIndustryFilterLabelMap } from "@/lib/industry-display";
@@ -172,6 +172,7 @@ type LeadRow = {
   importedAt: string;
   unansweredAttempts?: number;
   lastOutcomeAt?: string | null;
+  lastDialAttemptAt?: string | null;
   /** Fra API (til udfalds-modal) */
   meetingScheduledFor?: string | null;
   customFields?: string;
@@ -228,6 +229,17 @@ function formatDateCell(isoLike: string): string {
 }
 
 type SortColumn = "company" | "phone" | "address" | "status" | "campaign" | "imported" | "attempts";
+
+function queueOrderFieldsFromLead(l: LeadRow) {
+  return {
+    id: l.id,
+    status: l.status,
+    importedAt: l.importedAt,
+    unansweredAttempts: l.unansweredAttempts ?? 0,
+    lastOutcomeAt: l.lastOutcomeAt ?? undefined,
+    lastDialAttemptAt: l.lastDialAttemptAt ?? undefined,
+  };
+}
 
 function compareLeads(a: LeadRow, b: LeadRow, key: SortColumn, dir: "asc" | "desc"): number {
   let cmp = 0;
@@ -779,7 +791,7 @@ export function LeadsBulkPanel({
         const bHas = bn != null;
         if (aHas !== bHas) return aHas ? -1 : 1;
         if (aHas && bHas && an !== bn) return (an - bn) * dirMul;
-        return a.id.localeCompare(b.id);
+        return compareLeadQueueOrder(queueOrderFieldsFromLead(a), queueOrderFieldsFromLead(b));
       });
     }
 
@@ -812,7 +824,11 @@ export function LeadsBulkPanel({
       });
     }
 
-    if (!sortKey) return out;
+    if (!sortKey) {
+      return [...out].sort((a, b) =>
+        compareLeadQueueOrder(queueOrderFieldsFromLead(a), queueOrderFieldsFromLead(b)),
+      );
+    }
     return [...out].sort((a, b) => compareLeads(a, b, sortKey, sortDir));
   }, [
     leads,

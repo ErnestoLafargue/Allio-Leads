@@ -3,8 +3,7 @@ import { prisma as defaultPrisma } from "@/lib/prisma";
 import { markCallbackSeenByAssignee } from "@/lib/lead-cooldown";
 import { filterLeadsByCampaignProtectedSetting } from "@/lib/reklamebeskyttet-filter";
 import { filterLeadsByCampaignPhoneSetting } from "@/lib/lead-phone-filter";
-import { getLeadIdsWithOutcomeLogToday } from "@/lib/lead-outcome-today";
-import { isLeadInRebookingDialerPool } from "@/lib/lead-queue";
+import { isLeadInRebookingDialerPool, type QueueOrderFields } from "@/lib/lead-queue";
 import { MEETING_OUTCOME_REBOOK, normalizeMeetingOutcomeStatus } from "@/lib/meeting-outcome";
 import { releaseLeadLock, tryAcquireLeadLock } from "@/lib/lead-lock";
 import {
@@ -192,12 +191,21 @@ export type ReserveNewFromCampaignOpts = {
   workspaceStartFilter: WorkspaceStartDateFilterState | null;
 };
 
-/** «Ny»-kø for én kampagne (activeQueueFilter / startdato / phone / postal). */
-export async function reserveNextNewLeadFromCampaign(
-  opts: ReserveNewFromCampaignOpts,
-): Promise<ReservedLead | null> {
+export type SortedDialerQueueLead = QueueOrderFields & {
+  campaignId: string;
+  postalCode: string;
+  address: string;
+  hasOutcomeLogToday: boolean;
+};
+
+export async function loadSortedNewLeadsForCampaign(opts: {
+  db?: PrismaClient;
+  now: Date;
+  campaign: ReserveCampaignSlice;
+  workspaceStartFilter: WorkspaceStartDateFilterState | null;
+}): Promise<SortedDialerQueueLead[]> {
   const db = opts.db ?? defaultPrisma;
-  const { userId, now, campaign, preferLeadId, excludedLeadIds, workspaceStartFilter } = opts;
+  const { now, campaign, workspaceStartFilter } = opts;
 
   const powerDialEligible =
     normalizeCampaignDialMode(campaign.dialMode) === "POWER_DIALER"
@@ -295,10 +303,10 @@ export async function reserveNextNewLeadFromCampaign(
         ),
     campaign.includeLeadsWithoutPhone,
   );
-  const outcomeToday = await getLeadIdsWithOutcomeLogToday(filtered.map((r) => r.id));
-  const sorted = sortLeadsByActivePostalQueue(
+  return sortLeadsByActivePostalQueue(
     filtered.map((r) => ({
       id: r.id,
+      campaignId: campaign.id,
       postalCode: r.postalCode ?? "",
       address: (r as { address?: string | null }).address ?? "",
       status:
@@ -306,7 +314,7 @@ export async function reserveNextNewLeadFromCampaign(
         normalizeMeetingOutcomeStatus(r.meetingOutcomeStatus ?? "") === MEETING_OUTCOME_REBOOK
           ? "NEW"
           : r.status,
-      hasOutcomeLogToday: outcomeToday.has(r.id),
+      hasOutcomeLogToday: false,
       importedAt:
         r.importedAt instanceof Date ? r.importedAt.toISOString() : String(r.importedAt),
       lastOutcomeAt:
@@ -317,6 +325,21 @@ export async function reserveNextNewLeadFromCampaign(
     })),
     serverView,
   );
+}
+
+/** «Ny»-kø for én kampagne (activeQueueFilter / startdato / phone / postal). */
+export async function reserveNextNewLeadFromCampaign(
+  opts: ReserveNewFromCampaignOpts,
+): Promise<ReservedLead | null> {
+  const db = opts.db ?? defaultPrisma;
+  const { userId, now, campaign, preferLeadId, excludedLeadIds, workspaceStartFilter } = opts;
+
+  const sorted = await loadSortedNewLeadsForCampaign({
+    db,
+    now,
+    campaign,
+    workspaceStartFilter,
+  });
 
   const prefer = preferLeadId?.trim() ?? "";
   if (prefer) {

@@ -3,13 +3,12 @@ import { prisma } from "@/lib/prisma";
 import { requireSession } from "@/lib/api-auth";
 import { applyLeadCooldownResets } from "@/lib/lead-cooldown";
 import { releaseExpiredLocksEverywhere, releaseLeadLock } from "@/lib/lead-lock";
-import {
-  dialPoolCampaignIdsForUser,
-  orderDialPoolRoundRobin,
-} from "@/lib/campaign-access";
+import { dialPoolCampaignIdsForUser } from "@/lib/campaign-access";
 import { normalizeCampaignDialMode } from "@/lib/dial-mode";
+import { compareLeadQueueOrder } from "@/lib/lead-queue";
 import {
   campaignReserveSelect,
+  loadSortedNewLeadsForCampaign,
   reserveNextNewLeadFromCampaign,
   reserveNextPendingCallback,
   tryReserveLead,
@@ -18,8 +17,8 @@ import {
 /**
  * Reserver næste lead fra «Ring alle tildelte»-puljen.
  * Pulje = CampaignAssignment + CLICK_TO_CALL|PREDICTIVE (ingen admin-bypass).
- * Fairness: round-robin via afterCampaignId; hver kampagnes activeQueueFilter gælder.
- * (Lokal startdato-filter bruges ikke i puljen — kun gemt activeQueueFilter pr. kampagne.)
+ * Default: færrest kontaktforsøg først på tværs af tildelte kampagner; ældst sidste
+ * forsøg ved lige. Hver kampagnes activeQueueFilter gælder.
  */
 export async function POST(req: Request) {
   const { session, response } = await requireSession();
@@ -32,6 +31,7 @@ export async function POST(req: Request) {
   const excludeLeadId = typeof body?.excludeLeadId === "string" ? body.excludeLeadId.trim() : "";
   const afterCampaignId =
     typeof body?.afterCampaignId === "string" ? body.afterCampaignId.trim() : "";
+  void afterCampaignId;
   const rawExcludeLeadIds: unknown[] = Array.isArray(body?.excludeLeadIds) ? body.excludeLeadIds : [];
   const excludeLeadIds = rawExcludeLeadIds
     .filter((v: unknown): v is string => typeof v === "string")
@@ -118,8 +118,6 @@ export async function POST(req: Request) {
       });
     }
 
-    const order = orderDialPoolRoundRobin(poolIds, afterCampaignId || null);
-
     if (preferLeadId) {
       const preferLead = await prisma.lead.findUnique({
         where: { id: preferLeadId },
@@ -148,15 +146,30 @@ export async function POST(req: Request) {
       }
     }
 
-    for (const campaignId of order) {
-      const camp = byId.get(campaignId);
+    const queued = (
+      await Promise.all(
+        campaigns.map((camp) =>
+          loadSortedNewLeadsForCampaign({
+            now,
+            campaign: camp,
+            workspaceStartFilter: null,
+          }),
+        ),
+      )
+    ).flat();
+    if (campaigns.length > 1) {
+      queued.sort(compareLeadQueueOrder);
+    }
+
+    for (const row of queued) {
+      if (excludedLeadSet.has(row.id)) continue;
+      const camp = byId.get(row.campaignId);
       if (!camp) continue;
-      const got = await reserveNextNewLeadFromCampaign({
+      const got = await tryReserveLead({
         userId,
         now,
-        campaign: camp,
-        excludedLeadIds: excludedLeadSet,
-        workspaceStartFilter: null,
+        leadId: row.id,
+        systemCampaignType: camp.systemCampaignType,
       });
       if (got) {
         return NextResponse.json({
