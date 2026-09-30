@@ -1120,6 +1120,16 @@ export function buildTelnyxAgentSipUri(sipUsername: string): string {
 }
 
 /**
+ * Skal appen selv starte optagelser (record_start)? Som standard nej: Telnyx' outbound voice profile
+ * ("Default") optager ALLE opkald i stereo (dual, siden 26/9-2026) — også power dialerens — så
+ * app-optagelser gav dubletter. Den ældre dispatcher startede desuden sin optagelse, før sælgeren
+ * var forbundet, så den ene kanal blev tavs. Slå til med TELNYX_APP_RECORDING=on.
+ */
+export function appRecordingEnabled(): boolean {
+  return process.env.TELNYX_APP_RECORDING?.trim().toLowerCase() === "on";
+}
+
+/**
  * Start optagelse af et igangværende opkald.
  *
  * - `format: "mp3"` for kompakt lydfil egnet til afspilning i browseren.

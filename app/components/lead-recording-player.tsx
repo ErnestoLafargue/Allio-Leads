@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
+import { createMonoPlayback, supportsMonoPlayback, type MonoPlayback } from "@/lib/mono-playback";
 
 function formatClock(totalSeconds: number): string {
   if (!Number.isFinite(totalSeconds) || totalSeconds < 0) return "0:00";
@@ -41,6 +42,31 @@ export function LeadRecordingPlayer({ src, durationSecondsHint, variant = "defau
   useEffect(() => {
     playingRef.current = playing;
   }, [playing]);
+
+  const monoCapable = supportsMonoPlayback(playbackSrc);
+  /** Mono-graf (lib/mono-playback) — oprettes først ved Afspil (kræver bruger-gesture). */
+  const monoRef = useRef<MonoPlayback | null>(null);
+
+  const ensureMonoPlayback = useCallback(
+    (el: HTMLAudioElement) => {
+      if (!monoCapable) return;
+      monoRef.current ??= createMonoPlayback();
+      monoRef.current.ensure(el);
+    },
+    [monoCapable],
+  );
+
+  const suspendMonoPlayback = useCallback(() => {
+    monoRef.current?.suspend();
+  }, []);
+
+  useEffect(
+    () => () => {
+      monoRef.current?.close();
+      monoRef.current = null;
+    },
+    [],
+  );
 
   /** Opdatér intern src kun når der ikke spilles — ellers vent til pause/slut. */
   const pendingSrcRef = useRef<string | null>(null);
@@ -95,8 +121,9 @@ export function LeadRecordingPlayer({ src, durationSecondsHint, variant = "defau
     setCurrent(0);
     const el = audioRef.current;
     if (el) el.currentTime = 0;
+    suspendMonoPlayback();
     applyPendingSrc();
-  }, [applyPendingSrc]);
+  }, [applyPendingSrc, suspendMonoPlayback]);
 
   const onPause = useCallback(() => {
     const el = audioRef.current;
@@ -104,9 +131,10 @@ export function LeadRecordingPlayer({ src, durationSecondsHint, variant = "defau
     // faktisk er stoppet (ikke ended, som håndteres i onEnded).
     if (el && !el.ended && el.paused) {
       setPlaying(false);
+      suspendMonoPlayback();
       applyPendingSrc();
     }
-  }, [applyPendingSrc]);
+  }, [applyPendingSrc, suspendMonoPlayback]);
 
   const onPlay = useCallback(() => {
     setPlaying(true);
@@ -143,12 +171,13 @@ export function LeadRecordingPlayer({ src, durationSecondsHint, variant = "defau
       void el.pause();
       setPlaying(false);
     } else {
+      ensureMonoPlayback(el);
       void el.play().then(
         () => setPlaying(true),
         () => setError("Afspilning blev blokeret eller fejlede."),
       );
     }
-  }, [playing]);
+  }, [playing, ensureMonoPlayback]);
 
   const seekTo = useCallback(
     (value: number) => {
@@ -173,8 +202,10 @@ export function LeadRecordingPlayer({ src, durationSecondsHint, variant = "defau
   return (
     <div className={`mt-2 ${wrap}`}>
       <audio
+        key={monoCapable ? "mono" : "native"}
         ref={audioRef}
         src={playbackSrc}
+        crossOrigin={monoCapable ? "anonymous" : undefined}
         preload="metadata"
         className="hidden"
         onLoadedMetadata={onMeta}

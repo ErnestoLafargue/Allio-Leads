@@ -183,6 +183,26 @@ function MenuIcon({ open }: { open: boolean }) {
   );
 }
 
+function TrainingIcon({ className }: { className?: string }) {
+  return (
+    <svg
+      className={className}
+      width="22"
+      height="22"
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="1.8"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      aria-hidden
+    >
+      <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" />
+      <path d="M8 9h8M8 13h5" />
+    </svg>
+  );
+}
+
 function DashboardIcon({ className }: { className?: string }) {
   return (
     <svg
@@ -222,6 +242,19 @@ const SIDEBAR_SECTIONS: SidebarSection[] = [
     href: "/scoreboard",
     label: "Scoreboard",
     icon: ScoreboardIcon,
+  },
+  {
+    kind: "group",
+    id: "scripts-traening",
+    label: "Scripts & Træning",
+    icon: TrainingIcon,
+    items: [
+      { href: "/scripts-og-traening", label: "Overblik" },
+      { href: "/scripts-og-traening/samtaler", label: "Mine samtaler" },
+      { href: "/scripts-og-traening/scripts", label: "Scripts" },
+      { href: "/scripts-og-traening/traening", label: "Træning" },
+      { href: "/scripts-og-traening/indsigter", label: "Indsigter" },
+    ],
   },
   {
     kind: "link",
@@ -316,25 +349,17 @@ export function AppSidebar({
         if (p.startsWith("/kampagner/uddel")) return false;
         return p.startsWith("/kampagner/");
       }
+      // Overblik er sektionens forside — kun aktiv på præcis den sti, ikke på undersiderne.
+      if (href === "/scripts-og-traening") return pathname === href;
       return pathname === href || (pathname ?? "").startsWith(`${href}/`);
     },
     [pathname],
   );
 
-  const adminActive = useMemo(
-    () =>
-      visibleSections
-        .filter((s): s is Extract<SidebarSection, { kind: "group" }> => s.kind === "group")
-        .filter((g) => g.id === "admin")
-        .some((g) => g.items.some((it) => linkActive(it.href))),
-    [visibleSections, linkActive],
+  const groupSectionActive = useCallback(
+    (items: LeafItem[]) => items.some((it) => linkActive(it.href)),
+    [linkActive],
   );
-
-  const meetingsActive = useMemo(() => linkActive("/meetings"), [linkActive]);
-
-  const leadsActive = useMemo(() => (pathname ?? "").startsWith("/leads"), [pathname]);
-  const ticketsActive = useMemo(() => (pathname ?? "").startsWith("/tickets"), [pathname]);
-  const dialerActive = useMemo(() => (pathname ?? "").startsWith("/kampagner"), [pathname]);
 
   /** Seller: Dialer som enkelt link (uden tom undermenu). Admin: gruppe med Uddel. */
   const navSections = useMemo((): SidebarSection[] => {
@@ -437,22 +462,8 @@ export function AppSidebar({
                   );
                 }
                 const Icon = s.icon;
-                const isAdminGroup = s.id === "admin";
-                const isMeetingsGroup = s.id === "meetings";
-                const isLeadsGroup = s.id === "leads";
-                const isTicketsGroup = s.id === "tickets";
-                const isDialerGroup = s.id === "dialer";
-                const open = isAdminGroup
-                  ? mobileOpenGroupId === s.id || adminActive
-                  : isMeetingsGroup
-                    ? mobileOpenGroupId === s.id || meetingsActive
-                    : isLeadsGroup
-                      ? mobileOpenGroupId === s.id || leadsActive
-                      : isTicketsGroup
-                        ? mobileOpenGroupId === s.id || ticketsActive
-                        : isDialerGroup
-                          ? mobileOpenGroupId === s.id || dialerActive
-                          : false;
+                const sectionActive = groupSectionActive(visibleGroupItems(s.items));
+                const open = mobileOpenGroupId === s.id || sectionActive;
                 return (
                   <div key={s.id}>
                     <button
@@ -533,19 +544,13 @@ export function AppSidebar({
         onMouseEnter={() => setHovered(true)}
         onMouseLeave={() => {
           setHovered(false);
-          if (desktopOpenGroupId === "admin" && !adminActive) setDesktopOpenGroupId(null);
-          if (desktopOpenGroupId === "meetings" && !meetingsActive) setDesktopOpenGroupId(null);
-          if (desktopOpenGroupId === "leads" && !leadsActive) setDesktopOpenGroupId(null);
-          if (desktopOpenGroupId === "tickets" && !ticketsActive) setDesktopOpenGroupId(null);
+          setDesktopOpenGroupId(null);
         }}
         onFocus={() => setHovered(true)}
         onBlur={(e) => {
             if (!e.currentTarget.contains(e.relatedTarget as Node)) {
             setHovered(false);
-            if (desktopOpenGroupId === "admin" && !adminActive) setDesktopOpenGroupId(null);
-            if (desktopOpenGroupId === "meetings" && !meetingsActive) setDesktopOpenGroupId(null);
-            if (desktopOpenGroupId === "leads" && !leadsActive) setDesktopOpenGroupId(null);
-            if (desktopOpenGroupId === "tickets" && !ticketsActive) setDesktopOpenGroupId(null);
+            setDesktopOpenGroupId(null);
           }
         }}
         aria-label="Hovednavigation"
@@ -613,35 +618,9 @@ export function AppSidebar({
               );
             }
             const Icon = s.icon;
-            const isAdminGroup = s.id === "admin";
-            const isMeetingsGroup = s.id === "meetings";
-            const isLeadsGroup = s.id === "leads";
-            const isTicketsGroup = s.id === "tickets";
-            const isDialerGroup = s.id === "dialer";
-            const groupHighlighted = isAdminGroup
-              ? adminActive
-              : isMeetingsGroup
-                ? meetingsActive
-                : isLeadsGroup
-                  ? leadsActive
-                  : isTicketsGroup
-                    ? ticketsActive
-                    : isDialerGroup
-                      ? dialerActive
-                      : false;
-            const open = expanded
-              ? isAdminGroup
-                ? desktopOpenGroupId === s.id || adminActive
-                : isMeetingsGroup
-                  ? desktopOpenGroupId === s.id || meetingsActive
-                  : isLeadsGroup
-                    ? desktopOpenGroupId === s.id || leadsActive
-                    : isTicketsGroup
-                      ? desktopOpenGroupId === s.id || ticketsActive
-                      : isDialerGroup
-                        ? desktopOpenGroupId === s.id || dialerActive
-                        : false
-              : false;
+            const sectionActive = groupSectionActive(visibleGroupItems(s.items));
+            const groupHighlighted = sectionActive;
+            const open = expanded && (desktopOpenGroupId === s.id || sectionActive);
             return (
               <div key={s.id} className="flex flex-col">
                 <button

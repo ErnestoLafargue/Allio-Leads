@@ -17,7 +17,6 @@ import {
   hangupTelnyxCall,
   isTelnyxChannelLimitError,
   pickTelnyxFromNumber,
-  startTelnyxRecording,
 } from "@/lib/telnyx-call-control";
 import { encodeDialerClientState, PRESENCE_FRESH_WINDOW_MS } from "@/lib/dialer-shared";
 
@@ -311,21 +310,9 @@ export async function handleAmdHuman(params: {
     }),
   ]);
 
-  // Start optagelse på lead-leggen — kun nu hvor AMD har bekræftet menneske.
-  // Dette sikrer at vi aldrig optager voicemail-beskeder.
-  // Fire-and-forget: hvis recording fejler skal det ikke blokere bridge-flow.
-  startTelnyxRecording({
-    apiKey: params.apiKey,
-    callControlId: params.leadCallControlId,
-    format: "mp3",
-    channels: "dual",
-  }).then((rec) => {
-    if (!rec.ok) {
-      console.error("[dialer-bridge] startTelnyxRecording fejlede:", rec.message);
-    }
-  }).catch((err) => {
-    console.error("[dialer-bridge] startTelnyxRecording exception:", err);
-  });
+  // Ingen app-optagelse her: den startede før sælgerens ben var forbundet, så den ene kanal blev
+  // tavs (58 optagelser apr–maj 2026), og voice profilen optager alligevel opkaldet komplet i stereo.
+  // Se appRecordingEnabled() i telnyx-call-control.
 
   return { status: "bridged", agentUserId: reserved.userId };
 }

@@ -16,6 +16,7 @@ import {
   hangupTelnyxCall,
   isTelnyxChannelLimitError,
   pickTelnyxFromNumber,
+  appRecordingEnabled,
   startTelnyxRecording,
 } from "@/lib/telnyx-call-control";
 import {
@@ -651,7 +652,9 @@ export async function handlePowerLegBridged(callControlId: string, direction: "l
     data: { status: "talking", reservedAt: null },
   });
   const apiKey = telnyxApiKey();
-  if (won.count === 1 && apiKey) {
+  // Starter først her, hvor benene er forbundet (ellers bliver den ene kanal tavs), og kun hvis
+  // app-optagelse er slået til — voice profilen optager ellers opkaldet komplet.
+  if (won.count === 1 && apiKey && appRecordingEnabled()) {
     const rec = await startTelnyxRecording({
       apiKey,
       callControlId,

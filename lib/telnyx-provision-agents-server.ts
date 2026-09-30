@@ -12,7 +12,7 @@ function sanitize(s: string): string {
   return s.replace(/[^A-Za-z0-9]/g, "");
 }
 
-function buildConnectionName(userId: string): string {
+export function buildConnectionName(userId: string): string {
   const core = sanitize(userId).toLowerCase();
   // Telnyx credential connection_name max = 32 chars.
   // Keep deterministic suffix from user id to avoid collisions.
