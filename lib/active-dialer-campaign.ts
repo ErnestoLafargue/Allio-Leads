@@ -11,6 +11,7 @@
  */
 
 let activeDialerCampaignId: string | null = null;
+let activeDialerLinePhase: "ringing" | "talking" | null = null;
 
 export function setActiveDialerCampaign(campaignId: string | null): void {
   activeDialerCampaignId = campaignId?.trim() || null;
@@ -20,9 +21,18 @@ export function getActiveDialerCampaign(): string | null {
   return activeDialerCampaignId;
 }
 
+export function setActiveDialerLinePhase(phase: "ringing" | "talking" | null): void {
+  activeDialerLinePhase = phase;
+}
+
+export function getActiveDialerLinePhase(): "ringing" | "talking" | null {
+  return activeDialerLinePhase;
+}
+
 /** Ryd kun hvis kampagnen stadig er den registrerede — undgår at et nyt opkald ryddes af et gammelt unmount. */
 export function clearActiveDialerCampaignIfMatches(campaignId: string | null): void {
   if (activeDialerCampaignId === (campaignId?.trim() || null)) {
     activeDialerCampaignId = null;
+    activeDialerLinePhase = null;
   }
 }
