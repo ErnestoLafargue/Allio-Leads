@@ -27,6 +27,31 @@ describe("mergeDefaultExtensions — Domæne", () => {
     expect(cfg.extensions.companyName?.at(-1)).toEqual(FIXED_DOMAIN_EXTENSION_FIELD);
   });
 
+  it("holder Domæne sidst selv med ekstra kampagnefelter", () => {
+    const cfg = mergeDefaultExtensions({
+      extensions: {
+        companyName: [
+          { key: "stifter", label: "Stifter" },
+          { key: "domaene", label: "Domæne" },
+          { key: "ekstra_note", label: "Ekstra note" },
+          { key: "hjemmeside", label: "Hjemmeside" },
+        ],
+      },
+    });
+    const keys = cfg.extensions.companyName?.map((f) => f.key) ?? [];
+    expect(keys.at(-1)).toBe("domaene");
+    expect(keys).toEqual([
+      "stifter",
+      "direktor",
+      "fuldt_ansvarlig_person",
+      "hjemmeside_ansvarlig",
+      "virksomhedsejer",
+      "ekstra_note",
+      "hjemmeside",
+      "domaene",
+    ]);
+  });
+
   it("fjerner duplikat Domæne fra gemt config og beholder standard domaene", () => {
     const raw = serializeFieldConfig({
       extensions: {
@@ -45,9 +70,10 @@ describe("mergeDefaultExtensions — Domæne", () => {
       "fuldt_ansvarlig_person",
       "hjemmeside_ansvarlig",
       "virksomhedsejer",
-      "domaene",
       "hjemmeside",
+      "domaene",
     ]);
+    expect(keys.at(-1)).toBe("domaene");
   });
 });
 

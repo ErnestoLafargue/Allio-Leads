@@ -168,13 +168,17 @@ export function mergeDefaultExtensions(cfg: CampaignFieldConfig): CampaignFieldC
   for (const g of FIELD_GROUPS) {
     if (g === "companyName") {
       const existing = cfg.extensions.companyName ?? [];
-      const fixedKeys = new Set(FIXED_COMPANY_NAME_EXTENSION_FIELDS.map((f) => f.key));
-      const merged: CampaignExtraField[] = [...FIXED_COMPANY_NAME_EXTENSION_FIELDS];
+      const fixedPersonKeys = new Set(FIXED_PERSON_EXTENSION_FIELDS.map((f) => f.key));
+      // Personfelter først, kampagne-ekstrafelter midt, Domæne altid sidst.
+      const merged: CampaignExtraField[] = [...FIXED_PERSON_EXTENSION_FIELDS];
       for (const f of existing) {
-        if (fixedKeys.has(f.key)) continue;
-        if (isLegacyDomainExtensionField(f.key, f.label)) continue;
+        if (fixedPersonKeys.has(f.key)) continue;
+        if (isFixedDomainExtensionKey(f.key) || isLegacyDomainExtensionField(f.key, f.label)) {
+          continue;
+        }
         merged.push(f);
       }
+      merged.push(FIXED_DOMAIN_EXTENSION_FIELD);
       extensions.companyName = merged;
       continue;
     }
