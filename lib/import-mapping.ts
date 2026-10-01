@@ -137,6 +137,14 @@ export function suggestColumnMapping(columns: string[]): Record<string, string> 
     ) {
       t = "custom:hjemmeside_ansvarlig";
     } else if (
+      n === "virksomhedsejer" ||
+      n === "virksomheds_ejer" ||
+      n === "company_owner" ||
+      n === "owner" ||
+      (n.includes("virksomhed") && n.includes("ejer"))
+    ) {
+      t = "custom:virksomhedsejer";
+    } else if (
       n.includes("domain") ||
       n.includes("hjemmeside") ||
       n.includes("website") ||

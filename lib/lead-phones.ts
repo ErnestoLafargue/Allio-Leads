@@ -6,7 +6,7 @@ import {
   resolveFixedPersonFieldKeys,
 } from "@/lib/campaign-fields";
 import { hasLeadPhone } from "@/lib/lead-phone-filter";
-import { normalizePhoneToE164ForDial } from "@/lib/phone-e164";
+import { normalizePhoneToE164ForDial, phoneDigitsForMatch } from "@/lib/phone-e164";
 
 export const DIAL_PHONE_PRIORITIES = ["PRIVATE_FIRST", "COMPANY_FIRST"] as const;
 export type DialPhonePriority = (typeof DIAL_PHONE_PRIORITIES)[number];
@@ -44,7 +44,8 @@ export function visibleLeadPhoneFields(
 
 /**
  * Gyldige opkaldsmål i prioriteret rækkefølge.
- * Dubletter (samme E.164) fjernes — kun ét forsøg pr. unikt nummer.
+ * Samme nummer (E.164 / samme cifre, fx +4512345678 vs 12345678) fjernes —
+ * kun ét forsøg pr. unikt nummer, så failover ikke ringer det samme op to gange.
  */
 export function orderedDialPhones(
   phone: string,
@@ -67,11 +68,15 @@ export function orderedDialPhones(
       : [privateTarget, companyTarget];
 
   const out: DialPhoneTarget[] = [];
-  const seen = new Set<string>();
+  const seenE164 = new Set<string>();
+  const seenDigits = new Set<string>();
   for (const t of ordered) {
     if (!t) continue;
-    if (seen.has(t.e164)) continue;
-    seen.add(t.e164);
+    const digits = phoneDigitsForMatch(t.e164) ?? phoneDigitsForMatch(t.raw);
+    if (seenE164.has(t.e164)) continue;
+    if (digits && seenDigits.has(digits)) continue;
+    seenE164.add(t.e164);
+    if (digits) seenDigits.add(digits);
     out.push(t);
   }
   return out;
@@ -137,7 +142,7 @@ export function leadHasAnyPhone(phone: string, privatePhone?: string | null): bo
 }
 
 /**
- * Personfelter (stifter/direktør/FAD/hjemmeside-ansvarlig): kun felter med værdi.
+ * Personfelter (stifter/direktør/FAD/hjemmeside-ansvarlig/virksomhedsejer): kun felter med værdi.
  * Har ledet ingen personværdier → vis kun «Fuldt ansvarlig deltager» tom.
  */
 export function visiblePersonExtensionFields(
@@ -150,6 +155,7 @@ export function visiblePersonExtensionFields(
     { key: keys.direktor, label: "Direktør" },
     { key: keys.fuldtAnsvarligPerson, label: "Fuldt ansvarlig deltager" },
     { key: keys.hjemmesideAnsvarlig, label: "Hjemmeside Ansvarlig" },
+    { key: keys.virksomhedsejer, label: "Virksomhedsejer" },
   ];
 
   const companyExt = cfg.extensions.companyName ?? [];
@@ -175,7 +181,8 @@ export function isVisiblePersonFieldKey(key: string, cfg: CampaignFieldConfig): 
     key === keys.stifter ||
     key === keys.direktor ||
     key === keys.fuldtAnsvarligPerson ||
-    key === keys.hjemmesideAnsvarlig
+    key === keys.hjemmesideAnsvarlig ||
+    key === keys.virksomhedsejer
   );
 }
 

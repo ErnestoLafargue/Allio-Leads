@@ -2,7 +2,7 @@ import { normalizeCVR } from "@/lib/cvr-import";
 
 /**
  * Krak (personsøgning) kun for relevante personfelter — ikke for øvrige ekstrafelter.
- * Matcher typisk: stifter, direktør, fuldt ansvarlig deltager / FAD, hjemmeside ansvarlig.
+ * Matcher typisk: stifter, direktør, fuldt ansvarlig deltager / FAD, hjemmeside ansvarlig, virksomhedsejer.
  */
 export function isKrakPersonFieldLabel(label: string): boolean {
   const t = label.trim().toLowerCase();
@@ -12,6 +12,7 @@ export function isKrakPersonFieldLabel(label: string): boolean {
   if (t.includes("direktør") || noAccent.includes("direktor")) return true;
   if (t.includes("fuldt ansvarlig") || /\bfad\b/i.test(t) || t.includes("(fad)")) return true;
   if (t.includes("hjemmeside") && t.includes("ansvarlig")) return true;
+  if (t.includes("virksomhedsejer") || noAccent.includes("virksomhedsejer")) return true;
   return false;
 }
 

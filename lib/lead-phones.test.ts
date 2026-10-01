@@ -60,6 +60,21 @@ describe("orderedDialPhones / priority", () => {
     expect(orderedDialPhones("12345678", "12345678")).toHaveLength(1);
   });
 
+  it("fjerner samme nummer med forskellig formattering (+45 vs 8 cifre)", () => {
+    const ordered = orderedDialPhones("+45 12 34 56 78", "12345678", "PRIVATE_FIRST");
+    expect(ordered).toHaveLength(1);
+    expect(ordered[0]?.e164).toBe("+4512345678");
+    expect(nextDialPhoneAfterFailure("+4512345678", "12345678", "+4512345678", "PRIVATE_FIRST")).toBeNull();
+    expect(
+      pickPowerDialTarget({
+        phone: "12345678",
+        privatePhone: "+4512345678",
+        priority: "PRIVATE_FIRST",
+        dialFailoverPendingE164: "+4512345678",
+      }),
+    ).toBeNull();
+  });
+
   it("nextDialPhoneAfterFailure", () => {
     const next = nextDialPhoneAfterFailure("11111111", "22222222", "+4522222222", "PRIVATE_FIRST");
     expect(next?.e164).toBe("+4511111111");
@@ -102,6 +117,7 @@ describe("visiblePersonExtensionFields", () => {
           direktor: "",
           fuldt_ansvarlig_person: "Bo",
           hjemmeside_ansvarlig: "Carla",
+          virksomhedsejer: "Dan",
         },
         cfg,
       ),
@@ -109,12 +125,16 @@ describe("visiblePersonExtensionFields", () => {
       { key: "stifter", label: "Stifter" },
       { key: "fuldt_ansvarlig_person", label: "Fuldt ansvarlig deltager" },
       { key: "hjemmeside_ansvarlig", label: "Hjemmeside Ansvarlig" },
+      { key: "virksomhedsejer", label: "Virksomhedsejer" },
     ]);
   });
 
-  it("skjuler Hjemmeside Ansvarlig når tom", () => {
+  it("skjuler Hjemmeside Ansvarlig og Virksomhedsejer når tom", () => {
     expect(
-      visiblePersonExtensionFields({ stifter: "Anna", hjemmeside_ansvarlig: "  " }, cfg),
+      visiblePersonExtensionFields(
+        { stifter: "Anna", hjemmeside_ansvarlig: "  ", virksomhedsejer: "" },
+        cfg,
+      ),
     ).toEqual([{ key: "stifter", label: "Stifter" }]);
   });
 });

@@ -21,6 +21,7 @@ describe("mergeDefaultExtensions — Domæne", () => {
       "direktor",
       "fuldt_ansvarlig_person",
       "hjemmeside_ansvarlig",
+      "virksomhedsejer",
       "domaene",
     ]);
     expect(cfg.extensions.companyName?.at(-1)).toEqual(FIXED_DOMAIN_EXTENSION_FIELD);
@@ -43,6 +44,7 @@ describe("mergeDefaultExtensions — Domæne", () => {
       "direktor",
       "fuldt_ansvarlig_person",
       "hjemmeside_ansvarlig",
+      "virksomhedsejer",
       "domaene",
       "hjemmeside",
     ]);

@@ -307,10 +307,16 @@ export function CampaignVoipStrip({
   const liveTalkRef = useRef<{ leadId: string; startedAt: number } | null>(null);
   const voipPhone = (activeDialPhone || leadPhone || "").trim();
   const failoverTrimmed = (failoverPhone || "").trim();
+  const primaryE164 = normalizePhoneToE164ForDial((leadPhone || "").trim());
+  const failoverE164 = failoverTrimmed ? normalizePhoneToE164ForDial(failoverTrimmed) : null;
+  const sameAsPrimary =
+    failoverTrimmed.length > 0 &&
+    ((primaryE164 && failoverE164 && primaryE164 === failoverE164) ||
+      stripDialFormatting(failoverTrimmed) === stripDialFormatting((leadPhone || "").trim()));
   const canFailover =
     effectiveDialMode === "PREDICTIVE" &&
     failoverTrimmed.length > 0 &&
-    stripDialFormatting(failoverTrimmed) !== stripDialFormatting((leadPhone || "").trim()) &&
+    !sameAsPrimary &&
     usedFailoverForLeadId !== leadId;
 
   const [devices, setDevices] = useState<MediaDeviceInfo[]>([]);
