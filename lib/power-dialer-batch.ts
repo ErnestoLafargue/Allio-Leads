@@ -13,8 +13,12 @@ import {
 } from "@/lib/active-campaign-queue";
 import { getLeadIdsWithOutcomeLogToday } from "@/lib/lead-outcome-today";
 import { filterLeadsByCampaignProtectedSetting } from "@/lib/reklamebeskyttet-filter";
+import {
+  normalizeDialPhonePriority,
+  pickPowerDialTarget,
+  type DialPhonePriority,
+} from "@/lib/lead-phones";
 import { filterLeadsByCampaignPhoneSetting } from "@/lib/lead-phone-filter";
-import { normalizePhoneToE164ForDial } from "@/lib/phone-e164";
 import { QUEUE_RESERVATION_TTL_MS } from "@/lib/dialer-shared";
 import { unansweredAttemptsWithinMaxWhere } from "@/lib/lead-attempts";
 
@@ -42,6 +46,7 @@ type CampaignQueueFields = {
   includeProtectedBusinesses: boolean;
   includeLeadsWithoutPhone: boolean;
   maxContactAttempts: number | null;
+  dialPhonePriority?: string | null;
 };
 
 /**
@@ -85,6 +90,8 @@ export async function claimDispatchLeadBatch(
     select: {
       id: true,
       phone: true,
+      privatePhone: true,
+      dialFailoverPendingE164: true,
       companyName: true,
       industry: true,
       customFields: true,
@@ -103,6 +110,7 @@ export async function claimDispatchLeadBatch(
   const viewRaw =
     typeof campaign.activeQueueFilter === "string" ? campaign.activeQueueFilter : "{}";
   const serverView = parseActiveCampaignQueueView(viewRaw);
+  const priority: DialPhonePriority = normalizeDialPhonePriority(campaign.dialPhonePriority);
   let pool = getActiveCampaignLeads(
     candidatesRaw.map((r) => ({
       id: r.id,
@@ -162,8 +170,13 @@ export async function claimDispatchLeadBatch(
 
   for (const lead of candidates) {
     if (reserved.length >= newCallsNeeded) break;
-    const e164 = normalizePhoneToE164ForDial(lead.phone);
-    if (!e164) continue;
+    const target = pickPowerDialTarget({
+      phone: lead.phone,
+      privatePhone: lead.privatePhone,
+      priority,
+      dialFailoverPendingE164: lead.dialFailoverPendingE164,
+    });
+    if (!target) continue;
     try {
       const created = await prisma.$transaction(async (tx) => {
         const q = await tx.dialerQueueItem.create({
@@ -181,8 +194,8 @@ export async function claimDispatchLeadBatch(
       });
       reserved.push({
         leadId: lead.id,
-        phone: lead.phone,
-        e164,
+        phone: target.raw,
+        e164: target.e164,
         queueItemId: created.id,
       });
     } catch {
@@ -227,6 +240,8 @@ export async function listPowerDialerCandidates(
     select: {
       id: true,
       phone: true,
+      privatePhone: true,
+      dialFailoverPendingE164: true,
       industry: true,
       customFields: true,
       meetingScheduledFor: true,
@@ -243,6 +258,7 @@ export async function listPowerDialerCandidates(
   const fieldConfigJson = typeof campaign.fieldConfig === "string" ? campaign.fieldConfig : "{}";
   const viewRaw = typeof campaign.activeQueueFilter === "string" ? campaign.activeQueueFilter : "{}";
   const serverView = parseActiveCampaignQueueView(viewRaw);
+  const priority: DialPhonePriority = normalizeDialPhonePriority(campaign.dialPhonePriority);
   const inView = getActiveCampaignLeads(
     rows.map((r) => ({
       ...r,
@@ -278,9 +294,14 @@ export async function listPowerDialerCandidates(
     if (out.length >= limit) break;
     const r = byId.get(s.id);
     if (!r) continue;
-    const e164 = normalizePhoneToE164ForDial(r.phone);
-    if (!e164) continue;
-    out.push({ leadId: r.id, e164, lastDialAttemptAt: r.lastDialAttemptAt });
+    const target = pickPowerDialTarget({
+      phone: r.phone,
+      privatePhone: r.privatePhone,
+      priority,
+      dialFailoverPendingE164: r.dialFailoverPendingE164,
+    });
+    if (!target) continue;
+    out.push({ leadId: r.id, e164: target.e164, lastDialAttemptAt: r.lastDialAttemptAt });
   }
   return out;
 }

@@ -43,11 +43,17 @@ import { useActivityRecordingPoll } from "@/lib/use-activity-recording-poll";
 import { scrollWorkspaceToTop } from "@/lib/scroll-workspace-to-top";
 import { KNOWN_LEAD_SOURCES, parseLeadNavigation } from "@/lib/lead-navigation";
 import { DIALER_AUTO_PAUSED_KEY, DIALER_START_PATH, markDialerPauseExit } from "@/lib/dialer-pause-exit";
+import {
+  normalizeDialPhonePriority,
+  orderedDialPhones,
+  type DialPhonePriority,
+} from "@/lib/lead-phones";
 
 type Lead = {
   id: string;
   companyName: string;
   phone: string;
+  privatePhone?: string;
   email: string;
   cvr: string;
   address: string;
@@ -249,6 +255,7 @@ export function CampaignWorkspace({
   const isAdmin = session?.user?.role === "ADMIN";
   const [campaignName, setCampaignName] = useState(poolMode ? "Alle tildelte" : "");
   const [campaignDialMode, setCampaignDialMode] = useState<CampaignDialMode>("NO_DIAL");
+  const [dialPhonePriority, setDialPhonePriority] = useState<DialPhonePriority>("PRIVATE_FIRST");
   const [campaignSystemType, setCampaignSystemType] = useState<string | null>(null);
   /** Auto-dial pause-toggle (sessionStorage). Når true: agenten styrer selv hver opringning. */
   const [autoDialPaused, setAutoDialPaused] = useState<boolean>(() => {
@@ -323,6 +330,7 @@ export function CampaignWorkspace({
         : (c.name ?? ""),
     );
     setCampaignDialMode(normalizeCampaignDialMode(c.dialMode));
+    setDialPhonePriority(normalizeDialPhonePriority(c.dialPhonePriority));
     setCampaignSystemType(
       typeof c.systemCampaignType === "string" && c.systemCampaignType.trim()
         ? c.systemCampaignType.trim()
@@ -334,6 +342,7 @@ export function CampaignWorkspace({
 
   const [companyName, setCompanyName] = useState("");
   const [phone, setPhone] = useState("");
+  const [privatePhone, setPrivatePhone] = useState("");
   const [email, setEmail] = useState("");
   const [cvr, setCvr] = useState("");
   const [address, setAddress] = useState("");
@@ -446,6 +455,7 @@ export function CampaignWorkspace({
   const loadFormFromLead = useCallback((l: Lead) => {
     setCompanyName(l.companyName);
     setPhone(l.phone);
+    setPrivatePhone(l.privatePhone ?? "");
     setEmail(l.email ?? "");
     setCvr(l.cvr);
     setAddress(l.address);
@@ -483,6 +493,7 @@ export function CampaignWorkspace({
   const resetFormForPowerWaiting = useCallback(() => {
     setCompanyName("");
     setPhone("");
+    setPrivatePhone("");
     setEmail("");
     setCvr("");
     setAddress("");
@@ -586,6 +597,7 @@ export function CampaignWorkspace({
 
       setCampaignName(c.name ?? "");
       setCampaignDialMode(dialMode);
+      setDialPhonePriority(normalizeDialPhonePriority(c.dialPhonePriority));
       setCampaignSystemType(
         typeof c.systemCampaignType === "string" && c.systemCampaignType.trim()
           ? c.systemCampaignType.trim()
@@ -883,6 +895,7 @@ export function CampaignWorkspace({
     return {
       companyName,
       phone,
+      privatePhone,
       email,
       cvr,
       address,
@@ -899,6 +912,8 @@ export function CampaignWorkspace({
       meetingCompanyName,
     };
   }
+  const getFormSnapshotRef = useRef(getFormSnapshot);
+  getFormSnapshotRef.current = getFormSnapshot;
 
   async function saveLead(
     l: Lead,
@@ -1291,6 +1306,7 @@ export function CampaignWorkspace({
         assignedUserId: payload.assignedUserId,
         companyName,
         phone,
+        privatePhone,
         email,
         cvr,
         address,
@@ -1376,11 +1392,20 @@ export function CampaignWorkspace({
       return { ok: false, message: "Intet aktivt lead." };
     }
     const nextPhone = nextPhoneRaw.trim();
-    setPhone(nextPhone);
-    setActiveLead((prev) => (prev ? { ...prev, phone: nextPhone } : prev));
+    const snap = getFormSnapshotRef.current();
+    const primary = orderedDialPhones(snap.phone, snap.privatePhone, dialPhonePriority)[0];
+    // Gem i det felt der matcher det aktuelle primære opkaldsnummer (evt. privat ved PRIVATE_FIRST).
+    const dialingPrivate = primary?.kind === "PRIVATE";
+    if (dialingPrivate) {
+      setPrivatePhone(nextPhone);
+      setActiveLead((prev) => (prev ? { ...prev, privatePhone: nextPhone } : prev));
+    } else {
+      setPhone(nextPhone);
+      setActiveLead((prev) => (prev ? { ...prev, phone: nextPhone } : prev));
+    }
     const patchBody = {
-      ...buildCampaignLeadPatchBody(getFormSnapshot()),
-      phone: nextPhone,
+      ...buildCampaignLeadPatchBody(snap),
+      ...(dialingPrivate ? { privatePhone: nextPhone } : { phone: nextPhone }),
     };
     try {
       const res = await fetch(`/api/leads/${lead.id}`, {
@@ -1397,13 +1422,14 @@ export function CampaignWorkspace({
       }
       const updated = (await res.json()) as Lead;
       setActiveLead(updated);
-      setPhone(updated.phone ?? nextPhone);
+      setPhone(updated.phone ?? (dialingPrivate ? snap.phone : nextPhone));
+      setPrivatePhone(updated.privatePhone ?? (dialingPrivate ? nextPhone : snap.privatePhone));
       setError(null);
       return { ok: true, message: "Nummer opdateret på lead." };
     } catch {
       return { ok: false, message: "Netværksfejl ved gem af nummer." };
     }
-  }, [getFormSnapshot]);
+  }, [dialPhonePriority]);
 
   const handleOutcomeStatusChange = useCallback(
     (next: LeadStatus) => {
@@ -2019,7 +2045,8 @@ export function CampaignWorkspace({
         <CampaignVoipStrip
           leadId={current.id}
           campaignId={campaignId}
-          leadPhone={current.phone}
+          leadPhone={orderedDialPhones(phone, privatePhone, dialPhonePriority)[0]?.raw ?? ""}
+          failoverPhone={orderedDialPhones(phone, privatePhone, dialPhonePriority)[1]?.raw ?? ""}
           dialMode={campaignDialMode}
           autoStartCall={voipAutoStart}
           onUnansweredTimeout={() => {
@@ -2064,6 +2091,8 @@ export function CampaignWorkspace({
         onCompanyName={setCompanyName}
         phone={phone}
         onPhone={setPhone}
+        privatePhone={privatePhone}
+        onPrivatePhone={setPrivatePhone}
         email={email}
         onEmail={setEmail}
         cvr={cvr}

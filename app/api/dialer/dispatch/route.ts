@@ -117,6 +117,7 @@ async function predictiveDispatch(params: {
     select: {
       id: true,
       dialMode: true,
+      dialPhonePriority: true,
       fieldConfig: true,
       activeQueueFilter: true,
       includeProtectedBusinesses: true,

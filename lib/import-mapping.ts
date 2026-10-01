@@ -8,6 +8,7 @@ export type StandardMappingId =
   | "skip"
   | "companyName"
   | "phone"
+  | "privatePhone"
   | "email"
   | "cvr"
   | "domain"
@@ -20,7 +21,8 @@ export type StandardMappingId =
 export const STANDARD_MAPPING_OPTIONS: { id: StandardMappingId; label: string }[] = [
   { id: "skip", label: "Ignorer" },
   { id: "companyName", label: "Virksomhedsnavn" },
-  { id: "phone", label: "Telefonnummer" },
+  { id: "phone", label: "Virksomhed Tlf" },
+  { id: "privatePhone", label: "Privat Tlf" },
   { id: "notes", label: "Noter" },
   { id: "email", label: "E-mail" },
   { id: "domain", label: "Domæne" },
@@ -98,6 +100,24 @@ export function suggestColumnMapping(columns: string[]): Record<string, string> 
       n === "kontakt"
     ) {
       t = "companyName";
+    } else if (
+      (n.includes("privat") &&
+        (n.includes("telefon") || n.includes("tlf") || n.includes("phone") || n.includes("mobil"))) ||
+      n === "privat_tlf" ||
+      n === "privattelefon" ||
+      n === "private_phone" ||
+      n === "privatephone"
+    ) {
+      t = "privatePhone";
+    } else if (
+      (n.includes("virksomhed") &&
+        (n.includes("telefon") || n.includes("tlf") || n.includes("phone") || n.includes("mobil"))) ||
+      n === "virksomhed_tlf" ||
+      n === "virksomhedstelefon" ||
+      n === "company_phone" ||
+      n === "companyphone"
+    ) {
+      t = "phone";
     } else if (n.includes("telefon") || n === "phone" || n === "tlf" || n.includes("mobil")) {
       t = "phone";
     } else if (
@@ -167,6 +187,9 @@ export function applyColumnMapping(
       case "phone":
         flat.telefon = v;
         break;
+      case "privatePhone":
+        flat.privat_telefon = v;
+        break;
       case "email":
         flat.email = v;
         break;
@@ -220,6 +243,15 @@ export function pickBaseFromNorm(n: Record<string, string>) {
     n["phone"] ||
     n["tlf"] ||
     n["mobil"] ||
+    n["virksomhed_tlf"] ||
+    n["virksomhedstelefon"] ||
+    "";
+  const privatePhone =
+    n["privat_telefon"] ||
+    n["privat_tlf"] ||
+    n["privattelefon"] ||
+    n["private_phone"] ||
+    n["privatephone"] ||
     "";
   const email = n["email"] || n["e_mail"] || n["mail"] || "";
   const cvr = n["cvr"] || n["cvr_nummer"] || n["cvrnummer"] || "";
@@ -244,6 +276,7 @@ export function pickBaseFromNorm(n: Record<string, string>) {
   return {
     companyName: companyName.trim(),
     phone: canonicalLeadPhoneForStorage(phone),
+    privatePhone: canonicalLeadPhoneForStorage(privatePhone),
     email: email.trim(),
     cvr: cvr.trim(),
     address: filled.address,

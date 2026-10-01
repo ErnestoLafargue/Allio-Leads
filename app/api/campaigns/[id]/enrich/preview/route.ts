@@ -112,6 +112,7 @@ export async function POST(req: Request, { params }: Params) {
       id: true,
       companyName: true,
       phone: true,
+      privatePhone: true,
       email: true,
       cvr: true,
       address: true,

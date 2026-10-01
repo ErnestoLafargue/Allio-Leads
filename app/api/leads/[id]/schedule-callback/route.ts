@@ -123,6 +123,8 @@ export async function POST(req: Request, { params }: Params) {
       data: {
         companyName: typeof body?.companyName === "string" ? body.companyName.trim() : lead.companyName,
         phone: typeof body?.phone === "string" ? body.phone.trim() : lead.phone,
+        privatePhone:
+          typeof body?.privatePhone === "string" ? body.privatePhone.trim() : lead.privatePhone,
         email: typeof body?.email === "string" ? body.email : lead.email,
         cvr: typeof body?.cvr === "string" ? body.cvr : lead.cvr,
         address: filled.address,

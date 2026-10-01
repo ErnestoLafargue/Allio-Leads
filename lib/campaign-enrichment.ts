@@ -9,6 +9,7 @@ export type LeadEnrichmentSource = {
   id: string;
   companyName: string;
   phone: string;
+  privatePhone: string;
   email: string;
   cvr: string;
   address: string;
@@ -25,6 +26,7 @@ type UploadAggregate = {
   base: {
     companyName: string;
     phone: string;
+    privatePhone: string;
     email: string;
     cvr: string;
     address: string;
@@ -208,6 +210,7 @@ export function prepareEnrichmentUpload(params: {
       base: {
         companyName: base.companyName,
         phone: base.phone,
+        privatePhone: base.privatePhone,
         email: base.email,
         cvr: base.cvr,
         address: base.address,
@@ -263,6 +266,7 @@ type LeadPatchPlan = {
   data: {
     companyName?: string;
     phone?: string;
+    privatePhone?: string;
     email?: string;
     cvr?: string;
     address?: string;
@@ -375,6 +379,7 @@ export function buildEnrichmentPreview(params: {
 
       applyStandard("companyName", lead.companyName);
       applyStandard("phone", lead.phone);
+      applyStandard("privatePhone", lead.privatePhone);
       applyStandard("email", lead.email);
       applyStandard("cvr", lead.cvr);
       applyStandard("address", lead.address);

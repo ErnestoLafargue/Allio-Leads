@@ -261,6 +261,7 @@ export async function loadSortedNewLeadsForCampaign(opts: {
       unansweredAttempts: true,
       customFields: true,
       phone: true,
+      privatePhone: true,
       meetingScheduledFor: true,
       industry: true,
       postalCode: true,
@@ -278,6 +279,7 @@ export async function loadSortedNewLeadsForCampaign(opts: {
     industry: r.industry,
     customFields: r.customFields,
     phone: r.phone,
+    privatePhone: r.privatePhone,
     meetingScheduledFor: r.meetingScheduledFor,
     postalCode: r.postalCode,
     address: r.address,
@@ -296,9 +298,19 @@ export async function loadSortedNewLeadsForCampaign(opts: {
     campaign.systemCampaignType === "rebooking"
       ? afterStartDate
           .filter((r) => isLeadInRebookingDialerPool(r))
-          .map((r) => ({ ...r, customFields: r.customFields, phone: r.phone }))
+          .map((r) => ({
+            ...r,
+            customFields: r.customFields,
+            phone: r.phone,
+            privatePhone: r.privatePhone,
+          }))
       : filterLeadsByCampaignProtectedSetting(
-          afterStartDate.map((r) => ({ ...r, customFields: r.customFields, phone: r.phone })),
+          afterStartDate.map((r) => ({
+            ...r,
+            customFields: r.customFields,
+            phone: r.phone,
+            privatePhone: r.privatePhone,
+          })),
           campaign.includeProtectedBusinesses,
         ),
     campaign.includeLeadsWithoutPhone,

@@ -43,6 +43,7 @@ function NewLeadPageInner() {
   const [campaignName, setCampaignName] = useState("");
   const [companyName, setCompanyName] = useState("");
   const [phone, setPhone] = useState("");
+  const [privatePhone, setPrivatePhone] = useState("");
   const [email, setEmail] = useState("");
   const [cvr, setCvr] = useState("");
   const [address, setAddress] = useState("");
@@ -148,6 +149,7 @@ function NewLeadPageInner() {
           campaignId,
           companyName: trimmedCompanyName,
           phone,
+          privatePhone,
           email,
           cvr,
           address,
@@ -293,6 +295,8 @@ function NewLeadPageInner() {
             onCompanyName={setCompanyName}
             phone={phone}
             onPhone={setPhone}
+            privatePhone={privatePhone}
+            onPrivatePhone={setPrivatePhone}
             email={email}
             onEmail={setEmail}
             cvr={cvr}

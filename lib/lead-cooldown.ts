@@ -59,6 +59,7 @@ export async function applyLeadCooldownResets(): Promise<void> {
         status: "NEW",
         voicemailMarkedAt: null,
         notHomeMarkedAt: null,
+        dialFailoverPendingE164: "",
         updatedAt: touchedAt,
       },
     });
@@ -99,6 +100,7 @@ export async function applyLeadCooldownResets(): Promise<void> {
         status: "NEW",
         voicemailMarkedAt: null,
         notHomeMarkedAt: null,
+        dialFailoverPendingE164: "",
         updatedAt: touchedAt,
       },
     });

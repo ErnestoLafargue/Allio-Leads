@@ -53,6 +53,12 @@ import {
   type CampaignDialMode,
   normalizeCampaignDialMode,
 } from "@/lib/dial-mode";
+import {
+  DIAL_PHONE_PRIORITIES,
+  DIAL_PHONE_PRIORITY_LABELS,
+  normalizeDialPhonePriority,
+  type DialPhonePriority,
+} from "@/lib/lead-phones";
 import { POWER_DIALER_DEFAULTS, type PowerDialerSettings } from "@/lib/power-dialer-settings";
 import { PowerDialerSettingsFields } from "@/app/components/power-dialer-settings-fields";
 
@@ -109,6 +115,7 @@ export default function RedigerKampagnePage() {
   const [exporting, setExporting] = useState(false);
   const [exportMessage, setExportMessage] = useState<string | null>(null);
   const [dialMode, setDialMode] = useState<CampaignDialMode>("NO_DIAL");
+  const [dialPhonePriority, setDialPhonePriority] = useState<DialPhonePriority>("PRIVATE_FIRST");
   const [powerDialer, setPowerDialer] = useState<PowerDialerSettings>({ ...POWER_DIALER_DEFAULTS });
   const [maxContactAttempts, setMaxContactAttempts] = useState("");
   const [unansweredCooldownHours, setUnansweredCooldownHours] = useState("2");
@@ -150,6 +157,7 @@ export default function RedigerKampagnePage() {
       setIncludeProtectedBusinesses(Boolean(c.includeProtectedBusinesses));
       setIncludeLeadsWithoutPhone(c.includeLeadsWithoutPhone !== false);
       setDialMode(normalizeCampaignDialMode(c.dialMode));
+      setDialPhonePriority(normalizeDialPhonePriority(c.dialPhonePriority));
       if (c.powerDialer && typeof c.powerDialer === "object") {
         setPowerDialer({
           ...POWER_DIALER_DEFAULTS,
@@ -233,7 +241,8 @@ export default function RedigerKampagnePage() {
         }
         return;
       }
-      const rows: { status: string; customFields: string; phone: string }[] = await res.json();
+      const rows: { status: string; customFields: string; phone: string; privatePhone?: string }[] =
+        await res.json();
       const acc: Record<LeadStatus, number> = { ...emptyAcc };
       let protectedCount = 0;
       let withoutPhoneCount = 0;
@@ -244,14 +253,18 @@ export default function RedigerKampagnePage() {
         if (getReklamebeskyttetNormalized(r.customFields) === "ja") {
           protectedCount += 1;
         }
-        if (!hasLeadPhone(r.phone ?? "")) {
+        if (!hasLeadPhone(r.phone ?? "") && !hasLeadPhone(r.privatePhone ?? "")) {
           withoutPhoneCount += 1;
         }
         const st = String(r.status ?? "").trim().toUpperCase();
         if (isLeadStatus(st)) acc[st] += 1;
         if (st === "NEW") {
           const passesProtected = leadIncludedForCampaignProtectedSetting(r.customFields, false);
-          const passesPhone = leadIncludedForCampaignPhoneSetting(r.phone ?? "", false);
+          const passesPhone = leadIncludedForCampaignPhoneSetting(
+            r.phone ?? "",
+            false,
+            r.privatePhone,
+          );
           if (passesProtected) newCountWhenExcludingProtected += 1;
           if (passesPhone) newCountWhenExcludingPhone += 1;
           if (passesProtected && passesPhone) newCountWhenExcludingBoth += 1;
@@ -389,6 +402,7 @@ export default function RedigerKampagnePage() {
         includeProtectedBusinesses,
         includeLeadsWithoutPhone,
         dialMode,
+        dialPhonePriority,
         maxContactAttempts: maxContactAttempts.trim() === "" ? null : Number.parseInt(maxContactAttempts, 10),
         unansweredCooldownHours: cooldownParsed,
         powerDialer,
@@ -519,6 +533,50 @@ export default function RedigerKampagnePage() {
                     Parallel udringning via Telnyx — lead først når nogen svarer.
                   </span>
                 ) : null}
+              </span>
+            </label>
+          ))}
+        </fieldset>
+      </section>
+
+      <section className="rounded-lg border border-stone-200 bg-white p-6 shadow-sm">
+        <h2 className="text-sm font-semibold text-stone-900">Telefon-prioritet</h2>
+        <p className="mt-1 text-xs text-stone-500">
+          Når ledet har både privat- og virksomhedsnummer, ringer Click to call og Predictive det valgte
+          nummer først. Bliver der ikke svaret (eller systemet fanger telefonsvarer), ringes det andet
+          nummer automatisk. Power Dialer ringer altid begge numre (i den valgte rækkefølge) når begge
+          findes.
+        </p>
+        <fieldset className="mt-4 space-y-2 border-0 p-0">
+          <legend className="sr-only">Telefon-prioritet</legend>
+          {DIAL_PHONE_PRIORITIES.map((p) => (
+            <label
+              key={p}
+              className={`flex cursor-pointer gap-3 rounded-lg border px-3 py-2.5 text-sm ${
+                dialPhonePriority === p
+                  ? "border-emerald-300 bg-emerald-50/80"
+                  : "border-stone-200 bg-stone-50/60 hover:bg-stone-50"
+              }`}
+            >
+              <input
+                type="radio"
+                name="dialPhonePriority"
+                value={p}
+                checked={dialPhonePriority === p}
+                onChange={() => setDialPhonePriority(p)}
+                className="mt-0.5"
+              />
+              <span>
+                <span className="font-medium text-stone-900">{DIAL_PHONE_PRIORITY_LABELS[p]}</span>
+                {p === "PRIVATE_FIRST" ? (
+                  <span className="mt-0.5 block text-xs text-stone-600">
+                    Standard — privat nummer først, derefter virksomhed.
+                  </span>
+                ) : (
+                  <span className="mt-0.5 block text-xs text-stone-600">
+                    Virksomhedsnummer først, derefter privat.
+                  </span>
+                )}
               </span>
             </label>
           ))}

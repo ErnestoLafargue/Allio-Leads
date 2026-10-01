@@ -4,6 +4,7 @@ import type { LeadStatus } from "@/lib/lead-status";
 export type CampaignLeadFormSnapshot = {
   companyName: string;
   phone: string;
+  privatePhone: string;
   email: string;
   cvr: string;
   address: string;
@@ -31,6 +32,7 @@ export function buildCampaignLeadPatchBody(
   const body: Record<string, unknown> = {
     companyName: s.companyName,
     phone: s.phone,
+    privatePhone: s.privatePhone,
     email: s.email,
     cvr: s.cvr,
     address: s.address,

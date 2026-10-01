@@ -28,6 +28,8 @@ export type LeadKundeNoterBookingProps = {
   onCompanyName: (v: string) => void;
   phone: string;
   onPhone: (v: string) => void;
+  privatePhone: string;
+  onPrivatePhone: (v: string) => void;
   email: string;
   onEmail: (v: string) => void;
   cvr: string;
@@ -69,6 +71,8 @@ export function LeadKundeNoterBooking({
   onCompanyName,
   phone,
   onPhone,
+  privatePhone,
+  onPrivatePhone,
   email,
   onEmail,
   cvr,
@@ -129,6 +133,8 @@ export function LeadKundeNoterBooking({
               onCompanyName={onCompanyName}
               phone={phone}
               onPhone={onPhone}
+              privatePhone={privatePhone}
+              onPrivatePhone={onPrivatePhone}
               email={email}
               onEmail={onEmail}
               cvr={cvr}

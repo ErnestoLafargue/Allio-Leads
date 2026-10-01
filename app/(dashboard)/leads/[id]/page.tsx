@@ -9,6 +9,7 @@ import { isQueueEligibleStatus, sortLeadsForQueue } from "@/lib/lead-queue";
 import { MeetingOutcomeSelect } from "@/app/components/meeting-outcome-select";
 import { LeadOutcomeStrip } from "@/app/components/lead-workspace/lead-outcome-strip";
 import { LeadKundeNoterBooking } from "@/app/components/lead-workspace/lead-kunde-noter-booking";
+import { orderedDialPhones } from "@/lib/lead-phones";
 import { CallbackScheduleDialog } from "@/app/components/callback-schedule-dialog";
 import { SendStandardMailDialog } from "@/app/components/send-standard-mail-dialog";
 import { LeadIdBadge } from "@/app/components/lead-id-badge";
@@ -42,6 +43,7 @@ type Lead = {
   campaignId: string | null;
   companyName: string;
   phone: string;
+  privatePhone?: string;
   email: string;
   cvr: string;
   address: string;
@@ -90,6 +92,7 @@ function LeadDetailInner() {
   const [forbidden, setForbidden] = useState(false);
   const [companyName, setCompanyName] = useState("");
   const [phone, setPhone] = useState("");
+  const [privatePhone, setPrivatePhone] = useState("");
   const [email, setEmail] = useState("");
   const [cvr, setCvr] = useState("");
   const [address, setAddress] = useState("");
@@ -168,6 +171,7 @@ function LeadDetailInner() {
       setLead(data);
       setCompanyName(data.companyName);
       setPhone(data.phone);
+      setPrivatePhone(data.privatePhone ?? "");
       setEmail(data.email ?? "");
       setCvr(data.cvr);
       setAddress(data.address);
@@ -366,6 +370,7 @@ function LeadDetailInner() {
     const body: Record<string, unknown> = {
       companyName,
       phone,
+      privatePhone,
       email,
       cvr,
       address,
@@ -444,6 +449,7 @@ function LeadDetailInner() {
     const body: Record<string, unknown> = {
       companyName,
       phone,
+      privatePhone,
       email,
       cvr,
       address,
@@ -514,6 +520,7 @@ function LeadDetailInner() {
         assignedUserId: payload.assignedUserId,
         companyName,
         phone,
+        privatePhone,
         email,
         cvr,
         address,
@@ -836,7 +843,8 @@ function LeadDetailInner() {
             <CampaignVoipStrip
               leadId={lead.id}
               campaignId={lead.campaignId}
-              leadPhone={phone}
+              leadPhone={orderedDialPhones(phone, privatePhone, "PRIVATE_FIRST")[0]?.raw ?? ""}
+              failoverPhone={orderedDialPhones(phone, privatePhone, "PRIVATE_FIRST")[1]?.raw ?? ""}
               dialMode="CLICK_TO_CALL"
               autoStartCall={false}
               voipApiContext={VOIP_API_CONTEXT.GLOBAL_LEAD_PAGE}
@@ -860,6 +868,8 @@ function LeadDetailInner() {
               onCompanyName={setCompanyName}
               phone={phone}
               onPhone={setPhone}
+              privatePhone={privatePhone}
+              onPrivatePhone={setPrivatePhone}
               email={email}
               onEmail={setEmail}
               cvr={cvr}

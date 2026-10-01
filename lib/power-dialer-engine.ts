@@ -16,6 +16,7 @@ import {
   hangupTelnyxCall,
   isTelnyxChannelLimitError,
   pickTelnyxFromNumber,
+  appRecordingEnabled,
   startTelnyxRecording,
 } from "@/lib/telnyx-call-control";
 import {
@@ -56,6 +57,13 @@ import { countPowerChannelsInUse, resolvePowerChannelLimit } from "@/lib/power-d
 import { applyLeadCooldownResets } from "@/lib/lead-cooldown";
 import { powerAgentSipUri } from "@/lib/telnyx-power-agent";
 import { normalizeCampaignDialMode } from "@/lib/dial-mode";
+import {
+  normalizeDialPhonePriority,
+  nextDialPhoneAfterFailure,
+  POWER_PHONE_FAILOVER_REQUEUE_MS,
+} from "@/lib/lead-phones";
+import { normalizePhoneToE164ForDial } from "@/lib/phone-e164";
+import { LEAD_ACTIVITY_KIND } from "@/lib/lead-activity-kinds";
 
 type Db = PrismaClient | Prisma.TransactionClient;
 
@@ -63,6 +71,7 @@ export const POWER_CAMPAIGN_SELECT = {
   id: true,
   name: true,
   dialMode: true,
+  dialPhonePriority: true,
   fieldConfig: true,
   activeQueueFilter: true,
   includeProtectedBusinesses: true,
@@ -194,7 +203,7 @@ export async function resolvePowerLeadLeg(params: {
 
   const leg = await prisma.dialerCallLog.findUnique({
     where: { callControlId: params.callControlId },
-    select: { campaignId: true, leadId: true },
+    select: { campaignId: true, leadId: true, toNumber: true },
   });
   if (params.hangup) {
     const apiKey = telnyxApiKey();
@@ -220,15 +229,98 @@ export async function resolvePowerLeadLeg(params: {
     });
   }
   const campaign = params.campaign ?? (await loadPowerCampaign(leg.campaignId));
-  if (campaign) {
-    await applyPowerLeadResolution({
+  if (!campaign) return true;
+
+  // Power Dialer: ring begge numre — ved NO_ANSWER/VOICEMAIL på 1. nummer, prøv 2. med det samme.
+  if (
+    (params.resolution === "NO_ANSWER" ||
+      params.resolution === "VOICEMAIL" ||
+      params.resolution === "INVALID_NUMBER") &&
+    (await tryPowerPhoneFailover({
       leadId: leg.leadId,
-      resolution: params.resolution,
-      settings: campaign.settings,
-      unansweredCooldownHours: campaign.unansweredCooldownHours,
+      failedToNumber: leg.toNumber,
+      priority: normalizeDialPhonePriority(campaign.dialPhonePriority),
       now,
+    }))
+  ) {
+    return true;
+  }
+
+  if (params.resolution === "CONNECTED") {
+    await prisma.lead.updateMany({
+      where: { id: leg.leadId },
+      data: { dialFailoverPendingE164: "" },
     });
   }
+
+  await applyPowerLeadResolution({
+    leadId: leg.leadId,
+    resolution: params.resolution,
+    settings: campaign.settings,
+    unansweredCooldownHours: campaign.unansweredCooldownHours,
+    now,
+  });
+
+  // Efter endeligt ubesvaret udfald: nulstil failover-markering til næste kontaktcyklus.
+  if (params.resolution === "NO_ANSWER" || params.resolution === "VOICEMAIL") {
+    await prisma.lead.updateMany({
+      where: { id: leg.leadId },
+      data: { dialFailoverPendingE164: "" },
+    });
+  }
+  return true;
+}
+
+/**
+ * Hvis ledet har et andet nummer klar, marker failover og sæt kort requeue uden status-udfald.
+ * Returnerer true hvis failover er sat i gang (kalderen skal ikke anvende VOICEMAIL/NOT_HOME endnu).
+ */
+async function tryPowerPhoneFailover(params: {
+  leadId: string;
+  failedToNumber: string | null;
+  priority: ReturnType<typeof normalizeDialPhonePriority>;
+  now: Date;
+}): Promise<boolean> {
+  const lead = await prisma.lead.findUnique({
+    where: { id: params.leadId },
+    select: {
+      phone: true,
+      privatePhone: true,
+      dialFailoverPendingE164: true,
+      status: true,
+    },
+  });
+  if (!lead || lead.status !== "NEW") return false;
+
+  const failedRaw = (params.failedToNumber ?? "").trim();
+  if (!failedRaw) return false;
+  const failedE164 = normalizePhoneToE164ForDial(failedRaw) ?? failedRaw;
+
+  // Allerede midt i failover (2. nummer fejlede) → lad normal udfald køre.
+  const pending = (lead.dialFailoverPendingE164 ?? "").trim();
+  if (pending) return false;
+
+  const next = nextDialPhoneAfterFailure(lead.phone, lead.privatePhone, failedE164, params.priority);
+  if (!next) return false;
+
+  await prisma.$transaction(async (tx) => {
+    await tx.lead.updateMany({
+      where: { id: params.leadId, status: "NEW" },
+      data: {
+        dialFailoverPendingE164: failedE164,
+        powerDialerEligibleAfter: new Date(params.now.getTime() + POWER_PHONE_FAILOVER_REQUEUE_MS),
+        lastDialAttemptAt: params.now,
+      },
+    });
+    await tx.leadActivityEvent.create({
+      data: {
+        leadId: params.leadId,
+        userId: null,
+        kind: LEAD_ACTIVITY_KIND.CALL_ATTEMPT,
+        summary: `Power Dialer: intet svar — ringer næste nummer (${next.kind === "PRIVATE" ? "Privat Tlf" : "Virksomhed Tlf"})`,
+      },
+    });
+  });
   return true;
 }
 
@@ -651,7 +743,9 @@ export async function handlePowerLegBridged(callControlId: string, direction: "l
     data: { status: "talking", reservedAt: null },
   });
   const apiKey = telnyxApiKey();
-  if (won.count === 1 && apiKey) {
+  // Starter først her, hvor benene er forbundet (ellers bliver den ene kanal tavs), og kun hvis
+  // app-optagelse er slået til — voice profilen optager ellers opkaldet komplet.
+  if (won.count === 1 && apiKey && appRecordingEnabled()) {
     const rec = await startTelnyxRecording({
       apiKey,
       callControlId,

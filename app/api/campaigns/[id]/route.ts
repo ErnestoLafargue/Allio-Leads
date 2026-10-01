@@ -9,6 +9,11 @@ import {
 } from "@/lib/campaign-delete";
 import { workableCampaignLeadsWhere } from "@/lib/campaign-workable-leads";
 import { DIAL_MODES, normalizeCampaignDialMode, type CampaignDialMode } from "@/lib/dial-mode";
+import {
+  DIAL_PHONE_PRIORITIES,
+  normalizeDialPhonePriority,
+  type DialPhonePriority,
+} from "@/lib/lead-phones";
 import { parseMaxContactAttemptsInput, parseUnansweredCooldownHoursInput } from "@/lib/lead-attempts";
 import {
   applyPowerDialerSettingsPatch,
@@ -36,6 +41,7 @@ export async function GET(_req: Request, { params }: Params) {
       isSystemCampaign: true,
       systemCampaignType: true,
       dialMode: true,
+      dialPhonePriority: true,
       maxContactAttempts: true,
       unansweredCooldownHours: true,
       ...POWER_DIALER_CAMPAIGN_SELECT,
@@ -144,6 +150,15 @@ export async function PATCH(req: Request, { params }: Params) {
     dialMode = next;
   }
 
+  let dialPhonePriority: DialPhonePriority = normalizeDialPhonePriority(existing.dialPhonePriority);
+  if (typeof body?.dialPhonePriority === "string") {
+    const next = normalizeDialPhonePriority(body.dialPhonePriority);
+    if (!DIAL_PHONE_PRIORITIES.includes(next)) {
+      return NextResponse.json({ error: "Ugyldig telefon-prioritet" }, { status: 400 });
+    }
+    dialPhonePriority = next;
+  }
+
   let maxContactAttempts: number | null = existing.maxContactAttempts;
   if (body?.maxContactAttempts !== undefined) {
     const parsed = parseMaxContactAttemptsInput(body.maxContactAttempts);
@@ -197,6 +212,7 @@ export async function PATCH(req: Request, { params }: Params) {
       includeProtectedBusinesses,
       includeLeadsWithoutPhone,
       dialMode,
+      dialPhonePriority,
       maxContactAttempts,
       unansweredCooldownHours,
       ...powerDialerSettingsToColumns(powerPatch.settings),
@@ -208,6 +224,7 @@ export async function PATCH(req: Request, { params }: Params) {
       includeProtectedBusinesses: true,
       includeLeadsWithoutPhone: true,
       dialMode: true,
+      dialPhonePriority: true,
       maxContactAttempts: true,
       unansweredCooldownHours: true,
       ...POWER_DIALER_CAMPAIGN_SELECT,

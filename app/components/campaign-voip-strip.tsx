@@ -26,13 +26,21 @@ import { type VoipApiContext, VOIP_API_CONTEXT } from "@/lib/voip-api-context";
 import {
   clearActiveDialerCampaignIfMatches,
   setActiveDialerCampaign,
+  setActiveDialerLinePhase,
 } from "@/lib/active-dialer-campaign";
+import { linePhaseFromVoipStatus } from "@/lib/dialer-line-phase";
+import { reportDialerLineOccupancy } from "@/lib/report-dialer-line";
 
 type Props = {
   leadId: string;
   campaignId: string;
   /** Telefon på leadet (fra server) — bruges som udgangspunkt for opkaldsfeltet ved nyt lead */
   leadPhone: string;
+  /**
+   * Andet nummer (hvis ledet har to). Predictive: ved ubesvaret/telefonsvarer ringes dette
+   * automatisk før workspace går videre.
+   */
+  failoverPhone?: string;
   dialMode: CampaignDialMode;
   /** Predictive + power (efter connect): start opkald automatisk ved nyt lead */
   autoStartCall: boolean;
@@ -232,6 +240,7 @@ export function CampaignVoipStrip({
   leadId,
   campaignId,
   leadPhone,
+  failoverPhone = "",
   dialMode,
   autoStartCall,
   onUnansweredTimeout,
@@ -250,6 +259,9 @@ export function CampaignVoipStrip({
   const effectiveDialMode: CampaignDialMode = isGlobalVoip ? "CLICK_TO_CALL" : dialMode;
   const effectiveAutoStart = isGlobalVoip ? false : autoStartCall;
   const [lineStatus, setLineStatus] = useState<LineStatus>("idle");
+  /** Predictive failover: har vi allerede prøvet 2. nummer på dette lead? */
+  const [usedFailoverForLeadId, setUsedFailoverForLeadId] = useState<string | null>(null);
+  const [activeDialPhone, setActiveDialPhone] = useState(() => (leadPhone || "").trim());
 
   // Notér ændringer i lineStatus til parent (bruges af dialer-presence-hook)
   const onLineStatusRef = useRef(onLineStatusChange);
@@ -262,12 +274,21 @@ export function CampaignVoipStrip({
   // dialer-tid også når opkaldet foretages fra lead-detaljesiden (uden for
   // kampagnens arbejdsside, hvor pathname ellers er eneste kilde).
   useEffect(() => {
-    if (lineStatus === "idle") {
+    if (lineStatus === "idle" || lineStatus === "error") {
+      setActiveDialerLinePhase(null);
+      reportDialerLineOccupancy(campaignId, null);
       clearActiveDialerCampaignIfMatches(campaignId);
       return;
     }
+    const phase = linePhaseFromVoipStatus(lineStatus);
     setActiveDialerCampaign(campaignId);
-    return () => clearActiveDialerCampaignIfMatches(campaignId);
+    setActiveDialerLinePhase(phase);
+    reportDialerLineOccupancy(campaignId, phase);
+    return () => {
+      setActiveDialerLinePhase(null);
+      reportDialerLineOccupancy(campaignId, null);
+      clearActiveDialerCampaignIfMatches(campaignId);
+    };
   }, [campaignId, lineStatus]);
   const [detail, setDetail] = useState<string | null>(null);
   const [voipToast, setVoipToast] = useState<string | null>(null);
@@ -284,7 +305,13 @@ export function CampaignVoipStrip({
    * (hangUp + CLOSED-notifikation) aldrig dobbeltrapporterer.
    */
   const liveTalkRef = useRef<{ leadId: string; startedAt: number } | null>(null);
-  const voipPhone = (leadPhone || "").trim();
+  const voipPhone = (activeDialPhone || leadPhone || "").trim();
+  const failoverTrimmed = (failoverPhone || "").trim();
+  const canFailover =
+    effectiveDialMode === "PREDICTIVE" &&
+    failoverTrimmed.length > 0 &&
+    stripDialFormatting(failoverTrimmed) !== stripDialFormatting((leadPhone || "").trim()) &&
+    usedFailoverForLeadId !== leadId;
 
   const [devices, setDevices] = useState<MediaDeviceInfo[]>([]);
   const [permissionDone, setPermissionDone] = useState(false);
@@ -634,6 +661,8 @@ export function CampaignVoipStrip({
     setRemoteStream(null);
     setEditingPhone(false);
     setPhoneDraft((leadPhone || "").trim());
+    setActiveDialPhone((leadPhone || "").trim());
+    setUsedFailoverForLeadId(null);
     // VIGTIGT: hangUp() finalizer uret (callTimer.endAt) for det netop lukkede
     // opkald. Hvis vi nullede uret synkront her ville et race give 00:00
     // mid-call. Vi awaiter derfor hangUp og NULLER FØRST DEREFTER.
@@ -663,8 +692,34 @@ export function CampaignVoipStrip({
     if (!editingPhone) {
       setPhoneDraft((leadPhone || "").trim());
     }
-  }, [leadPhone, editingPhone]);
+    // Hold aktivt dial-nummer synkroniseret med primary, medmindre vi er midt i failover.
+    if (usedFailoverForLeadId !== leadId) {
+      setActiveDialPhone((leadPhone || "").trim());
+    }
+  }, [leadPhone, editingPhone, leadId, usedFailoverForLeadId]);
 
+  function isAllowedDialPhone(rawDigits: string): boolean {
+    const primary = stripDialFormatting((leadPhone || "").trim());
+    const failover = stripDialFormatting((failoverPhone || "").trim());
+    return rawDigits === primary || (failover.length > 0 && rawDigits === failover);
+  }
+
+  /**
+   * Predictive: prøv 2. nummer én gang før workspace sætter VOICEMAIL / går videre.
+   * Returnerer true hvis failover er startet (kalderen skal ikke kalde parent-callbacks).
+   * Selve opkaldet startes af auto-start-effekten når `activeDialPhone` skifter.
+   */
+  function tryPredictivePhoneFailover(): boolean {
+    if (!canFailover) return false;
+    const next = failoverTrimmed;
+    if (!next) return false;
+    setUsedFailoverForLeadId(leadId);
+    setActiveDialPhone(next);
+    setVoipToast("Ringer næste nummer…");
+    setVoipToastFading(false);
+    autoKeyRef.current = null; // tillad auto-start på det nye nummer
+    return true;
+  }
   /** Pre-load Telnyx WebRTC SDK-chunken så snart komponenten mountes,
    *  så den er klar i memory inden brugeren trykker «Ring op». */
   useEffect(() => {
@@ -1239,6 +1294,7 @@ export function CampaignVoipStrip({
                 autoStartCallRef.current &&
                 typeof onPredictiveAutoOutcome === "function"
               ) {
+                if (tryPredictivePhoneFailover()) return;
                 onPredictiveAutoOutcome(autoOutcome);
               }
             }
@@ -1344,12 +1400,12 @@ export function CampaignVoipStrip({
     if (activeCallRef.current) return;
     const voipPhoneRaw = voipPhone;
     const raw = stripDialFormatting(voipPhoneRaw);
-    const leadRaw = stripDialFormatting((leadPhone || "").trim());
-    if (raw !== leadRaw) {
+    if (!isAllowedDialPhone(raw)) {
       if (process.env.NODE_ENV !== "production") {
         console.warn("VOIP phone mismatch", {
           leadId,
           leadPhone,
+          failoverPhone,
           voipPhone,
           callContextPhone: currentCallContextRef.current?.phoneNumber ?? null,
         });
@@ -1598,7 +1654,7 @@ export function CampaignVoipStrip({
     if (!audioSetupReady) return;
     if (autoKeyRef.current === key) return;
     if (!stripDialFormatting(voipPhone)) return;
-    if (stripDialFormatting(voipPhone) !== stripDialFormatting(leadPhone || "")) return;
+    if (!isAllowedDialPhone(stripDialFormatting(voipPhone))) return;
     // Hvis brugeren netop har gemt et nyt nummer på dette lead, må predictive
     // ikke automatisk ringe det op — det skal være click-to-call. Suppression
     // ophæves når leadId skifter (lead-reset-effekten nuller flaget).
@@ -1637,6 +1693,7 @@ export function CampaignVoipStrip({
      * så når callbacket fyrer er vi stadig i "ringing"/"connecting". */
     const timer = window.setTimeout(() => {
       void hangUp();
+      if (tryPredictivePhoneFailover()) return;
       onUnansweredTimeout();
     }, unansweredTimeoutMs);
     return () => window.clearTimeout(timer);

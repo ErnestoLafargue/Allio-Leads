@@ -50,6 +50,7 @@ model User {
 
   agentSessions  AgentSession[]
   dialerCallLogs DialerCallLog[]
+  callRecordings CallRecording[]
 
   /// Interne opgaver (ticketsystem)
   ticketsAssigned Ticket[] @relation("TicketAssignedTo")
@@ -107,8 +108,15 @@ model UserCampaignPresenceDay {
   campaignId    String
   /// YYYY-MM-DD (Europe/Copenhagen)
   dayKey        String
-  /// Sekunder på kampagnens arbejdsside (dialer åben)
+  /// Sekunder på kampagnens arbejdsside (dialer åben) — skrivebordstid, ikke linjetid
   dialerSeconds Int      @default(0)
+  /// Produktiv linjetid: sekunder sælgerens egen linje ringer
+  ringSeconds   Int      @default(0)
+  /// Produktiv linjetid: sekunder sælgerens egen linje er i samtale
+  talkLineSeconds Int    @default(0)
+  /// Seneste rapporterede linje-fase: "ringing" | "talking" | null
+  linePhase     String?
+  lineLastSeenAt DateTime?
   lastSeenAt    DateTime @default(now())
 
   user     User     @relation(fields: [userId], references: [id], onDelete: Cascade)
@@ -159,6 +167,8 @@ model Campaign {
   systemCampaignType         String?
   /// NO_DIAL | CLICK_TO_CALL | POWER_DIALER | PREDICTIVE — styrer Telnyx VOIP / opkaldsflow
   dialMode                   String   @default("NO_DIAL")
+  /// PRIVATE_FIRST | COMPANY_FIRST — hvilket nummer der ringes først (når begge findes). Default: privat.
+  dialPhonePriority          String   @default("PRIVATE_FIRST")
   /// Maks. ubesvarede kontaktforsøg (VOICEMAIL + TRÆFFES IKKE) før lead udelukkes fra auto-opkald. null = ingen grænse.
   maxContactAttempts         Int?
   /// Timer før VOICEMAIL / TRÆFFES IKKE auto-sættes tilbage til Ny i denne kampagne (min. 1, default 2).
@@ -194,6 +204,7 @@ model Campaign {
   dialerQueueItems DialerQueueItem[]
   presenceDays     UserCampaignPresenceDay[]
   assignments      CampaignAssignment[]
+  callRecordings   CallRecording[]
 }
 
 /// Tildeling af kampagne til sælger (ACL for dialer/lister). Admin bypasser uden rows.
@@ -221,6 +232,10 @@ model Lead {
 
   companyName  String
   phone        String
+  /// Privat telefonnummer (fx klinikejer fra Punktum) — separat fra virksomhedsnummer (`phone`)
+  privatePhone String @default("")
+  /// E.164 for nummer der fejlede i aktuel Power-kontaktcyklus — næste dial bruger det andet nummer. Tom = start forfra.
+  dialFailoverPendingE164 String @default("")
   email        String @default("")
   cvr          String @default("")
   address      String @default("")
@@ -309,6 +324,7 @@ model Lead {
 
   dialerCallLogs  DialerCallLog[]
   dialerQueueItem DialerQueueItem?
+  callRecordings  CallRecording[]
 
   @@index([lockExpiresAt])
   @@index([lockedByUserId])
@@ -532,6 +548,150 @@ model DialerCallLog {
   @@index([state, startedAt])
   @@index([campaignId, direction, endedAt])
   @@index([campaignId, resolvedAt])
+}
+
+/// Én Telnyx-optagelse — fundamentet for «Scripts & Træning». Importeres fra Telnyx
+/// (`GET /v2/recordings`) og kobles til sælger, lead, kampagne og udfald; se
+/// lib/call-recording-import.ts. `pipelineStatus` styrer transskribering → analyse.
+model CallRecording {
+  id                  String    @id @default(cuid())
+  /// Telnyx recording id (UUID) — idempotens-nøgle for importen
+  telnyxRecordingId   String    @unique
+  telnyxCallSessionId String?
+  telnyxCallLegId     String?
+  telnyxCallControlId String?
+  /// Telnyx connection (sælgerens credential connection eller power dialerens Call Control-app)
+  telnyxConnectionId  String?
+  /// "Trunking" (voice profilen optager alle opkald) | "StartCallRecordingAPI" (record_start fra appen)
+  initiatedBy         String?
+  /// "single" | "dual". Dual på udgående opkald: venstre = sælger, højre = kunde (verificeret 2026-09-26)
+  channels            String
+  /// "outbound" | "inbound" | "unknown" — afgjort ud fra vores egne Telnyx-numre
+  direction           String    @default("unknown")
+  fromNumber          String?
+  toNumber            String?
+  /// Kundens nummer i E.164 (to ved udgående, from ved indgående)
+  customerNumber      String?
+  startedAt           DateTime
+  endedAt             DateTime?
+  durationSeconds     Int
+
+  agentUserId         String?
+  /// Hvordan sælgeren blev fundet: CONNECTION | CONNECTION_NAME | DIALER_LOG | ACTIVITY | CALL_ATTEMPT | NONE
+  agentMatch          String    @default("NONE")
+  leadId              String?
+  /// Hvordan leadet blev fundet: ACTIVITY | CLIENT_STATE | CALL_ATTEMPT | DIALER_LOG | PHONE | NONE
+  leadMatch           String    @default("NONE")
+  campaignId          String?
+  /// Eksisterende CALL_RECORDING-aktivitet på leadet (har typisk vores Blob-kopi til afspilning)
+  activityEventId     String?
+  playbackUrl         String?
+  /// Udfald sælgeren satte på leadet efter opkaldet (LeadOutcomeLog.status), fx MEETING_BOOKED
+  outcomeStatus       String?
+  outcomeAt           DateTime?
+
+  /// Importen: NEW | SKIPPED_SHORT | SKIPPED_NO_CONVERSATION.
+  /// Transskribering: TRANSCRIBED | NO_SPEECH. Analyse: ANALYZED. Fejl: FAILED (se pipelineError).
+  pipelineStatus      String    @default("NEW")
+  pipelineError       String?
+
+  importedAt          DateTime  @default(now())
+  updatedAt           DateTime  @updatedAt
+
+  agent      User?           @relation(fields: [agentUserId], references: [id], onDelete: SetNull)
+  lead       Lead?           @relation(fields: [leadId], references: [id], onDelete: SetNull)
+  campaign   Campaign?       @relation(fields: [campaignId], references: [id], onDelete: SetNull)
+  transcript CallTranscript?
+  analyses   CallAnalysis[]
+
+  @@index([startedAt])
+  @@index([agentUserId, startedAt])
+  @@index([leadId, startedAt])
+  @@index([campaignId, startedAt])
+  @@index([pipelineStatus, startedAt])
+  @@index([telnyxCallSessionId])
+}
+
+/// Transskription af én optagelse (Soniox). Stereo transskriberes pr. kanal (venstre = sælger,
+/// højre = kunde); mono via talerskelnen, hvor sælgeren findes heuristisk (lib/call-transcription).
+model CallTranscript {
+  id                  String   @id @default(cuid())
+  callRecordingId     String   @unique
+  provider            String
+  model               String
+  /// "stereo_split" | "mono_diarized"
+  mode                String
+  /// Dominerende sprog ("da", "en", …) og antal tokens pr. sprog
+  language            String?
+  languages           Json?
+  /// [{ speaker: "agent" | "customer" | "unknown", start, end, text }] — sekunder fra optagelsens start
+  segments            Json
+  wordCount           Int      @default(0)
+  agentTalkSeconds    Float    @default(0)
+  customerTalkSeconds Float    @default(0)
+  /// Lyd faktureret hos udbyderen (stereo = begge kanaler) og prisen i USD
+  billedAudioSeconds  Float    @default(0)
+  costUsd             Float    @default(0)
+  createdAt           DateTime @default(now())
+  updatedAt           DateTime @updatedAt
+
+  callRecording CallRecording @relation(fields: [callRecordingId], references: [id], onDelete: Cascade)
+}
+
+/// AI-analyse af én samtale. Versioneret (prompt + skema i lib/call-analysis) og med kilde:
+/// "session" (historikken, analyseret i en Claude-session) eller "api" (workeren).
+model CallAnalysis {
+  id              String   @id @default(cuid())
+  callRecordingId String
+  analysisVersion String
+  /// "session" | "api"
+  source          String
+  model           String
+  /// Valideret modeloutput (lib/call-analysis/schema.ts) — fakta med citater, ingen scorer
+  result          Json
+  /// Beregnet af koden ud fra result + transskription (lib/call-analysis/score.ts)
+  scores          Json
+  overallScore    Int?
+  /// Valideringsadvarsler, fx citater der ikke kunne genfindes i transskriptionen
+  warnings        Json?
+  inputTokens     Int?
+  outputTokens    Int?
+  costUsd         Float    @default(0)
+  createdAt       DateTime @default(now())
+
+  callRecording CallRecording @relation(fields: [callRecordingId], references: [id], onDelete: Cascade)
+
+  @@unique([callRecordingId, analysisVersion, source])
+  @@index([analysisVersion, source])
+}
+
+/// Salgsscripts: de historiske pitches (SEED) og ugens script (WEEKLY). Ugens script udgives
+/// automatisk; tidligere versioner bevares, så der kan rulles tilbage.
+model SalesScriptVersion {
+  id            String    @id @default(cuid())
+  /// "SEED" | "WEEKLY"
+  kind          String
+  name          String
+  /// Løbende nummer pr. kind
+  version       Int
+  /// ISO-uge for WEEKLY, fx "2026-W39"
+  weekKey       String?
+  /// Sektioner med replikker og evidens (lib/sales-scripts/types.ts)
+  content       Json
+  /// Evidensgrundlag: antal samtaler, bookingrate pr. mønster, eksempel-samtaler
+  evidence      Json?
+  basedOnCalls  Int       @default(0)
+  isActive      Boolean   @default(false)
+  /// "seed" | "session" | "api"
+  generatedBy   String?
+  promptVersion String?
+  costUsd       Float     @default(0)
+  publishedAt   DateTime?
+  rolledBackAt  DateTime?
+  createdAt     DateTime  @default(now())
+
+  @@unique([kind, version])
+  @@index([kind, isActive])
 }
 
 /// Reservation af leads i dispatcherens kø — sikrer at samme lead ikke dispatches to gange

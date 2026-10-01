@@ -6,6 +6,7 @@ describe("buildCampaignLeadPatchBody", () => {
   const base = {
     companyName: "Test ApS",
     phone: "12 34 56 78",
+    privatePhone: "",
     email: "t@test.dk",
     cvr: "12345678",
     address: "Vej 1",

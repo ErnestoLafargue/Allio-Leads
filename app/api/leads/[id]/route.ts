@@ -248,6 +248,10 @@ export async function PATCH(req: Request, { params }: Params) {
     typeof body?.companyName === "string" ? body.companyName.trim() : existing.companyName;
   const phone =
     typeof body?.phone === "string" ? canonicalLeadPhoneForStorage(body.phone) : existing.phone;
+  const privatePhone =
+    typeof body?.privatePhone === "string"
+      ? canonicalLeadPhoneForStorage(body.privatePhone)
+      : existing.privatePhone;
   const email = typeof body?.email === "string" ? body.email : existing.email;
   const cvr = typeof body?.cvr === "string" ? body.cvr : existing.cvr;
   const filled = applyPostalCityFromAddressFields({
@@ -624,6 +628,7 @@ export async function PATCH(req: Request, { params }: Params) {
         ...pickLeadUpdateData({
           companyName,
           phone,
+          privatePhone,
           email,
           cvr,
           address,

@@ -53,7 +53,13 @@ export async function GET(req: Request) {
       }
       const rowsRaw = await prisma.lead.findMany({
         where: { campaignId },
-        select: { status: true, customFields: true, phone: true, callbackReservedByUserId: true },
+        select: {
+          status: true,
+          customFields: true,
+          phone: true,
+          privatePhone: true,
+          callbackReservedByUserId: true,
+        },
         orderBy: [{ lastOutcomeAt: "asc" }, { importedAt: "desc" }],
       });
       const rows =
@@ -239,6 +245,10 @@ export async function POST(req: Request) {
   const companyName = typeof body?.companyName === "string" ? body.companyName.trim() : "";
   const phone =
     typeof body?.phone === "string" ? canonicalLeadPhoneForStorage(body.phone) : "";
+  const privatePhone =
+    typeof body?.privatePhone === "string"
+      ? canonicalLeadPhoneForStorage(body.privatePhone)
+      : "";
 
   if (!campaignId || !companyName) {
     return NextResponse.json(
@@ -310,6 +320,7 @@ export async function POST(req: Request) {
       campaignId,
       companyName,
       phone,
+      privatePhone,
       email,
       cvr,
       address,

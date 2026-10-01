@@ -1,5 +1,5 @@
 /**
- * Kanoniserer `Lead.phone` og `meetingContactPhonePrivate` (samme logik som API/import).
+ * Kanoniserer `Lead.phone`, `privatePhone` og `meetingContactPhonePrivate` (samme logik som API/import).
  * Kør mod produktion med DATABASE_URL i .env / .env.local.
  *
  *   npx tsx scripts/canonicalize-lead-phones.ts
@@ -25,22 +25,24 @@ async function main() {
       skip,
       take: BATCH,
       orderBy: { id: "asc" },
-      select: { id: true, phone: true, meetingContactPhonePrivate: true },
+      select: { id: true, phone: true, privatePhone: true, meetingContactPhonePrivate: true },
     });
     if (rows.length === 0) break;
 
     for (const r of rows) {
       examined += 1;
       const nextPhone = canonicalLeadPhoneForStorage(r.phone);
+      const nextPrivate = canonicalLeadPhoneForStorage(r.privatePhone);
       let nextMeeting: string | null = r.meetingContactPhonePrivate;
       if (r.meetingContactPhonePrivate != null) {
         nextMeeting = canonicalLeadPhoneForStorage(r.meetingContactPhonePrivate);
       }
 
       const phoneChanged = nextPhone !== r.phone;
+      const privateChanged = nextPrivate !== r.privatePhone;
       const meetingChanged = nextMeeting !== r.meetingContactPhonePrivate;
 
-      if (!phoneChanged && !meetingChanged) continue;
+      if (!phoneChanged && !privateChanged && !meetingChanged) continue;
 
       if (dryRun) {
         updated += 1;
@@ -51,6 +53,7 @@ async function main() {
         where: { id: r.id },
         data: {
           ...(phoneChanged ? { phone: nextPhone } : {}),
+          ...(privateChanged ? { privatePhone: nextPrivate } : {}),
           ...(meetingChanged ? { meetingContactPhonePrivate: nextMeeting } : {}),
         },
       });
