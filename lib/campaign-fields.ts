@@ -35,6 +35,7 @@ export const FIXED_PERSON_EXTENSION_FIELDS: CampaignExtraField[] = [
   { key: "stifter", label: "Stifter" },
   { key: "direktor", label: "Direktør" },
   { key: "fuldt_ansvarlig_person", label: "Fuldt ansvarlig deltager" },
+  { key: "hjemmeside_ansvarlig", label: "Hjemmeside Ansvarlig" },
 ];
 
 /** Altid som sidste felt under Virksomhedsnavn (efter personfelterne). */
@@ -270,11 +271,15 @@ export function findStartDateExtensionField(cfg: CampaignFieldConfig): CampaignE
   return fuzzy;
 }
 
-export function resolveFixedPersonFieldKeys(cfg: CampaignFieldConfig): Record<"stifter" | "direktor" | "fuldtAnsvarligPerson", string> {
+export function resolveFixedPersonFieldKeys(cfg: CampaignFieldConfig): Record<
+  "stifter" | "direktor" | "fuldtAnsvarligPerson" | "hjemmesideAnsvarlig",
+  string
+> {
   const out = {
     stifter: "stifter",
     direktor: "direktor",
     fuldtAnsvarligPerson: "fuldt_ansvarlig_person",
+    hjemmesideAnsvarlig: "hjemmeside_ansvarlig",
   };
 
   for (const g of FIELD_GROUPS) {
@@ -289,6 +294,12 @@ export function resolveFixedPersonFieldKeys(cfg: CampaignFieldConfig): Record<"s
         /\bfad\b/.test(labelNorm)
       ) {
         out.fuldtAnsvarligPerson = f.key;
+      }
+      if (
+        keyNorm.includes("hjemmeside_ansvarlig") ||
+        (labelNorm.includes("hjemmeside") && labelNorm.includes("ansvarlig"))
+      ) {
+        out.hjemmesideAnsvarlig = f.key;
       }
     }
   }

@@ -2,7 +2,7 @@ import { normalizeCVR } from "@/lib/cvr-import";
 
 /**
  * Krak (personsøgning) kun for relevante personfelter — ikke for øvrige ekstrafelter.
- * Matcher typisk: stifter, direktør, fuldt ansvarlig deltager / FAD.
+ * Matcher typisk: stifter, direktør, fuldt ansvarlig deltager / FAD, hjemmeside ansvarlig.
  */
 export function isKrakPersonFieldLabel(label: string): boolean {
   const t = label.trim().toLowerCase();
@@ -11,6 +11,7 @@ export function isKrakPersonFieldLabel(label: string): boolean {
   if (t.includes("stifter") && (t.includes("navn") || t.includes("på"))) return true;
   if (t.includes("direktør") || noAccent.includes("direktor")) return true;
   if (t.includes("fuldt ansvarlig") || /\bfad\b/i.test(t) || t.includes("(fad)")) return true;
+  if (t.includes("hjemmeside") && t.includes("ansvarlig")) return true;
   return false;
 }
 
@@ -18,6 +19,8 @@ export function isKrakPersonFieldLabel(label: string): boolean {
 export function isWebsiteFieldLabel(label: string): boolean {
   const t = label.trim().toLowerCase();
   if (!t) return false;
+  // Personfelt «Hjemmeside Ansvarlig» er ikke en URL.
+  if (t.includes("ansvarlig")) return false;
   const noAccent = t.normalize("NFD").replace(/\p{M}/gu, "");
   return (
     t.includes("hjemmeside") ||

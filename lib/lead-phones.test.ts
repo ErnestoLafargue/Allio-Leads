@@ -96,10 +96,25 @@ describe("visiblePersonExtensionFields", () => {
 
   it("viser kun felter med værdi", () => {
     expect(
-      visiblePersonExtensionFields({ stifter: "Anna", direktor: "", fuldt_ansvarlig_person: "Bo" }, cfg),
+      visiblePersonExtensionFields(
+        {
+          stifter: "Anna",
+          direktor: "",
+          fuldt_ansvarlig_person: "Bo",
+          hjemmeside_ansvarlig: "Carla",
+        },
+        cfg,
+      ),
     ).toEqual([
       { key: "stifter", label: "Stifter" },
       { key: "fuldt_ansvarlig_person", label: "Fuldt ansvarlig deltager" },
+      { key: "hjemmeside_ansvarlig", label: "Hjemmeside Ansvarlig" },
     ]);
+  });
+
+  it("skjuler Hjemmeside Ansvarlig når tom", () => {
+    expect(
+      visiblePersonExtensionFields({ stifter: "Anna", hjemmeside_ansvarlig: "  " }, cfg),
+    ).toEqual([{ key: "stifter", label: "Stifter" }]);
   });
 });

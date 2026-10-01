@@ -17,6 +17,10 @@ describe("isKrakPersonFieldLabel", () => {
     expect(isKrakPersonFieldLabel("Navn (FAD)")).toBe(true);
   });
 
+  it("matcher Hjemmeside Ansvarlig", () => {
+    expect(isKrakPersonFieldLabel("Hjemmeside Ansvarlig")).toBe(true);
+  });
+
   it("matcher ikke øvrige felter", () => {
     expect(isKrakPersonFieldLabel("Virksomhedsform")).toBe(false);
     expect(isKrakPersonFieldLabel("Branche")).toBe(false);

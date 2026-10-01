@@ -130,6 +130,13 @@ export function suggestColumnMapping(columns: string[]): Record<string, string> 
     ) {
       t = "email";
     } else if (
+      (n.includes("hjemmeside") && n.includes("ansvarlig")) ||
+      n === "hjemmeside_ansvarlig" ||
+      n === "website_ansvarlig" ||
+      n === "website_owner"
+    ) {
+      t = "custom:hjemmeside_ansvarlig";
+    } else if (
       n.includes("domain") ||
       n.includes("hjemmeside") ||
       n.includes("website") ||

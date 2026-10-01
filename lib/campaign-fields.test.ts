@@ -16,7 +16,13 @@ describe("mergeDefaultExtensions — Domæne", () => {
   it("tilføjer domaene som sidste felt under companyName på tom config", () => {
     const cfg = mergeDefaultExtensions({ extensions: {} });
     const names = cfg.extensions.companyName?.map((f) => f.key) ?? [];
-    expect(names).toEqual(["stifter", "direktor", "fuldt_ansvarlig_person", "domaene"]);
+    expect(names).toEqual([
+      "stifter",
+      "direktor",
+      "fuldt_ansvarlig_person",
+      "hjemmeside_ansvarlig",
+      "domaene",
+    ]);
     expect(cfg.extensions.companyName?.at(-1)).toEqual(FIXED_DOMAIN_EXTENSION_FIELD);
   });
 
@@ -36,6 +42,7 @@ describe("mergeDefaultExtensions — Domæne", () => {
       "stifter",
       "direktor",
       "fuldt_ansvarlig_person",
+      "hjemmeside_ansvarlig",
       "domaene",
       "hjemmeside",
     ]);

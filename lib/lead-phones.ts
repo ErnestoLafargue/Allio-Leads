@@ -137,7 +137,7 @@ export function leadHasAnyPhone(phone: string, privatePhone?: string | null): bo
 }
 
 /**
- * Personfelter (stifter/direktør/FAD): kun felter med værdi.
+ * Personfelter (stifter/direktør/FAD/hjemmeside-ansvarlig): kun felter med værdi.
  * Har ledet ingen personværdier → vis kun «Fuldt ansvarlig deltager» tom.
  */
 export function visiblePersonExtensionFields(
@@ -149,6 +149,7 @@ export function visiblePersonExtensionFields(
     { key: keys.stifter, label: "Stifter" },
     { key: keys.direktor, label: "Direktør" },
     { key: keys.fuldtAnsvarligPerson, label: "Fuldt ansvarlig deltager" },
+    { key: keys.hjemmesideAnsvarlig, label: "Hjemmeside Ansvarlig" },
   ];
 
   const companyExt = cfg.extensions.companyName ?? [];
@@ -170,7 +171,12 @@ export function visiblePersonExtensionFields(
 export function isVisiblePersonFieldKey(key: string, cfg: CampaignFieldConfig): boolean {
   if (isFixedPersonExtensionKey(key)) return true;
   const keys = resolveFixedPersonFieldKeys(cfg);
-  return key === keys.stifter || key === keys.direktor || key === keys.fuldtAnsvarligPerson;
+  return (
+    key === keys.stifter ||
+    key === keys.direktor ||
+    key === keys.fuldtAnsvarligPerson ||
+    key === keys.hjemmesideAnsvarlig
+  );
 }
 
 /** Kort pause før Power Dialer ringer 2. nummer efter fejl på 1. */
