@@ -215,7 +215,8 @@ export type PowerDialerCandidate = {
 type PowerCandidateCampaign = CampaignQueueFields;
 
 /**
- * Power Dialer-kø i samme rækkefølge som den manuelle kø (kampagnens gemte filter + sortering):
+ * Power Dialer-kø i samme rækkefølge som den manuelle kø: kampagnens filter
+ * afgrænser hvem der er med, og færrest kontaktforsøg ligger først.
  * Ny, ikke låst, ingen callback, ikke i cooldown, inden for maks. kontaktforsøg, ikke allerede i
  * dispatcherens kø. Returnerer op til `limit` leads med gyldigt nummer.
  */

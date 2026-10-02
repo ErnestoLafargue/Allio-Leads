@@ -361,8 +361,10 @@ export function leadMatchesActiveCampaignQueueView(
 }
 
 /**
- * Når postnummer-filter er aktivt: sorter primært på postnr (asc/desc), ellers eksisterende kø-orden.
- * Tomt/ugyldigt postnr lægges sidst (bør allerede være filtreret væk).
+ * Postnummer-intervaller vælger hvem der er i køen. Rækkefølgen er altid
+ * færrest kontaktforsøg først (derefter ældst sidste forsøg). Postnr må ikke
+ * være primær sortering: så recirkulerer de laveste postnumre, og leads i de
+ * højere intervaller bliver aldrig ringet op.
  */
 export function sortLeadsByActivePostalQueue<
   T extends QueueOrderFields & {
@@ -370,20 +372,8 @@ export function sortLeadsByActivePostalQueue<
     postalCode?: string | null;
     address?: string | null;
   },
->(leads: T[], view: ActiveCampaignQueueViewV1 | null | undefined): T[] {
-  if (!view || !isPostalQueueFilterActive(view)) {
-    return [...leads].sort(compareLeadQueueOrder);
-  }
-  const dir = view.postalSortDir === "desc" ? -1 : 1;
-  return [...leads].sort((a, b) => {
-    const na = postalCodeDigits(effectivePostalCode(a.postalCode, a.address));
-    const nb = postalCodeDigits(effectivePostalCode(b.postalCode, b.address));
-    if (na == null && nb == null) return compareLeadQueueOrder(a, b);
-    if (na == null) return 1;
-    if (nb == null) return -1;
-    if (na !== nb) return (na - nb) * dir;
-    return compareLeadQueueOrder(a, b);
-  });
+>(leads: T[], _view: ActiveCampaignQueueViewV1 | null | undefined): T[] {
+  return [...leads].sort(compareLeadQueueOrder);
 }
 
 export function filterLeadsByActiveCampaignQueueView<T extends LeadRowInput>(

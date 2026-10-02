@@ -36,7 +36,6 @@ import {
   hasActiveQueueViewConstraints,
   leadMatchesPostalRanges,
   parseActiveCampaignQueueView,
-  postalCodeDigits,
   syncLegacyFilterFields,
   type ActiveCampaignQueueViewV1,
   type PostalRange,
@@ -783,16 +782,9 @@ export function LeadsBulkPanel({
     }
 
     if (campaignId && postalFilterEnabled) {
-      const dirMul = postalSortDir === "asc" ? 1 : -1;
-      return [...out].sort((a, b) => {
-        const an = postalCodeDigits(effectivePostalCode(a.postalCode, a.address));
-        const bn = postalCodeDigits(effectivePostalCode(b.postalCode, b.address));
-        const aHas = an != null;
-        const bHas = bn != null;
-        if (aHas !== bHas) return aHas ? -1 : 1;
-        if (aHas && bHas && an !== bn) return (an - bn) * dirMul;
-        return compareLeadQueueOrder(queueOrderFieldsFromLead(a), queueOrderFieldsFromLead(b));
-      });
+      return [...out].sort((a, b) =>
+        compareLeadQueueOrder(queueOrderFieldsFromLead(a), queueOrderFieldsFromLead(b)),
+      );
     }
 
     if (selectedDynamicField) {
@@ -847,7 +839,6 @@ export function LeadsBulkPanel({
     meetingStartTo,
     selectedCampaignIndustries,
     postalFilterEnabled,
-    postalSortDir,
     postalRanges,
     serverQueueNarrowing,
     dialMode,
@@ -1152,37 +1143,16 @@ export function LeadsBulkPanel({
                     type="checkbox"
                     checked={postalFilterEnabled}
                     onChange={(e) => {
-                      const on = e.target.checked;
-                      setPostalFilterEnabled(on);
-                      if (on) {
-                        setDynamicSortFieldId("postalCode");
-                        setDynamicSortDir(postalSortDir);
-                      }
+                      setPostalFilterEnabled(e.target.checked);
                     }}
                     className="rounded border-stone-300"
                   />
                   Postnummer
                 </label>
                 <p className="text-[11px] leading-snug text-stone-500">
-                  Begrænser listen og dialerkøen til valgte postnr-intervaller.
+                  Begrænser listen og dialerkøen til valgte postnr-intervaller. Køen ringes med
+                  færrest forsøg først, så alle i intervallerne bliver ringet op.
                 </p>
-                <label className="text-xs text-stone-700">
-                  Rækkefølge
-                  <select
-                    value={postalSortDir}
-                    onChange={(e) => {
-                      const dir = e.target.value === "desc" ? "desc" : "asc";
-                      setPostalSortDir(dir);
-                      setDynamicSortFieldId("postalCode");
-                      setDynamicSortDir(dir);
-                    }}
-                    disabled={!postalFilterEnabled}
-                    className="mt-1 block min-w-[11rem] rounded-md border border-stone-200 bg-white px-2 py-1.5 text-xs text-stone-900 disabled:opacity-60"
-                  >
-                    <option value="asc">Lavt → højt</option>
-                    <option value="desc">Højt → lavt</option>
-                  </select>
-                </label>
                 <div className="space-y-2">
                   {postalRanges.map((range, idx) => (
                     <div key={idx} className="flex flex-wrap items-end gap-2">

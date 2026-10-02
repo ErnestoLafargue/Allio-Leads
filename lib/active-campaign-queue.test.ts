@@ -283,21 +283,34 @@ describe("sortLeadsByActivePostalQueue", () => {
     },
   ];
 
-  it("sorterer asc når filter er til", () => {
+  it("lader postnummer-filteret ikke overstyre færrest forsøg", () => {
+    const queued = [
+      {
+        id: "low-postal-many",
+        postalCode: "1000",
+        status: "NEW",
+        importedAt: "2026-01-01T00:00:00.000Z",
+        hasOutcomeLogToday: false,
+        unansweredAttempts: 3,
+        lastDialAttemptAt: "2026-06-01T08:00:00.000Z",
+      },
+      {
+        id: "high-postal-fresh",
+        postalCode: "8000",
+        status: "NEW",
+        importedAt: "2026-01-01T00:00:00.000Z",
+        hasOutcomeLogToday: false,
+        unansweredAttempts: 0,
+      },
+      ...rows,
+    ];
     const view: ActiveCampaignQueueViewV1 = {
       ...EMPTY_ACTIVE_CAMPAIGN_QUEUE_VIEW,
       postalFilterEnabled: true,
       postalSortDir: "asc",
     };
-    expect(sortLeadsByActivePostalQueue(rows, view).map((r) => r.id)).toEqual(["a", "b", "c"]);
-  });
-
-  it("sorterer desc når valgt", () => {
-    const view: ActiveCampaignQueueViewV1 = {
-      ...EMPTY_ACTIVE_CAMPAIGN_QUEUE_VIEW,
-      postalFilterEnabled: true,
-      postalSortDir: "desc",
-    };
-    expect(sortLeadsByActivePostalQueue(rows, view).map((r) => r.id)).toEqual(["c", "b", "a"]);
+    const order = sortLeadsByActivePostalQueue(queued, view).map((r) => r.id);
+    expect(order.indexOf("high-postal-fresh")).toBeLessThan(order.indexOf("low-postal-many"));
+    expect(order.indexOf("low-postal-many")).toBe(order.length - 1);
   });
 });
