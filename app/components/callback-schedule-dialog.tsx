@@ -21,18 +21,7 @@ type Props = {
   onConfirm: (p: CallbackSchedulePayload) => void;
 };
 
-/** 08:00–22:00 inkl., 15-minutters trin (København vises som lokal dato+tids-valg). */
-const TIME_OPTIONS: string[] = (() => {
-  const out: string[] = [];
-  for (let h = 8; h <= 22; h++) {
-    const maxM = h === 22 ? 0 : 45;
-    for (let m = 0; m <= maxM; m += 15) {
-      out.push(`${String(h).padStart(2, "0")}:${String(m).padStart(2, "0")}`);
-    }
-  }
-  return out;
-})();
-
+/** 08:00–22:00 inkl. København. Tid vælges på minut, ikke i 15-minutters trin. */
 function defaultDateParts(): { date: string; time: string } {
   const d = new Date();
   d.setMinutes(d.getMinutes() + 60, 0, 0);
@@ -42,11 +31,6 @@ function defaultDateParts(): { date: string; time: string } {
   const day = pad(d.getDate());
   let H = d.getHours();
   let M = d.getMinutes();
-  M = Math.ceil(M / 15) * 15;
-  if (M >= 60) {
-    H += 1;
-    M = 0;
-  }
   if (H < 8) {
     H = 8;
     M = 0;
@@ -55,8 +39,7 @@ function defaultDateParts(): { date: string; time: string } {
     H = 22;
     M = 0;
   }
-  const time = `${pad(H)}:${pad(M)}`;
-  return { date: `${y}-${mo}-${day}`, time: TIME_OPTIONS.includes(time) ? time : "09:00" };
+  return { date: `${y}-${mo}-${day}`, time: `${pad(H)}:${pad(M)}` };
 }
 
 export function CallbackScheduleDialog({
@@ -95,14 +78,19 @@ export function CallbackScheduleDialog({
 
   if (!open) return null;
 
-  function submit() {
-    if (!dateStr || !timeStr) return;
+  const selectedLocal = (() => {
+    if (!dateStr || !timeStr) return null;
     const local = new Date(`${dateStr}T${timeStr}:00`);
-    if (Number.isNaN(local.getTime())) return;
-    if (!isCallbackTimeInCopenhagenBusinessWindow(local)) return;
+    return Number.isNaN(local.getTime()) ? null : local;
+  })();
+  const outsideWindow =
+    selectedLocal != null && !isCallbackTimeInCopenhagenBusinessWindow(selectedLocal);
+
+  function submit() {
+    if (!selectedLocal || outsideWindow) return;
     onConfirm({
       assignedUserId,
-      scheduledForISO: local.toISOString(),
+      scheduledForISO: selectedLocal.toISOString(),
     });
   }
 
@@ -153,19 +141,20 @@ export function CallbackScheduleDialog({
           </label>
           <label className="block text-xs font-medium text-stone-600">
             Tid (08:00–22:00)
-            <select
+            <input
+              type="time"
+              step={60}
+              min="08:00"
+              max="22:00"
               value={timeStr}
               onChange={(e) => setTimeStr(e.target.value)}
-              className="mt-1 w-full appearance-none rounded-lg border border-stone-200 bg-white px-3 py-2.5 text-sm text-stone-900 shadow-sm outline-none ring-stone-400 focus:ring-2"
-            >
-              {TIME_OPTIONS.map((t) => (
-                <option key={t} value={t}>
-                  {t}
-                </option>
-              ))}
-            </select>
+              className="mt-1 w-full rounded-lg border border-stone-200 bg-white px-3 py-2 text-sm text-stone-900 shadow-sm outline-none ring-stone-400 focus:ring-2"
+            />
           </label>
         </div>
+        {outsideWindow ? (
+          <p className="mt-2 text-sm text-red-600">Vælg et tidspunkt mellem kl. 08:00 og 22:00.</p>
+        ) : null}
 
         <div className="mt-6 flex flex-wrap justify-end gap-2">
           <button
@@ -177,7 +166,7 @@ export function CallbackScheduleDialog({
           </button>
           <button
             type="button"
-            disabled={saving || !dateStr || !timeStr || users.length === 0}
+            disabled={saving || !selectedLocal || outsideWindow || users.length === 0}
             onClick={submit}
             className="rounded-lg bg-violet-700 px-4 py-2 text-sm font-semibold text-white shadow-sm hover:bg-violet-800 disabled:opacity-60"
           >
