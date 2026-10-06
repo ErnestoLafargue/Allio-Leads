@@ -62,11 +62,6 @@ type Props = {
   onUnansweredTimeout?: () => void;
   /** Predictive-mode: auto-udfald når Telnyx-lukårsag tydeligt peger på voicemail/no answer. */
   onPredictiveAutoOutcome?: (outcome: Exclude<PredictiveAutoOutcome, null>) => void;
-  /**
-   * Predictive: kunden lagde på uden et klassificeret udfald. Gå videre til næste lead.
-   * Agentens egen læg-på kalder ikke denne.
-   */
-  onCustomerHangup?: () => void;
   /** Gem nyt telefonnummer på selve leadet (source of truth). */
   onUpdateLeadPhone?: (nextPhone: string) => Promise<{ ok: boolean; message?: string }> | { ok: boolean; message?: string };
   /** Antal millisekunder før Predictive-modus giver op og kalder `onUnansweredTimeout`. */
@@ -262,7 +257,6 @@ export function CampaignVoipStrip({
   autoStartCall,
   onUnansweredTimeout,
   onPredictiveAutoOutcome,
-  onCustomerHangup,
   onUpdateLeadPhone,
   unansweredTimeoutMs = 25_000,
   onLineStatusChange,
@@ -422,8 +416,6 @@ export function CampaignVoipStrip({
   dialModeRef.current = effectiveDialMode;
   const onPredictiveAutoOutcomeRef = useRef(onPredictiveAutoOutcome);
   onPredictiveAutoOutcomeRef.current = onPredictiveAutoOutcome;
-  const onCustomerHangupRef = useRef(onCustomerHangup);
-  onCustomerHangupRef.current = onCustomerHangup;
   const micIdRef = useRef("");
   const audioSetupReadyRef = useRef(false);
 
@@ -760,14 +752,15 @@ export function CampaignVoipStrip({
       autoOutcome,
       canFailover,
     });
-    if (decision.type === "failover" && tryPredictivePhoneFailover()) return;
-    suppressAutoStartForLeadIdRef.current = leadId;
-    const outcome = decision.type === "advance" ? decision.outcome : autoOutcome;
-    if (outcome) {
-      onPredictiveAutoOutcomeRef.current?.(outcome);
+    if (decision.type === "stay") {
+      suppressAutoStartForLeadIdRef.current = leadId;
       return;
     }
-    onCustomerHangupRef.current?.();
+    if (decision.type === "failover" && tryPredictivePhoneFailover()) return;
+    suppressAutoStartForLeadIdRef.current = leadId;
+    if (decision.type === "advance") {
+      onPredictiveAutoOutcomeRef.current?.(decision.outcome);
+    }
   };
   /** Pre-load Telnyx WebRTC SDK-chunken så snart komponenten mountes,
    *  så den er klar i memory inden brugeren trykker «Ring op». */

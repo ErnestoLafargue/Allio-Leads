@@ -55,21 +55,30 @@ export function predictiveAutoStartKey(
 }
 
 export type PredictiveRemoteEndAction =
+  | { type: "stay" }
   | { type: "failover" }
-  | { type: "advance"; outcome: PredictiveAutoOutcome };
+  | { type: "advance"; outcome: Exclude<PredictiveAutoOutcome, null> };
 
 /**
- * Kunden lagde på: gå videre til næste lead.
- * Andet nummer på SAMME lead prøves kun, når der ikke har været en samtale.
- * Agentens egen læg-på er ikke denne funktion — den bliver på leadet og ringer ikke igen.
+ * Kunden lagde på.
+ * Har der været en samtale, bliver sælgeren på kundebilledet og vælger selv udfald
+ * (noter, tilbagekald, ukvalificeret). Systemet må ikke gemme et udfald og gå videre.
+ * Uden samtale kan andet nummer prøves, og et klassificeret udfald (ikke hjemme / telefonsvarer)
+ * må stadig gå videre. Agentens egen læg-på er ikke denne funktion.
  */
 export function predictiveActionAfterRemoteEnd(input: {
   hadLive: boolean;
   autoOutcome: PredictiveAutoOutcome;
   canFailover: boolean;
 }): PredictiveRemoteEndAction {
+  if (input.hadLive && input.autoOutcome !== "VOICEMAIL") {
+    return { type: "stay" };
+  }
   if (!input.hadLive && input.autoOutcome && input.canFailover) {
     return { type: "failover" };
   }
-  return { type: "advance", outcome: input.autoOutcome };
+  if (input.autoOutcome) {
+    return { type: "advance", outcome: input.autoOutcome };
+  }
+  return { type: "stay" };
 }

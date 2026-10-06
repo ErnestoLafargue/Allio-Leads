@@ -391,8 +391,6 @@ export function CampaignWorkspace({
   useEffect(() => {
     activeLeadRef.current = activeLead;
   }, [activeLead]);
-  const statusRef = useRef(status);
-  statusRef.current = status;
 
   useEffect(() => {
     prefetchedLeadRef.current = prefetchedLead;
@@ -2067,10 +2065,6 @@ export function CampaignWorkspace({
           onPredictiveAutoOutcome={(outcome) => {
             setStatus(outcome);
             queueMicrotask(() => void onNextRef.current(undefined, undefined, outcome));
-          }}
-          onCustomerHangup={() => {
-            if (statusRef.current !== "NEW") return;
-            queueMicrotask(() => void onNextRef.current());
           }}
           onUpdateLeadPhone={handleUpdateLeadPhoneFromVoip}
           unansweredTimeoutMs={25_000}

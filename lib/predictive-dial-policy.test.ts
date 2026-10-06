@@ -73,13 +73,15 @@ function runSmoke(priority: DialPhonePriority) {
   formPhone = "+45 11 11 11 11";
   tryAutoStart("agent-hangup-reformat");
 
-  // Kunden lægger på: videre til næste, og det er B's nummer der ringes.
+  // Kunden lægger på efter en samtale: bliv på samme kunde. Intet udfald, intet nyt opkald.
   const remote = predictiveActionAfterRemoteEnd({
     hadLive: true,
     autoOutcome: null,
     canFailover: true,
   });
-  if (remote.type === "advance") openLead(b);
+  lineBusy = false;
+  suppressed = open.id;
+  tryAutoStart("customer-hangup-after-talk");
 
   // Tilbagekald: billedet åbner B, men formularen har stadig A's nummer i ét render.
   openLead(a);
@@ -97,24 +99,34 @@ describe("predictive dialer smoke", () => {
     const { dials, remote, shownOnB } = runSmoke(priority);
 
     const agentRedials = dials.filter((d) => d.reason.startsWith("agent-hangup"));
+    const afterTalk = dials.filter((d) => d.reason === "customer-hangup-after-talk");
     const wrongNumber = dials.filter((d) => d.leadId === "lead-b" && !sameDialTarget(d.phone, shownOnB));
 
-    expect(remote).toEqual({ type: "advance", outcome: null });
+    expect(remote).toEqual({ type: "stay" });
     expect(agentRedials).toEqual([]);
+    expect(afterTalk).toEqual([]);
     expect(wrongNumber).toEqual([]);
     expect(dials.map((d) => `${d.leadId}:${d.phone}`)).toEqual([
       "lead-a:11111111",
-      "lead-b:22222222",
       "lead-a:11111111",
       "lead-b:22222222",
     ]);
     expect(dials.some((d) => d.reason === "form-synced" && d.phone === "22222222")).toBe(true);
   });
 
-  it("kunde der lægger på under samtale går videre og ringer ikke samme leads andet nummer", () => {
+  it("kunde der lægger på efter en samtale bliver på billedet uden udfald", () => {
     expect(
       predictiveActionAfterRemoteEnd({ hadLive: true, autoOutcome: null, canFailover: true }),
-    ).toEqual({ type: "advance", outcome: null });
+    ).toEqual({ type: "stay" });
+    expect(
+      predictiveActionAfterRemoteEnd({ hadLive: true, autoOutcome: "NOT_HOME", canFailover: false }),
+    ).toEqual({ type: "stay" });
+  });
+
+  it("telefonsvarer uden samtale må stadig gå videre", () => {
+    expect(
+      predictiveActionAfterRemoteEnd({ hadLive: false, autoOutcome: "VOICEMAIL", canFailover: false }),
+    ).toEqual({ type: "advance", outcome: "VOICEMAIL" });
   });
 
   it("ubesvaret uden samtale må stadig prøve leadets andet nummer før næste", () => {
