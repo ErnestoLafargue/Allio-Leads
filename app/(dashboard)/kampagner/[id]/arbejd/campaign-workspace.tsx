@@ -251,6 +251,8 @@ export function CampaignWorkspace({
     [searchParams, campaignId],
   );
   const returnPath = leadNavigation.openedFrom.path;
+  /** Åbnet fra historik: gem udfaldet og luk, uden at gå videre i køen. */
+  const closeAfterSave = leadNavigation.openedFrom.source === "history";
   const { data: session } = useSession();
   const sessionUserId = session?.user?.id ?? "";
   const isAdmin = session?.user?.role === "ADMIN";
@@ -681,7 +683,8 @@ export function CampaignWorkspace({
       return;
     }
     // Power: næste lead kommer fra dispatcheren — ingen manuel forhåndsreservation.
-    if (isPowerAutoDialSession) return;
+    // Historik: gem lukker leadet, så næste i køen må ikke reserveres.
+    if (isPowerAutoDialSession || closeAfterSave) return;
     if (prefetchedLeadRef.current?.id) return;
     void prefetchNextLead(activeLead.id);
     // prefetch kun ved lead-skift; cache håndteres via ref
@@ -1068,6 +1071,17 @@ export function CampaignWorkspace({
     window.location.assign(path || DIALER_START_PATH);
   }
 
+  function leaveOpenedLead(leadId: string) {
+    clearPrefetchReservation();
+    void releaseLockHttp(leadId);
+    try {
+      sessionStorage.removeItem(preferKeyFor(campaignId));
+    } catch {
+      /* ignore */
+    }
+    window.location.assign(returnPath || "/historik");
+  }
+
   async function onNext(
     meetingScheduledForISO?: string,
     adminSkipBookingOverlap?: boolean,
@@ -1132,6 +1146,11 @@ export function CampaignWorkspace({
         const d = new Date(meetingScheduledForISO);
         const local = new Date(d.getTime() - d.getTimezoneOffset() * 60000);
         setMeetingScheduledFor(local.toISOString().slice(0, 16));
+      }
+
+      if (closeAfterSave) {
+        leaveOpenedLead(currentId);
+        return;
       }
 
       if (leaveAfterSave) {
@@ -1212,6 +1231,19 @@ export function CampaignWorkspace({
     setNextAdvanceBusy(true);
 
     try {
+      if (closeAfterSave) {
+        clearPrefetchReservation();
+        setSaving(true);
+        const saved = await patchLeadDocument(currentId, patchBody);
+        setSaving(false);
+        if (!saved) {
+          setError("Kunne ikke gemme");
+          return;
+        }
+        leaveOpenedLead(currentId);
+        return;
+      }
+
       if (leaveAfterSave) {
         clearPrefetchReservation();
         queueBackgroundPatch(currentId, patchBody);
@@ -1336,6 +1368,10 @@ export function CampaignWorkspace({
     }
     pendingPatchBodiesRef.current.delete(activeLead.id);
     setCallbackDialogOpen(false);
+    if (closeAfterSave) {
+      leaveOpenedLead(activeLead.id);
+      return;
+    }
     await advanceToNextReservedAfterSave(activeLead.id);
   }
 
@@ -1626,15 +1662,19 @@ export function CampaignWorkspace({
         String(current.callbackStatus ?? "PENDING").trim().toUpperCase() === "PENDING"));
 
   const showNextForMeeting = status !== "MEETING_BOOKED";
-  const nextLabel = leaveAfterSave
+  const nextLabel = closeAfterSave
     ? saving || nextAdvanceBusy
       ? "Gemmer…"
-      : "Gem og gå til pause"
-    : saving
-      ? "Henter næste…"
-      : nextAdvanceBusy
-        ? "Skifter…"
-        : "Gem og næste";
+      : "Gem og luk"
+    : leaveAfterSave
+      ? saving || nextAdvanceBusy
+        ? "Gemmer…"
+        : "Gem og gå til pause"
+      : saving
+        ? "Henter næste…"
+        : nextAdvanceBusy
+          ? "Skifter…"
+          : "Gem og næste";
   const showBackgroundSaveHint = backgroundLockLeadIds.length > 0;
   const nextButtonClass = leaveAfterSave
     ? "rounded-xl bg-amber-800 px-6 py-3 text-sm font-semibold text-white shadow-md transition hover:bg-amber-900 disabled:opacity-60 shrink-0"
@@ -1962,7 +2002,11 @@ export function CampaignWorkspace({
         </div>
         <p className="mt-1 text-xs text-stone-600">
           Dette lead er <strong>låst til dig</strong>, så længe du har denne side åben — kolleger kan ikke åbne
-          eller reservere det samme nummer samtidig. Når du går videre eller lukker fanen, frigives låset. Mens du
+          eller reservere det samme nummer samtidig.{" "}
+          {closeAfterSave
+            ? "Når du gemmer og lukker, eller lukker fanen, frigives låset."
+            : "Når du går videre eller lukker fanen, frigives låset."}{" "}
+          Mens du
           arbejder her, fornyes det automatisk.
         </p>
         {leaveAfterSave ? (
@@ -1977,7 +2021,10 @@ export function CampaignWorkspace({
               dateStyle: "short",
               timeStyle: "short",
             })}
-            . Vælg udfald og gem — eller «Gem og næste» med «Ny» for at lægge leadet tilbage som nyt i køen.
+            . Vælg udfald og gem
+            {closeAfterSave
+              ? " — «Gem og luk» registrerer udfaldet og lukker leadet."
+              : " — eller «Gem og næste» med «Ny» for at lægge leadet tilbage som nyt i køen."}
           </div>
         )}
         {showOriginalCancelledMeetingInfo && (
