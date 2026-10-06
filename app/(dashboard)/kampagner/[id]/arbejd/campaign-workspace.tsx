@@ -48,6 +48,7 @@ import {
   orderedDialPhones,
   type DialPhonePriority,
 } from "@/lib/lead-phones";
+import { dialPhoneForOpenLead } from "@/lib/predictive-dial-policy";
 
 type Lead = {
   id: string;
@@ -390,6 +391,8 @@ export function CampaignWorkspace({
   useEffect(() => {
     activeLeadRef.current = activeLead;
   }, [activeLead]);
+  const statusRef = useRef(status);
+  statusRef.current = status;
 
   useEffect(() => {
     prefetchedLeadRef.current = prefetchedLead;
@@ -489,6 +492,13 @@ export function CampaignWorkspace({
     setMeetingContactPhonePrivate(l.meetingContactPhonePrivate ?? "");
     setMeetingCompanyName(l.meetingCompanyName ?? "");
   }, [campaignSystemType]);
+
+  // Nummer og kundebillede skifter i samme render. Ellers kan auto-opkald nå at bruge forrige leads nummer.
+  const openedFormLeadIdRef = useRef<string | null>(null);
+  if ((activeLead?.id ?? null) !== openedFormLeadIdRef.current) {
+    openedFormLeadIdRef.current = activeLead?.id ?? null;
+    if (activeLead) loadFormFromLead(activeLead);
+  }
 
   const resetFormForPowerWaiting = useCallback(() => {
     setCompanyName("");
@@ -2045,7 +2055,8 @@ export function CampaignWorkspace({
         <CampaignVoipStrip
           leadId={current.id}
           campaignId={campaignId}
-          leadPhone={orderedDialPhones(phone, privatePhone, dialPhonePriority)[0]?.raw ?? ""}
+          leadPhone={dialPhoneForOpenLead({ phone, privatePhone }, dialPhonePriority)}
+          recordPhone={dialPhoneForOpenLead(current, dialPhonePriority)}
           failoverPhone={orderedDialPhones(phone, privatePhone, dialPhonePriority)[1]?.raw ?? ""}
           dialMode={campaignDialMode}
           autoStartCall={voipAutoStart}
@@ -2056,6 +2067,10 @@ export function CampaignWorkspace({
           onPredictiveAutoOutcome={(outcome) => {
             setStatus(outcome);
             queueMicrotask(() => void onNextRef.current(undefined, undefined, outcome));
+          }}
+          onCustomerHangup={() => {
+            if (statusRef.current !== "NEW") return;
+            queueMicrotask(() => void onNextRef.current());
           }}
           onUpdateLeadPhone={handleUpdateLeadPhoneFromVoip}
           unansweredTimeoutMs={25_000}

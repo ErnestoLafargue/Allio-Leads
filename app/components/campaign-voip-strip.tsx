@@ -30,12 +30,23 @@ import {
 } from "@/lib/active-dialer-campaign";
 import { linePhaseFromVoipStatus } from "@/lib/dialer-line-phase";
 import { reportDialerLineOccupancy } from "@/lib/report-dialer-line";
+import {
+  predictiveActionAfterRemoteEnd,
+  predictiveAutoStartKey,
+  sameDialTarget,
+  shouldPredictiveAutoStart,
+} from "@/lib/predictive-dial-policy";
 
 type Props = {
   leadId: string;
   campaignId: string;
   /** Telefon på leadet (fra server) — bruges som udgangspunkt for opkaldsfeltet ved nyt lead */
   leadPhone: string;
+  /**
+   * Nummeret på det åbne lead. Auto-opkald venter, til `leadPhone` er det samme,
+   * så et forældet formularnummer ikke kan ringes op.
+   */
+  recordPhone?: string;
   /**
    * Andet nummer (hvis ledet har to). Predictive: ved ubesvaret/telefonsvarer ringes dette
    * automatisk før workspace går videre.
@@ -51,6 +62,11 @@ type Props = {
   onUnansweredTimeout?: () => void;
   /** Predictive-mode: auto-udfald når Telnyx-lukårsag tydeligt peger på voicemail/no answer. */
   onPredictiveAutoOutcome?: (outcome: Exclude<PredictiveAutoOutcome, null>) => void;
+  /**
+   * Predictive: kunden lagde på uden et klassificeret udfald. Gå videre til næste lead.
+   * Agentens egen læg-på kalder ikke denne.
+   */
+  onCustomerHangup?: () => void;
   /** Gem nyt telefonnummer på selve leadet (source of truth). */
   onUpdateLeadPhone?: (nextPhone: string) => Promise<{ ok: boolean; message?: string }> | { ok: boolean; message?: string };
   /** Antal millisekunder før Predictive-modus giver op og kalder `onUnansweredTimeout`. */
@@ -240,11 +256,13 @@ export function CampaignVoipStrip({
   leadId,
   campaignId,
   leadPhone,
+  recordPhone = "",
   failoverPhone = "",
   dialMode,
   autoStartCall,
   onUnansweredTimeout,
   onPredictiveAutoOutcome,
+  onCustomerHangup,
   onUpdateLeadPhone,
   unansweredTimeoutMs = 25_000,
   onLineStatusChange,
@@ -402,6 +420,10 @@ export function CampaignVoipStrip({
   autoStartCallRef.current = effectiveAutoStart;
   const dialModeRef = useRef(effectiveDialMode);
   dialModeRef.current = effectiveDialMode;
+  const onPredictiveAutoOutcomeRef = useRef(onPredictiveAutoOutcome);
+  onPredictiveAutoOutcomeRef.current = onPredictiveAutoOutcome;
+  const onCustomerHangupRef = useRef(onCustomerHangup);
+  onCustomerHangupRef.current = onCustomerHangup;
   const micIdRef = useRef("");
   const audioSetupReadyRef = useRef(false);
 
@@ -726,6 +748,27 @@ export function CampaignVoipStrip({
     autoKeyRef.current = null; // tillad auto-start på det nye nummer
     return true;
   }
+
+  const handleRemoteEndRef = useRef<
+    (hadLive: boolean, sipCode: number, cause: string, sipReason: string) => void
+  >(() => {});
+  handleRemoteEndRef.current = (hadLive, sipCode, cause, sipReason) => {
+    if (dialModeRef.current !== "PREDICTIVE" || !autoStartCallRef.current) return;
+    const autoOutcome = detectPredictiveOutcomeFromCall({ hadLive, sipCode, cause, sipReason });
+    const decision = predictiveActionAfterRemoteEnd({
+      hadLive,
+      autoOutcome,
+      canFailover,
+    });
+    if (decision.type === "failover" && tryPredictivePhoneFailover()) return;
+    suppressAutoStartForLeadIdRef.current = leadId;
+    const outcome = decision.type === "advance" ? decision.outcome : autoOutcome;
+    if (outcome) {
+      onPredictiveAutoOutcomeRef.current?.(outcome);
+      return;
+    }
+    onCustomerHangupRef.current?.();
+  };
   /** Pre-load Telnyx WebRTC SDK-chunken så snart komponenten mountes,
    *  så den er klar i memory inden brugeren trykker «Ring op». */
   useEffect(() => {
@@ -1288,21 +1331,7 @@ export function CampaignVoipStrip({
               if (desc) {
                 reportVoipFailureRef.current(desc.userText, desc.technical);
               }
-              const autoOutcome = detectPredictiveOutcomeFromCall({
-                hadLive,
-                sipCode,
-                cause,
-                sipReason,
-              });
-              if (
-                autoOutcome &&
-                effectiveDialMode === "PREDICTIVE" &&
-                autoStartCallRef.current &&
-                typeof onPredictiveAutoOutcome === "function"
-              ) {
-                if (tryPredictivePhoneFailover()) return;
-                onPredictiveAutoOutcome(autoOutcome);
-              }
+              handleRemoteEndRef.current(hadLive, sipCode, cause, sipReason);
             }
             return;
           }
@@ -1621,6 +1650,9 @@ export function CampaignVoipStrip({
 
   function onRoundButtonClick() {
     if (lineStatus === "ringing" || lineStatus === "live" || lineStatus === "connecting") {
+      if (dialModeRef.current === "PREDICTIVE") {
+        suppressAutoStartForLeadIdRef.current = currentLeadIdRef.current;
+      }
       void hangUp();
       return;
     }
@@ -1652,38 +1684,36 @@ export function CampaignVoipStrip({
   }, [hangupSignal, onHangupSignalHandled, lineStatus]);
 
   useEffect(() => {
-    const key = `${leadId}|${stripDialFormatting(voipPhone)}|${effectiveAutoStart}`;
+    const slot = usedFailoverForLeadId === leadId ? "failover" : "primary";
+    const key = predictiveAutoStartKey(leadId, slot, effectiveAutoStart);
+    const record = (recordPhone || "").trim();
+    const numberMatchesOpenLead =
+      slot === "failover" || !record || sameDialTarget(leadPhone || "", record);
     if (!effectiveAutoStart) {
       autoKeyRef.current = null;
-      return;
     }
-    if (!audioSetupReady) return;
-    if (autoKeyRef.current === key) return;
-    if (!stripDialFormatting(voipPhone)) return;
-    if (!isAllowedDialPhone(stripDialFormatting(voipPhone))) return;
-    // Hvis brugeren netop har gemt et nyt nummer på dette lead, må predictive
-    // ikke automatisk ringe det op — det skal være click-to-call. Suppression
-    // ophæves når leadId skifter (lead-reset-effekten nuller flaget).
-    if (suppressAutoStartForLeadIdRef.current === leadId) {
-      return;
-    }
-    // Et `voipPhone`-skift mid-call må ikke kunne re-fyre startCall — det ville
-    // generere et nyt timerKey og smide det aktuelle ur tilbage til en frisk
-    // start (eller 00:00 hvis Telnyx ikke når at svare). Vi holder os til kun
-    // at auto-starte når linjen er reelt klar.
-    if (
-      activeCallRef.current ||
-      inFlightRef.current ||
-      lineStatus === "live" ||
-      lineStatus === "ringing" ||
-      lineStatus === "connecting"
-    ) {
-      return;
-    }
+    const start = shouldPredictiveAutoStart({
+      autoStart: effectiveAutoStart,
+      audioReady: audioSetupReady,
+      hasNumber: Boolean(stripDialFormatting(voipPhone)),
+      numberAllowed: isAllowedDialPhone(stripDialFormatting(voipPhone)),
+      numberMatchesOpenLead,
+      suppressedLeadId: suppressAutoStartForLeadIdRef.current,
+      leadId,
+      lineBusy:
+        Boolean(activeCallRef.current) ||
+        inFlightRef.current ||
+        lineStatus === "live" ||
+        lineStatus === "ringing" ||
+        lineStatus === "connecting",
+      previousKey: autoKeyRef.current,
+      key,
+    });
+    if (!start) return;
     autoKeyRef.current = key;
     void startCall();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [leadId, voipPhone, leadPhone, effectiveAutoStart, audioSetupReady, lineStatus]);
+  }, [leadId, voipPhone, leadPhone, recordPhone, effectiveAutoStart, audioSetupReady, lineStatus, usedFailoverForLeadId]);
 
   /**
    * Predictive-mode: hvis modtageren ikke svarer inden timeout, lægges der på og
