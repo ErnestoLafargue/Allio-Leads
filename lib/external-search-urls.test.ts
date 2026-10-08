@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { buildGoogleSearchUrl, isKrakPersonFieldLabel } from "./external-search-urls";
+import { buildGoogleSearchUrl, buildHintlyLeadUrl, isKrakPersonFieldLabel } from "./external-search-urls";
 
 describe("isKrakPersonFieldLabel", () => {
   it("matcher stifter med navn/på", () => {
@@ -29,6 +29,22 @@ describe("isKrakPersonFieldLabel", () => {
     expect(isKrakPersonFieldLabel("Virksomhedsform")).toBe(false);
     expect(isKrakPersonFieldLabel("Branche")).toBe(false);
     expect(isKrakPersonFieldLabel("Stifter alene")).toBe(false);
+  });
+});
+
+describe("buildHintlyLeadUrl", () => {
+  it("bygger lookup-link med DK og leadets CVR", () => {
+    expect(buildHintlyLeadUrl("45634108")).toBe(
+      "https://intelligence.hintly.ai/leads/lookup/DK45634108",
+    );
+    expect(buildHintlyLeadUrl("DK 45 63 41 08")).toBe(
+      "https://intelligence.hintly.ai/leads/lookup/DK45634108",
+    );
+  });
+
+  it("returnerer null uden et 8-cifret CVR", () => {
+    expect(buildHintlyLeadUrl("")).toBeNull();
+    expect(buildHintlyLeadUrl("123")).toBeNull();
   });
 });
 

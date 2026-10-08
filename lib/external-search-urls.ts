@@ -41,6 +41,13 @@ export function buildKrakUrl(name: string): string | null {
   return `https://www.krak.dk/${formatted}/personer`;
 }
 
+/** Hintly-kundebillede. CVR normaliseres til 8 cifre og præfikses med DK. */
+export function buildHintlyLeadUrl(rawCvr: string | null | undefined): string | null {
+  const cvr = normalizeCVR(rawCvr);
+  if (!cvr) return null;
+  return `https://intelligence.hintly.ai/leads/lookup/DK${cvr}`;
+}
+
 export function buildVirkUrl(rawCvr: string): string | null {
   const cvr = rawCvr.trim().replace(/\s+/g, "");
   const normalized = normalizeCVR(cvr);

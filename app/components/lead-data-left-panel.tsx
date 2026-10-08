@@ -1,5 +1,6 @@
 "use client";
 
+import Image from "next/image";
 import { useEffect, useRef, useState } from "react";
 import {
   FIELD_GROUP_LABELS,
@@ -7,7 +8,7 @@ import {
   type FieldGroupKey,
 } from "@/lib/campaign-fields";
 import { ExternalSearchButton } from "@/app/components/external-search-button";
-import { isKrakPersonFieldLabel, isWebsiteFieldLabel } from "@/lib/external-search-urls";
+import { buildHintlyLeadUrl, isKrakPersonFieldLabel, isWebsiteFieldLabel } from "@/lib/external-search-urls";
 import { formatAnnoncerKanaler, formatAnnoncerStatus } from "@/lib/annoncer-display";
 import {
   isVisiblePersonFieldKey,
@@ -61,23 +62,47 @@ function ExtensionFieldRow({
   value,
   onChange,
   noData,
+  cvr,
 }: {
   fieldKey: string;
   label: string;
   value: string;
   onChange: (value: string) => void;
   noData?: "show" | "fade";
+  cvr?: string;
 }) {
   if (fieldKey === "annoncer") {
     const status = formatAnnoncerStatus(value);
+    const hintlyUrl = buildHintlyLeadUrl(cvr);
     return (
       <div>
         <label className="mb-1 block text-xs font-medium text-stone-600">{label}</label>
-        <div
-          className={`inline-flex min-h-[2.5rem] items-center rounded-md border px-3 py-2 text-sm font-semibold ${ANNONCER_STATUS_BADGE_CLASS[status.kind]}`}
-          title={value.trim() ? `Råværdi: ${value}` : undefined}
-        >
-          {status.label}
+        <div className="flex items-center gap-2">
+          <div
+            className={`inline-flex min-h-[2.5rem] items-center rounded-md border px-3 py-2 text-sm font-semibold ${ANNONCER_STATUS_BADGE_CLASS[status.kind]}`}
+            title={value.trim() ? `Råværdi: ${value}` : undefined}
+          >
+            {status.label}
+          </div>
+          {hintlyUrl ? (
+            <a
+              href={hintlyUrl}
+              target="_blank"
+              rel="noopener noreferrer"
+              title="Åbn kunden i Hintly"
+              aria-label="Åbn kunden i Hintly"
+              className="inline-flex h-9 shrink-0 items-center rounded-md border-2 border-black bg-white px-1.5 shadow-sm outline-none ring-stone-400 hover:bg-stone-50 focus-visible:ring-2"
+            >
+              <Image
+                src="/enrichment/hintly.png"
+                alt=""
+                width={78}
+                height={24}
+                className="h-5 w-auto object-contain"
+                unoptimized
+              />
+            </a>
+          ) : null}
         </div>
       </div>
     );
@@ -361,6 +386,7 @@ export function LeadDataLeftPanel({
                     label={f.label}
                     value={extVal}
                     onChange={(v) => onCustom(f.key, v)}
+                    cvr={cvr}
                   />
                 );
               }
