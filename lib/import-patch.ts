@@ -1,5 +1,6 @@
 import { leadDomainFromCustomFields, parseCustomFields, stringifyCustomFields } from "@/lib/custom-fields";
 import { COMPANY_TYPE_CUSTOM_KEY } from "@/lib/active-campaign-queue";
+import { normalizeCVR } from "@/lib/cvr-import";
 
 export type ImportPatchField =
   | "phone"
@@ -7,6 +8,9 @@ export type ImportPatchField =
   | "domain"
   | "virksomhedstype"
   | "otherCustom";
+
+/** Nøgle der bruges til at finde eksisterende leads under berigelse. */
+export type ImportPatchMatchField = "cvr" | "phone" | "email" | "domain";
 
 export const DEFAULT_IMPORT_PATCH_FIELDS: ImportPatchField[] = ["email", "domain", "otherCustom"];
 
@@ -16,6 +20,13 @@ export const IMPORT_PATCH_FIELD_OPTIONS: { id: ImportPatchField; label: string }
   { id: "domain", label: "Domæne" },
   { id: "virksomhedstype", label: "Virksomhedstype" },
   { id: "otherCustom", label: "Øvrige mappede kampagnefelter" },
+];
+
+export const IMPORT_PATCH_MATCH_OPTIONS: { id: ImportPatchMatchField; label: string }[] = [
+  { id: "cvr", label: "CVR" },
+  { id: "phone", label: "Telefonnummer" },
+  { id: "email", label: "E-mail" },
+  { id: "domain", label: "Domæne / hjemmeside" },
 ];
 
 export type ImportPatchFieldCounts = Partial<Record<ImportPatchField, number>>;
@@ -40,8 +51,35 @@ export type ImportPatchResult = {
   fieldCounts: ImportPatchFieldCounts;
 };
 
+export type ImportPatchMatchLead = {
+  id: string;
+  campaignId: string | null;
+  cvr: string;
+  phone: string;
+  email: string;
+  customFields: string;
+};
+
 function isEmpty(v: string | null | undefined): boolean {
   return !(v ?? "").trim();
+}
+
+function normalizePhone(v: string): string {
+  return v.replace(/[^\d+]/g, "").trim().toLowerCase();
+}
+
+function normalizeEmail(v: string): string {
+  return v.trim().toLowerCase();
+}
+
+function normalizeDomain(value: string): string {
+  let v = value.trim().toLowerCase();
+  if (!v) return "";
+  v = v.replace(/^https?:\/\//, "");
+  v = v.replace(/^www\./, "");
+  const slash = v.indexOf("/");
+  if (slash >= 0) v = v.slice(0, slash);
+  return v.trim();
 }
 
 export function parseImportPatchFields(raw: unknown): ImportPatchField[] | null {
@@ -54,6 +92,11 @@ export function parseImportPatchFields(raw: unknown): ImportPatchField[] | null 
     if (!out.includes(item as ImportPatchField)) out.push(item as ImportPatchField);
   }
   return out;
+}
+
+export function parseImportPatchMatchField(raw: unknown): ImportPatchMatchField {
+  if (raw === "phone" || raw === "email" || raw === "domain") return raw;
+  return "cvr";
 }
 
 /** Domæne til patch: mappet custom-værdi, ellers host fra e-mail. */
@@ -71,6 +114,51 @@ export function resolveIncomingDomain(custom: Record<string, string>, email: str
     if (host) return host;
   }
   return "";
+}
+
+/** Match-værdi for en upload-række. */
+export function getIncomingMatchValue(
+  incoming: { cvr: string; phone: string; email: string; domain: string },
+  matchField: ImportPatchMatchField,
+): string {
+  if (matchField === "cvr") return normalizeCVR(incoming.cvr) ?? "";
+  if (matchField === "phone") return normalizePhone(incoming.phone);
+  if (matchField === "email") return normalizeEmail(incoming.email);
+  return normalizeDomain(incoming.domain);
+}
+
+/** Match-værdi for et eksisterende lead. */
+export function getLeadMatchValue(
+  lead: ImportPatchMatchLead,
+  matchField: ImportPatchMatchField,
+): string {
+  if (matchField === "cvr") return normalizeCVR(lead.cvr) ?? "";
+  if (matchField === "phone") return normalizePhone(lead.phone);
+  if (matchField === "email") return normalizeEmail(lead.email);
+  return normalizeDomain(leadDomainFromCustomFields(lead.customFields));
+}
+
+/**
+ * Bygger indeks: match-nøgle → lead-ids.
+ * Scope: kun valgt kampagne, eller alle kampagner.
+ */
+export function indexLeadsForPatchMatch(params: {
+  leads: ImportPatchMatchLead[];
+  matchField: ImportPatchMatchField;
+  campaignId: string;
+  allCampaigns: boolean;
+}): Map<string, string[]> {
+  const { leads, matchField, campaignId, allCampaigns } = params;
+  const map = new Map<string, string[]>();
+  for (const lead of leads) {
+    if (!allCampaigns && lead.campaignId !== campaignId) continue;
+    const key = getLeadMatchValue(lead, matchField);
+    if (!key) continue;
+    const list = map.get(key) ?? [];
+    list.push(lead.id);
+    map.set(key, list);
+  }
+  return map;
 }
 
 /**

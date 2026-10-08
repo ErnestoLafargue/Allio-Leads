@@ -13,10 +13,11 @@ import {
 import { CampaignImportLogsPanel } from "@/app/components/campaign-import-logs-panel";
 import { STANDARD_MAPPING_OPTIONS } from "@/lib/import-mapping";
 import {
-  DEFAULT_IMPORT_PATCH_FIELDS,
   IMPORT_PATCH_FIELD_OPTIONS,
+  IMPORT_PATCH_MATCH_OPTIONS,
   type ImportPatchField,
   type ImportPatchFieldCounts,
+  type ImportPatchMatchField,
 } from "@/lib/import-patch";
 
 type Campaign = { id: string; name: string; fieldConfig: string };
@@ -33,7 +34,12 @@ type PreviewResponse = {
   } | null;
 };
 
-type ImportDetailReason = "duplicate_in_file" | "already_in_campaign" | "invalid_row";
+type ImportDetailReason =
+  | "duplicate_in_file"
+  | "already_in_campaign"
+  | "invalid_row"
+  | "no_match"
+  | "matched_no_update";
 
 type ImportResult = {
   totalRows: number;
@@ -45,7 +51,10 @@ type ImportResult = {
   skippedDuplicateInFile: number;
   skippedAlreadyInCampaign: number;
   skippedInvalid: number;
+  skippedNoMatch?: number;
+  matchedNoUpdate?: number;
   patchFieldCounts?: ImportPatchFieldCounts;
+  patchMatchField?: ImportPatchMatchField;
   details: {
     dataRow: number;
     cvr: string;
@@ -53,6 +62,8 @@ type ImportResult = {
     note?: string;
   }[];
 };
+
+type WorkflowMode = "import" | "enrich";
 
 type ImportProgressEvent =
   | { type: "progress"; processedRows: number; totalRows: number; percent: number }
@@ -67,6 +78,10 @@ function detailReasonLabel(r: ImportDetailReason): string {
       return "Allerede i denne kampagne";
     case "invalid_row":
       return "Ugyldig række";
+    case "no_match":
+      return "Ingen match";
+    case "matched_no_update":
+      return "Match — intet at udfylde";
     default:
       return r;
   }
@@ -128,9 +143,11 @@ export default function ImportPage() {
   const [overwriteExistingCvrs, setOverwriteExistingCvrs] = useState(false);
   const [allowMissingCvr, setAllowMissingCvr] = useState(false);
   const [allowMissingCompanyName, setAllowMissingCompanyName] = useState(false);
-  const [patchMissingOnly, setPatchMissingOnly] = useState(false);
-  const [patchAllCampaigns, setPatchAllCampaigns] = useState(false);
-  const [patchFields, setPatchFields] = useState<ImportPatchField[]>([...DEFAULT_IMPORT_PATCH_FIELDS]);
+  const [workflowMode, setWorkflowMode] = useState<WorkflowMode>("import");
+  const patchMissingOnly = workflowMode === "enrich";
+  const [patchAllCampaigns, setPatchAllCampaigns] = useState(true);
+  const [patchMatchField, setPatchMatchField] = useState<ImportPatchMatchField>("cvr");
+  const [patchFields, setPatchFields] = useState<ImportPatchField[]>(["virksomhedstype"]);
   const [overwritePreview, setOverwritePreview] = useState<PreviewResponse["overwritePreview"]>(null);
   const [showAllInCampaignLoading, setShowAllInCampaignLoading] = useState(false);
   const [showAllInCampaignError, setShowAllInCampaignError] = useState<string | null>(null);
@@ -196,10 +213,22 @@ export default function ImportPage() {
     (allowMissingCvr || Object.values(mapping).includes("cvr"));
 
   const mappedTargets = new Set(Object.values(mapping));
+  const patchMatchMappingOk = (() => {
+    if (!patchMissingOnly) return true;
+    if (patchMatchField === "cvr") return mappedTargets.has("cvr");
+    if (patchMatchField === "phone") return mappedTargets.has("phone");
+    if (patchMatchField === "email") return mappedTargets.has("email");
+    return (
+      mappedTargets.has("domain") ||
+      mappedTargets.has("custom:domaene") ||
+      mappedTargets.has("custom:domain") ||
+      mappedTargets.has("email")
+    );
+  })();
   const patchFieldMappingOk = (() => {
     if (!patchMissingOnly) return true;
     if (patchFields.length === 0) return false;
-    if (!mappedTargets.has("cvr")) return false;
+    if (!patchMatchMappingOk) return false;
     for (const field of patchFields) {
       if (field === "phone" && !mappedTargets.has("phone")) return false;
       if (field === "email" && !mappedTargets.has("email")) return false;
@@ -231,6 +260,16 @@ export default function ImportPage() {
       if (on) return prev.includes(field) ? prev : [...prev, field];
       return prev.filter((f) => f !== field);
     });
+  }
+
+  function setEnrichMode(on: boolean) {
+    if (on) {
+      setWorkflowMode("enrich");
+      setPatchAllCampaigns(true);
+      if (patchFields.length === 0) setPatchFields(["virksomhedstype"]);
+    } else {
+      setWorkflowMode("import");
+    }
   }
 
   async function onCreateCampaign(e: React.FormEvent) {
@@ -361,7 +400,10 @@ export default function ImportPage() {
     fd.append("allowMissingCompanyName", allowMissingCompanyName ? "1" : "0");
     fd.append("patchMissingOnly", patchMissingOnly ? "1" : "0");
     fd.append("patchAllCampaigns", patchAllCampaigns ? "1" : "0");
-    if (patchMissingOnly) fd.append("patchFields", JSON.stringify(patchFields));
+    if (patchMissingOnly) {
+      fd.append("patchFields", JSON.stringify(patchFields));
+      fd.append("patchMatchField", patchMatchField);
+    }
     const res = await fetch("/api/import/csv", { method: "POST", body: fd });
     if (!res.ok) {
       setLoadingImport(false);
@@ -502,44 +544,67 @@ export default function ImportPage() {
       </section>
 
       <section className="rounded-xl border border-stone-200 bg-white p-6 shadow-sm">
-        <h2 className="text-sm font-semibold text-stone-900">Import af leads</h2>
+        <h2 className="text-sm font-semibold text-stone-900">Import eller berigelse</h2>
         <p className="mt-1 text-xs text-stone-500">
-          Trin 1: Vælg kampagne og fil. Trin 2: Map kolonner — <strong>CVR-nummer</strong> og{' '}
-          <strong>Virksomhedsnavn</strong> er påkrævet som standard (CVR bruges til dubletkontrol; kun cifre/mellemrum
-          normaliseres til 8 cifre). Telefon er valgfrit, og både CVR og virksomhedsnavn kan gøres valgfrie via
-          indstillingerne nedenfor.
+          Trin 1: Vælg kampagne og fil. Trin 2: Map kolonner og vælg enten <strong>Importer nye leads</strong>{" "}
+          eller <strong>Berig eksisterende leads</strong>. Ved berigelse matches på CVR, telefon, e-mail eller
+          domæne, og kun tomme felter udfyldes — eksisterende leads springes ikke over som dubletter.
         </p>
 
         {result && (
           <div className="mt-4 space-y-3 rounded-lg border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm text-emerald-950">
-            <p className="font-medium">Import gennemført</p>
+            <p className="font-medium">
+              {result.patchFieldCounts ? "Berigelse gennemført" : "Import gennemført"}
+            </p>
             <ul className="list-inside list-disc space-y-1 tabular-nums">
               <li>{result.totalRows} rækker i filen (efter tomme rækker er fjernet)</li>
-              <li>{result.newLeadsImported} nye leads oprettet</li>
-              {overwriteExistingCvrs && (
+              {result.patchFieldCounts ? (
                 <>
-                  <li>{result.overwriteMatchedCvrs ?? 0} CVR-matches behandlet til overskrivning</li>
-                  <li>{result.protectedCvrsSkipped ?? 0} beskyttede CVR&apos;er sprunget over</li>
-                  <li>{result.replacedLeadsDeleted ?? 0} eksisterende leads slettet/erstattet</li>
+                  <li>
+                    Match på{" "}
+                    {IMPORT_PATCH_MATCH_OPTIONS.find((o) => o.id === result.patchMatchField)?.label ??
+                      "CVR"}
+                  </li>
+                  <li>{result.existingAttached} leads beriget (tomme felter udfyldt)</li>
+                  <li>{result.matchedNoUpdate ?? 0} matches uden ændring (allerede udfyldt)</li>
+                  <li>{result.skippedNoMatch ?? 0} rækker uden match</li>
+                  <li>{result.skippedDuplicateInFile} dubletter i filen</li>
+                  <li>{result.skippedInvalid} ugyldige rækker (manglende match-nøgle)</li>
+                  {IMPORT_PATCH_FIELD_OPTIONS.filter(
+                    (o) => (result.patchFieldCounts?.[o.id] ?? 0) > 0,
+                  ).map((o) => (
+                    <li key={o.id}>
+                      {o.label}: {result.patchFieldCounts?.[o.id] ?? 0} leads
+                    </li>
+                  ))}
+                </>
+              ) : (
+                <>
+                  <li>{result.newLeadsImported} nye leads oprettet</li>
+                  {overwriteExistingCvrs && (
+                    <>
+                      <li>{result.overwriteMatchedCvrs ?? 0} CVR-matches behandlet til overskrivning</li>
+                      <li>{result.protectedCvrsSkipped ?? 0} beskyttede CVR&apos;er sprunget over</li>
+                      <li>{result.replacedLeadsDeleted ?? 0} eksisterende leads slettet/erstattet</li>
+                    </>
+                  )}
+                  <li>
+                    {result.existingAttached} eksisterende leads knyttet til kampagne (flyttet fra anden
+                    kampagne hvis nødvendigt)
+                  </li>
+                  <li>
+                    {result.skippedDuplicateInFile + result.skippedAlreadyInCampaign} dubletter sprunget
+                    over
+                    {result.skippedDuplicateInFile > 0 || result.skippedAlreadyInCampaign > 0
+                      ? ` (${result.skippedDuplicateInFile} i filen, ${result.skippedAlreadyInCampaign} allerede i kampagne)`
+                      : ""}
+                  </li>
+                  <li>
+                    {result.skippedInvalid} ugyldige rækker sprunget over (manglende CVR, forkert format
+                    eller manglende navn for nye)
+                  </li>
                 </>
               )}
-              <li>{result.existingAttached} eksisterende leads knyttet til kampagne (flyttet fra anden kampagne hvis nødvendigt)</li>
-              <li>
-                {result.skippedDuplicateInFile + result.skippedAlreadyInCampaign} dubletter sprunget over
-                {result.skippedDuplicateInFile > 0 || result.skippedAlreadyInCampaign > 0
-                  ? ` (${result.skippedDuplicateInFile} i filen, ${result.skippedAlreadyInCampaign} allerede i kampagne)`
-                  : ""}
-              </li>
-              <li>{result.skippedInvalid} ugyldige rækker sprunget over (manglende CVR, forkert format eller manglende navn for nye)</li>
-              {result.patchFieldCounts
-                ? IMPORT_PATCH_FIELD_OPTIONS.filter((o) => (result.patchFieldCounts?.[o.id] ?? 0) > 0).map(
-                    (o) => (
-                      <li key={o.id}>
-                        {o.label}: {result.patchFieldCounts?.[o.id] ?? 0} leads
-                      </li>
-                    ),
-                  )
-                : null}
             </ul>
             {result.details.length > 0 && (
               <details className="rounded-md border border-emerald-200/80 bg-white/90">
@@ -682,7 +747,38 @@ export default function ImportPage() {
                 </button>
               </div>
 
-              {!hasRequiredMapping && (
+              <div className="rounded-lg border border-stone-200 bg-stone-50 p-3">
+                <p className="text-sm font-medium text-stone-800">Hvad vil du gøre?</p>
+                <div className="mt-2 flex flex-wrap gap-4">
+                  <label className="inline-flex items-center gap-2 text-sm text-stone-800">
+                    <input
+                      type="radio"
+                      name="workflowMode"
+                      checked={workflowMode === "import"}
+                      onChange={() => setEnrichMode(false)}
+                      className="h-4 w-4 border-stone-300 text-stone-900 focus:ring-stone-400"
+                    />
+                    Importer nye leads
+                  </label>
+                  <label className="inline-flex items-center gap-2 text-sm text-stone-800">
+                    <input
+                      type="radio"
+                      name="workflowMode"
+                      checked={workflowMode === "enrich"}
+                      onChange={() => setEnrichMode(true)}
+                      className="h-4 w-4 border-stone-300 text-amber-700 focus:ring-amber-400"
+                    />
+                    Berig eksisterende leads
+                  </label>
+                </div>
+                <p className="mt-2 text-xs text-stone-600">
+                  {workflowMode === "enrich"
+                    ? "Finder leads der allerede findes (via CVR, telefon, e-mail eller domæne) og udfylder kun de tomme felter du vælger. Opretter ikke nye leads og springer dem ikke over som dubletter."
+                    : "Opretter nye leads. Rækker med CVR der allerede findes springes over som standard."}
+                </p>
+              </div>
+
+              {!patchMissingOnly && !hasRequiredMapping && (
                 <p className="rounded-md bg-amber-50 px-3 py-2 text-sm text-amber-900">
                   Map mindst én kolonne
                   {!allowMissingCompanyName && (
@@ -773,126 +869,125 @@ export default function ImportPage() {
                 </details>
               )}
 
-              <label className="flex items-start gap-3 rounded-md border border-stone-200 bg-stone-50 px-3 py-2 text-sm text-stone-800">
-                <input
-                  type="checkbox"
-                  checked={attachExistingCvrsToCampaign}
-                  onChange={(e) => setAttachExistingCvrsToCampaign(e.target.checked)}
-                  className="mt-0.5 h-4 w-4 rounded border-stone-300 text-stone-900 focus:ring-stone-400"
-                />
-                <span>
-                  Tilknyt eksisterende CVR-numre til kampagne
-                  <span className="mt-0.5 block text-xs text-stone-600">
-                    Flytter leads med matchende CVR fra andre kampagner til den valgte kampagne (opdaterer ikke data fra
-                    filen). Leads med udfald Ikke interesseret eller Ukvalificeret tilknyttes ikke.
-                  </span>
-                </span>
-              </label>
-              <label className="flex items-start gap-3 rounded-md border border-stone-200 bg-stone-50 px-3 py-2 text-sm text-stone-800">
-                <input
-                  type="checkbox"
-                  checked={importDuplicateCvrs}
-                  onChange={(e) => setImportDuplicateCvrs(e.target.checked)}
-                  className="mt-0.5 h-4 w-4 rounded border-stone-300 text-stone-900 focus:ring-stone-400"
-                />
-                <span>
-                  Medtag allerede eksisterende CVR-numre
-                  <span className="mt-0.5 block text-xs text-stone-600">
-                    Importerer rækken som et nyt lead, selv om CVR allerede findes — også i samme kampagne. Flytter
-                    ikke leads fra andre kampagner (brug «Tilknyt» til det).
-                  </span>
-                </span>
-              </label>
-              <label className="flex items-start gap-3 rounded-md border border-stone-200 bg-stone-50 px-3 py-2 text-sm text-stone-800">
-                <input
-                  type="checkbox"
-                  checked={overwriteExistingCvrs}
-                  onChange={(e) => setOverwriteExistingCvrs(e.target.checked)}
-                  className="mt-0.5 h-4 w-4 rounded border-stone-300 text-stone-900 focus:ring-stone-400"
-                />
-                <span>
-                  Overskriv eksisterende CVR
-                  <span className="mt-0.5 block text-xs text-stone-600">
-                    Erstatter eksisterende leads med samme CVR. Hvis et lead har aktivitet eller noter, bliver CVR&apos;en sprunget over.
-                  </span>
-                </span>
-              </label>
-              {overwriteExistingCvrs && overwritePreview && (
-                <div className="rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-900">
-                  <p>{overwritePreview.cvrMatches} CVR-matches fundet i kampagnen</p>
-                  <p>{overwritePreview.protectedCvrs} CVR&apos;er er beskyttet og bliver ikke overskrevet</p>
-                  <p>{overwritePreview.leadsToDelete} leads vil blive erstattet</p>
-                  <p>{overwritePreview.newLeadsToImport} nye leads forventes importeret via overskrivning</p>
-                </div>
-              )}
-              {overwriteExistingCvrs && (
-                <button
-                  type="button"
-                  disabled={loadingPreview || !file || !campaignId}
-                  onClick={() => void onAnalyze(true)}
-                  className="rounded-md border border-stone-300 bg-white px-3 py-1.5 text-sm font-medium text-stone-700 hover:bg-stone-50 disabled:opacity-60"
-                >
-                  {loadingPreview ? "Opdaterer preview…" : "Opdater overskriv-preview"}
-                </button>
-              )}
+              {workflowMode === "import" ? (
+                <>
+                  <label className="flex items-start gap-3 rounded-md border border-stone-200 bg-stone-50 px-3 py-2 text-sm text-stone-800">
+                    <input
+                      type="checkbox"
+                      checked={attachExistingCvrsToCampaign}
+                      onChange={(e) => setAttachExistingCvrsToCampaign(e.target.checked)}
+                      className="mt-0.5 h-4 w-4 rounded border-stone-300 text-stone-900 focus:ring-stone-400"
+                    />
+                    <span>
+                      Tilknyt eksisterende CVR-numre til kampagne
+                      <span className="mt-0.5 block text-xs text-stone-600">
+                        Flytter leads med matchende CVR fra andre kampagner til den valgte kampagne
+                        (opdaterer ikke data fra filen). Leads med udfald Ikke interesseret eller
+                        Ukvalificeret tilknyttes ikke.
+                      </span>
+                    </span>
+                  </label>
+                  <label className="flex items-start gap-3 rounded-md border border-stone-200 bg-stone-50 px-3 py-2 text-sm text-stone-800">
+                    <input
+                      type="checkbox"
+                      checked={importDuplicateCvrs}
+                      onChange={(e) => setImportDuplicateCvrs(e.target.checked)}
+                      className="mt-0.5 h-4 w-4 rounded border-stone-300 text-stone-900 focus:ring-stone-400"
+                    />
+                    <span>
+                      Medtag allerede eksisterende CVR-numre
+                      <span className="mt-0.5 block text-xs text-stone-600">
+                        Importerer rækken som et nyt lead, selv om CVR allerede findes — også i samme
+                        kampagne. Flytter ikke leads fra andre kampagner (brug «Tilknyt» til det).
+                      </span>
+                    </span>
+                  </label>
+                  <label className="flex items-start gap-3 rounded-md border border-stone-200 bg-stone-50 px-3 py-2 text-sm text-stone-800">
+                    <input
+                      type="checkbox"
+                      checked={overwriteExistingCvrs}
+                      onChange={(e) => setOverwriteExistingCvrs(e.target.checked)}
+                      className="mt-0.5 h-4 w-4 rounded border-stone-300 text-stone-900 focus:ring-stone-400"
+                    />
+                    <span>
+                      Overskriv eksisterende CVR
+                      <span className="mt-0.5 block text-xs text-stone-600">
+                        Erstatter eksisterende leads med samme CVR. Hvis et lead har aktivitet eller
+                        noter, bliver CVR&apos;en sprunget over.
+                      </span>
+                    </span>
+                  </label>
+                  {overwriteExistingCvrs && overwritePreview && (
+                    <div className="rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-900">
+                      <p>{overwritePreview.cvrMatches} CVR-matches fundet i kampagnen</p>
+                      <p>{overwritePreview.protectedCvrs} CVR&apos;er er beskyttet og bliver ikke overskrevet</p>
+                      <p>{overwritePreview.leadsToDelete} leads vil blive erstattet</p>
+                      <p>{overwritePreview.newLeadsToImport} nye leads forventes importeret via overskrivning</p>
+                    </div>
+                  )}
+                  {overwriteExistingCvrs && (
+                    <button
+                      type="button"
+                      disabled={loadingPreview || !file || !campaignId}
+                      onClick={() => void onAnalyze(true)}
+                      className="rounded-md border border-stone-300 bg-white px-3 py-1.5 text-sm font-medium text-stone-700 hover:bg-stone-50 disabled:opacity-60"
+                    >
+                      {loadingPreview ? "Opdaterer preview…" : "Opdater overskriv-preview"}
+                    </button>
+                  )}
 
-              <label className="flex items-start gap-3 rounded-md border border-stone-200 bg-stone-50 px-3 py-2 text-sm text-stone-800">
-                <input
-                  type="checkbox"
-                  checked={allowMissingCompanyName}
-                  onChange={(e) => setAllowMissingCompanyName(e.target.checked)}
-                  className="mt-0.5 h-4 w-4 rounded border-stone-300 text-stone-900 focus:ring-stone-400"
-                />
-                <span>
-                  Medtag uden virksomhedsnavn
-                  <span className="mt-0.5 block text-xs text-stone-600">
-                    Når slået til er virksomhedsnavn ikke påkrævet. Rækker uden virksomhedsnavn importeres med en
-                    standardtekst.
-                  </span>
-                </span>
-              </label>
+                  <label className="flex items-start gap-3 rounded-md border border-stone-200 bg-stone-50 px-3 py-2 text-sm text-stone-800">
+                    <input
+                      type="checkbox"
+                      checked={allowMissingCompanyName}
+                      onChange={(e) => setAllowMissingCompanyName(e.target.checked)}
+                      className="mt-0.5 h-4 w-4 rounded border-stone-300 text-stone-900 focus:ring-stone-400"
+                    />
+                    <span>
+                      Medtag uden virksomhedsnavn
+                      <span className="mt-0.5 block text-xs text-stone-600">
+                        Når slået til er virksomhedsnavn ikke påkrævet. Rækker uden virksomhedsnavn
+                        importeres med en standardtekst.
+                      </span>
+                    </span>
+                  </label>
 
-              <label className="flex items-start gap-3 rounded-md border border-stone-200 bg-stone-50 px-3 py-2 text-sm text-stone-800">
-                <input
-                  type="checkbox"
-                  checked={allowMissingCvr}
-                  onChange={(e) => setAllowMissingCvr(e.target.checked)}
-                  className="mt-0.5 h-4 w-4 rounded border-stone-300 text-stone-900 focus:ring-stone-400"
-                />
-                <span>
-                  Importer leads uden CVR-nummer
-                  <span className="mt-0.5 block text-xs text-stone-600">
-                    Når slået til er CVR ikke påkrævet. Rækker uden CVR importeres som nye leads og kan ikke matches
-                    mod eksisterende via CVR.
-                  </span>
-                </span>
-              </label>
-
-              <label className="flex items-start gap-3 rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-stone-800">
-                <input
-                  type="checkbox"
-                  checked={patchMissingOnly}
-                  onChange={(e) => {
-                    const on = e.target.checked;
-                    setPatchMissingOnly(on);
-                    if (!on) {
-                      setPatchAllCampaigns(false);
-                      setPatchFields([...DEFAULT_IMPORT_PATCH_FIELDS]);
-                    }
-                  }}
-                  className="mt-0.5 h-4 w-4 rounded border-stone-300 text-amber-700 focus:ring-amber-400"
-                />
-                <span>
-                  Berig eksisterende leads (kun tomme felter)
-                  <span className="mt-0.5 block text-xs text-stone-600">
-                    Matcher leads på CVR og udfylder kun tomme felter blandt dem du vælger nedenfor.
-                    Status, noter og øvrige data bevares. Nye leads oprettes ikke.
-                  </span>
-                </span>
-              </label>
-
-              {patchMissingOnly ? (
+                  <label className="flex items-start gap-3 rounded-md border border-stone-200 bg-stone-50 px-3 py-2 text-sm text-stone-800">
+                    <input
+                      type="checkbox"
+                      checked={allowMissingCvr}
+                      onChange={(e) => setAllowMissingCvr(e.target.checked)}
+                      className="mt-0.5 h-4 w-4 rounded border-stone-300 text-stone-900 focus:ring-stone-400"
+                    />
+                    <span>
+                      Importer leads uden CVR-nummer
+                      <span className="mt-0.5 block text-xs text-stone-600">
+                        Når slået til er CVR ikke påkrævet. Rækker uden CVR importeres som nye leads og
+                        kan ikke matches mod eksisterende via CVR.
+                      </span>
+                    </span>
+                  </label>
+                </>
+              ) : (
                 <div className="space-y-3 rounded-md border border-amber-200 bg-amber-50/60 px-3 py-3">
+                  <label className="block text-sm font-medium text-stone-800">
+                    Match eksisterende leads på
+                    <select
+                      value={patchMatchField}
+                      onChange={(e) => setPatchMatchField(e.target.value as ImportPatchMatchField)}
+                      className="mt-1 w-full max-w-sm rounded-md border border-stone-200 bg-white px-3 py-2 text-sm text-stone-900"
+                    >
+                      {IMPORT_PATCH_MATCH_OPTIONS.map((option) => (
+                        <option key={option.id} value={option.id}>
+                          {option.label}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+                  <p className="text-xs text-stone-600">
+                    Filens match-værdi bruges til at finde leads der allerede findes. De springes ikke
+                    over — de beriges.
+                  </p>
                   <p className="text-sm font-medium text-stone-800">Hvilke felter skal beriges?</p>
                   <div className="space-y-2">
                     {IMPORT_PATCH_FIELD_OPTIONS.map((option) => (
@@ -912,8 +1007,9 @@ export default function ImportPage() {
                   </div>
                   {!patchFieldMappingOk ? (
                     <p className="text-xs text-amber-900">
-                      Map CVR og mindst én kolonne til hvert valgt felt (domæne kan også komme fra
-                      e-mail).
+                      Map kolonnen til match-nøglen (
+                      {IMPORT_PATCH_MATCH_OPTIONS.find((o) => o.id === patchMatchField)?.label}) og til
+                      hvert valgt berigelsesfelt.
                     </p>
                   ) : null}
                   <label className="flex items-start gap-3 rounded-md border border-amber-200 bg-white px-3 py-2 text-sm text-stone-800">
@@ -926,12 +1022,12 @@ export default function ImportPage() {
                     <span>
                       Berig leads i alle kampagner
                       <span className="mt-0.5 block text-xs text-stone-600">
-                        Matcher CVR på tværs af hele systemet i stedet for kun den valgte kampagne.
+                        Matcher på tværs af hele systemet i stedet for kun den valgte kampagne.
                       </span>
                     </span>
                   </label>
                 </div>
-              ) : null}
+              )}
 
               <button
                 type="button"
@@ -995,14 +1091,15 @@ export default function ImportPage() {
             <p className="mt-2 text-sm text-stone-600">
               {patchMissingOnly ? (
                 <>
-                  Berigelse: matcher eksisterende leads på CVR
+                  Berigelse: matcher eksisterende leads på{" "}
+                  {IMPORT_PATCH_MATCH_OPTIONS.find((o) => o.id === patchMatchField)?.label ?? "CVR"}
                   {patchAllCampaigns ? " i hele systemet" : " i den valgte kampagne"} og udfylder kun
                   tomme felter blandt:{" "}
                   {IMPORT_PATCH_FIELD_OPTIONS.filter((o) => patchFields.includes(o.id))
                     .map((o) => o.label)
-                    .join(", ") || "—"}.{" "}
-                  Status, noter og øvrige data bevares. Nye leads oprettes ikke. Rækker uden CVR eller
-                  uden match springes over.{" "}
+                    .join(", ") || "—"}
+                  . Status, noter og øvrige data bevares. Nye leads oprettes ikke. Rækker uden match
+                  markeres som «Ingen match» — de springes ikke over som dubletter.{" "}
                 </>
               ) : (
                 <>

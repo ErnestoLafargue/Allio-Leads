@@ -28,11 +28,15 @@ import {
 import {
   DEFAULT_IMPORT_PATCH_FIELDS,
   buildImportPatchForLead,
+  getIncomingMatchValue,
+  indexLeadsForPatchMatch,
   mergeFieldCounts,
   parseImportPatchFields,
+  parseImportPatchMatchField,
   resolveIncomingDomain,
   type ImportPatchField,
   type ImportPatchFieldCounts,
+  type ImportPatchMatchField,
 } from "@/lib/import-patch";
 
 const MAX_DETAIL_ROWS = 200;
@@ -48,9 +52,15 @@ export type CsvImportResponse = {
   skippedDuplicateInFile: number;
   skippedAlreadyInCampaign: number;
   skippedInvalid: number;
+  /** Berigelse: rækker uden match på valgt nøgle. */
+  skippedNoMatch?: number;
+  /** Berigelse: leads fundet, men intet tomt felt at udfylde. */
+  matchedNoUpdate?: number;
   details: ImportDetailRow[];
   /** Antal leads der fik hvert patch-felt udfyldt (kun når patchMissingOnly). */
   patchFieldCounts?: ImportPatchFieldCounts;
+  /** Berigelse: valgt match-nøgle. */
+  patchMatchField?: ImportPatchMatchField;
 };
 
 export async function POST(req: Request) {
@@ -73,6 +83,7 @@ export async function POST(req: Request) {
   const allowMissingCompanyName = form.get("allowMissingCompanyName") === "1";
   const patchMissingOnly = form.get("patchMissingOnly") === "1";
   const patchAllCampaigns = form.get("patchAllCampaigns") === "1";
+  const patchMatchField = parseImportPatchMatchField(form.get("patchMatchField"));
   const patchFieldsRaw = form.get("patchFields");
   let patchFields: ImportPatchField[] = DEFAULT_IMPORT_PATCH_FIELDS;
   if (typeof patchFieldsRaw === "string" && patchFieldsRaw.trim()) {
@@ -126,29 +137,38 @@ export async function POST(req: Request) {
   const rows = parsed.rows;
 
   const existingLeads = await prisma.lead.findMany({
-    select: { id: true, campaignId: true, cvr: true, status: true, notes: true },
+    select: {
+      id: true,
+      campaignId: true,
+      cvr: true,
+      status: true,
+      notes: true,
+      phone: true,
+      email: true,
+      customFields: true,
+    },
   });
   let cvrToLead = indexLeadsByNormalizedCvr(existingLeads);
   const campaignLeadsByCvr = new Map<
     string,
     { id: string; status: string; notes: string; campaignId: string | null }[]
   >();
-  /** Patch-mode: alle leads med CVR (valgfrit begrænset til kampagne). */
-  const patchLeadsByCvr = new Map<string, { id: string }[]>();
   for (const lead of existingLeads) {
     const norm = normalizeCVR(lead.cvr);
-    if (!norm) continue;
-    if (lead.campaignId === campaignId) {
-      const arr = campaignLeadsByCvr.get(norm) ?? [];
-      arr.push(lead);
-      campaignLeadsByCvr.set(norm, arr);
-    }
-    if (patchMissingOnly && (patchAllCampaigns || lead.campaignId === campaignId)) {
-      const arr = patchLeadsByCvr.get(norm) ?? [];
-      arr.push({ id: lead.id });
-      patchLeadsByCvr.set(norm, arr);
-    }
+    if (!norm || lead.campaignId !== campaignId) continue;
+    const arr = campaignLeadsByCvr.get(norm) ?? [];
+    arr.push(lead);
+    campaignLeadsByCvr.set(norm, arr);
   }
+  /** Berigelse: match eksisterende leads på valgt nøgle — aldrig «spring over fordi CVR findes». */
+  const patchLeadIndex = patchMissingOnly
+    ? indexLeadsForPatchMatch({
+        leads: existingLeads,
+        matchField: patchMatchField,
+        campaignId,
+        allCampaigns: patchAllCampaigns,
+      })
+    : new Map<string, string[]>();
 
   const encoder = new TextEncoder();
   const totalRows = rows.length;
@@ -169,9 +189,12 @@ export async function POST(req: Request) {
         skippedDuplicateInFile: 0,
         skippedAlreadyInCampaign: 0,
         skippedInvalid: 0,
+        skippedNoMatch: 0,
+        matchedNoUpdate: 0,
         details: [],
       };
       const handledCvrsInFile = new Set<string>();
+      const handledPatchKeysInFile = new Set<string>();
       const overwriteHandledCvrs = new Set<string>();
       const progressStep = Math.max(1, Math.floor(totalRows / 100));
       let annoncerDataWritten = false;
@@ -208,30 +231,60 @@ export async function POST(req: Request) {
           const base = pickBaseFromNorm(n);
           const cvrNorm = normalizeCVR(base.cvr);
 
-          // --- patch-missing-only mode: udfyld kun tomme valgte felter på eksisterende leads ---
+          // --- berigelse: match eksisterende leads og udfyld kun tomme valgte felter ---
           if (patchMissingOnly) {
-            if (!cvrNorm) {
+            const custom = collectCustomFromRow(n, fieldCfg);
+            // Eksplicit mappede custom-felter (fx virksomhedstype) — også hvis label ikke matcher.
+            if (mapping) {
+              for (const [col, target] of Object.entries(mapping)) {
+                if (!target?.startsWith("custom:")) continue;
+                const key = target.slice("custom:".length).trim();
+                if (!key) continue;
+                const value = String(row[col] ?? "").trim();
+                if (value) custom[key] = value;
+              }
+            }
+            noteAnnoncerCustom(custom);
+            const domain = resolveIncomingDomain(custom, base.email);
+            const matchKey = getIncomingMatchValue(
+              {
+                cvr: base.cvr,
+                phone: base.phone,
+                email: base.email,
+                domain,
+              },
+              patchMatchField,
+            );
+            const matchLabel = cvrNorm ?? (matchKey || "—");
+            if (!matchKey) {
               summary.skippedInvalid += 1;
-              pushDetail({ dataRow, cvr: "—", reason: "invalid_row", note: "CVR mangler (patch kræver CVR)" });
+              pushDetail({
+                dataRow,
+                cvr: matchLabel,
+                reason: "invalid_row",
+                note: `Match-nøgle mangler (${patchMatchField})`,
+              });
+            } else if (handledPatchKeysInFile.has(matchKey)) {
+              summary.skippedDuplicateInFile += 1;
+              pushDetail({ dataRow, cvr: matchLabel, reason: "duplicate_in_file" });
             } else {
-              const matches = patchLeadsByCvr.get(cvrNorm) ?? [];
-              if (matches.length === 0) {
-                summary.skippedAlreadyInCampaign += 1;
+              handledPatchKeysInFile.add(matchKey);
+              const matchIds = patchLeadIndex.get(matchKey) ?? [];
+              if (matchIds.length === 0) {
+                summary.skippedNoMatch = (summary.skippedNoMatch ?? 0) + 1;
                 pushDetail({
                   dataRow,
-                  cvr: cvrNorm,
-                  reason: "already_in_campaign",
+                  cvr: matchLabel,
+                  reason: "no_match",
                   note: patchAllCampaigns
-                    ? "Ikke fundet i systemet"
-                    : "Ikke fundet i kampagnen",
+                    ? `Ingen lead med ${patchMatchField}=${matchKey}`
+                    : `Ingen lead i kampagnen med ${patchMatchField}=${matchKey}`,
                 });
               } else {
-                const custom = collectCustomFromRow(n, fieldCfg);
-                noteAnnoncerCustom(custom);
-                const domain = resolveIncomingDomain(custom, base.email);
-                for (const match of matches) {
+                let anyUpdated = false;
+                for (const leadId of matchIds) {
                   const lead = await prisma.lead.findUnique({
-                    where: { id: match.id },
+                    where: { id: leadId },
                     select: { id: true, phone: true, email: true, customFields: true },
                   });
                   if (!lead) continue;
@@ -249,10 +302,19 @@ export async function POST(req: Request) {
                     await prisma.lead.update({ where: { id: lead.id }, data: patch });
                     summary.existingAttached += 1;
                     mergeFieldCounts(patchFieldCounts, fieldCounts);
+                    anyUpdated = true;
                   }
                 }
+                if (!anyUpdated) {
+                  summary.matchedNoUpdate = (summary.matchedNoUpdate ?? 0) + 1;
+                  pushDetail({
+                    dataRow,
+                    cvr: matchLabel,
+                    reason: "matched_no_update",
+                    note: "Lead fundet, men valgte felter var allerede udfyldt eller tomme i filen",
+                  });
+                }
               }
-              handledCvrsInFile.add(cvrNorm);
             }
             const processed = i + 1;
             if (processed === totalRows || processed % progressStep === 0) {
@@ -260,7 +322,7 @@ export async function POST(req: Request) {
             }
             continue;
           }
-          // --- end patch-missing-only ---
+          // --- end berigelse ---
 
           if (!cvrNorm && !allowMissingCvr) {
             summary.skippedInvalid += 1;
@@ -464,6 +526,7 @@ export async function POST(req: Request) {
 
         if (patchMissingOnly) {
           summary.patchFieldCounts = patchFieldCounts;
+          summary.patchMatchField = patchMatchField;
         }
         controller.enqueue(eventLine({ type: "result", result: summary }));
       } catch (e) {

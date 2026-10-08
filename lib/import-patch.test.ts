@@ -1,8 +1,12 @@
 import { describe, expect, it } from "vitest";
 import {
   buildImportPatchForLead,
+  getIncomingMatchValue,
+  getLeadMatchValue,
+  indexLeadsForPatchMatch,
   mergeFieldCounts,
   parseImportPatchFields,
+  parseImportPatchMatchField,
   resolveIncomingDomain,
 } from "./import-patch";
 
@@ -17,6 +21,14 @@ describe("parseImportPatchFields", () => {
   });
 });
 
+describe("parseImportPatchMatchField", () => {
+  it("default er cvr", () => {
+    expect(parseImportPatchMatchField(undefined)).toBe("cvr");
+    expect(parseImportPatchMatchField("phone")).toBe("phone");
+    expect(parseImportPatchMatchField("domain")).toBe("domain");
+  });
+});
+
 describe("resolveIncomingDomain", () => {
   it("foretrækker mappet domæne", () => {
     expect(resolveIncomingDomain({ domaene: "example.dk" }, "a@other.dk")).toBe("example.dk");
@@ -24,6 +36,77 @@ describe("resolveIncomingDomain", () => {
 
   it("falder tilbage til e-mail-host", () => {
     expect(resolveIncomingDomain({}, "kontakt@firma.dk")).toBe("firma.dk");
+  });
+});
+
+describe("match keys", () => {
+  it("normaliserer CVR, telefon, e-mail og domæne", () => {
+    expect(getIncomingMatchValue({ cvr: "DK 12 34 56 78", phone: "", email: "", domain: "" }, "cvr")).toBe(
+      "12345678",
+    );
+    expect(
+      getIncomingMatchValue({ cvr: "", phone: "+45 12 34 56 78", email: "", domain: "" }, "phone"),
+    ).toBe("+4512345678");
+    expect(
+      getIncomingMatchValue({ cvr: "", phone: "", email: "A@Firma.DK", domain: "" }, "email"),
+    ).toBe("a@firma.dk");
+    expect(
+      getIncomingMatchValue(
+        { cvr: "", phone: "", email: "", domain: "https://www.firma.dk/path" },
+        "domain",
+      ),
+    ).toBe("firma.dk");
+  });
+
+  it("indekserer leads inden for kampagne eller alle", () => {
+    const leads = [
+      {
+        id: "a",
+        campaignId: "c1",
+        cvr: "12345678",
+        phone: "11111111",
+        email: "",
+        customFields: "{}",
+      },
+      {
+        id: "b",
+        campaignId: "c2",
+        cvr: "12345678",
+        phone: "22222222",
+        email: "",
+        customFields: "{}",
+      },
+    ];
+    const inCampaign = indexLeadsForPatchMatch({
+      leads,
+      matchField: "cvr",
+      campaignId: "c1",
+      allCampaigns: false,
+    });
+    expect(inCampaign.get("12345678")).toEqual(["a"]);
+    const all = indexLeadsForPatchMatch({
+      leads,
+      matchField: "cvr",
+      campaignId: "c1",
+      allCampaigns: true,
+    });
+    expect(all.get("12345678")).toEqual(["a", "b"]);
+  });
+
+  it("matcher lead på domæne i customFields", () => {
+    expect(
+      getLeadMatchValue(
+        {
+          id: "1",
+          campaignId: "c1",
+          cvr: "",
+          phone: "",
+          email: "",
+          customFields: JSON.stringify({ domaene: "https://WWW.Firma.dk/" }),
+        },
+        "domain",
+      ),
+    ).toBe("firma.dk");
   });
 });
 

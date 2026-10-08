@@ -32,7 +32,11 @@ export function indexLeadsByNormalizedCvr(
 export type ImportDetailReason =
   | "duplicate_in_file"
   | "already_in_campaign"
-  | "invalid_row";
+  | "invalid_row"
+  /** Berigelse: rækken matchede ikke et eksisterende lead. */
+  | "no_match"
+  /** Berigelse: lead fundet, men intet tomt felt skulle opdateres. */
+  | "matched_no_update";
 
 export type ImportDetailRow = {
   dataRow: number;
