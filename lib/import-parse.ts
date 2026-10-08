@@ -41,6 +41,12 @@ export function looksLikeUrlOrDomain(value: string): boolean {
   return false;
 }
 
+/** Rene tal (CVR/telefon) må ikke overskrives af hyperlink-URL. */
+export function looksLikeNumericId(value: string): boolean {
+  const digits = value.trim().replace(/[\s.+()-]/g, "");
+  return digits.length >= 6 && /^\d+$/.test(digits);
+}
+
 function looksLikeEmail(value: string): boolean {
   const s = value.trim();
   return s.includes("@") && !s.includes(" ");
@@ -70,7 +76,7 @@ function patchHyperlinksIntoSheet(sheet: XLSX.WorkSheet): void {
           cell.t = "s";
         }
       } else if (target.startsWith("http://") || target.startsWith("https://")) {
-        if (looksLikeUrlOrDomain(currentVal)) continue;
+        if (looksLikeUrlOrDomain(currentVal) || looksLikeNumericId(currentVal)) continue;
         cell.v = target;
         cell.w = target;
         cell.t = "s";

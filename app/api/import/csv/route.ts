@@ -291,19 +291,28 @@ export async function POST(req: Request) {
               patchMatchField,
             );
             // #region agent log
-            if (patchMatchField === "domain" && i < 3) {
+            if (i < 3) {
+              const cvrMappedCols = mapping
+                ? Object.entries(mapping)
+                    .filter(([, t]) => t === "cvr")
+                    .map(([col]) => col)
+                : [];
               const payload = {
                 sessionId: "8b0f30",
-                runId: "onlinebooq-nomatch",
-                hypothesisId: "B",
+                runId: "onlinebooq-cvr",
+                hypothesisId: "C",
                 location: "app/api/import/csv/route.ts",
-                message: "enrich domain sample",
+                message: "enrich match sample",
                 data: {
                   row: i + 1,
-                  domain: domain.slice(0, 120),
-                  matchKey: matchKey.slice(0, 120),
+                  patchMatchField,
                   indexSize: patchLeadIndex.size,
-                  hasMatch: Boolean(matchKey) && patchLeadIndex.has(matchKey),
+                  matchKey: matchKey.slice(0, 80),
+                  cvrRaw: base.cvr.slice(0, 40),
+                  phoneRaw: base.phone.slice(0, 40),
+                  domainRaw: domain.slice(0, 80),
+                  cvrMappedCols,
+                  rowKeys: Object.keys(row).slice(0, 20),
                 },
                 timestamp: Date.now(),
               };
@@ -318,11 +327,21 @@ export async function POST(req: Request) {
             const matchLabel = cvrNorm ?? (matchKey || "—");
             if (!matchKey) {
               summary.skippedInvalid += 1;
+              const rawForField =
+                patchMatchField === "cvr"
+                  ? base.cvr
+                  : patchMatchField === "phone"
+                    ? base.phone
+                    : patchMatchField === "email"
+                      ? base.email
+                      : domain;
               pushDetail({
                 dataRow,
                 cvr: matchLabel,
                 reason: "invalid_row",
-                note: `Match-nøgle mangler (${patchMatchField})`,
+                note: rawForField.trim()
+                  ? `Match-nøgle ugyldig (${patchMatchField}): «${rawForField.trim().slice(0, 60)}»`
+                  : `Match-nøgle mangler (${patchMatchField}): mappet kolonne er tom i filen`,
               });
             } else if (handledPatchKeysInFile.has(matchKey)) {
               summary.skippedDuplicateInFile += 1;
