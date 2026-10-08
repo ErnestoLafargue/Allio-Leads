@@ -147,6 +147,7 @@ export async function POST(req: Request) {
     select: {
       id: true,
       campaignId: true,
+      companyName: true,
       cvr: true,
       status: true,
       notes: true,
@@ -284,57 +285,26 @@ export async function POST(req: Request) {
             const matchKey = getIncomingMatchValue(
               {
                 cvr: base.cvr,
+                companyName: base.companyName,
                 phone: base.phone,
                 email: base.email,
                 domain,
               },
               patchMatchField,
             );
-            // #region agent log
-            if (i < 3) {
-              const cvrMappedCols = mapping
-                ? Object.entries(mapping)
-                    .filter(([, t]) => t === "cvr")
-                    .map(([col]) => col)
-                : [];
-              const payload = {
-                sessionId: "8b0f30",
-                runId: "onlinebooq-cvr",
-                hypothesisId: "C",
-                location: "app/api/import/csv/route.ts",
-                message: "enrich match sample",
-                data: {
-                  row: i + 1,
-                  patchMatchField,
-                  indexSize: patchLeadIndex.size,
-                  matchKey: matchKey.slice(0, 80),
-                  cvrRaw: base.cvr.slice(0, 40),
-                  phoneRaw: base.phone.slice(0, 40),
-                  domainRaw: domain.slice(0, 80),
-                  cvrMappedCols,
-                  rowKeys: Object.keys(row).slice(0, 20),
-                },
-                timestamp: Date.now(),
-              };
-              console.info("[import/csv:dbg]", payload.message, payload.data);
-              fetch("http://127.0.0.1:7517/ingest/1bbc5f7f-d2bf-4f94-a413-704594bbabb0", {
-                method: "POST",
-                headers: { "Content-Type": "application/json", "X-Debug-Session-Id": "8b0f30" },
-                body: JSON.stringify(payload),
-              }).catch(() => {});
-            }
-            // #endregion
             const matchLabel = cvrNorm ?? (matchKey || "—");
             if (!matchKey) {
               summary.skippedInvalid += 1;
               const rawForField =
                 patchMatchField === "cvr"
                   ? base.cvr
-                  : patchMatchField === "phone"
-                    ? base.phone
-                    : patchMatchField === "email"
-                      ? base.email
-                      : domain;
+                  : patchMatchField === "companyName"
+                    ? base.companyName
+                    : patchMatchField === "phone"
+                      ? base.phone
+                      : patchMatchField === "email"
+                        ? base.email
+                        : domain;
               pushDetail({
                 dataRow,
                 cvr: matchLabel,

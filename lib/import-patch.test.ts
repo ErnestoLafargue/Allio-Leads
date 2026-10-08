@@ -47,18 +47,33 @@ describe("resolveIncomingDomain", () => {
 
 describe("match keys", () => {
   it("normaliserer CVR, telefon, e-mail og domæne", () => {
-    expect(getIncomingMatchValue({ cvr: "DK 12 34 56 78", phone: "", email: "", domain: "" }, "cvr")).toBe(
-      "12345678",
-    );
     expect(
-      getIncomingMatchValue({ cvr: "", phone: "+45 12 34 56 78", email: "", domain: "" }, "phone"),
+      getIncomingMatchValue(
+        { cvr: "DK 12 34 56 78", companyName: "", phone: "", email: "", domain: "" },
+        "cvr",
+      ),
+    ).toBe("12345678");
+    expect(
+      getIncomingMatchValue(
+        { cvr: "", companyName: "  Bicell ApS ", phone: "", email: "", domain: "" },
+        "companyName",
+      ),
+    ).toBe("bicell aps");
+    expect(
+      getIncomingMatchValue(
+        { cvr: "", companyName: "", phone: "+45 12 34 56 78", email: "", domain: "" },
+        "phone",
+      ),
     ).toBe("+4512345678");
     expect(
-      getIncomingMatchValue({ cvr: "", phone: "", email: "A@Firma.DK", domain: "" }, "email"),
+      getIncomingMatchValue(
+        { cvr: "", companyName: "", phone: "", email: "A@Firma.DK", domain: "" },
+        "email",
+      ),
     ).toBe("a@firma.dk");
     expect(
       getIncomingMatchValue(
-        { cvr: "", phone: "", email: "", domain: "https://www.firma.dk/path" },
+        { cvr: "", companyName: "", phone: "", email: "", domain: "https://www.firma.dk/path" },
         "domain",
       ),
     ).toBe("firma.dk");
@@ -69,6 +84,7 @@ describe("match keys", () => {
       {
         id: "a",
         campaignId: "c1",
+        companyName: "Firma A",
         cvr: "12345678",
         phone: "11111111",
         email: "",
@@ -77,6 +93,7 @@ describe("match keys", () => {
       {
         id: "b",
         campaignId: "c2",
+        companyName: "Firma B",
         cvr: "12345678",
         phone: "22222222",
         email: "",
@@ -105,6 +122,7 @@ describe("match keys", () => {
         {
           id: "1",
           campaignId: "c1",
+          companyName: "",
           cvr: "",
           phone: "",
           email: "",
@@ -121,6 +139,7 @@ describe("match keys", () => {
         {
           id: "1",
           campaignId: "c1",
+          companyName: "",
           cvr: "",
           phone: "",
           email: "",

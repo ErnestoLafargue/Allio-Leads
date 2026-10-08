@@ -10,7 +10,7 @@ export type ImportPatchField =
   | "otherCustom";
 
 /** Nøgle der bruges til at finde eksisterende leads under berigelse. */
-export type ImportPatchMatchField = "cvr" | "phone" | "email" | "domain";
+export type ImportPatchMatchField = "cvr" | "phone" | "email" | "domain" | "companyName";
 
 export const DEFAULT_IMPORT_PATCH_FIELDS: ImportPatchField[] = ["email", "domain", "otherCustom"];
 
@@ -24,6 +24,7 @@ export const IMPORT_PATCH_FIELD_OPTIONS: { id: ImportPatchField; label: string }
 
 export const IMPORT_PATCH_MATCH_OPTIONS: { id: ImportPatchMatchField; label: string }[] = [
   { id: "cvr", label: "CVR" },
+  { id: "companyName", label: "Virksomhedsnavn" },
   { id: "phone", label: "Telefonnummer" },
   { id: "email", label: "E-mail" },
   { id: "domain", label: "Domæne / hjemmeside" },
@@ -54,6 +55,7 @@ export type ImportPatchResult = {
 export type ImportPatchMatchLead = {
   id: string;
   campaignId: string | null;
+  companyName: string;
   cvr: string;
   phone: string;
   email: string;
@@ -69,6 +71,10 @@ function normalizePhone(v: string): string {
 }
 
 function normalizeEmail(v: string): string {
+  return v.trim().toLowerCase();
+}
+
+function normalizeCompanyName(v: string): string {
   return v.trim().toLowerCase();
 }
 
@@ -95,7 +101,7 @@ export function parseImportPatchFields(raw: unknown): ImportPatchField[] | null 
 }
 
 export function parseImportPatchMatchField(raw: unknown): ImportPatchMatchField {
-  if (raw === "phone" || raw === "email" || raw === "domain") return raw;
+  if (raw === "phone" || raw === "email" || raw === "domain" || raw === "companyName") return raw;
   return "cvr";
 }
 
@@ -130,10 +136,11 @@ export function resolveIncomingDomain(
 
 /** Match-værdi for en upload-række. */
 export function getIncomingMatchValue(
-  incoming: { cvr: string; phone: string; email: string; domain: string },
+  incoming: { cvr: string; companyName: string; phone: string; email: string; domain: string },
   matchField: ImportPatchMatchField,
 ): string {
   if (matchField === "cvr") return normalizeCVR(incoming.cvr) ?? "";
+  if (matchField === "companyName") return normalizeCompanyName(incoming.companyName);
   if (matchField === "phone") return normalizePhone(incoming.phone);
   if (matchField === "email") return normalizeEmail(incoming.email);
   return normalizeDomain(incoming.domain);
@@ -145,6 +152,7 @@ export function getLeadMatchValue(
   matchField: ImportPatchMatchField,
 ): string {
   if (matchField === "cvr") return normalizeCVR(lead.cvr) ?? "";
+  if (matchField === "companyName") return normalizeCompanyName(lead.companyName);
   if (matchField === "phone") return normalizePhone(lead.phone);
   if (matchField === "email") return normalizeEmail(lead.email);
   return normalizeDomain(leadDomainFromCustomFields(lead.customFields));

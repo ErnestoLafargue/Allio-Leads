@@ -216,6 +216,7 @@ export default function ImportPage() {
   const patchMatchMappingOk = (() => {
     if (!patchMissingOnly) return true;
     if (patchMatchField === "cvr") return mappedTargets.has("cvr");
+    if (patchMatchField === "companyName") return mappedTargets.has("companyName");
     if (patchMatchField === "phone") return mappedTargets.has("phone");
     if (patchMatchField === "email") return mappedTargets.has("email");
     return (
