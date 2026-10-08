@@ -34,6 +34,12 @@ describe("resolveIncomingDomain", () => {
     expect(resolveIncomingDomain({ domaene: "example.dk" }, "a@other.dk")).toBe("example.dk");
   });
 
+  it("bruger extras fra standard-mapping før e-mail", () => {
+    expect(resolveIncomingDomain({}, "a@other.dk", ["https://www.firma.dk"])).toBe(
+      "https://www.firma.dk",
+    );
+  });
+
   it("falder tilbage til e-mail-host", () => {
     expect(resolveIncomingDomain({}, "kontakt@firma.dk")).toBe("firma.dk");
   });

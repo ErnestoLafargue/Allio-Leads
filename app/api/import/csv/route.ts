@@ -118,7 +118,11 @@ export async function POST(req: Request) {
     return NextResponse.json({ error: "Vælg en kampagne" }, { status: 400 });
   }
 
-  const campaign = await prisma.campaign.findUnique({ where: { id: campaignId } });
+  // Only select fields we need — avoids P2022 when local/dev DB schema lags Prisma client.
+  const campaign = await prisma.campaign.findUnique({
+    where: { id: campaignId },
+    select: { id: true, fieldConfig: true },
+  });
   if (!campaign) {
     return NextResponse.json({ error: "Kampagne findes ikke" }, { status: 400 });
   }
@@ -135,7 +139,6 @@ export async function POST(req: Request) {
   }
 
   const rows = parsed.rows;
-
   const existingLeads = await prisma.lead.findMany({
     select: {
       id: true,
@@ -245,7 +248,14 @@ export async function POST(req: Request) {
               }
             }
             noteAnnoncerCustom(custom);
-            const domain = resolveIncomingDomain(custom, base.email);
+            const domain = resolveIncomingDomain(custom, base.email, [
+              n.domaene,
+              n.domain,
+              n.hjemmeside,
+              n.website,
+              n.url,
+              n.webside,
+            ]);
             const matchKey = getIncomingMatchValue(
               {
                 cvr: base.cvr,
@@ -299,7 +309,12 @@ export async function POST(req: Request) {
                     patchFields,
                   });
                   if (Object.keys(patch).length > 0) {
-                    await prisma.lead.update({ where: { id: lead.id }, data: patch });
+                    // select id only — RETURNING * would fail if local DB lags Prisma schema
+                    await prisma.lead.update({
+                      where: { id: lead.id },
+                      data: patch,
+                      select: { id: true },
+                    });
                     summary.existingAttached += 1;
                     mergeFieldCounts(patchFieldCounts, fieldCounts);
                     anyUpdated = true;

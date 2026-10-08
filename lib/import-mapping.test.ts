@@ -9,3 +9,13 @@ describe("suggestColumnMapping virksomhedstype", () => {
     expect(m["Virksomhed"]).toBe("companyName");
   });
 });
+
+describe("suggestColumnMapping domæne", () => {
+  it("gætter Domæne/domaene/website som domain", () => {
+    const m = suggestColumnMapping(["Domæne", "Domaene", "Website", "Hjemmeside"]);
+    expect(m["Domæne"]).toBe("domain");
+    expect(m["Domaene"]).toBe("domain");
+    expect(m["Website"]).toBe("domain");
+    expect(m["Hjemmeside"]).toBe("domain");
+  });
+});

@@ -99,15 +99,26 @@ export function parseImportPatchMatchField(raw: unknown): ImportPatchMatchField 
   return "cvr";
 }
 
-/** Domæne til patch: mappet custom-værdi, ellers host fra e-mail. */
-export function resolveIncomingDomain(custom: Record<string, string>, email: string): string {
+/** Domæne til match/patch: custom, eksplicit mapping, ellers e-mail-host. */
+export function resolveIncomingDomain(
+  custom: Record<string, string>,
+  email: string,
+  /** Ekstra kandidater fra standard-mapping (n.domain / n.domaene). */
+  extras: string[] = [],
+): string {
   const fromCustom =
     custom.domaene?.trim() ||
     custom.domain?.trim() ||
     custom.hjemmeside?.trim() ||
     custom.website?.trim() ||
+    custom.url?.trim() ||
+    custom.webside?.trim() ||
     "";
   if (fromCustom) return fromCustom;
+  for (const extra of extras) {
+    const v = extra?.trim();
+    if (v) return v;
+  }
   const at = email.indexOf("@");
   if (at >= 0) {
     const host = email.slice(at + 1).trim();

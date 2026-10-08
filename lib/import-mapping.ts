@@ -156,6 +156,8 @@ export function suggestColumnMapping(columns: string[]): Record<string, string> 
       t = "custom:virksomhedsejer";
     } else if (
       n.includes("domain") ||
+      n.includes("domaene") ||
+      n.includes("domæne") ||
       n.includes("hjemmeside") ||
       n.includes("website") ||
       n === "url" ||
