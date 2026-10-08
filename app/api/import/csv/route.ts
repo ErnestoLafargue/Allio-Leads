@@ -281,18 +281,29 @@ export async function POST(req: Request) {
               n.url,
               n.webside,
             ]);
+            const matchKey = getIncomingMatchValue(
+              {
+                cvr: base.cvr,
+                phone: base.phone,
+                email: base.email,
+                domain,
+              },
+              patchMatchField,
+            );
             // #region agent log
             if (patchMatchField === "domain" && i < 3) {
               const payload = {
                 sessionId: "8b0f30",
-                runId: "easypractice-ok",
-                hypothesisId: "A",
+                runId: "onlinebooq-nomatch",
+                hypothesisId: "B",
                 location: "app/api/import/csv/route.ts",
                 message: "enrich domain sample",
                 data: {
                   row: i + 1,
                   domain: domain.slice(0, 120),
-                  nDomain: (n.domain || n.domaene || "").slice(0, 120),
+                  matchKey: matchKey.slice(0, 120),
+                  indexSize: patchLeadIndex.size,
+                  hasMatch: Boolean(matchKey) && patchLeadIndex.has(matchKey),
                 },
                 timestamp: Date.now(),
               };
@@ -304,15 +315,6 @@ export async function POST(req: Request) {
               }).catch(() => {});
             }
             // #endregion
-            const matchKey = getIncomingMatchValue(
-              {
-                cvr: base.cvr,
-                phone: base.phone,
-                email: base.email,
-                domain,
-              },
-              patchMatchField,
-            );
             const matchLabel = cvrNorm ?? (matchKey || "—");
             if (!matchKey) {
               summary.skippedInvalid += 1;

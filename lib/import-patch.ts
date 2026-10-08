@@ -108,6 +108,7 @@ export function resolveIncomingDomain(
 ): string {
   const fromCustom =
     custom.domaene?.trim() ||
+    custom["domæne"]?.trim() ||
     custom.domain?.trim() ||
     custom.hjemmeside?.trim() ||
     custom.website?.trim() ||
@@ -225,7 +226,15 @@ export function buildImportPatchForLead(params: {
     for (const [k, v] of Object.entries(incoming.custom)) {
       if (!v.trim()) continue;
       if (k === COMPANY_TYPE_CUSTOM_KEY || k === "virksomheds_type") continue;
-      if (k === "domaene" || k === "domain" || k === "hjemmeside" || k === "website") continue;
+      if (
+        k === "domaene" ||
+        k === "domæne" ||
+        k === "domain" ||
+        k === "hjemmeside" ||
+        k === "website"
+      ) {
+        continue;
+      }
       if (!(existingCustom[k] ?? "").trim()) {
         mergedCustom[k] = v.trim();
         customChanged = true;

@@ -114,6 +114,22 @@ describe("match keys", () => {
       ),
     ).toBe("firma.dk");
   });
+
+  it("matcher også ældre nøgle domæne (med æ)", () => {
+    expect(
+      getLeadMatchValue(
+        {
+          id: "1",
+          campaignId: "c1",
+          cvr: "",
+          phone: "",
+          email: "",
+          customFields: JSON.stringify({ domæne: "illum.dk" }),
+        },
+        "domain",
+      ),
+    ).toBe("illum.dk");
+  });
 });
 
 describe("buildImportPatchForLead", () => {

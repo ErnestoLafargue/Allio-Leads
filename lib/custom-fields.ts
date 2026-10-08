@@ -19,6 +19,7 @@ export function stringifyCustomFields(obj: Record<string, string>): string {
 
 const LEAD_DOMAIN_FIELD_KEYS = [
   "domaene",
+  "domæne", // ældre/import-varianter med æ
   "domain",
   "hjemmeside",
   "website",
