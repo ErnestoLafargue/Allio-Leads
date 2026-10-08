@@ -31,10 +31,25 @@ function nonEmptyRow(r: Record<string, string>) {
   return Object.values(r).some((v) => String(v).trim());
 }
 
+/** True hvis værdien allerede ligner URL/domæne (ikke link-labels som «ok»). */
+export function looksLikeUrlOrDomain(value: string): boolean {
+  const s = value.trim().toLowerCase();
+  if (!s) return false;
+  if (s.startsWith("http://") || s.startsWith("https://")) return true;
+  // host-agtig: har punktum, ingen mellemrum
+  if (!s.includes(" ") && s.includes(".") && /[a-z0-9]/.test(s)) return true;
+  return false;
+}
+
+function looksLikeEmail(value: string): boolean {
+  const s = value.trim();
+  return s.includes("@") && !s.includes(" ");
+}
+
 /**
- * Efterbehandler et XLSX-worksheet: for celler der har et hyperlink (`cell.l.Target`)
- * og en tom eller ren tekst-værdi, injicerer vi hyperlink-target som celleværdi.
- * Dækker bl.a. mailto:-links (email) og https:-links (domæne/hjemmeside).
+ * Efterbehandler et XLSX-worksheet: for celler med hyperlink (`cell.l.Target`)
+ * bruger vi target når display-teksten er tom eller ikke selv er URL/email
+ * (fx EasyPractice «ok»-labels over rigtige https-links).
  */
 function patchHyperlinksIntoSheet(sheet: XLSX.WorkSheet): void {
   const range = XLSX.utils.decode_range(sheet["!ref"] ?? "A1");
@@ -45,9 +60,9 @@ function patchHyperlinksIntoSheet(sheet: XLSX.WorkSheet): void {
       if (!cell || !cell.l || typeof cell.l.Target !== "string") continue;
       const target = cell.l.Target.trim();
       const currentVal = (cell.w ?? cell.v ?? "").toString().trim();
-      if (currentVal) continue;
 
       if (target.toLowerCase().startsWith("mailto:")) {
+        if (looksLikeEmail(currentVal)) continue;
         const email = target.slice("mailto:".length).split("?")[0].trim();
         if (email) {
           cell.v = email;
@@ -55,6 +70,7 @@ function patchHyperlinksIntoSheet(sheet: XLSX.WorkSheet): void {
           cell.t = "s";
         }
       } else if (target.startsWith("http://") || target.startsWith("https://")) {
+        if (looksLikeUrlOrDomain(currentVal)) continue;
         cell.v = target;
         cell.w = target;
         cell.t = "s";

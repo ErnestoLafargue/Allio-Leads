@@ -281,6 +281,29 @@ export async function POST(req: Request) {
               n.url,
               n.webside,
             ]);
+            // #region agent log
+            if (patchMatchField === "domain" && i < 3) {
+              const payload = {
+                sessionId: "8b0f30",
+                runId: "easypractice-ok",
+                hypothesisId: "A",
+                location: "app/api/import/csv/route.ts",
+                message: "enrich domain sample",
+                data: {
+                  row: i + 1,
+                  domain: domain.slice(0, 120),
+                  nDomain: (n.domain || n.domaene || "").slice(0, 120),
+                },
+                timestamp: Date.now(),
+              };
+              console.info("[import/csv:dbg]", payload.message, payload.data);
+              fetch("http://127.0.0.1:7517/ingest/1bbc5f7f-d2bf-4f94-a413-704594bbabb0", {
+                method: "POST",
+                headers: { "Content-Type": "application/json", "X-Debug-Session-Id": "8b0f30" },
+                body: JSON.stringify(payload),
+              }).catch(() => {});
+            }
+            // #endregion
             const matchKey = getIncomingMatchValue(
               {
                 cvr: base.cvr,
