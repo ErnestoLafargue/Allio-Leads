@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
-import type { DialPhonePriority } from "@/lib/lead-phones";
+import { dialNumberMenu, showsDialNumberMenu, type DialPhonePriority } from "@/lib/lead-phones";
 import {
+  dialActionForMenuChoice,
   dialPhoneForOpenLead,
   predictiveActionAfterRemoteEnd,
   predictiveAutoStartKey,
@@ -123,10 +124,136 @@ describe("predictive dialer smoke", () => {
     ).toEqual({ type: "stay" });
   });
 
-  it("telefonsvarer uden samtale må stadig gå videre", () => {
+  it("opdaget telefonsvarer ringer automatisk næste nummer, også når svareren nåede at forbinde", () => {
+    const detected = predictiveActionAfterRemoteEnd({
+      hadLive: true,
+      autoOutcome: "VOICEMAIL",
+      canFailover: true,
+    });
+    expect(detected).toEqual({ type: "failover" });
+    expect(
+      predictiveActionAfterRemoteEnd({ hadLive: false, autoOutcome: "VOICEMAIL", canFailover: true }),
+    ).toEqual({ type: "failover" });
     expect(
       predictiveActionAfterRemoteEnd({ hadLive: false, autoOutcome: "VOICEMAIL", canFailover: false }),
     ).toEqual({ type: "advance", outcome: "VOICEMAIL" });
+    expect(
+      predictiveActionAfterRemoteEnd({ hadLive: true, autoOutcome: "VOICEMAIL", canFailover: false }),
+    ).toEqual({ type: "advance", outcome: "VOICEMAIL" });
+
+    const leadId = "lead-a";
+    const nextKey = predictiveAutoStartKey(leadId, "failover", true);
+    expect(
+      shouldPredictiveAutoStart({
+        autoStart: true,
+        audioReady: true,
+        hasNumber: true,
+        numberAllowed: true,
+        numberMatchesOpenLead: true,
+        suppressedLeadId: null,
+        leadId,
+        lineBusy: false,
+        previousKey: null,
+        key: nextKey,
+      }),
+    ).toBe(true);
+  });
+
+  it("hørt telefonsvarer: rullemenuen lader sælgeren ringe det andet nummer bagefter", () => {
+    const priority: DialPhonePriority = "COMPANY_FIRST";
+    const lead: Lead = { id: "lead-a", phone: "+4536179018", privatePhone: "22112211" };
+    const menu = dialNumberMenu(lead.phone, lead.privatePhone, priority);
+    const primary = dialPhoneForOpenLead(lead, priority);
+
+    expect(showsDialNumberMenu(menu)).toBe(true);
+    expect(menu.map((item) => item.label)).toEqual([
+      "Virksomhed · +4536179018",
+      "Privat · 22112211",
+    ]);
+    expect(showsDialNumberMenu(dialNumberMenu(lead.phone, lead.phone, priority))).toBe(false);
+
+    const undetected = predictiveActionAfterRemoteEnd({
+      hadLive: true,
+      autoOutcome: null,
+      canFailover: true,
+    });
+    expect(undetected).toEqual({ type: "stay" });
+    const detected = predictiveActionAfterRemoteEnd({
+      hadLive: true,
+      autoOutcome: "VOICEMAIL",
+      canFailover: true,
+    });
+    expect(detected).toEqual({ type: "failover" });
+
+    const afterHangup = dialActionForMenuChoice({
+      menu,
+      primaryRaw: primary,
+      currentRaw: primary,
+      selectedRaw: menu[1]!.raw,
+      lineBusy: false,
+    });
+    expect(afterHangup).toEqual({
+      type: "dial",
+      phone: "22112211",
+      usingAlternate: true,
+      hangUpFirst: false,
+    });
+    expect(
+      dialActionForMenuChoice({
+        menu,
+        primaryRaw: primary,
+        currentRaw: primary,
+        selectedRaw: "99887766",
+        lineBusy: false,
+      }),
+    ).toEqual({ type: "keep" });
+    expect(showsDialNumberMenu(menu)).toBe(true);
+
+    const whileSecondRings = dialActionForMenuChoice({
+      menu,
+      primaryRaw: primary,
+      currentRaw: menu[1]!.raw,
+      selectedRaw: primary,
+      lineBusy: true,
+    });
+    expect(whileSecondRings).toEqual({
+      type: "dial",
+      phone: primary,
+      usingAlternate: false,
+      hangUpFirst: true,
+    });
+    expect(
+      dialActionForMenuChoice({
+        menu,
+        primaryRaw: primary,
+        currentRaw: menu[1]!.raw,
+        selectedRaw: menu[1]!.raw,
+        lineBusy: true,
+      }),
+    ).toEqual({ type: "keep" });
+
+    const choice = afterHangup.type === "dial" ? afterHangup : null;
+    const suppressed = lead.id;
+    const slot = choice?.usingAlternate ? "failover" : "primary";
+    const previousKey = predictiveAutoStartKey(lead.id, "primary", true);
+    const key = predictiveAutoStartKey(lead.id, slot, true);
+    const auto = shouldPredictiveAutoStart({
+      autoStart: true,
+      audioReady: true,
+      hasNumber: true,
+      numberAllowed: true,
+      numberMatchesOpenLead: true,
+      suppressedLeadId: suppressed,
+      leadId: lead.id,
+      lineBusy: false,
+      previousKey,
+      key,
+    });
+    expect(auto).toBe(false);
+
+    const manualDial = choice!.phone;
+    expect(sameDialTarget(manualDial, "22112211")).toBe(true);
+    expect(sameDialTarget(manualDial, primary)).toBe(false);
   });
 
   it("ubesvaret uden samtale må stadig prøve leadets andet nummer før næste", () => {

@@ -82,6 +82,53 @@ export function orderedDialPhones(
   return out;
 }
 
+export type DialNumberMenuItem = {
+  kind: DialPhoneKind;
+  raw: string;
+  /** Tekst i rullemenuen, fx "Virksomhed · +4536179018". */
+  label: string;
+};
+
+const DIAL_NUMBER_KIND_LABEL: Record<DialPhoneKind, string> = {
+  COMPANY: "Virksomhed",
+  PRIVATE: "Privat",
+};
+
+export function dialNumberMenuItemLabel(kind: DialPhoneKind, raw: string): string {
+  return `${DIAL_NUMBER_KIND_LABEL[kind]} · ${raw}`;
+}
+
+/**
+ * Numre sælgeren kan vælge i opkaldsfeltet.
+ * Ét unikt nummer giver én række (feltet forbliver et almindeligt felt).
+ * To forskellige numre giver en rullemenu.
+ */
+export function dialNumberMenu(
+  phone: string,
+  privatePhone?: string | null,
+  priority: DialPhonePriority = DIAL_PHONE_PRIORITY_DEFAULT,
+): DialNumberMenuItem[] {
+  return orderedDialPhones(phone, privatePhone, priority).map((target) => ({
+    kind: target.kind,
+    raw: target.raw,
+    label: dialNumberMenuItemLabel(target.kind, target.raw),
+  }));
+}
+
+export function showsDialNumberMenu(items: readonly { raw: string }[]): boolean {
+  return items.length >= 2;
+}
+
+/** Kun et nummer der faktisk står på leadet. Et fremmed valg giver null. */
+export function chosenDialNumber<T extends { raw: string }>(
+  items: readonly T[],
+  selectedRaw: string,
+): T | null {
+  const want = phoneDigitsForMatch(selectedRaw);
+  if (!want) return null;
+  return items.find((item) => phoneDigitsForMatch(item.raw) === want) ?? null;
+}
+
 /** Primært opkaldsnummer ud fra kampagnens prioritet. */
 export function primaryDialPhone(
   phone: string,

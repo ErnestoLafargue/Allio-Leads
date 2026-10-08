@@ -1,4 +1,9 @@
-import { primaryDialPhone, type DialPhonePriority } from "@/lib/lead-phones";
+import {
+  chosenDialNumber,
+  primaryDialPhone,
+  type DialNumberMenuItem,
+  type DialPhonePriority,
+} from "@/lib/lead-phones";
 import { phoneDigitsForMatch } from "@/lib/phone-e164";
 import type { PredictiveAutoOutcome } from "@/lib/voip-call-messages";
 
@@ -60,25 +65,72 @@ export type PredictiveRemoteEndAction =
   | { type: "advance"; outcome: Exclude<PredictiveAutoOutcome, null> };
 
 /**
- * Kunden lagde på.
- * Har der været en samtale, bliver sælgeren på kundebilledet og vælger selv udfald
- * (noter, tilbagekald, ukvalificeret). Systemet må ikke gemme et udfald og gå videre.
- * Uden samtale kan andet nummer prøves, og et klassificeret udfald (ikke hjemme / telefonsvarer)
- * må stadig gå videre. Agentens egen læg-på er ikke denne funktion.
+ * Kunden lagde på, eller systemet klassificerede opkaldet.
+ * Opdaget telefonsvarer og ubesvaret ringer næste nummer på samme kunde, også når
+ * svareren nåede at forbinde (`hadLive`). Uden flere numre går det udfald videre.
+ * En rigtig samtale, eller en telefonsvarer systemet ikke opdagede (`hadLive` uden udfald),
+ * bliver på billedet, så sælgeren selv kan vælge nummer og udfald.
+ * Agentens egen læg-på er ikke denne funktion.
  */
 export function predictiveActionAfterRemoteEnd(input: {
   hadLive: boolean;
   autoOutcome: PredictiveAutoOutcome;
   canFailover: boolean;
 }): PredictiveRemoteEndAction {
+  const detectedMiss =
+    input.autoOutcome === "VOICEMAIL" || (!input.hadLive && input.autoOutcome != null);
+  if (detectedMiss && input.canFailover) {
+    return { type: "failover" };
+  }
   if (input.hadLive && input.autoOutcome !== "VOICEMAIL") {
     return { type: "stay" };
-  }
-  if (!input.hadLive && input.autoOutcome && input.canFailover) {
-    return { type: "failover" };
   }
   if (input.autoOutcome) {
     return { type: "advance", outcome: input.autoOutcome };
   }
   return { type: "stay" };
+}
+
+/**
+ * Sælgeren vælger et nummer i rullemenuen.
+ * Menuen findes, når leadet har to numre, også mens det andet nummer ringes automatisk.
+ */
+export function applyDialMenuChoice(
+  menu: readonly DialNumberMenuItem[],
+  primaryRaw: string,
+  selectedRaw: string,
+): { phone: string; usingAlternate: boolean } | null {
+  const chosen = chosenDialNumber(menu, selectedRaw);
+  if (!chosen) return null;
+  return {
+    phone: chosen.raw,
+    usingAlternate: !sameDialTarget(chosen.raw, primaryRaw),
+  };
+}
+
+export type DialMenuAction =
+  | { type: "keep" }
+  | { type: "dial"; phone: string; usingAlternate: boolean; hangUpFirst: boolean };
+
+/**
+ * Et andet nummer i menuen ringes op med det samme.
+ * Er linjen i gang, lægges der på først, så det viste nummer og opkaldet er det samme.
+ * Samme nummer som det aktuelle starter ikke et nyt opkald.
+ */
+export function dialActionForMenuChoice(input: {
+  menu: readonly DialNumberMenuItem[];
+  primaryRaw: string;
+  currentRaw: string;
+  selectedRaw: string;
+  lineBusy: boolean;
+}): DialMenuAction {
+  const choice = applyDialMenuChoice(input.menu, input.primaryRaw, input.selectedRaw);
+  if (!choice) return { type: "keep" };
+  if (sameDialTarget(choice.phone, input.currentRaw)) return { type: "keep" };
+  return {
+    type: "dial",
+    phone: choice.phone,
+    usingAlternate: choice.usingAlternate,
+    hangUpFirst: input.lineBusy,
+  };
 }

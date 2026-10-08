@@ -30,7 +30,9 @@ import {
 } from "@/lib/active-dialer-campaign";
 import { linePhaseFromVoipStatus } from "@/lib/dialer-line-phase";
 import { reportDialerLineOccupancy } from "@/lib/report-dialer-line";
+import { showsDialNumberMenu, type DialNumberMenuItem } from "@/lib/lead-phones";
 import {
+  dialActionForMenuChoice,
   predictiveActionAfterRemoteEnd,
   predictiveAutoStartKey,
   sameDialTarget,
@@ -52,6 +54,11 @@ type Props = {
    * automatisk før workspace går videre.
    */
   failoverPhone?: string;
+  /**
+   * Virksomheds- og privatnummer i prioriteret rækkefølge.
+   * To forskellige numre vises som rullemenu i opkaldsfeltet.
+   */
+  dialMenu?: DialNumberMenuItem[];
   dialMode: CampaignDialMode;
   /** Predictive + power (efter connect): start opkald automatisk ved nyt lead */
   autoStartCall: boolean;
@@ -253,6 +260,7 @@ export function CampaignVoipStrip({
   leadPhone,
   recordPhone = "",
   failoverPhone = "",
+  dialMenu = [],
   dialMode,
   autoStartCall,
   onUnansweredTimeout,
@@ -1404,7 +1412,7 @@ export function CampaignVoipStrip({
     }
   }
 
-  async function startCall() {
+  async function startCall(explicitRaw?: string) {
     if (editingPhone) {
       setLineStatus("error");
       setDetail("Gem nummeret først før opkald.");
@@ -1426,7 +1434,7 @@ export function CampaignVoipStrip({
     // (som awaiter hangUp), så når vi når hertil bør disse altid være tomme;
     // guarden er en defensiv backstop.
     if (activeCallRef.current) return;
-    const voipPhoneRaw = voipPhone;
+    const voipPhoneRaw = (explicitRaw ?? voipPhone).trim();
     const raw = stripDialFormatting(voipPhoneRaw);
     if (!isAllowedDialPhone(raw)) {
       if (process.env.NODE_ENV !== "production") {
@@ -1639,6 +1647,31 @@ export function CampaignVoipStrip({
     inFlightRef.current = false;
     clearCallAudioState(true, hangupTimerKey);
     queueMicrotask(() => onCallEndedForActivityRef.current?.());
+  }
+
+  const lineBusyForMenu =
+    lineStatus === "live" || lineStatus === "ringing" || lineStatus === "connecting";
+  const chosenMenuValue =
+    dialMenu.find((item) => sameDialTarget(item.raw, voipPhone))?.raw ?? dialMenu[0]?.raw ?? "";
+
+  function pickDialNumber(selectedRaw: string) {
+    const action = dialActionForMenuChoice({
+      menu: dialMenu,
+      primaryRaw: leadPhone || "",
+      currentRaw: voipPhone,
+      selectedRaw,
+      lineBusy: lineBusyForMenu || Boolean(activeCallRef.current) || inFlightRef.current,
+    });
+    if (action.type !== "dial") return;
+    if (effectiveDialMode === "PREDICTIVE") {
+      suppressAutoStartForLeadIdRef.current = leadId;
+    }
+    setUsedFailoverForLeadId(action.usingAlternate ? leadId : null);
+    setActiveDialPhone(action.phone);
+    void (async () => {
+      if (action.hangUpFirst) await hangUp();
+      await startCall(action.phone);
+    })();
   }
 
   function onRoundButtonClick() {
@@ -1987,17 +2020,47 @@ export function CampaignVoipStrip({
           Telefonnummer (opkald)
         </label>
         <div className="mt-1 flex flex-wrap items-center gap-3">
-          <input
-            id={`voip-dial-${leadId}`}
-            type="text"
-            inputMode="tel"
-            autoComplete="off"
-            value={editingPhone ? phoneDraft : voipPhone}
-            onChange={(e) => setPhoneDraft(e.target.value)}
-            readOnly={!editingPhone}
-            placeholder="Nummer til opkald"
-            className="min-w-[12rem] flex-1 rounded-md border border-emerald-200/80 bg-white px-3 py-2 font-mono text-sm font-medium tracking-wide text-stone-900 shadow-sm outline-none ring-emerald-400/40 focus:ring-2"
-          />
+          {showsDialNumberMenu(dialMenu) && !editingPhone ? (
+            <div className="relative min-w-[12rem] flex-1">
+              <select
+                id={`voip-dial-${leadId}`}
+                value={chosenMenuValue}
+                onChange={(e) => pickDialNumber(e.target.value)}
+                aria-label="Vælg telefonnummer"
+                className="w-full appearance-none rounded-md border border-emerald-200/80 bg-white py-2 pl-3 pr-9 font-mono text-sm font-medium tracking-wide text-stone-900 shadow-sm outline-none ring-emerald-400/40 focus:ring-2 disabled:cursor-not-allowed disabled:opacity-70"
+              >
+                {dialMenu.map((item) => (
+                  <option key={`${item.kind}-${item.raw}`} value={item.raw}>
+                    {item.label}
+                  </option>
+                ))}
+              </select>
+              <svg
+                viewBox="0 0 20 20"
+                fill="currentColor"
+                aria-hidden="true"
+                className="pointer-events-none absolute right-3 top-1/2 h-4 w-4 -translate-y-1/2 text-emerald-800"
+              >
+                <path
+                  fillRule="evenodd"
+                  d="M5.23 7.21a.75.75 0 0 1 1.06.02L10 11.17l3.71-3.94a.75.75 0 1 1 1.08 1.04l-4.25 4.5a.75.75 0 0 1-1.08 0l-4.25-4.5a.75.75 0 0 1 .02-1.06Z"
+                  clipRule="evenodd"
+                />
+              </svg>
+            </div>
+          ) : (
+            <input
+              id={`voip-dial-${leadId}`}
+              type="text"
+              inputMode="tel"
+              autoComplete="off"
+              value={editingPhone ? phoneDraft : voipPhone}
+              onChange={(e) => setPhoneDraft(e.target.value)}
+              readOnly={!editingPhone}
+              placeholder="Nummer til opkald"
+              className="min-w-[12rem] flex-1 rounded-md border border-emerald-200/80 bg-white px-3 py-2 font-mono text-sm font-medium tracking-wide text-stone-900 shadow-sm outline-none ring-emerald-400/40 focus:ring-2"
+            />
+          )}
           <button
             type="button"
             onClick={() => {

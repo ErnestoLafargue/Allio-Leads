@@ -44,6 +44,7 @@ import { scrollWorkspaceToTop } from "@/lib/scroll-workspace-to-top";
 import { KNOWN_LEAD_SOURCES, parseLeadNavigation } from "@/lib/lead-navigation";
 import { DIALER_AUTO_PAUSED_KEY, DIALER_START_PATH, markDialerPauseExit } from "@/lib/dialer-pause-exit";
 import {
+  dialNumberMenu,
   normalizeDialPhonePriority,
   orderedDialPhones,
   type DialPhonePriority,
@@ -2103,6 +2104,7 @@ export function CampaignWorkspace({
           leadPhone={dialPhoneForOpenLead({ phone, privatePhone }, dialPhonePriority)}
           recordPhone={dialPhoneForOpenLead(current, dialPhonePriority)}
           failoverPhone={orderedDialPhones(phone, privatePhone, dialPhonePriority)[1]?.raw ?? ""}
+          dialMenu={dialNumberMenu(phone, privatePhone, dialPhonePriority)}
           dialMode={campaignDialMode}
           autoStartCall={voipAutoStart}
           onUnansweredTimeout={() => {

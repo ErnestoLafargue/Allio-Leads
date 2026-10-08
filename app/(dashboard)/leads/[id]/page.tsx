@@ -9,7 +9,7 @@ import { isQueueEligibleStatus, sortLeadsForQueue } from "@/lib/lead-queue";
 import { MeetingOutcomeSelect } from "@/app/components/meeting-outcome-select";
 import { LeadOutcomeStrip } from "@/app/components/lead-workspace/lead-outcome-strip";
 import { LeadKundeNoterBooking } from "@/app/components/lead-workspace/lead-kunde-noter-booking";
-import { orderedDialPhones } from "@/lib/lead-phones";
+import { dialNumberMenu, orderedDialPhones } from "@/lib/lead-phones";
 import { CallbackScheduleDialog } from "@/app/components/callback-schedule-dialog";
 import { SendStandardMailDialog } from "@/app/components/send-standard-mail-dialog";
 import { LeadIdBadge } from "@/app/components/lead-id-badge";
@@ -845,6 +845,7 @@ function LeadDetailInner() {
               campaignId={lead.campaignId}
               leadPhone={orderedDialPhones(phone, privatePhone, "PRIVATE_FIRST")[0]?.raw ?? ""}
               failoverPhone={orderedDialPhones(phone, privatePhone, "PRIVATE_FIRST")[1]?.raw ?? ""}
+              dialMenu={dialNumberMenu(phone, privatePhone, "PRIVATE_FIRST")}
               dialMode="CLICK_TO_CALL"
               autoStartCall={false}
               voipApiContext={VOIP_API_CONTEXT.GLOBAL_LEAD_PAGE}
