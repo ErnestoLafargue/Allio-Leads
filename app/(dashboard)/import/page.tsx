@@ -477,25 +477,6 @@ export default function ImportPage() {
       }
     }
     if (!gotResult) {
-      // #region agent log
-      fetch("http://127.0.0.1:7517/ingest/1bbc5f7f-d2bf-4f94-a413-704594bbabb0", {
-        method: "POST",
-        headers: { "Content-Type": "application/json", "X-Debug-Session-Id": "8b0f30" },
-        body: JSON.stringify({
-          sessionId: "8b0f30",
-          runId: "planway-timeout",
-          hypothesisId: "A",
-          location: "app/(dashboard)/import/page.tsx:onImport",
-          message: "client stream ended without result",
-          data: {
-            lastPercent,
-            processed: lastProcessed,
-            total: lastTotal,
-          },
-          timestamp: Date.now(),
-        }),
-      }).catch(() => {});
-      // #endregion
       setError(
         "Import blev afbrudt før resultat (timeout eller netværk). Prøv igen — store berigelser er nu gjort hurtigere.",
       );

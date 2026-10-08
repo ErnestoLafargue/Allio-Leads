@@ -69,36 +69,6 @@ export async function POST(req: Request) {
   const { session, response } = await requireAdmin();
   if (response) return response;
 
-  // #region agent log
-  const __dbgT0 = Date.now();
-  const __dbg = (message: string, hypothesisId: string, data: Record<string, unknown> = {}) => {
-    const payload = {
-      sessionId: "8b0f30",
-      runId: "planway-timeout",
-      hypothesisId,
-      location: "app/api/import/csv/route.ts",
-      message,
-      data: { ...data, elapsedMs: Date.now() - __dbgT0 },
-      timestamp: Date.now(),
-    };
-    console.info("[import/csv:dbg]", message, payload.data);
-    fetch("http://127.0.0.1:7517/ingest/1bbc5f7f-d2bf-4f94-a413-704594bbabb0", {
-      method: "POST",
-      headers: { "Content-Type": "application/json", "X-Debug-Session-Id": "8b0f30" },
-      body: JSON.stringify(payload),
-    }).catch(() => {});
-    try {
-      // eslint-disable-next-line @typescript-eslint/no-require-imports
-      require("fs").appendFileSync(
-        "/root/Allio-Leads/.cursor/debug-8b0f30.log",
-        `${JSON.stringify(payload)}\n`,
-      );
-    } catch {
-      /* ignore on Vercel */
-    }
-  };
-  // #endregion
-
   const form = await req.formData();
   const file = form.get("file");
   const campaignIdRaw = form.get("campaignId");
@@ -185,16 +155,6 @@ export async function POST(req: Request) {
       customFields: true,
     },
   });
-  // #region agent log
-  __dbg("leads loaded", "A", {
-    patchMissingOnly,
-    patchAllCampaigns,
-    patchMatchField,
-    rowCount: rows.length,
-    leadCount: existingLeads.length,
-    scopedToCampaign: Boolean(patchMissingOnly && !patchAllCampaigns),
-  });
-  // #endregion
   const leadsById = new Map(existingLeads.map((lead) => [lead.id, lead]));
   let cvrToLead = indexLeadsByNormalizedCvr(existingLeads);
   const campaignLeadsByCvr = new Map<
@@ -395,16 +355,6 @@ export async function POST(req: Request) {
             if (processed === totalRows || processed % progressStep === 0) {
               await flushPatchUpdates();
               pushProgress(processed);
-              // #region agent log
-              if (processed === totalRows || processed % Math.max(progressStep * 20, 1) === 0) {
-                __dbg("enrich progress", "A", {
-                  processed,
-                  totalRows,
-                  percent: Math.round((processed / Math.max(totalRows, 1)) * 100),
-                  existingAttached: summary.existingAttached,
-                });
-              }
-              // #endregion
             }
             continue;
           }
@@ -577,17 +527,6 @@ export async function POST(req: Request) {
         }
 
         await flushPatchUpdates();
-        // #region agent log
-        if (patchMissingOnly) {
-          __dbg("enrich complete", "A", {
-            existingAttached: summary.existingAttached,
-            skippedNoMatch: summary.skippedNoMatch ?? 0,
-            matchedNoUpdate: summary.matchedNoUpdate ?? 0,
-            skippedInvalid: summary.skippedInvalid,
-            patchFieldCounts,
-          });
-        }
-        // #endregion
 
         // Annoncer: kun slå til på kampagnen hvis importen faktisk indsætte data i felterne.
         // Mappede men tomme værdier → slå fra. Uden Annoncer-mapping → rør ikke kampagne-indstillingen.
