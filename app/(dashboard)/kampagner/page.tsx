@@ -281,9 +281,6 @@ export default function StartPage() {
         <div>
           <p className="text-[11px] font-semibold uppercase tracking-wide text-stone-500">Dialer</p>
           <h1 className="text-2xl font-semibold tracking-tight text-stone-900">Start</h1>
-          <p className="mt-1 text-sm text-stone-500">
-            Vælg en kampagne for at starte arbejdsflowet — ring → næste → ring → næste.
-          </p>
         </div>
         <div className="flex flex-wrap items-center gap-2">
           {hasVoipCampaign ? <VoipAudioSettingsButton /> : null}
