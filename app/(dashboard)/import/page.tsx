@@ -440,9 +440,6 @@ export default function ImportPage() {
     const decoder = new TextDecoder();
     let buffer = "";
     let gotResult = false;
-    let lastPercent = 0;
-    let lastProcessed = 0;
-    let lastTotal = 0;
     while (true) {
       const { value, done } = await reader.read();
       if (done) break;
@@ -459,9 +456,6 @@ export default function ImportPage() {
           continue;
         }
         if (evt.type === "progress") {
-          lastPercent = evt.percent;
-          lastProcessed = evt.processedRows;
-          lastTotal = evt.totalRows;
           setImportProgressPercent(Math.max(0, Math.min(100, evt.percent)));
           setImportProgressProcessedRows(evt.processedRows);
           setImportProgressTotalRows(evt.totalRows);
