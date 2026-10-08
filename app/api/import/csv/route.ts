@@ -41,6 +41,8 @@ import {
 
 const MAX_DETAIL_ROWS = 200;
 const PROTECTED_STATUSES = new Set(["CALLBACK_SCHEDULED", "MEETING_BOOKED", "UNQUALIFIED", "NOT_INTERESTED"]);
+/** Store berigelser kan overstige default; Pro/Fluid tillader op til 800s. */
+export const maxDuration = 800;
 
 export type CsvImportResponse = {
   totalRows: number;
@@ -66,6 +68,36 @@ export type CsvImportResponse = {
 export async function POST(req: Request) {
   const { session, response } = await requireAdmin();
   if (response) return response;
+
+  // #region agent log
+  const __dbgT0 = Date.now();
+  const __dbg = (message: string, hypothesisId: string, data: Record<string, unknown> = {}) => {
+    const payload = {
+      sessionId: "8b0f30",
+      runId: "planway-timeout",
+      hypothesisId,
+      location: "app/api/import/csv/route.ts",
+      message,
+      data: { ...data, elapsedMs: Date.now() - __dbgT0 },
+      timestamp: Date.now(),
+    };
+    console.info("[import/csv:dbg]", message, payload.data);
+    fetch("http://127.0.0.1:7517/ingest/1bbc5f7f-d2bf-4f94-a413-704594bbabb0", {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "X-Debug-Session-Id": "8b0f30" },
+      body: JSON.stringify(payload),
+    }).catch(() => {});
+    try {
+      // eslint-disable-next-line @typescript-eslint/no-require-imports
+      require("fs").appendFileSync(
+        "/root/Allio-Leads/.cursor/debug-8b0f30.log",
+        `${JSON.stringify(payload)}\n`,
+      );
+    } catch {
+      /* ignore on Vercel */
+    }
+  };
+  // #endregion
 
   const form = await req.formData();
   const file = form.get("file");
@@ -139,7 +171,9 @@ export async function POST(req: Request) {
   }
 
   const rows = parsed.rows;
+  // Berigelse i én kampagne behøver ikke hele databasen (undgår timeout på store filer).
   const existingLeads = await prisma.lead.findMany({
+    ...(patchMissingOnly && !patchAllCampaigns ? { where: { campaignId } } : {}),
     select: {
       id: true,
       campaignId: true,
@@ -151,6 +185,17 @@ export async function POST(req: Request) {
       customFields: true,
     },
   });
+  // #region agent log
+  __dbg("leads loaded", "A", {
+    patchMissingOnly,
+    patchAllCampaigns,
+    patchMatchField,
+    rowCount: rows.length,
+    leadCount: existingLeads.length,
+    scopedToCampaign: Boolean(patchMissingOnly && !patchAllCampaigns),
+  });
+  // #endregion
+  const leadsById = new Map(existingLeads.map((lead) => [lead.id, lead]));
   let cvrToLead = indexLeadsByNormalizedCvr(existingLeads);
   const campaignLeadsByCvr = new Map<
     string,
@@ -224,6 +269,26 @@ export async function POST(req: Request) {
 
       try {
         pushProgress(0);
+        const PATCH_UPDATE_CHUNK = 40;
+        let patchUpdateQueue: { id: string; data: Record<string, unknown> }[] = [];
+        async function flushPatchUpdates() {
+          if (patchUpdateQueue.length === 0) return;
+          const queue = patchUpdateQueue;
+          patchUpdateQueue = [];
+          for (let q = 0; q < queue.length; q += PATCH_UPDATE_CHUNK) {
+            const chunk = queue.slice(q, q + PATCH_UPDATE_CHUNK);
+            await Promise.all(
+              chunk.map((item) =>
+                prisma.lead.update({
+                  where: { id: item.id },
+                  data: item.data,
+                  select: { id: true },
+                }),
+              ),
+            );
+          }
+        }
+
         for (let i = 0; i < rows.length; i++) {
           const dataRow = i + 1;
           const row = rows[i];
@@ -293,10 +358,7 @@ export async function POST(req: Request) {
               } else {
                 let anyUpdated = false;
                 for (const leadId of matchIds) {
-                  const lead = await prisma.lead.findUnique({
-                    where: { id: leadId },
-                    select: { id: true, phone: true, email: true, customFields: true },
-                  });
+                  const lead = leadsById.get(leadId);
                   if (!lead) continue;
                   const { patch, fieldCounts } = buildImportPatchForLead({
                     lead,
@@ -309,12 +371,10 @@ export async function POST(req: Request) {
                     patchFields,
                   });
                   if (Object.keys(patch).length > 0) {
-                    // select id only — RETURNING * would fail if local DB lags Prisma schema
-                    await prisma.lead.update({
-                      where: { id: lead.id },
-                      data: patch,
-                      select: { id: true },
-                    });
+                    patchUpdateQueue.push({ id: lead.id, data: patch });
+                    if (typeof patch.phone === "string") lead.phone = patch.phone;
+                    if (typeof patch.email === "string") lead.email = patch.email;
+                    if (typeof patch.customFields === "string") lead.customFields = patch.customFields;
                     summary.existingAttached += 1;
                     mergeFieldCounts(patchFieldCounts, fieldCounts);
                     anyUpdated = true;
@@ -333,7 +393,18 @@ export async function POST(req: Request) {
             }
             const processed = i + 1;
             if (processed === totalRows || processed % progressStep === 0) {
+              await flushPatchUpdates();
               pushProgress(processed);
+              // #region agent log
+              if (processed === totalRows || processed % Math.max(progressStep * 20, 1) === 0) {
+                __dbg("enrich progress", "A", {
+                  processed,
+                  totalRows,
+                  percent: Math.round((processed / Math.max(totalRows, 1)) * 100),
+                  existingAttached: summary.existingAttached,
+                });
+              }
+              // #endregion
             }
             continue;
           }
@@ -504,6 +575,19 @@ export async function POST(req: Request) {
             pushProgress(processed);
           }
         }
+
+        await flushPatchUpdates();
+        // #region agent log
+        if (patchMissingOnly) {
+          __dbg("enrich complete", "A", {
+            existingAttached: summary.existingAttached,
+            skippedNoMatch: summary.skippedNoMatch ?? 0,
+            matchedNoUpdate: summary.matchedNoUpdate ?? 0,
+            skippedInvalid: summary.skippedInvalid,
+            patchFieldCounts,
+          });
+        }
+        // #endregion
 
         // Annoncer: kun slå til på kampagnen hvis importen faktisk indsætte data i felterne.
         // Mappede men tomme værdier → slå fra. Uden Annoncer-mapping → rør ikke kampagne-indstillingen.
