@@ -9,8 +9,7 @@ import {
   parseFieldConfig,
   serializeFieldConfig,
 } from "@/lib/campaign-fields";
-import { parseCustomFields, stringifyCustomFields } from "@/lib/custom-fields";
-import { leadDomainFromCustomFields } from "@/lib/custom-fields";
+import { stringifyCustomFields } from "@/lib/custom-fields";
 import { getUploadedBlob, uploadFilename } from "@/lib/form-upload";
 import { parseImportFile } from "@/lib/import-parse";
 import { buildNormRow } from "@/lib/import-parse-helpers";
@@ -26,6 +25,15 @@ import {
   normalizeCVR,
   type ImportDetailRow,
 } from "@/lib/cvr-import";
+import {
+  DEFAULT_IMPORT_PATCH_FIELDS,
+  buildImportPatchForLead,
+  mergeFieldCounts,
+  parseImportPatchFields,
+  resolveIncomingDomain,
+  type ImportPatchField,
+  type ImportPatchFieldCounts,
+} from "@/lib/import-patch";
 
 const MAX_DETAIL_ROWS = 200;
 const PROTECTED_STATUSES = new Set(["CALLBACK_SCHEDULED", "MEETING_BOOKED", "UNQUALIFIED", "NOT_INTERESTED"]);
@@ -41,6 +49,8 @@ export type CsvImportResponse = {
   skippedAlreadyInCampaign: number;
   skippedInvalid: number;
   details: ImportDetailRow[];
+  /** Antal leads der fik hvert patch-felt udfyldt (kun når patchMissingOnly). */
+  patchFieldCounts?: ImportPatchFieldCounts;
 };
 
 export async function POST(req: Request) {
@@ -62,6 +72,23 @@ export async function POST(req: Request) {
   const allowMissingCvr = form.get("allowMissingCvr") === "1";
   const allowMissingCompanyName = form.get("allowMissingCompanyName") === "1";
   const patchMissingOnly = form.get("patchMissingOnly") === "1";
+  const patchAllCampaigns = form.get("patchAllCampaigns") === "1";
+  const patchFieldsRaw = form.get("patchFields");
+  let patchFields: ImportPatchField[] = DEFAULT_IMPORT_PATCH_FIELDS;
+  if (typeof patchFieldsRaw === "string" && patchFieldsRaw.trim()) {
+    try {
+      const parsed = parseImportPatchFields(JSON.parse(patchFieldsRaw));
+      if (!parsed || parsed.length === 0) {
+        return NextResponse.json(
+          { error: "Vælg mindst ét felt at berige." },
+          { status: 400 },
+        );
+      }
+      patchFields = parsed;
+    } catch {
+      return NextResponse.json({ error: "Ugyldig patchFields JSON" }, { status: 400 });
+    }
+  }
   let mapping: MappingRecord | null = null;
   if (typeof mappingRaw === "string" && mappingRaw.trim()) {
     try {
@@ -106,12 +133,21 @@ export async function POST(req: Request) {
     string,
     { id: string; status: string; notes: string; campaignId: string | null }[]
   >();
+  /** Patch-mode: alle leads med CVR (valgfrit begrænset til kampagne). */
+  const patchLeadsByCvr = new Map<string, { id: string }[]>();
   for (const lead of existingLeads) {
     const norm = normalizeCVR(lead.cvr);
-    if (!norm || lead.campaignId !== campaignId) continue;
-    const arr = campaignLeadsByCvr.get(norm) ?? [];
-    arr.push(lead);
-    campaignLeadsByCvr.set(norm, arr);
+    if (!norm) continue;
+    if (lead.campaignId === campaignId) {
+      const arr = campaignLeadsByCvr.get(norm) ?? [];
+      arr.push(lead);
+      campaignLeadsByCvr.set(norm, arr);
+    }
+    if (patchMissingOnly && (patchAllCampaigns || lead.campaignId === campaignId)) {
+      const arr = patchLeadsByCvr.get(norm) ?? [];
+      arr.push({ id: lead.id });
+      patchLeadsByCvr.set(norm, arr);
+    }
   }
 
   const encoder = new TextEncoder();
@@ -139,6 +175,7 @@ export async function POST(req: Request) {
       const overwriteHandledCvrs = new Set<string>();
       const progressStep = Math.max(1, Math.floor(totalRows / 100));
       let annoncerDataWritten = false;
+      const patchFieldCounts: ImportPatchFieldCounts = {};
 
       function noteAnnoncerCustom(custom: Record<string, string>) {
         if (customFieldsHaveAnnoncerData(custom)) annoncerDataWritten = true;
@@ -171,55 +208,47 @@ export async function POST(req: Request) {
           const base = pickBaseFromNorm(n);
           const cvrNorm = normalizeCVR(base.cvr);
 
-          // --- patch-missing-only mode: kun opdater email/domæne på eksisterende leads ---
+          // --- patch-missing-only mode: udfyld kun tomme valgte felter på eksisterende leads ---
           if (patchMissingOnly) {
             if (!cvrNorm) {
               summary.skippedInvalid += 1;
               pushDetail({ dataRow, cvr: "—", reason: "invalid_row", note: "CVR mangler (patch kræver CVR)" });
             } else {
-              const campaignMatches = campaignLeadsByCvr.get(cvrNorm) ?? [];
-              if (campaignMatches.length === 0) {
+              const matches = patchLeadsByCvr.get(cvrNorm) ?? [];
+              if (matches.length === 0) {
                 summary.skippedAlreadyInCampaign += 1;
-                pushDetail({ dataRow, cvr: cvrNorm, reason: "already_in_campaign", note: "Ikke fundet i kampagnen" });
+                pushDetail({
+                  dataRow,
+                  cvr: cvrNorm,
+                  reason: "already_in_campaign",
+                  note: patchAllCampaigns
+                    ? "Ikke fundet i systemet"
+                    : "Ikke fundet i kampagnen",
+                });
               } else {
                 const custom = collectCustomFromRow(n, fieldCfg);
                 noteAnnoncerCustom(custom);
-                for (const match of campaignMatches) {
+                const domain = resolveIncomingDomain(custom, base.email);
+                for (const match of matches) {
                   const lead = await prisma.lead.findUnique({
                     where: { id: match.id },
-                    select: { id: true, email: true, customFields: true },
+                    select: { id: true, phone: true, email: true, customFields: true },
                   });
                   if (!lead) continue;
-                  const patch: Record<string, unknown> = {};
-                  // Patch email if empty
-                  if (!lead.email.trim() && base.email.trim()) {
-                    patch.email = base.email;
-                  }
-                  // Patch domæne in customFields if missing
-                  const existingCustom = parseCustomFields(lead.customFields);
-                  const existingDomain = leadDomainFromCustomFields(lead.customFields);
-                  let mergedCustom = { ...existingCustom };
-                  let customChanged = false;
-                  if (!existingDomain.trim()) {
-                    const newDomain = custom["domaene"] || custom["domain"] || base.email.split("@")[1] || "";
-                    if (newDomain.trim()) {
-                      mergedCustom.domaene = newDomain.trim();
-                      customChanged = true;
-                    }
-                  }
-                  // Also patch any other custom fields that are empty in lead but present in import
-                  for (const [k, v] of Object.entries(custom)) {
-                    if (v.trim() && !(existingCustom[k] ?? "").trim()) {
-                      mergedCustom[k] = v;
-                      customChanged = true;
-                    }
-                  }
-                  if (customChanged) {
-                    patch.customFields = stringifyCustomFields(mergedCustom);
-                  }
+                  const { patch, fieldCounts } = buildImportPatchForLead({
+                    lead,
+                    incoming: {
+                      phone: base.phone,
+                      email: base.email,
+                      domain,
+                      custom,
+                    },
+                    patchFields,
+                  });
                   if (Object.keys(patch).length > 0) {
                     await prisma.lead.update({ where: { id: lead.id }, data: patch });
                     summary.existingAttached += 1;
+                    mergeFieldCounts(patchFieldCounts, fieldCounts);
                   }
                 }
               }
@@ -433,6 +462,9 @@ export async function POST(req: Request) {
           },
         });
 
+        if (patchMissingOnly) {
+          summary.patchFieldCounts = patchFieldCounts;
+        }
         controller.enqueue(eventLine({ type: "result", result: summary }));
       } catch (e) {
         const msg = e instanceof Error ? e.message : String(e);

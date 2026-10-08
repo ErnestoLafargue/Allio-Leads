@@ -1,11 +1,13 @@
 import { describe, expect, it } from "vitest";
 import {
+  DEFAULT_INDUSTRY_EXTENSION_FIELDS,
   FIXED_DOMAIN_EXTENSION_FIELD,
   FIXED_EMAIL_ANNONCER_FIELDS,
   customFieldsHaveAnnoncerData,
   disableAnnoncerEmailFields,
   enableAnnoncerEmailFields,
   hasAnnoncerEmailFields,
+  isFixedIndustryExtensionKey,
   mappingTargetsAnnoncerFields,
   mergeDefaultExtensions,
   parseFieldConfig,
@@ -74,6 +76,34 @@ describe("mergeDefaultExtensions — Domæne", () => {
       "domaene",
     ]);
     expect(keys.at(-1)).toBe("domaene");
+  });
+});
+
+describe("mergeDefaultExtensions — Virksomhedstype", () => {
+  it("tilføjer virksomhedstype som første felt under industry på tom config", () => {
+    const cfg = mergeDefaultExtensions({ extensions: {} });
+    expect(cfg.extensions.industry).toEqual(DEFAULT_INDUSTRY_EXTENSION_FIELDS);
+    expect(isFixedIndustryExtensionKey("virksomhedstype")).toBe(true);
+  });
+
+  it("bevarer øvrige industry-felter efter virksomhedstype", () => {
+    const cfg = mergeDefaultExtensions({
+      extensions: {
+        industry: [
+          { key: "virksomhedstype", label: "Virksomhedstype" },
+          { key: "branchebeskrivelse", label: "Branchebeskrivelse" },
+        ],
+      },
+    });
+    expect(cfg.extensions.industry?.map((f) => f.key)).toEqual([
+      "virksomhedstype",
+      "branchebeskrivelse",
+    ]);
+  });
+
+  it("parseFieldConfig merger virksomhedstype ind selv uden gemt industry-config", () => {
+    const cfg = parseFieldConfig("{}");
+    expect(cfg.extensions.industry?.[0]).toEqual(DEFAULT_INDUSTRY_EXTENSION_FIELDS[0]);
   });
 });
 

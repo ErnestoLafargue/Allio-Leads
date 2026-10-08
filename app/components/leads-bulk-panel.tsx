@@ -32,6 +32,7 @@ import {
   type LeadOpenedFrom,
 } from "@/lib/lead-navigation";
 import {
+  COMPANY_TYPE_CUSTOM_KEY,
   EMPTY_ACTIVE_CAMPAIGN_QUEUE_VIEW,
   hasActiveQueueViewConstraints,
   leadMatchesPostalRanges,
@@ -49,10 +50,12 @@ import { buildIndustryFilterLabelMap } from "@/lib/industry-display";
 type CampaignLeadViewPrefs = {
   startdateEnabled: boolean;
   industryEnabled: boolean;
+  companyTypeEnabled: boolean;
   postalFilterEnabled: boolean;
   meetingStartFrom: string;
   meetingStartTo: string;
   selectedCampaignIndustries: string[];
+  selectedCompanyTypes: string[];
   dynamicSortFieldId: string;
   dynamicSortDir: "asc" | "desc";
   dynamicFromDate: string;
@@ -93,10 +96,12 @@ function readCampaignLeadViewPrefs(campaignId: string): CampaignLeadViewPrefs | 
 
     let startdateEnabled = parsed.startdateEnabled === true;
     let industryEnabled = parsed.industryEnabled === true;
+    let companyTypeEnabled = parsed.companyTypeEnabled === true;
     let postalFilterEnabled = parsed.postalFilterEnabled === true;
     if (
       typeof parsed.startdateEnabled !== "boolean" &&
-      typeof parsed.industryEnabled !== "boolean"
+      typeof parsed.industryEnabled !== "boolean" &&
+      typeof parsed.companyTypeEnabled !== "boolean"
     ) {
       // Legacy localStorage
       const mode = parsed.campaignFilterMode;
@@ -106,13 +111,21 @@ function readCampaignLeadViewPrefs(campaignId: string): CampaignLeadViewPrefs | 
           postalFilterEnabled = true;
           startdateEnabled = false;
           industryEnabled = false;
+          companyTypeEnabled = false;
         } else if (mode === "industry") {
           industryEnabled = true;
           startdateEnabled = false;
+          companyTypeEnabled = false;
+          postalFilterEnabled = false;
+        } else if (mode === "companyType") {
+          companyTypeEnabled = true;
+          startdateEnabled = false;
+          industryEnabled = false;
           postalFilterEnabled = false;
         } else {
           startdateEnabled = true;
           industryEnabled = false;
+          companyTypeEnabled = false;
           postalFilterEnabled = false;
         }
       }
@@ -121,11 +134,15 @@ function readCampaignLeadViewPrefs(campaignId: string): CampaignLeadViewPrefs | 
     return {
       startdateEnabled,
       industryEnabled,
+      companyTypeEnabled,
       postalFilterEnabled,
       meetingStartFrom: typeof parsed.meetingStartFrom === "string" ? parsed.meetingStartFrom : "",
       meetingStartTo: typeof parsed.meetingStartTo === "string" ? parsed.meetingStartTo : "",
       selectedCampaignIndustries: Array.isArray(parsed.selectedCampaignIndustries)
         ? parsed.selectedCampaignIndustries.filter((v): v is string => typeof v === "string")
+        : [],
+      selectedCompanyTypes: Array.isArray(parsed.selectedCompanyTypes)
+        ? parsed.selectedCompanyTypes.filter((v): v is string => typeof v === "string")
         : [],
       dynamicSortFieldId: typeof parsed.dynamicSortFieldId === "string" ? parsed.dynamicSortFieldId : "",
       dynamicSortDir: parsed.dynamicSortDir === "desc" ? "desc" : "asc",
@@ -403,9 +420,10 @@ export function LeadsBulkPanel({
   const [addedToday, setAddedToday] = useState(false);
   const [fromDate, setFromDate] = useState("");
   const [toDate, setToDate] = useState("");
-  /** Planlagt møde / kampagnefiltre (startdato, branche, postnr — uafhængige AND). */
+  /** Planlagt møde / kampagnefiltre (startdato, branche, virksomhedstype, postnr — uafhængige AND). */
   const [startdateEnabled, setStartdateEnabled] = useState(false);
   const [industryEnabled, setIndustryEnabled] = useState(false);
+  const [companyTypeEnabled, setCompanyTypeEnabled] = useState(false);
   const [postalFilterEnabled, setPostalFilterEnabled] = useState(false);
   const [meetingStartFrom, setMeetingStartFrom] = useState(
     () => initialWorkspaceStartFilterFromStorage(campaignId).from,
@@ -415,6 +433,8 @@ export function LeadsBulkPanel({
   );
   const [campaignIndustryOptions, setCampaignIndustryOptions] = useState<string[]>([]);
   const [selectedCampaignIndustries, setSelectedCampaignIndustries] = useState<string[]>([]);
+  const [campaignCompanyTypeOptions, setCampaignCompanyTypeOptions] = useState<string[]>([]);
+  const [selectedCompanyTypes, setSelectedCompanyTypes] = useState<string[]>([]);
   const [statusFilter, setStatusFilter] = useState<"ANY" | "NO_OUTCOME" | LeadStatus>("ANY");
   const [excludeNotInterested, setExcludeNotInterested] = useState(false);
   const [dynamicSortFieldId, setDynamicSortFieldId] = useState("");
@@ -444,11 +464,14 @@ export function LeadsBulkPanel({
         setSortDir("desc");
         setStartdateEnabled(false);
         setIndustryEnabled(false);
+        setCompanyTypeEnabled(false);
         setPostalFilterEnabled(false);
         setMeetingStartFrom("");
         setMeetingStartTo("");
         setCampaignIndustryOptions([]);
         setSelectedCampaignIndustries([]);
+        setCampaignCompanyTypeOptions([]);
+        setSelectedCompanyTypes([]);
         setDynamicSortFieldId("");
         setDynamicSortDir("asc");
         setDynamicFromDate("");
@@ -486,10 +509,12 @@ export function LeadsBulkPanel({
         setServerQueueNarrowing(true);
         setStartdateEnabled(view.startdateEnabled);
         setIndustryEnabled(view.industryEnabled);
+        setCompanyTypeEnabled(view.companyTypeEnabled);
         setPostalFilterEnabled(view.postalFilterEnabled);
         setMeetingStartFrom(view.meetingStartFrom);
         setMeetingStartTo(view.meetingStartTo);
         setSelectedCampaignIndustries(view.selectedCampaignIndustries);
+        setSelectedCompanyTypes(view.selectedCompanyTypes);
         setDynamicSortFieldId(view.dynamicSortFieldId);
         setDynamicSortDir(view.dynamicSortDir);
         setDynamicFromDate(view.dynamicFromDate);
@@ -510,10 +535,12 @@ export function LeadsBulkPanel({
         if (prefs) {
           setStartdateEnabled(prefs.startdateEnabled);
           setIndustryEnabled(prefs.industryEnabled);
+          setCompanyTypeEnabled(prefs.companyTypeEnabled);
           setPostalFilterEnabled(prefs.postalFilterEnabled);
           setMeetingStartFrom(prefs.meetingStartFrom);
           setMeetingStartTo(prefs.meetingStartTo);
           setSelectedCampaignIndustries(prefs.selectedCampaignIndustries);
+          setSelectedCompanyTypes(prefs.selectedCompanyTypes);
           setDynamicSortFieldId(prefs.dynamicSortFieldId);
           setDynamicSortDir(prefs.dynamicSortDir);
           setDynamicFromDate(prefs.dynamicFromDate);
@@ -533,8 +560,10 @@ export function LeadsBulkPanel({
             setMeetingStartTo("");
           }
           setIndustryEnabled(false);
+          setCompanyTypeEnabled(false);
           setPostalFilterEnabled(false);
           setSelectedCampaignIndustries([]);
+          setSelectedCompanyTypes([]);
           setDynamicSortFieldId("");
           setDynamicSortDir("asc");
           setDynamicFromDate("");
@@ -563,6 +592,24 @@ export function LeadsBulkPanel({
       if (!cancelled) {
         setCampaignIndustryOptions(unique);
         setSelectedCampaignIndustries((prev) => prev.filter((p) => unique.includes(p)));
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [campaignId, refreshNonce]);
+
+  useEffect(() => {
+    if (!campaignId) return;
+    let cancelled = false;
+    void (async () => {
+      const res = await fetch(`/api/campaigns/${encodeURIComponent(campaignId)}/company-types`);
+      if (!res.ok || cancelled) return;
+      const j = (await res.json().catch(() => ({}))) as { companyTypes?: string[] };
+      const unique = Array.isArray(j.companyTypes) ? j.companyTypes : [];
+      if (!cancelled) {
+        setCampaignCompanyTypeOptions(unique);
+        setSelectedCompanyTypes((prev) => prev.filter((p) => unique.includes(p)));
       }
     })();
     return () => {
@@ -742,6 +789,19 @@ export function LeadsBulkPanel({
         }
       }
 
+      if (campaignId && companyTypeEnabled) {
+        if (selectedCompanyTypes.length === 0) {
+          out = [];
+        } else {
+          const typeSelected = new Set(selectedCompanyTypes.map((v) => v.toLocaleLowerCase("da")));
+          out = out.filter((l) => {
+            const raw = parseCustomFields(l.customFields ?? "")[COMPANY_TYPE_CUSTOM_KEY] ?? "";
+            const normalized = raw.trim().toLocaleLowerCase("da");
+            return normalized.length > 0 && typeSelected.has(normalized);
+          });
+        }
+      }
+
       if (campaignId && postalFilterEnabled) {
         out = out.filter((l) =>
           leadMatchesPostalRanges(effectivePostalCode(l.postalCode, l.address), postalRanges),
@@ -834,10 +894,12 @@ export function LeadsBulkPanel({
     campaignId,
     startdateEnabled,
     industryEnabled,
+    companyTypeEnabled,
     startDateExtensionField,
     meetingStartFrom,
     meetingStartTo,
     selectedCampaignIndustries,
+    selectedCompanyTypes,
     postalFilterEnabled,
     postalRanges,
     serverQueueNarrowing,
@@ -1036,61 +1098,63 @@ export function LeadsBulkPanel({
                   />
                   Startdato
                 </label>
-                <p className="text-[11px] leading-snug text-stone-500">
-                  {startDateExtensionField ? (
-                    <>
-                      Bruger kampagnefeltet «{startDateExtensionField.label}» (værdier som{" "}
-                      <span className="font-mono">dd.mm.åååå</span>).
-                    </>
-                  ) : (
-                    <>
-                      Ingen «Start dato»-kolonne i kampagne-layout: bruger i stedet{" "}
-                      <strong>planlagt møde</strong> (mødetid).
-                    </>
-                  )}
-                </p>
-                <div className="flex flex-wrap gap-2">
-                  <label className="text-xs text-stone-700">
-                    Fra
-                    <input
-                      type="date"
-                      value={meetingStartFrom}
-                      onChange={(e) => {
-                        const v = e.target.value;
-                        setMeetingStartFrom(v);
-                        if (campaignId) {
-                          writeWorkspaceStartDateFilter(campaignId, {
-                            enabled: startdateEnabled,
-                            from: v,
-                            to: meetingStartTo,
-                          });
-                        }
-                      }}
-                      disabled={!startdateEnabled}
-                      className="mt-1 block rounded-md border border-stone-200 bg-white px-2 py-1.5 text-xs text-stone-900 disabled:opacity-60"
-                    />
-                  </label>
-                  <label className="text-xs text-stone-700">
-                    Til
-                    <input
-                      type="date"
-                      value={meetingStartTo}
-                      onChange={(e) => {
-                        const v = e.target.value;
-                        setMeetingStartTo(v);
-                        if (campaignId) {
-                          writeWorkspaceStartDateFilter(campaignId, {
-                            enabled: startdateEnabled,
-                            from: meetingStartFrom,
-                            to: v,
-                          });
-                        }
-                      }}
-                      disabled={!startdateEnabled}
-                      className="mt-1 block rounded-md border border-stone-200 bg-white px-2 py-1.5 text-xs text-stone-900 disabled:opacity-60"
-                    />
-                  </label>
-                </div>
+                {startdateEnabled ? (
+                  <>
+                    <p className="text-[11px] leading-snug text-stone-500">
+                      {startDateExtensionField ? (
+                        <>
+                          Bruger kampagnefeltet «{startDateExtensionField.label}» (værdier som{" "}
+                          <span className="font-mono">dd.mm.åååå</span>).
+                        </>
+                      ) : (
+                        <>
+                          Ingen «Start dato»-kolonne i kampagne-layout: bruger i stedet{" "}
+                          <strong>planlagt møde</strong> (mødetid).
+                        </>
+                      )}
+                    </p>
+                    <div className="flex flex-wrap gap-2">
+                      <label className="text-xs text-stone-700">
+                        Fra
+                        <input
+                          type="date"
+                          value={meetingStartFrom}
+                          onChange={(e) => {
+                            const v = e.target.value;
+                            setMeetingStartFrom(v);
+                            if (campaignId) {
+                              writeWorkspaceStartDateFilter(campaignId, {
+                                enabled: startdateEnabled,
+                                from: v,
+                                to: meetingStartTo,
+                              });
+                            }
+                          }}
+                          className="mt-1 block rounded-md border border-stone-200 bg-white px-2 py-1.5 text-xs text-stone-900"
+                        />
+                      </label>
+                      <label className="text-xs text-stone-700">
+                        Til
+                        <input
+                          type="date"
+                          value={meetingStartTo}
+                          onChange={(e) => {
+                            const v = e.target.value;
+                            setMeetingStartTo(v);
+                            if (campaignId) {
+                              writeWorkspaceStartDateFilter(campaignId, {
+                                enabled: startdateEnabled,
+                                from: meetingStartFrom,
+                                to: v,
+                              });
+                            }
+                          }}
+                          className="mt-1 block rounded-md border border-stone-200 bg-white px-2 py-1.5 text-xs text-stone-900"
+                        />
+                      </label>
+                    </div>
+                  </>
+                ) : null}
               </div>
 
               {/* Branche */}
@@ -1104,36 +1168,86 @@ export function LeadsBulkPanel({
                   />
                   Branche
                 </label>
-                <div className="max-h-40 min-w-[16rem] overflow-auto rounded-md border border-stone-200 bg-white p-2">
-                  {campaignIndustryOptions.length === 0 ? (
-                    <p className="text-xs text-stone-500">Ingen brancher fundet i kampagnen.</p>
-                  ) : (
-                    <div className="space-y-1">
-                      {campaignIndustryOptions.map((industry) => {
-                        const checked = selectedCampaignIndustries.includes(industry);
-                        return (
-                          <label key={industry} className="flex items-center gap-2 text-xs text-stone-700">
-                            <input
-                              type="checkbox"
-                              checked={checked}
-                              onChange={(e) => {
-                                const on = e.target.checked;
-                                setSelectedCampaignIndustries((prev) =>
-                                  on ? [...prev, industry] : prev.filter((v) => v !== industry),
-                                );
-                              }}
-                              disabled={!industryEnabled}
-                              className="rounded border-stone-300"
-                            />
-                            <span className="tabular-nums">
-                              {campaignIndustryOptionLabels.get(industry) ?? industry}
-                            </span>
-                          </label>
-                        );
-                      })}
-                    </div>
-                  )}
-                </div>
+                {industryEnabled ? (
+                  <div className="max-h-40 min-w-[16rem] overflow-auto rounded-md border border-stone-200 bg-white p-2">
+                    {campaignIndustryOptions.length === 0 ? (
+                      <p className="text-xs text-stone-500">Ingen brancher fundet i kampagnen.</p>
+                    ) : (
+                      <div className="space-y-1">
+                        {campaignIndustryOptions.map((industry) => {
+                          const checked = selectedCampaignIndustries.includes(industry);
+                          return (
+                            <label key={industry} className="flex items-center gap-2 text-xs text-stone-700">
+                              <input
+                                type="checkbox"
+                                checked={checked}
+                                onChange={(e) => {
+                                  const on = e.target.checked;
+                                  setSelectedCampaignIndustries((prev) =>
+                                    on ? [...prev, industry] : prev.filter((v) => v !== industry),
+                                  );
+                                }}
+                                className="rounded border-stone-300"
+                              />
+                              <span className="tabular-nums">
+                                {campaignIndustryOptionLabels.get(industry) ?? industry}
+                              </span>
+                            </label>
+                          );
+                        })}
+                      </div>
+                    )}
+                  </div>
+                ) : null}
+              </div>
+
+              {/* Virksomhedstype */}
+              <div className="space-y-1 border-t border-stone-200 pt-2">
+                <label className="inline-flex items-center gap-2 text-xs font-medium text-stone-800">
+                  <input
+                    type="checkbox"
+                    checked={companyTypeEnabled}
+                    onChange={(e) => setCompanyTypeEnabled(e.target.checked)}
+                    className="rounded border-stone-300"
+                  />
+                  Virksomhedstype
+                </label>
+                {companyTypeEnabled ? (
+                  <div className="max-h-40 min-w-[16rem] overflow-auto rounded-md border border-stone-200 bg-white p-2">
+                    {campaignCompanyTypeOptions.length === 0 ? (
+                      <p className="text-xs text-stone-500">
+                        Ingen virksomhedstyper fundet i kampagnen endnu.
+                      </p>
+                    ) : (
+                      <div className="space-y-1">
+                        {campaignCompanyTypeOptions.map((companyType) => {
+                          const checked = selectedCompanyTypes.includes(companyType);
+                          return (
+                            <label
+                              key={companyType}
+                              className="flex items-center gap-2 text-xs text-stone-700"
+                            >
+                              <input
+                                type="checkbox"
+                                checked={checked}
+                                onChange={(e) => {
+                                  const on = e.target.checked;
+                                  setSelectedCompanyTypes((prev) =>
+                                    on
+                                      ? [...prev, companyType]
+                                      : prev.filter((v) => v !== companyType),
+                                  );
+                                }}
+                                className="rounded border-stone-300"
+                              />
+                              <span>{companyType}</span>
+                            </label>
+                          );
+                        })}
+                      </div>
+                    )}
+                  </div>
+                ) : null}
               </div>
 
               {/* Postnummer */}
@@ -1149,70 +1263,70 @@ export function LeadsBulkPanel({
                   />
                   Postnummer
                 </label>
-                <p className="text-[11px] leading-snug text-stone-500">
-                  Begrænser listen og dialerkøen til valgte postnr-intervaller. Køen ringes med
-                  færrest forsøg først, så alle i intervallerne bliver ringet op.
-                </p>
-                <div className="space-y-2">
-                  {postalRanges.map((range, idx) => (
-                    <div key={idx} className="flex flex-wrap items-end gap-2">
-                      <label className="text-xs text-stone-700">
-                        Fra
-                        <input
-                          type="text"
-                          inputMode="numeric"
-                          placeholder="1000"
-                          value={range.from}
-                          disabled={!postalFilterEnabled}
-                          onChange={(e) => {
-                            const v = e.target.value;
-                            setPostalRanges((prev) =>
-                              prev.map((r, i) => (i === idx ? { ...r, from: v } : r)),
-                            );
-                          }}
-                          className="mt-1 block w-20 rounded-md border border-stone-200 bg-white px-2 py-1.5 text-xs text-stone-900 disabled:opacity-60"
-                        />
-                      </label>
-                      <label className="text-xs text-stone-700">
-                        Til
-                        <input
-                          type="text"
-                          inputMode="numeric"
-                          placeholder="2999"
-                          value={range.to}
-                          disabled={!postalFilterEnabled}
-                          onChange={(e) => {
-                            const v = e.target.value;
-                            setPostalRanges((prev) =>
-                              prev.map((r, i) => (i === idx ? { ...r, to: v } : r)),
-                            );
-                          }}
-                          className="mt-1 block w-20 rounded-md border border-stone-200 bg-white px-2 py-1.5 text-xs text-stone-900 disabled:opacity-60"
-                        />
-                      </label>
-                      {postalRanges.length > 1 ? (
-                        <button
-                          type="button"
-                          disabled={!postalFilterEnabled}
-                          onClick={() =>
-                            setPostalRanges((prev) => prev.filter((_, i) => i !== idx))
-                          }
-                          className="rounded-md border border-stone-200 bg-white px-2 py-1.5 text-xs text-stone-600 hover:bg-stone-50 disabled:opacity-60"
-                        >
-                          Fjern
-                        </button>
-                      ) : null}
+                {postalFilterEnabled ? (
+                  <>
+                    <p className="text-[11px] leading-snug text-stone-500">
+                      Begrænser listen og dialerkøen til valgte postnr-intervaller. Køen ringes med
+                      færrest forsøg først, så alle i intervallerne bliver ringet op.
+                    </p>
+                    <div className="space-y-2">
+                      {postalRanges.map((range, idx) => (
+                        <div key={idx} className="flex flex-wrap items-end gap-2">
+                          <label className="text-xs text-stone-700">
+                            Fra
+                            <input
+                              type="text"
+                              inputMode="numeric"
+                              placeholder="1000"
+                              value={range.from}
+                              onChange={(e) => {
+                                const v = e.target.value;
+                                setPostalRanges((prev) =>
+                                  prev.map((r, i) => (i === idx ? { ...r, from: v } : r)),
+                                );
+                              }}
+                              className="mt-1 block w-20 rounded-md border border-stone-200 bg-white px-2 py-1.5 text-xs text-stone-900"
+                            />
+                          </label>
+                          <label className="text-xs text-stone-700">
+                            Til
+                            <input
+                              type="text"
+                              inputMode="numeric"
+                              placeholder="2999"
+                              value={range.to}
+                              onChange={(e) => {
+                                const v = e.target.value;
+                                setPostalRanges((prev) =>
+                                  prev.map((r, i) => (i === idx ? { ...r, to: v } : r)),
+                                );
+                              }}
+                              className="mt-1 block w-20 rounded-md border border-stone-200 bg-white px-2 py-1.5 text-xs text-stone-900"
+                            />
+                          </label>
+                          {postalRanges.length > 1 ? (
+                            <button
+                              type="button"
+                              onClick={() =>
+                                setPostalRanges((prev) => prev.filter((_, i) => i !== idx))
+                              }
+                              className="rounded-md border border-stone-200 bg-white px-2 py-1.5 text-xs text-stone-600 hover:bg-stone-50"
+                            >
+                              Fjern
+                            </button>
+                          ) : null}
+                        </div>
+                      ))}
+                      <button
+                        type="button"
+                        onClick={() => setPostalRanges((prev) => [...prev, { from: "", to: "" }])}
+                        className="rounded-md border border-stone-200 bg-white px-2 py-1 text-xs font-medium text-stone-700 hover:bg-stone-50"
+                      >
+                        Tilføj interval
+                      </button>
                     </div>
-                  ))}
-                  <button
-                    type="button"
-                    disabled={!postalFilterEnabled}
-                    onClick={() => setPostalRanges((prev) => [...prev, { from: "", to: "" }])}
-                    className="rounded-md border border-stone-200 bg-white px-2 py-1 text-xs font-medium text-stone-700 hover:bg-stone-50 disabled:opacity-60"
-                  >
-                    Tilføj interval
-                  </button>
-                </div>
+                  </>
+                ) : null}
               </div>
             </div>
           )}
@@ -1316,6 +1430,7 @@ export function LeadsBulkPanel({
               const legacy = syncLegacyFilterFields({
                 startdateEnabled,
                 industryEnabled,
+                companyTypeEnabled,
                 postalFilterEnabled,
               });
               const body: ActiveCampaignQueueViewV1 = {
@@ -1325,6 +1440,7 @@ export function LeadsBulkPanel({
                 meetingStartFrom,
                 meetingStartTo,
                 selectedCampaignIndustries,
+                selectedCompanyTypes,
                 dynamicSortFieldId,
                 dynamicSortDir: postalFilterEnabled ? postalSortDir : dynamicSortDir,
                 dynamicFromDate,
@@ -1332,6 +1448,7 @@ export function LeadsBulkPanel({
                 dynamicDateInvert,
                 startdateEnabled,
                 industryEnabled,
+                companyTypeEnabled,
                 postalFilterEnabled,
                 postalSortDir,
                 postalRanges,
@@ -1350,10 +1467,12 @@ export function LeadsBulkPanel({
                   writeCampaignLeadViewPrefs(campaignId, {
                     startdateEnabled: body.startdateEnabled,
                     industryEnabled: body.industryEnabled,
+                    companyTypeEnabled: body.companyTypeEnabled,
                     postalFilterEnabled: body.postalFilterEnabled,
                     meetingStartFrom: body.meetingStartFrom,
                     meetingStartTo: body.meetingStartTo,
                     selectedCampaignIndustries: body.selectedCampaignIndustries,
+                    selectedCompanyTypes: body.selectedCompanyTypes,
                     dynamicSortFieldId: body.dynamicSortFieldId,
                     dynamicSortDir: body.dynamicSortDir,
                     dynamicFromDate: body.dynamicFromDate,
@@ -1390,10 +1509,12 @@ export function LeadsBulkPanel({
               if (!campaignId) {
                 setStartdateEnabled(false);
                 setIndustryEnabled(false);
+                setCompanyTypeEnabled(false);
                 setPostalFilterEnabled(false);
                 setMeetingStartFrom("");
                 setMeetingStartTo("");
                 setSelectedCampaignIndustries([]);
+                setSelectedCompanyTypes([]);
                 setStatusFilter("ANY");
                 setExcludeNotInterested(false);
                 setDynamicSortFieldId("");
@@ -1422,10 +1543,12 @@ export function LeadsBulkPanel({
                   setExcludeNotInterested(false);
                   setStartdateEnabled(false);
                   setIndustryEnabled(false);
+                  setCompanyTypeEnabled(false);
                   setPostalFilterEnabled(false);
                   setMeetingStartFrom("");
                   setMeetingStartTo("");
                   setSelectedCampaignIndustries([]);
+                  setSelectedCompanyTypes([]);
                   setDynamicSortFieldId("");
                   setDynamicFromDate("");
                   setDynamicToDate("");

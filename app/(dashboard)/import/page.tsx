@@ -12,6 +12,12 @@ import {
 } from "@/lib/campaign-fields";
 import { CampaignImportLogsPanel } from "@/app/components/campaign-import-logs-panel";
 import { STANDARD_MAPPING_OPTIONS } from "@/lib/import-mapping";
+import {
+  DEFAULT_IMPORT_PATCH_FIELDS,
+  IMPORT_PATCH_FIELD_OPTIONS,
+  type ImportPatchField,
+  type ImportPatchFieldCounts,
+} from "@/lib/import-patch";
 
 type Campaign = { id: string; name: string; fieldConfig: string };
 
@@ -39,6 +45,7 @@ type ImportResult = {
   skippedDuplicateInFile: number;
   skippedAlreadyInCampaign: number;
   skippedInvalid: number;
+  patchFieldCounts?: ImportPatchFieldCounts;
   details: {
     dataRow: number;
     cvr: string;
@@ -122,6 +129,8 @@ export default function ImportPage() {
   const [allowMissingCvr, setAllowMissingCvr] = useState(false);
   const [allowMissingCompanyName, setAllowMissingCompanyName] = useState(false);
   const [patchMissingOnly, setPatchMissingOnly] = useState(false);
+  const [patchAllCampaigns, setPatchAllCampaigns] = useState(false);
+  const [patchFields, setPatchFields] = useState<ImportPatchField[]>([...DEFAULT_IMPORT_PATCH_FIELDS]);
   const [overwritePreview, setOverwritePreview] = useState<PreviewResponse["overwritePreview"]>(null);
   const [showAllInCampaignLoading, setShowAllInCampaignLoading] = useState(false);
   const [showAllInCampaignError, setShowAllInCampaignError] = useState<string | null>(null);
@@ -185,6 +194,44 @@ export default function ImportPage() {
   const hasRequiredMapping =
     (allowMissingCompanyName || Object.values(mapping).includes("companyName")) &&
     (allowMissingCvr || Object.values(mapping).includes("cvr"));
+
+  const mappedTargets = new Set(Object.values(mapping));
+  const patchFieldMappingOk = (() => {
+    if (!patchMissingOnly) return true;
+    if (patchFields.length === 0) return false;
+    if (!mappedTargets.has("cvr")) return false;
+    for (const field of patchFields) {
+      if (field === "phone" && !mappedTargets.has("phone")) return false;
+      if (field === "email" && !mappedTargets.has("email")) return false;
+      if (field === "domain") {
+        const hasDomain =
+          mappedTargets.has("domain") ||
+          mappedTargets.has("custom:domaene") ||
+          mappedTargets.has("custom:domain") ||
+          mappedTargets.has("email");
+        if (!hasDomain) return false;
+      }
+      if (field === "virksomhedstype" && !mappedTargets.has("custom:virksomhedstype")) return false;
+      if (field === "otherCustom") {
+        const hasOther = [...mappedTargets].some(
+          (t) =>
+            t.startsWith("custom:") &&
+            t !== "custom:virksomhedstype" &&
+            t !== "custom:domaene" &&
+            t !== "custom:domain",
+        );
+        if (!hasOther) return false;
+      }
+    }
+    return true;
+  })();
+
+  function togglePatchField(field: ImportPatchField, on: boolean) {
+    setPatchFields((prev) => {
+      if (on) return prev.includes(field) ? prev : [...prev, field];
+      return prev.filter((f) => f !== field);
+    });
+  }
 
   async function onCreateCampaign(e: React.FormEvent) {
     e.preventDefault();
@@ -313,6 +360,8 @@ export default function ImportPage() {
     fd.append("allowMissingCvr", allowMissingCvr ? "1" : "0");
     fd.append("allowMissingCompanyName", allowMissingCompanyName ? "1" : "0");
     fd.append("patchMissingOnly", patchMissingOnly ? "1" : "0");
+    fd.append("patchAllCampaigns", patchAllCampaigns ? "1" : "0");
+    if (patchMissingOnly) fd.append("patchFields", JSON.stringify(patchFields));
     const res = await fetch("/api/import/csv", { method: "POST", body: fd });
     if (!res.ok) {
       setLoadingImport(false);
@@ -482,6 +531,15 @@ export default function ImportPage() {
                   : ""}
               </li>
               <li>{result.skippedInvalid} ugyldige rækker sprunget over (manglende CVR, forkert format eller manglende navn for nye)</li>
+              {result.patchFieldCounts
+                ? IMPORT_PATCH_FIELD_OPTIONS.filter((o) => (result.patchFieldCounts?.[o.id] ?? 0) > 0).map(
+                    (o) => (
+                      <li key={o.id}>
+                        {o.label}: {result.patchFieldCounts?.[o.id] ?? 0} leads
+                      </li>
+                    ),
+                  )
+                : null}
             </ul>
             {result.details.length > 0 && (
               <details className="rounded-md border border-emerald-200/80 bg-white/90">
@@ -814,24 +872,84 @@ export default function ImportPage() {
                 <input
                   type="checkbox"
                   checked={patchMissingOnly}
-                  onChange={(e) => setPatchMissingOnly(e.target.checked)}
+                  onChange={(e) => {
+                    const on = e.target.checked;
+                    setPatchMissingOnly(on);
+                    if (!on) {
+                      setPatchAllCampaigns(false);
+                      setPatchFields([...DEFAULT_IMPORT_PATCH_FIELDS]);
+                    }
+                  }}
                   className="mt-0.5 h-4 w-4 rounded border-stone-300 text-amber-700 focus:ring-amber-400"
                 />
                 <span>
-                  Patch kun manglende email/domæne
+                  Berig eksisterende leads (kun tomme felter)
                   <span className="mt-0.5 block text-xs text-stone-600">
-                    Matcher leads på CVR og opdaterer kun tomme email- og domæne-felter. Status, noter og øvrige data bevares.
+                    Matcher leads på CVR og udfylder kun tomme felter blandt dem du vælger nedenfor.
+                    Status, noter og øvrige data bevares. Nye leads oprettes ikke.
                   </span>
                 </span>
               </label>
 
+              {patchMissingOnly ? (
+                <div className="space-y-3 rounded-md border border-amber-200 bg-amber-50/60 px-3 py-3">
+                  <p className="text-sm font-medium text-stone-800">Hvilke felter skal beriges?</p>
+                  <div className="space-y-2">
+                    {IMPORT_PATCH_FIELD_OPTIONS.map((option) => (
+                      <label
+                        key={option.id}
+                        className="flex items-center gap-2 text-sm text-stone-800"
+                      >
+                        <input
+                          type="checkbox"
+                          checked={patchFields.includes(option.id)}
+                          onChange={(e) => togglePatchField(option.id, e.target.checked)}
+                          className="h-4 w-4 rounded border-stone-300 text-amber-700 focus:ring-amber-400"
+                        />
+                        {option.label}
+                      </label>
+                    ))}
+                  </div>
+                  {!patchFieldMappingOk ? (
+                    <p className="text-xs text-amber-900">
+                      Map CVR og mindst én kolonne til hvert valgt felt (domæne kan også komme fra
+                      e-mail).
+                    </p>
+                  ) : null}
+                  <label className="flex items-start gap-3 rounded-md border border-amber-200 bg-white px-3 py-2 text-sm text-stone-800">
+                    <input
+                      type="checkbox"
+                      checked={patchAllCampaigns}
+                      onChange={(e) => setPatchAllCampaigns(e.target.checked)}
+                      className="mt-0.5 h-4 w-4 rounded border-stone-300 text-amber-700 focus:ring-amber-400"
+                    />
+                    <span>
+                      Berig leads i alle kampagner
+                      <span className="mt-0.5 block text-xs text-stone-600">
+                        Matcher CVR på tværs af hele systemet i stedet for kun den valgte kampagne.
+                      </span>
+                    </span>
+                  </label>
+                </div>
+              ) : null}
+
               <button
                 type="button"
-                disabled={loadingImport || !hasRequiredMapping}
+                disabled={
+                  loadingImport ||
+                  (!patchMissingOnly && !hasRequiredMapping) ||
+                  (patchMissingOnly && (!patchFieldMappingOk || patchFields.length === 0))
+                }
                 onClick={() => setImportConfirmOpen(true)}
                 className="rounded-md bg-stone-800 px-4 py-2 text-sm font-medium text-white hover:bg-stone-900 disabled:opacity-60"
               >
-                {loadingImport ? "Importerer…" : "Importer leads"}
+                {loadingImport
+                  ? patchMissingOnly
+                    ? "Beriger…"
+                    : "Importerer…"
+                  : patchMissingOnly
+                    ? "Berig leads"
+                    : "Importer leads"}
               </button>
               {loadingImport && (
                 <div className="w-full max-w-xl rounded-md border border-stone-200 bg-stone-50 p-3">
@@ -872,14 +990,19 @@ export default function ImportPage() {
             onClick={(e) => e.stopPropagation()}
           >
             <h3 id="import-confirm-title" className="text-base font-semibold text-stone-900">
-              Bekræft import
+              {patchMissingOnly ? "Bekræft berigelse" : "Bekræft import"}
             </h3>
             <p className="mt-2 text-sm text-stone-600">
               {patchMissingOnly ? (
                 <>
-                  Patch-tilstand: matcher eksisterende leads på CVR og udfylder kun tomme email- og
-                  domæne-felter. Status, noter og øvrige data bevares. Nye leads oprettes ikke. Rækker
-                  uden CVR eller uden match i kampagnen springes over.{" "}
+                  Berigelse: matcher eksisterende leads på CVR
+                  {patchAllCampaigns ? " i hele systemet" : " i den valgte kampagne"} og udfylder kun
+                  tomme felter blandt:{" "}
+                  {IMPORT_PATCH_FIELD_OPTIONS.filter((o) => patchFields.includes(o.id))
+                    .map((o) => o.label)
+                    .join(", ") || "—"}.{" "}
+                  Status, noter og øvrige data bevares. Nye leads oprettes ikke. Rækker uden CVR eller
+                  uden match springes over.{" "}
                 </>
               ) : (
                 <>
@@ -903,9 +1026,9 @@ export default function ImportPage() {
                     : "Leads uden virksomhedsnavn springes over."}{" "}
                 </>
               )}
-              Bekræfter import til{" "}
+              {patchMissingOnly ? "Bekræfter berigelse" : "Bekræfter import"} til{" "}
               <strong className="text-stone-800">{campaigns.find((c) => c.id === campaignId)?.name ?? "—"}</strong>
-              ?
+              {patchMissingOnly && patchAllCampaigns ? " (alle kampagner)" : ""}?
             </p>
             <div className="mt-6 flex flex-wrap justify-end gap-2">
               <button
@@ -922,7 +1045,13 @@ export default function ImportPage() {
                 onClick={() => void onImport()}
                 className="rounded-md bg-stone-800 px-4 py-2 text-sm font-medium text-white hover:bg-stone-900 disabled:opacity-60"
               >
-                {loadingImport ? "Importerer…" : "Ja, importer"}
+                {loadingImport
+                  ? patchMissingOnly
+                    ? "Beriger…"
+                    : "Importerer…"
+                  : patchMissingOnly
+                    ? "Ja, berig"
+                    : "Ja, importer"}
               </button>
             </div>
           </div>

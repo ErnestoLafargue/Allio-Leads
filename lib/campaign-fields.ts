@@ -57,6 +57,11 @@ export const DEFAULT_CVR_EXTENSION_FIELDS: CampaignExtraField[] = [
   { key: "virksomhedsform", label: "Virksomhedsform" },
 ];
 
+/** Altid under Branche i alle kampagner (nøgle bruges i køfilter + import/berigelse). */
+export const DEFAULT_INDUSTRY_EXTENSION_FIELDS: CampaignExtraField[] = [
+  { key: "virksomhedstype", label: "Virksomhedstype" },
+];
+
 /**
  * Valgfrie standardfelter under E-mail — kun når Annoncer er slået til på kampagnen.
  * Merges ikke automatisk ind i alle kampagner (i modsætning til Stifter/CVR).
@@ -69,10 +74,15 @@ export const FIXED_EMAIL_ANNONCER_FIELDS: CampaignExtraField[] = [
 ];
 
 const DEFAULT_CVR_KEYS = new Set(DEFAULT_CVR_EXTENSION_FIELDS.map((f) => f.key));
+const DEFAULT_INDUSTRY_KEYS = new Set(DEFAULT_INDUSTRY_EXTENSION_FIELDS.map((f) => f.key));
 const FIXED_EMAIL_ANNONCER_KEYS = new Set(FIXED_EMAIL_ANNONCER_FIELDS.map((f) => f.key));
 
 export function isFixedCvrExtensionKey(key: string): boolean {
   return DEFAULT_CVR_KEYS.has(key.trim());
+}
+
+export function isFixedIndustryExtensionKey(key: string): boolean {
+  return DEFAULT_INDUSTRY_KEYS.has(key.trim());
 }
 
 export function isFixedEmailAnnoncerKey(key: string): boolean {
@@ -189,6 +199,15 @@ export function mergeDefaultExtensions(cfg: CampaignFieldConfig): CampaignFieldC
         if (!DEFAULT_CVR_KEYS.has(f.key)) merged.push(f);
       }
       extensions.cvr = merged;
+      continue;
+    }
+    if (g === "industry") {
+      const existing = cfg.extensions.industry ?? [];
+      const merged: CampaignExtraField[] = [...DEFAULT_INDUSTRY_EXTENSION_FIELDS];
+      for (const f of existing) {
+        if (!DEFAULT_INDUSTRY_KEYS.has(f.key)) merged.push(f);
+      }
+      extensions.industry = merged;
       continue;
     }
     if (g === "email") {

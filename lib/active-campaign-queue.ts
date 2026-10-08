@@ -11,13 +11,16 @@ const VIEW_VERSION = 1 as const;
 
 export type PostalRange = { from: string; to: string };
 
-export type CampaignFilterMode = "startdate" | "industry" | "postal";
+export type CampaignFilterMode = "startdate" | "industry" | "postal" | "companyType";
+
+/** Custom-felt-nøgle for standardfeltet «Virksomhedstype» under Branche. */
+export const COMPANY_TYPE_CUSTOM_KEY = "virksomhedstype";
 
 /**
  * Det der gemmes på `Campaign.activeQueueFilter` når man trykker «Gem filter/sortering».
  * Matcher semantik i `leads-bulk-panel` (sortedLeads uden tabel-klik-sortering).
  *
- * Startdato, branche og postnummer er uafhængige (AND). Ældre views med kun
+ * Startdato, branche, virksomhedstype og postnummer er uafhængige (AND). Ældre views med kun
  * `campaignFilterMode` mappes ved parse til præcis ét enabled-flag.
  */
 export type ActiveCampaignQueueViewV1 = {
@@ -29,6 +32,8 @@ export type ActiveCampaignQueueViewV1 = {
   meetingStartFrom: string;
   meetingStartTo: string;
   selectedCampaignIndustries: string[];
+  /** Valgte virksomhedstyper (`customFields.virksomhedstype`). */
+  selectedCompanyTypes: string[];
   dynamicSortFieldId: string;
   dynamicSortDir: "asc" | "desc";
   dynamicFromDate: string;
@@ -38,6 +43,8 @@ export type ActiveCampaignQueueViewV1 = {
   startdateEnabled: boolean;
   /** Branche-filter aktivt (uafhængigt af startdato/postnr). */
   industryEnabled: boolean;
+  /** Virksomhedstype-filter aktivt (uafhængigt af øvrige filtre). */
+  companyTypeEnabled: boolean;
   /** Postnummer-filter aktivt (uafhængigt af startdato/branche). */
   postalFilterEnabled: boolean;
   postalSortDir: "asc" | "desc";
@@ -51,6 +58,7 @@ export const EMPTY_ACTIVE_CAMPAIGN_QUEUE_VIEW: ActiveCampaignQueueViewV1 = {
   meetingStartFrom: "",
   meetingStartTo: "",
   selectedCampaignIndustries: [],
+  selectedCompanyTypes: [],
   dynamicSortFieldId: "",
   dynamicSortDir: "asc",
   dynamicFromDate: "",
@@ -58,6 +66,7 @@ export const EMPTY_ACTIVE_CAMPAIGN_QUEUE_VIEW: ActiveCampaignQueueViewV1 = {
   dynamicDateInvert: false,
   startdateEnabled: false,
   industryEnabled: false,
+  companyTypeEnabled: false,
   postalFilterEnabled: false,
   postalSortDir: "asc",
   postalRanges: [{ from: "", to: "" }],
@@ -112,6 +121,7 @@ export function leadMatchesPostalRanges(
 function parseCampaignFilterMode(raw: unknown): CampaignFilterMode {
   if (raw === "postal") return "postal";
   if (raw === "industry") return "industry";
+  if (raw === "companyType") return "companyType";
   return "startdate";
 }
 
@@ -127,6 +137,14 @@ export function isIndustryQueueFilterActive(v: ActiveCampaignQueueViewV1 | null 
   return v.industryEnabled === true;
 }
 
+/** True når virksomhedstype-filteret er aktivt. */
+export function isCompanyTypeQueueFilterActive(
+  v: ActiveCampaignQueueViewV1 | null | undefined,
+): boolean {
+  if (!v) return false;
+  return v.companyTypeEnabled === true;
+}
+
 /** True når startdato-filteret er aktivt. */
 export function isStartdateQueueFilterActive(v: ActiveCampaignQueueViewV1 | null | undefined): boolean {
   if (!v) return false;
@@ -134,20 +152,25 @@ export function isStartdateQueueFilterActive(v: ActiveCampaignQueueViewV1 | null
 }
 
 /**
- * Synkroniser legacy `filterMeetingStart` / `campaignFilterMode` ud fra de tre flag.
- * Når flere er tændt: filterMeetingStart=true, campaignFilterMode = første af startdate|industry|postal.
+ * Synkroniser legacy `filterMeetingStart` / `campaignFilterMode` ud fra filter-flagene.
+ * Når flere er tændt: filterMeetingStart=true, campaignFilterMode = første af
+ * startdate|industry|companyType|postal.
  */
 export function syncLegacyFilterFields(
   view: Pick<
     ActiveCampaignQueueViewV1,
-    "startdateEnabled" | "industryEnabled" | "postalFilterEnabled"
+    "startdateEnabled" | "industryEnabled" | "companyTypeEnabled" | "postalFilterEnabled"
   >,
 ): Pick<ActiveCampaignQueueViewV1, "filterMeetingStart" | "campaignFilterMode"> {
   const any =
-    view.startdateEnabled || view.industryEnabled || view.postalFilterEnabled;
+    view.startdateEnabled ||
+    view.industryEnabled ||
+    view.companyTypeEnabled ||
+    view.postalFilterEnabled;
   let campaignFilterMode: CampaignFilterMode = "startdate";
   if (view.startdateEnabled) campaignFilterMode = "startdate";
   else if (view.industryEnabled) campaignFilterMode = "industry";
+  else if (view.companyTypeEnabled) campaignFilterMode = "companyType";
   else if (view.postalFilterEnabled) campaignFilterMode = "postal";
   return { filterMeetingStart: any, campaignFilterMode };
 }
@@ -164,14 +187,18 @@ export function parseActiveCampaignQueueView(
 
     let startdateEnabled = false;
     let industryEnabled = false;
+    let companyTypeEnabled = false;
     let postalFilterEnabled = false;
 
     const hasNewFlags =
-      typeof o.startdateEnabled === "boolean" || typeof o.industryEnabled === "boolean";
+      typeof o.startdateEnabled === "boolean" ||
+      typeof o.industryEnabled === "boolean" ||
+      typeof o.companyTypeEnabled === "boolean";
 
     if (hasNewFlags) {
       startdateEnabled = o.startdateEnabled === true;
       industryEnabled = o.industryEnabled === true;
+      companyTypeEnabled = o.companyTypeEnabled === true;
       postalFilterEnabled = o.postalFilterEnabled === true;
     } else {
       // Legacy: præcis ét filter via campaignFilterMode / postalFilterEnabled
@@ -181,6 +208,7 @@ export function parseActiveCampaignQueueView(
       if (filterMeetingStart) {
         if (mode === "postal" || postalFlag) postalFilterEnabled = true;
         else if (mode === "industry") industryEnabled = true;
+        else if (mode === "companyType") companyTypeEnabled = true;
         else startdateEnabled = true;
       }
     }
@@ -188,6 +216,7 @@ export function parseActiveCampaignQueueView(
     const legacy = syncLegacyFilterFields({
       startdateEnabled,
       industryEnabled,
+      companyTypeEnabled,
       postalFilterEnabled,
     });
 
@@ -200,6 +229,9 @@ export function parseActiveCampaignQueueView(
       selectedCampaignIndustries: Array.isArray(o.selectedCampaignIndustries)
         ? o.selectedCampaignIndustries.filter((v): v is string => typeof v === "string")
         : [],
+      selectedCompanyTypes: Array.isArray(o.selectedCompanyTypes)
+        ? o.selectedCompanyTypes.filter((v): v is string => typeof v === "string")
+        : [],
       dynamicSortFieldId: typeof o.dynamicSortFieldId === "string" ? o.dynamicSortFieldId : "",
       dynamicSortDir: o.dynamicSortDir === "desc" ? "desc" : "asc",
       dynamicFromDate: typeof o.dynamicFromDate === "string" ? o.dynamicFromDate : "",
@@ -207,6 +239,7 @@ export function parseActiveCampaignQueueView(
       dynamicDateInvert: o.dynamicDateInvert === true,
       startdateEnabled,
       industryEnabled,
+      companyTypeEnabled,
       postalFilterEnabled,
       postalSortDir: o.postalSortDir === "desc" ? "desc" : "asc",
       postalRanges: parsePostalRanges(o.postalRanges),
@@ -223,6 +256,7 @@ export function hasActiveQueueViewConstraints(v: ActiveCampaignQueueViewV1 | nul
   if (!v) return false;
   if (isPostalQueueFilterActive(v)) return true;
   if (isIndustryQueueFilterActive(v)) return true; // også tom liste = 0 træf
+  if (isCompanyTypeQueueFilterActive(v)) return true; // også tom liste = 0 træf
   if (
     isStartdateQueueFilterActive(v) &&
     (v.meetingStartFrom.trim() || v.meetingStartTo.trim())
@@ -332,6 +366,17 @@ export function leadMatchesActiveCampaignQueueView(
       view.selectedCampaignIndustries.map((v) => v.trim().toLocaleLowerCase("da")),
     );
     const normalized = (lead.industry ?? "").trim().toLocaleLowerCase("da");
+    if (normalized.length === 0) return false;
+    if (!selected.has(normalized)) return false;
+  }
+
+  if (isCompanyTypeQueueFilterActive(view)) {
+    if (view.selectedCompanyTypes.length === 0) return false;
+    const selected = new Set(
+      view.selectedCompanyTypes.map((v) => v.trim().toLocaleLowerCase("da")),
+    );
+    const raw = parseCustomFields(lead.customFields ?? "")[COMPANY_TYPE_CUSTOM_KEY] ?? "";
+    const normalized = raw.trim().toLocaleLowerCase("da");
     if (normalized.length === 0) return false;
     if (!selected.has(normalized)) return false;
   }

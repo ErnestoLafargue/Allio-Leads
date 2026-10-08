@@ -57,6 +57,16 @@ export function suggestColumnMapping(columns: string[]): Record<string, string> 
     ) {
       t = "custom:virksomhedsform";
     } else if (
+      n.includes("virksomhedstype") ||
+      n.includes("virksomheds_type") ||
+      n === "company_type" ||
+      n === "companytype" ||
+      n === "business_type" ||
+      n === "businesstype" ||
+      (n.includes("type") && (n.includes("virksom") || n.includes("company") || n.includes("business")))
+    ) {
+      t = "custom:virksomhedstype";
+    } else if (
       n === "annoncer" ||
       n === "ads_active" ||
       n === "ads_status" ||

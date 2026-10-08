@@ -17,6 +17,7 @@ import {
   isFixedCvrExtensionKey,
   isFixedCompanyNameExtensionKey,
   isFixedEmailAnnoncerKey,
+  isFixedIndustryExtensionKey,
   parseFieldConfig,
   serializeFieldConfig,
   slugifyKey,
@@ -938,7 +939,10 @@ export default function RedigerKampagnePage() {
                         isFixedCompanyNameExtensionKey(row.key, row.label);
                       const fixedEmailAnnoncer =
                         g === "email" && isFixedEmailAnnoncerKey(row.key);
-                      const fixedField = fixedCvr || fixedCompanyName || fixedEmailAnnoncer;
+                      const fixedIndustry =
+                        g === "industry" && isFixedIndustryExtensionKey(row.key);
+                      const fixedField =
+                        fixedCvr || fixedCompanyName || fixedEmailAnnoncer || fixedIndustry;
                       return (
                         <li key={row.draftId} className="flex flex-wrap items-end gap-3 rounded-md bg-stone-50 p-3">
                           <div className="min-w-[180px] flex-1">

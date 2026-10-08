@@ -135,6 +135,7 @@ describe("syncLegacyFilterFields", () => {
       syncLegacyFilterFields({
         startdateEnabled: true,
         industryEnabled: true,
+        companyTypeEnabled: true,
         postalFilterEnabled: true,
       }),
     ).toEqual({ filterMeetingStart: true, campaignFilterMode: "startdate" });
@@ -142,9 +143,18 @@ describe("syncLegacyFilterFields", () => {
       syncLegacyFilterFields({
         startdateEnabled: false,
         industryEnabled: true,
+        companyTypeEnabled: true,
         postalFilterEnabled: true,
       }),
     ).toEqual({ filterMeetingStart: true, campaignFilterMode: "industry" });
+    expect(
+      syncLegacyFilterFields({
+        startdateEnabled: false,
+        industryEnabled: false,
+        companyTypeEnabled: true,
+        postalFilterEnabled: true,
+      }),
+    ).toEqual({ filterMeetingStart: true, campaignFilterMode: "companyType" });
   });
 });
 
@@ -163,6 +173,15 @@ describe("hasActiveQueueViewConstraints postal", () => {
       hasActiveQueueViewConstraints({
         ...EMPTY_ACTIVE_CAMPAIGN_QUEUE_VIEW,
         industryEnabled: true,
+      }),
+    ).toBe(true);
+  });
+
+  it("er true når virksomhedstype er til (også tom liste)", () => {
+    expect(
+      hasActiveQueueViewConstraints({
+        ...EMPTY_ACTIVE_CAMPAIGN_QUEUE_VIEW,
+        companyTypeEnabled: true,
       }),
     ).toBe(true);
   });
@@ -233,6 +252,39 @@ describe("leadMatchesActiveCampaignQueueView AND", () => {
       postalRanges: [{ from: "1000", to: "2999" }],
     };
     expect(leadMatchesActiveCampaignQueueView(baseLead, "{}", view)).toBe(true);
+  });
+
+  it("virksomhedstype ja + postnr ja = med", () => {
+    const view: ActiveCampaignQueueViewV1 = {
+      ...EMPTY_ACTIVE_CAMPAIGN_QUEUE_VIEW,
+      companyTypeEnabled: true,
+      selectedCompanyTypes: ["ApS"],
+      postalFilterEnabled: true,
+      postalRanges: [{ from: "1000", to: "2999" }],
+    };
+    expect(
+      leadMatchesActiveCampaignQueueView(
+        { ...baseLead, customFields: JSON.stringify({ virksomhedstype: "ApS" }) },
+        "{}",
+        view,
+      ),
+    ).toBe(true);
+  });
+
+  it("virksomhedstype ja uden match = ude", () => {
+    const view: ActiveCampaignQueueViewV1 = {
+      ...EMPTY_ACTIVE_CAMPAIGN_QUEUE_VIEW,
+      companyTypeEnabled: true,
+      selectedCompanyTypes: ["ApS"],
+    };
+    expect(
+      leadMatchesActiveCampaignQueueView(
+        { ...baseLead, customFields: JSON.stringify({ virksomhedstype: "A/S" }) },
+        "{}",
+        view,
+      ),
+    ).toBe(false);
+    expect(leadMatchesActiveCampaignQueueView(baseLead, "{}", view)).toBe(false);
   });
 
   it("bruger postnr fra adresse når postalCode er tom", () => {
