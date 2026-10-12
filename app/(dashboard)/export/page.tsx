@@ -217,8 +217,8 @@ export default function ExportPage() {
         <div>
           <h3 className="text-sm font-semibold text-stone-900">Kampagne (valgfri)</h3>
           <p className="mt-1 text-xs text-stone-500">
-            Lad være tom for alle kampagner. Matcher nuværende kampagne eller besøgshistorik på
-            kampagnen (så leads der er flyttet til kommende møder stadig findes).
+            Ved «Møde booket» filtreres på kampagnen mødet blev booket fra (fx Gecko, CBID,
+            Planway) — ikke «Kommende møder». Ellers: nuværende kampagne eller besøgshistorik.
           </p>
           <div className="mt-3 max-h-48 space-y-1 overflow-y-auto rounded-md border border-stone-200 p-2">
             {campaigns.length === 0 ? (

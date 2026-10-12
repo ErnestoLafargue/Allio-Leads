@@ -6,6 +6,10 @@ import {
   FIXED_PERSON_EXTENSION_FIELDS,
 } from "@/lib/campaign-fields";
 import { parseCustomFields } from "@/lib/custom-fields";
+import {
+  buildLeadCampaignAttribution,
+  type LeadVisitForAttribution,
+} from "@/lib/lead-campaign-attribution";
 import { LEAD_STATUS_LABELS, type LeadStatus } from "@/lib/lead-status";
 import { MEETING_OUTCOME_LABELS } from "@/lib/meeting-outcome";
 
@@ -28,6 +32,13 @@ export const EXPORTABLE_OUTCOME_OPTIONS: {
 ];
 
 const WHITELIST = new Set<string>(EXPORTABLE_OUTCOME_STATUSES);
+
+const SYSTEM_CAMPAIGN_TYPES = new Set([
+  "upcoming_meetings",
+  "rebooking",
+  "active_customers",
+  "direct_booking",
+]);
 
 export function isExportableOutcomeStatus(v: string): v is ExportableOutcomeStatus {
   return WHITELIST.has(v);
@@ -81,7 +92,6 @@ export function parseCampaignIds(raw: string | null): string[] {
 function parseDayBound(raw: string | null, endOfDay: boolean): Date | null {
   if (!raw?.trim()) return null;
   const s = raw.trim();
-  // YYYY-MM-DD
   if (/^\d{4}-\d{2}-\d{2}$/.test(s)) {
     const iso = endOfDay ? `${s}T23:59:59.999+02:00` : `${s}T00:00:00.000+02:00`;
     const d = new Date(iso);
@@ -99,11 +109,9 @@ export type OutcomeExportFilters = {
 };
 
 /**
- * Historisk filter: lead har mindst én gang fået ét af de valgte udfald
- * (LeadOutcomeLog) — også hvis nuværende status er noget andet (fx genbook →
- * ikke interesseret). Dato gælder for den historiske udfaldslog.
- * Kampagne: nuværende kampagne ELLER besøgshistorik på kampagnen (leads flyttes
- * ofte til kommende møder / genbooking).
+ * Historisk filter via LeadOutcomeLog. Kampagnefilter i SQL er kun groft
+ * (besøg/nuværende); ved «Møde booket» snævres efterfølgende til
+ * «kampagne booket fra» via besøgshistorik.
  */
 export function buildOutcomeExportWhere(filters: OutcomeExportFilters): Prisma.LeadWhereInput {
   const from = parseDayBound(filters.from ?? null, false);
@@ -123,7 +131,10 @@ export function buildOutcomeExportWhere(filters: OutcomeExportFilters): Prisma.L
     outcomeLogs: { some: outcomeLogSome },
   };
 
-  if (filters.campaignIds && filters.campaignIds.length > 0) {
+  const wantsMeeting = filters.statuses.includes("MEETING_BOOKED");
+  // Ved møde booket filtreres kampagne efter attribution («booket fra») i JS —
+  // ikke her, så vi ikke mister leads der er flyttet til kommende møder.
+  if (filters.campaignIds && filters.campaignIds.length > 0 && !wantsMeeting) {
     const ids = filters.campaignIds;
     where.OR = [
       { campaignId: { in: ids } },
@@ -136,6 +147,8 @@ export function buildOutcomeExportWhere(filters: OutcomeExportFilters): Prisma.L
 
 type UserLabel = Pick<User, "name" | "username">;
 
+type VisitRow = { campaignId: string | null; visitedAt: Date };
+
 export type LeadForOutcomeExport = Lead & {
   campaign: { name: string } | null;
   bookedByUser: UserLabel | null;
@@ -145,6 +158,10 @@ export type LeadForOutcomeExport = Lead & {
     status: string;
     user: UserLabel | null;
   }[];
+  visitHistory: VisitRow[];
+  /** Udfyldt efter attribution */
+  bookedFromCampaignId?: string | null;
+  bookedFromCampaignName?: string;
 };
 
 function fmtDa(dt: Date | null | undefined): string {
@@ -181,9 +198,9 @@ const FIXED_CUSTOM_FIELDS = [
   ...DEFAULT_CVR_EXTENSION_FIELDS,
 ];
 
-/** Faste kolonner — Noter tidligt; historisk udfald + nuværende status. */
 export const OUTCOME_EXPORT_HEADERS: string[] = [
   "Lead ID",
+  "Kampagne (booket fra)",
   "Kampagne (nuværende)",
   "Historisk udfald",
   "Nuværende udfald",
@@ -210,6 +227,36 @@ export const OUTCOME_EXPORT_HEADERS: string[] = [
   "Mødekontakt telefon (privat)",
 ];
 
+/**
+ * Find kildekampagne ved mødebooking: seneste besøg ≤ booking-tidspunkt
+ * der ikke er en systemkampagne (kommende møder / genbooking / …).
+ */
+export function resolveBookedFromCampaignId(
+  visits: LeadVisitForAttribution[],
+  leadId: string,
+  bookedAt: Date,
+  systemCampaignIds: Set<string>,
+): string | null {
+  const attribution = buildLeadCampaignAttribution(visits);
+  const leadVisits = visits
+    .filter((v) => v.leadId === leadId && v.campaignId)
+    .slice()
+    .sort((a, b) => a.visitedAt.getTime() - b.visitedAt.getTime());
+
+  let source: string | null = null;
+  for (const v of leadVisits) {
+    if (v.visitedAt.getTime() > bookedAt.getTime()) break;
+    if (v.campaignId && !systemCampaignIds.has(v.campaignId)) {
+      source = v.campaignId;
+    }
+  }
+  if (source) return source;
+
+  const fallback = attribution.campaignIdAt(leadId, bookedAt);
+  if (fallback && !systemCampaignIds.has(fallback)) return fallback;
+  return fallback;
+}
+
 export function mapLeadToOutcomeExportRow(
   lead: LeadForOutcomeExport,
   selectedStatuses: ExportableOutcomeStatus[] = [...EXPORTABLE_OUTCOME_STATUSES],
@@ -231,10 +278,13 @@ export function mapLeadToOutcomeExportRow(
       Boolean(lead.meetingBookedAt) ||
       lead.status === "MEETING_BOOKED");
 
-  const meetingBookedLog = lead.outcomeLogs.find((l) => l.status === "MEETING_BOOKED");
+  const meetingBookedLog = [...lead.outcomeLogs]
+    .filter((l) => l.status === "MEETING_BOOKED")
+    .sort((a, b) => a.createdAt.getTime() - b.createdAt.getTime())[0];
 
   const row: Record<string, string> = {
     "Lead ID": lead.id,
+    "Kampagne (booket fra)": lead.bookedFromCampaignName ?? "",
     "Kampagne (nuværende)": lead.campaign?.name ?? "",
     "Historisk udfald": historicalLabels || (primaryLog ? statusLabel(primaryLog.status) : ""),
     "Nuværende udfald": statusLabel(lead.status),
@@ -297,21 +347,104 @@ function outcomeLogInclude(statuses: ExportableOutcomeStatus[]) {
         user: { select: { name: true, username: true } },
       },
     },
+    visitHistory: {
+      orderBy: { visitedAt: "asc" as const },
+      take: 100,
+      select: { campaignId: true, visitedAt: true },
+    },
   } satisfies Prisma.LeadInclude;
 }
 
+async function loadCampaignMeta(): Promise<{
+  nameById: Map<string, string>;
+  systemIds: Set<string>;
+}> {
+  const rows = await prisma.campaign.findMany({
+    select: { id: true, name: true, systemCampaignType: true },
+  });
+  const nameById = new Map<string, string>();
+  const systemIds = new Set<string>();
+  for (const c of rows) {
+    nameById.set(c.id, c.name);
+    if (c.systemCampaignType && SYSTEM_CAMPAIGN_TYPES.has(c.systemCampaignType)) {
+      systemIds.add(c.id);
+    }
+  }
+  return { nameById, systemIds };
+}
+
+function enrichBookedFromCampaign(
+  leads: LeadForOutcomeExport[],
+  nameById: Map<string, string>,
+  systemIds: Set<string>,
+): LeadForOutcomeExport[] {
+  const visits: LeadVisitForAttribution[] = [];
+  for (const lead of leads) {
+    for (const v of lead.visitHistory ?? []) {
+      visits.push({
+        leadId: lead.id,
+        campaignId: v.campaignId,
+        visitedAt: v.visitedAt,
+      });
+    }
+  }
+
+  return leads.map((lead) => {
+    const meetingLog = [...(lead.outcomeLogs ?? [])]
+      .filter((l) => l.status === "MEETING_BOOKED")
+      .sort((a, b) => a.createdAt.getTime() - b.createdAt.getTime())[0];
+    const bookedAt = meetingLog?.createdAt ?? lead.meetingBookedAt ?? null;
+    if (!bookedAt) {
+      return { ...lead, bookedFromCampaignId: null, bookedFromCampaignName: "" };
+    }
+    const id = resolveBookedFromCampaignId(visits, lead.id, bookedAt, systemIds);
+    return {
+      ...lead,
+      bookedFromCampaignId: id,
+      bookedFromCampaignName: id ? (nameById.get(id) ?? "") : "",
+    };
+  });
+}
+
+function applyBookedFromCampaignFilter(
+  leads: LeadForOutcomeExport[],
+  filters: OutcomeExportFilters,
+): LeadForOutcomeExport[] {
+  const ids = filters.campaignIds ?? [];
+  if (ids.length === 0) return leads;
+  if (!filters.statuses.includes("MEETING_BOOKED")) return leads;
+  const allowed = new Set(ids);
+  return leads.filter(
+    (l) => l.bookedFromCampaignId != null && allowed.has(l.bookedFromCampaignId),
+  );
+}
+
+async function loadEnrichedLeads(
+  filters: OutcomeExportFilters,
+): Promise<LeadForOutcomeExport[]> {
+  const raw = (await prisma.lead.findMany({
+    where: buildOutcomeExportWhere(filters),
+    orderBy: [{ updatedAt: "desc" }],
+    include: outcomeLogInclude(filters.statuses),
+  })) as LeadForOutcomeExport[];
+
+  const { nameById, systemIds } = await loadCampaignMeta();
+  const enriched = enrichBookedFromCampaign(raw, nameById, systemIds);
+  return applyBookedFromCampaignFilter(enriched, filters);
+}
+
 export async function countLeadsByOutcome(filters: OutcomeExportFilters): Promise<number> {
+  if (filters.campaignIds?.length && filters.statuses.includes("MEETING_BOOKED")) {
+    const leads = await loadEnrichedLeads(filters);
+    return leads.length;
+  }
   return prisma.lead.count({ where: buildOutcomeExportWhere(filters) });
 }
 
 export async function fetchLeadsByOutcome(
   filters: OutcomeExportFilters,
 ): Promise<LeadForOutcomeExport[]> {
-  return prisma.lead.findMany({
-    where: buildOutcomeExportWhere(filters),
-    orderBy: [{ updatedAt: "desc" }],
-    include: outcomeLogInclude(filters.statuses),
-  }) as Promise<LeadForOutcomeExport[]>;
+  return loadEnrichedLeads(filters);
 }
 
 export function outcomeExportFilenameBase(statuses: ExportableOutcomeStatus[]): string {
