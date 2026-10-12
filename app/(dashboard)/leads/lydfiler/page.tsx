@@ -116,8 +116,8 @@ export default function LydfilerPage() {
         <div>
           <h1 className="text-xl font-semibold text-stone-900">Lydfiler</h1>
           <p className="text-sm text-stone-500">
-            Alle opkaldsoptagelser med kunde, lead, tidspunkt og leadets nuværende udfald. Filtrér på udfald og
-            hvilken bruger der har lavet optagelsen. Klik på kolonnetitler for at sortere.
+            Optagelser på mindst 12 sekunder, med kunde, lead, tidspunkt og leadets nuværende udfald. Filtrér på
+            udfald og hvilken bruger der har lavet optagelsen. Klik på kolonnetitler for at sortere.
           </p>
         </div>
         <div className="flex flex-wrap items-end gap-2">
