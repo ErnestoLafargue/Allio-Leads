@@ -4,8 +4,7 @@
  * Triggers (møde booket / samtale ≥ 60 s) kalder `scheduleLeadRecordingSync`,
  * som venter kort (så Telnyx når at gemme filen) og kører per-lead backfill.
  * Hard rule: «Møde booket» henter ALLE optagelser (ingen skip, ingen 14-dages grænse).
- * Hard rule: samtaler ≥ 60 s gemmes altid (uanset udfald) — skippes ikke fordi leadet
- * allerede har en anden lydfil. Standard-retention er 12 måneder.
+ * Hard rule: samtaler ≥ 60 s gemmes altid (uanset udfald) og beholdes.
  * Cron bruger `findLeadsNeedingRecordingSync` til at genfinde gamle mangler.
  */
 import { after } from "next/server";

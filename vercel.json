@@ -16,10 +16,6 @@
       "schedule": "15 3 * * *"
     },
     {
-      "path": "/api/cron/purge-expired-recordings",
-      "schedule": "45 4 * * *"
-    },
-    {
       "path": "/api/cron/sync-podio-outcomes",
       "schedule": "30 3 * * *"
     }
