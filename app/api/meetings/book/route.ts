@@ -19,6 +19,7 @@ import {
   isMeetingNotesSufficient,
   MEETING_NOTES_REQUIRED_ERROR,
 } from "@/lib/meeting-notes-quality";
+import { scheduleMeetingBookedRecordings } from "@/lib/telnyx-recordings-auto-sync";
 
 export async function POST(req: Request) {
   const { session, response } = await requireSession();
@@ -158,6 +159,7 @@ export async function POST(req: Request) {
     after(() => {
       void syncPostBookingIntegrations(lead.id);
     });
+    scheduleMeetingBookedRecordings(lead.id);
 
     return NextResponse.json({ ...lead, integrationsPending: true });
   } catch (e) {

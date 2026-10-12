@@ -49,7 +49,7 @@ import {
   isMeetingNotesSufficient,
   MEETING_NOTES_REQUIRED_ERROR,
 } from "@/lib/meeting-notes-quality";
-import { scheduleLeadRecordingSync } from "@/lib/telnyx-recordings-auto-sync";
+import { scheduleMeetingBookedRecordings } from "@/lib/telnyx-recordings-auto-sync";
 
 type Params = { params: Promise<{ id: string }> };
 
@@ -808,12 +808,9 @@ export async function PATCH(req: Request, { params }: Params) {
     });
   }
 
-  // Hent manglende Telnyx-optagelse når møde bookes (webhook kan have misset leadet).
-  if (
-    status === "MEETING_BOOKED" &&
-    (existing.status !== "MEETING_BOOKED" || shouldSyncIntegrations)
-  ) {
-    scheduleLeadRecordingSync(id, "meeting_booked");
+  // Hard rule: møde booket → hent ALLE lydfiler ind i Allio.
+  if (status === "MEETING_BOOKED") {
+    scheduleMeetingBookedRecordings(id);
   }
 
   const apiKey = process.env.TELNYX_API_KEY?.trim();

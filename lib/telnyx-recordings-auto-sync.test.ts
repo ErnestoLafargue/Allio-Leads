@@ -1,7 +1,10 @@
 import { describe, expect, it } from "vitest";
 import {
+  isMeetingBookedRecordingReason,
   meetsAutoSyncTalkThreshold,
   MIN_TALK_SECONDS_FOR_AUTO_SYNC,
+  recordingSyncFromIso,
+  shouldSkipIfLeadAlreadyHasRecording,
   talkSecondsFromCallTimestamps,
 } from "@/lib/telnyx-recordings-auto-sync";
 
@@ -42,5 +45,25 @@ describe("meetsAutoSyncTalkThreshold", () => {
     expect(meetsAutoSyncTalkThreshold(59)).toBe(false);
     expect(meetsAutoSyncTalkThreshold(60)).toBe(true);
     expect(meetsAutoSyncTalkThreshold(900)).toBe(true);
+  });
+});
+
+describe("møde booket hard rule", () => {
+  it("kender møde-booket reasons", () => {
+    expect(isMeetingBookedRecordingReason("meeting_booked")).toBe(true);
+    expect(isMeetingBookedRecordingReason("meeting_booked:backfill")).toBe(true);
+    expect(isMeetingBookedRecordingReason("cron:meeting_booked")).toBe(true);
+    expect(isMeetingBookedRecordingReason("hangup_long_call")).toBe(false);
+  });
+
+  it("springer ikke over eksisterende filer når møde er booket", () => {
+    expect(shouldSkipIfLeadAlreadyHasRecording("meeting_booked")).toBe(false);
+    expect(shouldSkipIfLeadAlreadyHasRecording("hangup_long_call")).toBe(true);
+    expect(shouldSkipIfLeadAlreadyHasRecording("webrtc_long_call")).toBe(true);
+  });
+
+  it("henter uden 14-dages grænse når møde er booket", () => {
+    expect(recordingSyncFromIso("meeting_booked")).toBeNull();
+    expect(recordingSyncFromIso("hangup_long_call")).toEqual(expect.stringMatching(/^\d{4}-\d{2}-\d{2}T/));
   });
 });

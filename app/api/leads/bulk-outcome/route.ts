@@ -27,6 +27,7 @@ import {
   isMeetingNotesSufficient,
   MEETING_NOTES_REQUIRED_ERROR,
 } from "@/lib/meeting-notes-quality";
+import { scheduleMeetingBookedRecordings } from "@/lib/telnyx-recordings-auto-sync";
 
 const MAX_BULK = 500;
 
@@ -229,6 +230,12 @@ export async function POST(req: Request) {
         await tx.leadOutcomeLog.createMany({ data: logRows });
       }
     });
+
+    if (status === "MEETING_BOOKED") {
+      for (const u of updates) {
+        scheduleMeetingBookedRecordings(u.id);
+      }
+    }
 
     return NextResponse.json({ ok: true, updated: updates.length });
   } catch (e) {

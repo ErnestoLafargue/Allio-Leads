@@ -19,6 +19,7 @@ import {
 import { requireDefaultMeetingAssigneeId } from "@/lib/meeting-assignee";
 import { canonicalLeadPhoneForStorage } from "@/lib/phone-e164";
 import { applyPostalCityFromAddressFields } from "@/lib/postal-from-address";
+import { scheduleMeetingBookedRecordings } from "@/lib/telnyx-recordings-auto-sync";
 
 export async function GET(req: Request) {
   const { session, response } = await requireSession();
@@ -340,6 +341,10 @@ export async function POST(req: Request) {
       lastOutcomeAt: status === "NEW" ? null : new Date(),
     }),
   });
+
+  if (status === "MEETING_BOOKED") {
+    scheduleMeetingBookedRecordings(lead.id);
+  }
 
   return NextResponse.json(lead);
 }

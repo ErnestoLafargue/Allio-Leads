@@ -3,6 +3,7 @@
  *
  * Triggers (møde booket / samtale ≥ 60 s) kalder `scheduleLeadRecordingSync`,
  * som venter kort (så Telnyx når at gemme filen) og kører per-lead backfill.
+ * Hard rule: «Møde booket» henter ALLE optagelser (ingen skip, ingen 14-dages grænse).
  * Cron bruger `findLeadsNeedingRecordingSync` til at genfinde gamle mangler.
  */
 import { after } from "next/server";
@@ -14,6 +15,26 @@ export const MIN_TALK_SECONDS_FOR_AUTO_SYNC = 60;
 export const AUTO_SYNC_LOOKBACK_DAYS = 14;
 export const AUTO_SYNC_DELAY_MS = 25_000;
 export const AUTO_SYNC_CRON_LIMIT = 20;
+
+const MEETING_BOOKED_REASON = "meeting_booked";
+
+/** Hard rule: møde-booket henter ALLE optagelser — ingen skip og ingen lookback-grænse. */
+export function isMeetingBookedRecordingReason(reason: string): boolean {
+  return (
+    reason === MEETING_BOOKED_REASON ||
+    reason.startsWith(`${MEETING_BOOKED_REASON}:`) ||
+    reason === "cron:meeting_booked"
+  );
+}
+
+export function shouldSkipIfLeadAlreadyHasRecording(reason: string): boolean {
+  return !isMeetingBookedRecordingReason(reason);
+}
+
+export function recordingSyncFromIso(reason: string, nowMs = Date.now()): string | null {
+  if (isMeetingBookedRecordingReason(reason)) return null;
+  return new Date(nowMs - AUTO_SYNC_LOOKBACK_DAYS * 86400000).toISOString();
+}
 
 /** Talk-tid i sekunder fra DialerCallLog-tidsstempler (0 hvis mangler). */
 export function talkSecondsFromCallTimestamps(params: {
@@ -54,7 +75,9 @@ export async function leadHasPlayableRecording(leadId: string): Promise<boolean>
 }
 
 /**
- * Kør per-lead Telnyx-backfill (uden delay). Skip hvis optagelse allerede findes.
+ * Kør per-lead Telnyx-backfill (uden delay).
+ * Ved møde booket hentes ALLE optagelser (ingen skip, ingen 14-dages grænse).
+ * Øvrige triggers skipper hvis leadet allerede har en afspilbar fil.
  */
 export async function syncLeadRecordingsNow(
   leadId: string,
@@ -66,37 +89,51 @@ export async function syncLeadRecordingsNow(
     return { skipped: true, ok: false, message: "no_api_key" };
   }
 
-  if (await leadHasPlayableRecording(leadId)) {
+  const meetingBooked = isMeetingBookedRecordingReason(reason);
+  if (!meetingBooked && (await leadHasPlayableRecording(leadId))) {
     console.log(`[recordings-auto-sync] skip lead=${leadId} reason=${reason}: already_has_recording`);
     return { skipped: true, ok: true, message: "already_has_recording" };
   }
 
-  const fromIso = new Date(Date.now() - AUTO_SYNC_LOOKBACK_DAYS * 86400000).toISOString();
-  console.log(`[recordings-auto-sync] sync lead=${leadId} reason=${reason}`);
+  const fromIso = recordingSyncFromIso(reason);
+  console.log(`[recordings-auto-sync] sync lead=${leadId} reason=${reason} forceAll=${meetingBooked}`);
 
-  const out = await runRecordingsBackfillForLead({
-    apiKey,
-    leadId,
-    pageSize: 100,
-    fromIso,
-    toIso: null,
-    dryRun: false,
-    copyToBlob: true,
-    maxSessionQueries: 25,
-    sessionBatchStart: 0,
-    maxPhonePages: 4,
-    includePhoneFilters: true,
-  });
+  let sessionBatchStart = 0;
+  let created = 0;
+  let updated = 0;
+  let matched = 0;
+  for (;;) {
+    const out = await runRecordingsBackfillForLead({
+      apiKey,
+      leadId,
+      pageSize: 100,
+      fromIso,
+      toIso: null,
+      dryRun: false,
+      copyToBlob: true,
+      maxSessionQueries: meetingBooked ? 40 : 25,
+      sessionBatchStart,
+      maxPhonePages: meetingBooked ? 8 : 4,
+      includePhoneFilters: sessionBatchStart === 0,
+    });
 
-  if (!out.ok) {
-    console.error(
-      `[recordings-auto-sync] failed lead=${leadId} reason=${reason}: ${out.message}`,
-    );
-    return { skipped: false, ok: false, message: out.message };
+    if (!out.ok) {
+      console.error(
+        `[recordings-auto-sync] failed lead=${leadId} reason=${reason}: ${out.message}`,
+      );
+      return { skipped: false, ok: false, message: out.message };
+    }
+
+    created += out.result.stats.created;
+    updated += out.result.stats.updated;
+    matched += out.result.stats.matched;
+
+    if (!meetingBooked || out.result.nextSessionBatchStart == null) break;
+    sessionBatchStart = out.result.nextSessionBatchStart;
   }
 
   console.log(
-    `[recordings-auto-sync] done lead=${leadId} reason=${reason} created=${out.result.stats.created} updated=${out.result.stats.updated} matched=${out.result.stats.matched}`,
+    `[recordings-auto-sync] done lead=${leadId} reason=${reason} created=${created} updated=${updated} matched=${matched}`,
   );
   return { skipped: false, ok: true };
 }
@@ -122,6 +159,56 @@ export function scheduleLeadRecordingSync(leadId: string, reason: string): void 
       }
     })();
   });
+}
+
+/**
+ * Hard rule: når et lead sættes til «Møde booket», skal ALLE lydfiler hentes
+ * fra Telnyx og ligge i Allio (Blob + CALL_RECORDING).
+ */
+export function scheduleMeetingBookedRecordings(leadId: string): void {
+  scheduleLeadRecordingSync(leadId, MEETING_BOOKED_REASON);
+}
+
+export async function syncRecentMeetingBookedRecordings(limit = 15): Promise<{
+  leads: {
+    id: string;
+    companyName: string;
+    meetingBookedAt: string | null;
+    ok: boolean;
+    skipped: boolean;
+    message?: string;
+  }[];
+}> {
+  const take = Math.min(50, Math.max(1, limit));
+  const rows = await prisma.lead.findMany({
+    where: { status: "MEETING_BOOKED" },
+    orderBy: { meetingBookedAt: "desc" },
+    take,
+    select: { id: true, companyName: true, meetingBookedAt: true },
+  });
+
+  const leads: {
+    id: string;
+    companyName: string;
+    meetingBookedAt: string | null;
+    ok: boolean;
+    skipped: boolean;
+    message?: string;
+  }[] = [];
+
+  for (const row of rows) {
+    const result = await syncLeadRecordingsNow(row.id, `${MEETING_BOOKED_REASON}:backfill`);
+    leads.push({
+      id: row.id,
+      companyName: row.companyName,
+      meetingBookedAt: row.meetingBookedAt?.toISOString() ?? null,
+      ok: result.ok,
+      skipped: result.skipped,
+      message: result.message,
+    });
+  }
+
+  return { leads };
 }
 
 export type RecordingSyncCandidate = {
