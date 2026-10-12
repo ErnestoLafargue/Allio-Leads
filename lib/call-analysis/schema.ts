@@ -8,7 +8,7 @@
 import * as z from "zod/v4";
 
 export const PHASES = ["opening", "qualification", "discovery", "solution", "close", "confirmation"] as const;
-export const PITCHES = ["pitch_5", "pitch_6", "pitch_7", "onlinebooq_free", "pitch_nynyny", "other", "unclear"] as const;
+export const PITCHES = ["pitch_5", "pitch_6", "pitch_7", "onlinebooq_free", "pitch_nynyny", "pitch_8", "other", "unclear"] as const;
 export const OBJECTION_CATEGORIES = [
   "has_booking_system",
   "has_agency",

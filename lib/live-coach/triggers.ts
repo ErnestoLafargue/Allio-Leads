@@ -3,6 +3,7 @@
  * og viser straks det bedste svar — uden AI-kald. Svarene kommer fra det aktive «ugens script»
  * (bygget på jeres egne samtaler) med de foretrukne svar som reserve.
  */
+import { ALLIO_PRICE_TEXT } from "@/lib/allio-offer";
 import type { ObjectionCategory } from "@/lib/call-analysis/schema";
 
 export type CoachSignal = "tryghed" | "klarhed" | "okonomi" | "skepsis" | "timing" | "lav_interesse";
@@ -141,8 +142,7 @@ export const DEFAULT_RESPONSES: Partial<Record<ObjectionCategory, string>> = {
     "Fint — vi erstatter ikke bureauet. De skaffer kunderne, vi sørger for, at I får mere ud af dem bagefter.",
   no_time:
     "Det forstår jeg godt. Derfor kommer vi ud til jer og kigger på jeres egne tal — det tager en time, og så ved du, om der er noget at komme efter.",
-  price:
-    "Det kommer an på, hvad der giver mening for jer. Lad os først se potentialet i jeres egne tal — så kan du holde prisen op mod noget konkret.",
+  price: `Vi arbejder kun med klinikker, hvor der er værdi at hente – det viser specialisten ud fra jeres egne data. Er der værdi, koster hele setuppet ${ALLIO_PRICE_TEXT}.`,
   bad_timing:
     "Helt fair. Hvornår passer det bedre? Lad os sætte et konkret tidspunkt nu, så du slipper for at tænke på det.",
   send_email:

@@ -7,17 +7,19 @@
  */
 import type { TranscriptSegment } from "@/lib/call-transcription/segments";
 
-export const ANALYSIS_VERSION = "v1.1";
+import { ALLIO_PRICE_RULE } from "@/lib/allio-offer";
+
+export const ANALYSIS_VERSION = "v1.2";
 /**
  * Versioner med samme skema — siderne viser den nyeste analyse pr. samtale på tværs af dem.
  * v1.1: betterLine bruger aldrig opdigtede navne; korte samtaler holdes korte.
  */
-export const COMPATIBLE_ANALYSIS_VERSIONS = ["v1", "v1.1"];
+export const COMPATIBLE_ANALYSIS_VERSIONS = ["v1", "v1.1", "v1.2"];
 
 export const ANALYSIS_SYSTEM_PROMPT = `Du er en erfaren salgscoach for Allio. Du analyserer optagede telefonsamtaler, hvor en mødebooker ringer til klinikejere for at booke et møde. Du udtrækker FAKTA med ordrette citater — du giver ingen scorer; dem beregner koden bagefter.
 
 ## Om Allio
-Allio hjælper klinikker (skønhedsklinikker, massører, kiropraktorer, neglesaloner m.fl.) med at få flere kunder i stolen og mere omsætning ud af de leads og den kundebase, de allerede har: flere henvendelser konverteret til bookinger, flere genbesøg og højere kundelivstidsværdi, genaktivering af tidligere/inaktive kunder, flere Google-anmeldelser og bedre tracking af, hvor kunder og omsætning vindes eller tabes. Pris: 2.500 kr./md.
+Allio hjælper klinikker (skønhedsklinikker, massører, kiropraktorer, neglesaloner m.fl.) med at få flere kunder i stolen og mere omsætning ud af de leads og den kundebase, de allerede har: flere henvendelser konverteret til bookinger, flere genbesøg og højere kundelivstidsværdi, genaktivering af tidligere/inaktive kunder, flere Google-anmeldelser og bedre tracking af, hvor kunder og omsætning vindes eller tabes. ${ALLIO_PRICE_RULE}
 Målet med opkaldet er et ja til et fysisk eller online møde (45–75 min) med en Allio-specialist, der viser potentialet ud fra klinikkens egne data. Sælgeren sælger ikke produktet i telefonen — han booker mødet.
 
 ## Faser i en god samtale
@@ -33,6 +35,7 @@ Målet med opkaldet er et ja til et fysisk eller online møde (45–75 min) med 
 - pitch_6: GeckoBook; sovende kunder, 50–60 % konvertering, klinik i Køge 38.000 kr., AI-assistent; API-adgang + TeamViewer.
 - pitch_7: "vi er ikke et marketingbureau"; genaktivering (Trine Toft 49 bookinger/49.000 kr., Ann 39.000 kr.) + samlet indbakke/AI; online møde.
 - onlinebooq_free: Onlinebooq-kunder; gratis bookingkalender permanent; tjener på genaktivering; 20 min online.
+- pitch_8: (nyeste) ærlig åbning (mødebooker, ikke et salgsopkald, «I bruger GeckoBook»), øge kundernes livstidsværdi uden at bruge penge på markedsføring, 50–60 % konvertering til faste kunder / ca. 40 % inaktive kunder, spørger hvor længe de har brugt bookingsystemet og hvor mange kunder der ligger i kartoteket, regnestykke 2–5 % af de inaktive → 7–18 ekstra bookinger om måneden, personaliserede SMS'er, booking-frekvens for aktive kunder, specialist viser værdien ud fra klinikkens egne data; pris 2.500 kr./md. for hele setuppet.
 - pitch_nynyny: "loyalitetsmotor", BALA-spørgsmål (tracking af annoncekroner, fastholdelse efter 6–12 mdr., genaktivering, besøgsfrekvens-regnestykke), spand-metaforen, 60 min fysisk møde.
 - other/unclear: ingen passer, eller samtalen er for kort til at afgøre det.
 

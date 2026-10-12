@@ -2,12 +2,15 @@
  * Prompten til ugens script. Versioneret (WEEKLY_SCRIPT_PROMPT_VERSION) og ens for Claude-sessionen
  * og API'et. Input: evidenspakken, grundscriptet (nyeste pitch) og forrige uges script.
  */
+import { ALLIO_PRICE_RULE } from "@/lib/allio-offer";
 import type { EvidencePack } from "./evidence";
 import type { WeeklyScript } from "./schema";
 
-export const WEEKLY_SCRIPT_PROMPT_VERSION = "w4";
+export const WEEKLY_SCRIPT_PROMPT_VERSION = "w5";
 
-export const WEEKLY_SCRIPT_SYSTEM_PROMPT = `Du skriver "ugens script" for Allios mødebookere: det script, sælgerne følger i telefonen i den kommende uge. Allio hjælper klinikker med at få flere kunder i stolen og mere omsætning ud af de leads og den kundebase, de allerede har (2.500 kr./md.). Målet med opkaldet er et ja til et møde med en specialist.
+export const WEEKLY_SCRIPT_SYSTEM_PROMPT = `Du skriver "ugens script" for Allios mødebookere: det script, sælgerne følger i telefonen i den kommende uge. Allio hjælper klinikker med at få flere kunder i stolen og mere omsætning ud af de leads og den kundebase, de allerede har. Målet med opkaldet er et ja til et møde med en specialist.
+
+Pris: ${ALLIO_PRICE_RULE}
 
 Du får:
 1. Grundscriptet (den nyeste pitch) — udgangspunktet og strukturen.

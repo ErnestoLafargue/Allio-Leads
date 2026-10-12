@@ -5,10 +5,11 @@
  * Den må ikke opfinde tal, påstande eller cases og skal bevare evidensen.
  */
 import type Anthropic from "@anthropic-ai/sdk";
+import { ALLIO_PRICE_RULE } from "@/lib/allio-offer";
 import { structuredCall } from "@/lib/anthropic-client";
 import { WeeklyScriptSchema, type WeeklyScript } from "./schema";
 
-export const POLISH_PROMPT_VERSION = "p2";
+export const POLISH_PROMPT_VERSION = "p3";
 
 export const POLISH_SYSTEM_PROMPT = `Du er en erfaren dansk salgstræner og manuskriptforfatter for Allios mødebookere. Du får et udkast til "ugens script", som er sat sammen replik for replik ud fra data. Hver replik er god for sig, men helheden hænger ikke altid sammen. Din opgave er at finpudse det til ÉT sammenhængende manuskript for den perfekte samtale, som en sælger kan læse højt fra start til slut.
 
@@ -24,6 +25,7 @@ Regler — vigtigt:
 - Opfind ALDRIG tal, procenter, kundenavne, cases eller påstande, der ikke står i udkastet. Behold de tal og eksempler, der står der.
 - Behold evidenceCalls, evidence, note, changes og caveats på de replikker og indvendinger, de hører til. Slår du replikker sammen, så slå deres evidenceCalls sammen (højst 3).
 - Pladsholdere som [navn], [dit navn] og [system] bevares. Sælgerens replikker nævner ALDRIG et bestemt bookingsystem eller firma (fx Gecko, Planway, Onlinebooq) — skriv [system]. Kun kundens svar må nævne et konkret system.
+- Pris: ${ALLIO_PRICE_RULE}
 - Alt på dansk. Svar kun med ét JSON-objekt, der følger skemaet.`;
 
 export async function polishWeeklyScript(

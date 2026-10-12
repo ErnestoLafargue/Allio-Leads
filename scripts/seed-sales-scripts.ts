@@ -16,6 +16,7 @@ const SEEDS = [
   { file: "pitch-7.md", name: "Pitch 7" },
   { file: "onlinebooq-booking-free.md", name: "Onlinebooq → Allio Booking Free" },
   { file: "pitch-nynyny.md", name: "Pitch NyNyNy" },
+  { file: "pitch-8.md", name: "Pitch 8" },
 ];
 
 async function main() {

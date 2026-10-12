@@ -41,6 +41,7 @@ export const PITCH_LABELS: Record<string, string> = {
   pitch_7: "Pitch 7",
   onlinebooq_free: "Onlinebooq → Booking Free",
   pitch_nynyny: "Pitch NyNyNy",
+  pitch_8: "Pitch 8",
   other: "Anden",
   unclear: "Uklar",
 };

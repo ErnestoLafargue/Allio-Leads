@@ -10,6 +10,7 @@ i script-biblioteket. Teksten er gengivet præcis som leveret (26.–27. septemb
 | [pitch-6.md](pitch-6.md) | Pitch 6 | GeckoBook. Sovende kunder, social proof (Køge 38.000 kr.), AI-assistent. API-adgang + TeamViewer før mødet. |
 | [pitch-7.md](pitch-7.md) | Pitch 7 | Allio generelt (ikke kun GeckoBook). Genaktivering (Trine Toft 49.000 kr., Ann 39.000 kr.) + samlet indbakke/AI. Online møde. |
 | [onlinebooq-booking-free.md](onlinebooq-booking-free.md) | Onlinebooq → Allio Booking Free | Gratis bookingkalender permanent; tjener på genaktivering. Mange indvendinger med svar. 20 min online. |
+| [pitch-8.md](pitch-8.md) | Pitch 8 (nyeste) | Ærlig åbning (GeckoBook). Kundelivstidsværdi uden markedsføring: ~40 % inaktive kunder, 2–5 % genaktivering → 7–18 ekstra bookinger/md. via personaliserede SMS'er + booking-frekvens. Specialist viser værdien på egne data. **Pris: 2.500 kr./md. for hele setuppet.** |
 | [pitch-nynyny.md](pitch-nynyny.md) | Pitch NyNyNy | «Loyalitetsmotor». BALA-behovsafdækning (tracking, fastholdelse, genaktivering, besøgsfrekvens), spand-metaforen. 60 min fysisk møde. |
 
 Fælles skelet: åbning (ærlighed: «jeg er mødebooker … ikke et salgsopkald … to minutter — lyder det fair?») →

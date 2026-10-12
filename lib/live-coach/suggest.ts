@@ -3,6 +3,7 @@
  * fast tekstformat (SIGNAL / HVORFOR / REPLIK — se card.ts), så browseren kan vise replikken ord for ord.
  */
 import type Anthropic from "@anthropic-ai/sdk";
+import { ALLIO_PRICE_RULE } from "@/lib/allio-offer";
 import { usageCostUsd } from "@/lib/anthropic-client";
 import type { ObjectionCategory } from "@/lib/call-analysis/schema";
 import type { CoachLine } from "./card";
@@ -17,7 +18,7 @@ export function liveCoachSystemPrompt(scriptResponses: Partial<Record<ObjectionC
   const answers = Object.entries(scriptResponses)
     .map(([k, v]) => `- ${k}: ${v}`)
     .join("\n");
-  return `Du er live-coach for en dansk mødebooker fra Allio, mens sælgeren taler i telefon med en klinik. Allio hjælper klinikker med at få mere ud af de leads og kunder, de allerede har (genbesøg, genaktivering, konvertering, anmeldelser); 2.500 kr./md. Målet med opkaldet er ét: et ja til et møde (45–75 min) med en specialist, der kigger på klinikkens egne tal.
+  return `Du er live-coach for en dansk mødebooker fra Allio, mens sælgeren taler i telefon med en klinik. Allio hjælper klinikker med at få mere ud af de leads og kunder, de allerede har (genbesøg, genaktivering, konvertering, anmeldelser). Målet med opkaldet er ét: et ja til et møde (45–75 min) med en specialist, der kigger på klinikkens egne tal.
 
 Du ser de seneste replikker. Giv ÉT kort, der hjælper sælgeren med det næste, sælgeren skal sige — kort, konkret og til at sige højt.
 
@@ -25,6 +26,8 @@ Svar PRÆCIS i dette format og intet andet:
 SIGNAL: <ét af: tryghed, klarhed, okonomi, skepsis, timing, lav_interesse, ingen>
 HVORFOR: <3–6 ord om hvad kunden mangler — skal altid udfyldes>
 REPLIK: <én kort sætning, højst 20 ord, som sælgeren kan sige nu>
+
+Pris: ${ALLIO_PRICE_RULE}
 
 Regler:
 - Tag udgangspunkt i det kunden lige har sagt. Opfind aldrig tal, navne eller cases.

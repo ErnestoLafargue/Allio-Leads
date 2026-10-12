@@ -12,8 +12,8 @@ import { POLISH_PROMPT_VERSION, polishWeeklyScript } from "./polish";
 import { isoWeekKey, publishWeeklyScript, sanitizeWeeklyScript } from "./publish";
 import { WeeklyScriptSchema, type WeeklyScript } from "./schema";
 
-/** Grundscriptet: den nyeste pitch (docs/salgsscripts/pitch-nynyny.md). */
-export const BASE_SCRIPT = { name: "Pitch NyNyNy", file: "docs/salgsscripts/pitch-nynyny.md" };
+/** Grundscriptet: den nyeste pitch (docs/salgsscripts/pitch-8.md). */
+export const BASE_SCRIPT = { name: "Pitch 8", file: "docs/salgsscripts/pitch-8.md" };
 
 export async function buildWeeklyScriptInput(
   now = new Date(),
