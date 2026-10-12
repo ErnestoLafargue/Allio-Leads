@@ -1,0 +1,21 @@
+# systemd-service for workeren (VPS). Installeres med (som root, efter godkendelse):
+#   cp deploy/allio-scripts-worker.service /etc/systemd/system/
+#   systemctl daemon-reload && systemctl enable --now allio-scripts-worker
+# Log:  journalctl -u allio-scripts-worker -f
+[Unit]
+Description=Allio Scripts & Træning worker (transskribering og analyse af nye samtaler)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+WorkingDirectory=/root/Allio-Leads
+# Test: WORKER_ENV_FILE=.env.branch (Neon-testbranchen). Produktion: .env.worker.
+Environment=WORKER_ENV_FILE=.env.worker
+Environment=WORKER_INTERVAL_MIN=10
+ExecStart=/root/Allio-Leads/deploy/scripts-worker.sh
+Restart=always
+RestartSec=60
+
+[Install]
+WantedBy=multi-user.target

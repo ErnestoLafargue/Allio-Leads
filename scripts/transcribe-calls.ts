@@ -5,7 +5,7 @@
  *
  * Brug:
  *   set -a; . ./.env.local; . ./.env.branch; set +a
- *   npx tsx --tsconfig tsconfig.json scripts/transcribe-calls.ts [--limit 20] [--concurrency 3] [--retry-failed]
+ *   npx tsx --tsconfig tsconfig.json scripts/transcribe-calls.ts [--limit 20] [--concurrency 3] [--retry-failed] [--min-seconds 45]
  *
  * Budget: SONIOX_BUDGET_USD (standard 5) inkl. SONIOX_PRIOR_SPEND_USD (forbrug uden for DB, fx test).
  */
@@ -35,13 +35,15 @@ async function main() {
   const priorSpend = Number(process.env.SONIOX_PRIOR_SPEND_USD ?? 0.15);
   const limit = Number(arg("--limit") ?? Infinity);
   const concurrency = Number(arg("--concurrency") ?? 3);
+  /** Kun samtaler af mindst denne længde (fx 45 s, så åbningen kommer med). */
+  const minSeconds = Number(arg("--min-seconds") ?? 0);
   const statuses = process.argv.includes("--retry-failed") ? ["NEW", "FAILED"] : ["NEW"];
 
   const spent = await prisma.callTranscript.aggregate({ _sum: { costUsd: true } });
   let spend = priorSpend + (spent._sum.costUsd ?? 0);
   const todo = (
     await prisma.callRecording.findMany({
-      where: { pipelineStatus: { in: statuses } },
+      where: { pipelineStatus: { in: statuses }, durationSeconds: { gte: minSeconds } },
       select: { id: true, durationSeconds: true, outcomeStatus: true, channels: true },
     })
   )

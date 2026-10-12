@@ -7,10 +7,13 @@
  *   4. Ugens script: genereres og udgives automatisk, når der ikke findes et for indeværende uge.
  * Forbrugsloft pr. måned for Soniox og Claude; fejl markeres FAILED (prøv igen med --retry-failed).
  *
- * Køres manuelt (ingen systemd/cron endnu):
+ * Kun samtaler på mindst WORKER_MIN_SECONDS (standard 45 s, så åbningen kommer med) transskriberes.
+ *
+ * Fast drift: deploy/scripts-worker.sh + deploy/allio-scripts-worker.service (systemd, genstarter selv).
+ * Manuelt:
  *   set -a; . ./.env.local; . ./.env.branch; set +a
  *   npx tsx --tsconfig tsconfig.json scripts/worker.ts --once [--analyze-limit 5] [--analyze-ids a,b] [--no-weekly]
- * Uden --once kører den i løkke med --interval-min (standard 5).
+ * Uden --once kører den i løkke med --interval-min (standard 5); en fejlet runde stopper ikke løkken.
  */
 import { assertExpectedDatabase } from "@/lib/db-guard";
 import { prisma } from "@/lib/prisma";
@@ -60,6 +63,7 @@ async function runOnce(opts: {
   sonioxBudget: number;
   analyzeLimit: number;
   transcribeLimit: number;
+  minSeconds: number;
   analyzeIds: string[] | null;
   weekly: boolean;
 }) {
@@ -72,7 +76,7 @@ async function runOnce(opts: {
 
     const statuses = has("--retry-failed") ? ["NEW", "FAILED"] : ["NEW"];
     const toTranscribe = await prisma.callRecording.findMany({
-      where: { pipelineStatus: { in: statuses }, transcript: null },
+      where: { pipelineStatus: { in: statuses }, transcript: null, durationSeconds: { gte: opts.minSeconds } },
       orderBy: { startedAt: "desc" },
       take: opts.transcribeLimit,
       select: { id: true },
@@ -140,13 +144,18 @@ async function main() {
     sonioxBudget: Number(process.env.SONIOX_MONTHLY_BUDGET_USD ?? 5),
     analyzeLimit: Number(arg("--analyze-limit") ?? 5),
     transcribeLimit: Number(arg("--transcribe-limit") ?? 20),
+    minSeconds: Number(process.env.WORKER_MIN_SECONDS ?? 45),
     analyzeIds: arg("--analyze-ids")?.split(",").filter(Boolean) ?? null,
     weekly: !has("--no-weekly"),
   };
   const intervalMs = Number(arg("--interval-min") ?? 5) * 60 * 1000;
   for (;;) {
-    await runOnce(opts);
-    if (has("--once")) return;
+    if (has("--once")) return runOnce(opts);
+    try {
+      await runOnce(opts);
+    } catch (err) {
+      log(`Runden fejlede (prøver igen om ${intervalMs / 60000} min): ${err instanceof Error ? err.message : String(err)}`);
+    }
     await new Promise((r) => setTimeout(r, intervalMs));
   }
 }
