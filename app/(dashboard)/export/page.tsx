@@ -169,16 +169,17 @@ export default function ExportPage() {
       <div>
         <h1 className="text-xl font-semibold text-stone-900">Export</h1>
         <p className="mt-1 text-sm text-stone-600">
-          Træk leads ud filtreret på faste udfald. Kun de valgte udfald kommer med — med alle
-          datafelter (CVR, noter, kontakt, mødeudfald m.m.).
+          Træk leads ud efter historisk udfald — alle der mindst én gang har fået det valgte udfald
+          gemt, også hvis de senere er flyttet til genbooking eller har et andet nuværende udfald.
         </p>
       </div>
 
       <section className="space-y-4 rounded-lg border border-stone-200 bg-white p-6 shadow-sm">
         <div>
-          <h3 className="text-sm font-semibold text-stone-900">Udfald</h3>
+          <h3 className="text-sm font-semibold text-stone-900">Udfald (historisk)</h3>
           <p className="mt-1 text-xs text-stone-500">
-            Vælg mindst ét. Soft udfald (voicemail, ikke hjemme, callback) kan ikke eksporteres her.
+            Vælg mindst ét. Matcher udfaldsloggen — ikke kun nuværende status. Soft udfald
+            (voicemail, ikke hjemme, callback) kan ikke eksporteres her.
           </p>
           <div className="mt-3 flex flex-wrap gap-3">
             {EXPORTABLE_OUTCOME_OPTIONS.map((o) => {
@@ -206,7 +207,9 @@ export default function ExportPage() {
           </div>
           {selectedStatuses.includes("MEETING_BOOKED") && (
             <p className="mt-2 text-xs text-stone-500">
-              Ved møde booket medfølger også mødeudfald (afventende, salg, tabt, genbooking m.m.).
+              «Møde booket» finder alle der har sagt ja til møde mindst én gang — også hvis de
+              nu ligger under ikke interesseret, ukvalificeret eller genbooking. Mødeudfald
+              (afventende, salg, tabt, genbooking m.m.) medfølger.
             </p>
           )}
         </div>
@@ -214,7 +217,8 @@ export default function ExportPage() {
         <div>
           <h3 className="text-sm font-semibold text-stone-900">Kampagne (valgfri)</h3>
           <p className="mt-1 text-xs text-stone-500">
-            Lad være tom for alle kampagner. Vælg én eller flere for at snævre yderligere.
+            Lad være tom for alle kampagner. Matcher nuværende kampagne eller besøgshistorik på
+            kampagnen (så leads der er flyttet til kommende møder stadig findes).
           </p>
           <div className="mt-3 max-h-48 space-y-1 overflow-y-auto rounded-md border border-stone-200 p-2">
             {campaigns.length === 0 ? (

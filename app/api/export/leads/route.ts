@@ -53,7 +53,7 @@ export async function GET(req: Request) {
   }
 
   const leads = await fetchLeadsByOutcome(filters);
-  const { headers, rows } = buildOutcomeExportRows(leads);
+  const { headers, rows } = buildOutcomeExportRows(leads, filters.statuses);
   const base = outcomeExportFilenameBase(filters.statuses);
 
   if (format === "csv") {

@@ -98,28 +98,46 @@ export type OutcomeExportFilters = {
   to?: string | null;
 };
 
+/**
+ * Historisk filter: lead har mindst én gang fået ét af de valgte udfald
+ * (LeadOutcomeLog) — også hvis nuværende status er noget andet (fx genbook →
+ * ikke interesseret). Dato gælder for den historiske udfaldslog.
+ * Kampagne: nuværende kampagne ELLER besøgshistorik på kampagnen (leads flyttes
+ * ofte til kommende møder / genbooking).
+ */
 export function buildOutcomeExportWhere(filters: OutcomeExportFilters): Prisma.LeadWhereInput {
-  const where: Prisma.LeadWhereInput = {
-    status: { in: [...filters.statuses] },
-  };
-  if (filters.campaignIds && filters.campaignIds.length > 0) {
-    where.campaignId = { in: filters.campaignIds };
-  }
   const from = parseDayBound(filters.from ?? null, false);
   const to = parseDayBound(filters.to ?? null, true);
+
+  const outcomeLogSome: Prisma.LeadOutcomeLogWhereInput = {
+    status: { in: [...filters.statuses] },
+  };
   if (from || to) {
-    where.lastOutcomeAt = {
+    outcomeLogSome.createdAt = {
       ...(from ? { gte: from } : {}),
       ...(to ? { lte: to } : {}),
     };
   }
+
+  const where: Prisma.LeadWhereInput = {
+    outcomeLogs: { some: outcomeLogSome },
+  };
+
+  if (filters.campaignIds && filters.campaignIds.length > 0) {
+    const ids = filters.campaignIds;
+    where.OR = [
+      { campaignId: { in: ids } },
+      { visitHistory: { some: { campaignId: { in: ids } } } },
+    ];
+  }
+
   return where;
 }
 
 type UserLabel = Pick<User, "name" | "username">;
 
 export type LeadForOutcomeExport = Lead & {
-  campaign: { name: string };
+  campaign: { name: string } | null;
   bookedByUser: UserLabel | null;
   assignedUser: UserLabel | null;
   outcomeLogs: {
@@ -163,11 +181,12 @@ const FIXED_CUSTOM_FIELDS = [
   ...DEFAULT_CVR_EXTENSION_FIELDS,
 ];
 
-/** Faste kolonner — Noter tidligt; Mødeudfald med ved møde-booket leads. */
+/** Faste kolonner — Noter tidligt; historisk udfald + nuværende status. */
 export const OUTCOME_EXPORT_HEADERS: string[] = [
   "Lead ID",
-  "Kampagne",
-  "Udfald",
+  "Kampagne (nuværende)",
+  "Historisk udfald",
+  "Nuværende udfald",
   "CVR",
   "Virksomhedsnavn",
   "Noter",
@@ -179,8 +198,8 @@ export const OUTCOME_EXPORT_HEADERS: string[] = [
   "By",
   "Branche",
   ...FIXED_CUSTOM_FIELDS.map((f) => f.label),
-  "Udfald sat af",
-  "Udfaldsdato",
+  "Historisk udfald sat af",
+  "Historisk udfaldsdato",
   "Møde booket den",
   "Møde planlagt",
   "Møde booket af",
@@ -191,17 +210,34 @@ export const OUTCOME_EXPORT_HEADERS: string[] = [
   "Mødekontakt telefon (privat)",
 ];
 
-export function mapLeadToOutcomeExportRow(lead: LeadForOutcomeExport): Record<string, string> {
+export function mapLeadToOutcomeExportRow(
+  lead: LeadForOutcomeExport,
+  selectedStatuses: ExportableOutcomeStatus[] = [...EXPORTABLE_OUTCOME_STATUSES],
+): Record<string, string> {
   const custom = parseCustomFields(lead.customFields);
-  const matchingLog =
-    lead.outcomeLogs.find((l) => l.status === lead.status && l.user) ??
-    lead.outcomeLogs.find((l) => l.status === lead.status) ??
-    lead.outcomeLogs[0];
+  const selectedSet = new Set<string>(selectedStatuses);
+
+  const matchingLogs = lead.outcomeLogs.filter((l) => selectedSet.has(l.status));
+  const primaryLog =
+    matchingLogs.find((l) => l.user) ?? matchingLogs[0] ?? null;
+
+  const historicalLabels = [
+    ...new Set(matchingLogs.map((l) => statusLabel(l.status))),
+  ].join(", ");
+
+  const everMeetingBooked =
+    selectedSet.has("MEETING_BOOKED") &&
+    (lead.outcomeLogs.some((l) => l.status === "MEETING_BOOKED") ||
+      Boolean(lead.meetingBookedAt) ||
+      lead.status === "MEETING_BOOKED");
+
+  const meetingBookedLog = lead.outcomeLogs.find((l) => l.status === "MEETING_BOOKED");
 
   const row: Record<string, string> = {
     "Lead ID": lead.id,
-    Kampagne: lead.campaign?.name ?? "",
-    Udfald: statusLabel(lead.status),
+    "Kampagne (nuværende)": lead.campaign?.name ?? "",
+    "Historisk udfald": historicalLabels || (primaryLog ? statusLabel(primaryLog.status) : ""),
+    "Nuværende udfald": statusLabel(lead.status),
     CVR: lead.cvr ?? "",
     Virksomhedsnavn: lead.companyName ?? "",
     Noter: lead.notes ?? "",
@@ -212,16 +248,15 @@ export function mapLeadToOutcomeExportRow(lead: LeadForOutcomeExport): Record<st
     Postnr: lead.postalCode ?? "",
     By: lead.city ?? "",
     Branche: lead.industry ?? "",
-    "Udfald sat af": userLabel(matchingLog?.user),
-    Udfaldsdato: matchingLog ? fmtDa(matchingLog.createdAt) : fmtDa(lead.lastOutcomeAt),
-    "Møde booket den": fmtDa(lead.meetingBookedAt),
+    "Historisk udfald sat af": userLabel(primaryLog?.user),
+    "Historisk udfaldsdato": primaryLog
+      ? fmtDa(primaryLog.createdAt)
+      : fmtDa(lead.lastOutcomeAt),
+    "Møde booket den": fmtDa(lead.meetingBookedAt) || fmtDa(meetingBookedLog?.createdAt),
     "Møde planlagt": fmtDa(lead.meetingScheduledFor),
     "Møde booket af": userLabel(lead.bookedByUser),
     Mødeansvarlig: userLabel(lead.assignedUser),
-    Mødeudfald:
-      lead.status === "MEETING_BOOKED"
-        ? meetingOutcomeLabel(lead.meetingOutcomeStatus)
-        : "",
+    Mødeudfald: everMeetingBooked ? meetingOutcomeLabel(lead.meetingOutcomeStatus) : "",
     "Mødekontakt navn": lead.meetingContactName ?? "",
     "Mødekontakt email": lead.meetingContactEmail ?? "",
     "Mødekontakt telefon (privat)": lead.meetingContactPhonePrivate ?? "",
@@ -234,30 +269,36 @@ export function mapLeadToOutcomeExportRow(lead: LeadForOutcomeExport): Record<st
   return row;
 }
 
-export function buildOutcomeExportRows(leads: LeadForOutcomeExport[]): {
+export function buildOutcomeExportRows(
+  leads: LeadForOutcomeExport[],
+  selectedStatuses: ExportableOutcomeStatus[],
+): {
   headers: string[];
   rows: Record<string, string>[];
 } {
   return {
     headers: OUTCOME_EXPORT_HEADERS,
-    rows: leads.map(mapLeadToOutcomeExportRow),
+    rows: leads.map((l) => mapLeadToOutcomeExportRow(l, selectedStatuses)),
   };
 }
 
-const leadInclude = {
-  campaign: { select: { name: true } },
-  bookedByUser: { select: { name: true, username: true } },
-  assignedUser: { select: { name: true, username: true } },
-  outcomeLogs: {
-    orderBy: { createdAt: "desc" as const },
-    take: 10,
-    select: {
-      createdAt: true,
-      status: true,
-      user: { select: { name: true, username: true } },
+function outcomeLogInclude(statuses: ExportableOutcomeStatus[]) {
+  return {
+    campaign: { select: { name: true } },
+    bookedByUser: { select: { name: true, username: true } },
+    assignedUser: { select: { name: true, username: true } },
+    outcomeLogs: {
+      where: { status: { in: [...statuses] } },
+      orderBy: { createdAt: "desc" as const },
+      take: 20,
+      select: {
+        createdAt: true,
+        status: true,
+        user: { select: { name: true, username: true } },
+      },
     },
-  },
-} satisfies Prisma.LeadInclude;
+  } satisfies Prisma.LeadInclude;
+}
 
 export async function countLeadsByOutcome(filters: OutcomeExportFilters): Promise<number> {
   return prisma.lead.count({ where: buildOutcomeExportWhere(filters) });
@@ -268,8 +309,8 @@ export async function fetchLeadsByOutcome(
 ): Promise<LeadForOutcomeExport[]> {
   return prisma.lead.findMany({
     where: buildOutcomeExportWhere(filters),
-    orderBy: [{ lastOutcomeAt: "desc" }, { updatedAt: "desc" }],
-    include: leadInclude,
+    orderBy: [{ updatedAt: "desc" }],
+    include: outcomeLogInclude(filters.statuses),
   }) as Promise<LeadForOutcomeExport[]>;
 }
 
