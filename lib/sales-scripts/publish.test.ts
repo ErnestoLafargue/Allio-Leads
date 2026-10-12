@@ -8,7 +8,7 @@ const script = {
     {
       key: "opening",
       title: "Åbning",
-      lines: [{ text: "Hej, det er Emil fra Allio.", note: null, evidenceCalls: ["kendt", "opdigtet"] }],
+      lines: [{ text: "Hej, det er Emil fra Allio.", note: null, customerReply: null, evidenceCalls: ["kendt", "opdigtet"] }],
       evidence: "12 samtaler.",
     },
   ],

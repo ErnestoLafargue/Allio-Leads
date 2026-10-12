@@ -17,6 +17,10 @@ export const WeeklyScriptSchema = z.object({
       lines: z.array(
         z.object({
           text: z.string().describe("Replikken, som sælgeren siger den"),
+          customerReply: z
+            .string()
+            .nullable()
+            .describe("Kundens typiske svar lige efter replikken (kort, som sagt i telefonen), ellers null"),
           note: z.string().nullable().describe("Kort vejledning: hvornår og hvordan, ellers null"),
           evidenceCalls: EvidenceCalls,
         }),
@@ -28,7 +32,7 @@ export const WeeklyScriptSchema = z.object({
     z.object({
       category: z.enum(OBJECTION_CATEGORIES),
       customerSays: z.string(),
-      response: z.string(),
+      response: z.string().describe("Det bedste svar: højst 2 korte sætninger, der slutter med et konkret spørgsmål eller alternativt valg"),
       evidence: z.string(),
       evidenceCalls: EvidenceCalls,
     }),

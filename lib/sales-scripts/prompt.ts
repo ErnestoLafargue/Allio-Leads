@@ -5,7 +5,7 @@
 import type { EvidencePack } from "./evidence";
 import type { WeeklyScript } from "./schema";
 
-export const WEEKLY_SCRIPT_PROMPT_VERSION = "w2";
+export const WEEKLY_SCRIPT_PROMPT_VERSION = "w3";
 
 export const WEEKLY_SCRIPT_SYSTEM_PROMPT = `Du skriver "ugens script" for Allios mødebookere: det script, sælgerne følger i telefonen i den kommende uge. Allio hjælper klinikker med at få flere kunder i stolen og mere omsætning ud af de leads og den kundebase, de allerede har (2.500 kr./md.). Målet med opkaldet er et ja til et møde med en specialist.
 
@@ -19,7 +19,9 @@ Regler:
 - Grupper med færre samtaler end minGroup er for tynde til at konkludere på — nævn dem i caveats i stedet for at ændre scriptet på baggrund af dem.
 - Opfind aldrig tal, kundenavne eller cases. Brug kun dem, der står i grundscriptet eller evidenspakken.
 - evidenceCalls må kun indeholde samtale-id'er, der står i evidenspakken (højst 3 pr. punkt).
-- sections dækker faserne opening, qualification, discovery, solution, close og confirmation i den rækkefølge. Replikkerne er korte, naturlige og til at sige højt.
+- sections dækker faserne opening, qualification, discovery, solution, close og confirmation i den rækkefølge. Tilsammen er de ÉT sammenhængende manuskript for den perfekte samtale, som sælgeren kan læse fra en ende af: 2–4 replikker pr. fase, korte, naturlige og til at sige højt.
+- Giv hver replik kundens typiske svar (customerReply) — kort og realistisk, som kunderne faktisk svarer i samtalerne — så manuskriptet læses som en samtale. Brug null, hvor kunden ikke svarer.
+- Hold note og evidence korte (én sætning). Indvendingernes svar er højst 2 korte sætninger.
 - objections giver det bedste svar på de indvendinger, der faktisk forekommer — tag udgangspunkt i de stærkeste svar fra samtaler, der endte med møde.
 - Titlen nævner ugen fra input (fx «uge 39») — gæt ikke selv ugenummeret.
 - Alt skrives på dansk.
