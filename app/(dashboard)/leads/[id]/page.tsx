@@ -37,6 +37,7 @@ import { CampaignVoipStrip } from "@/app/components/campaign-voip-strip";
 import { VOIP_API_CONTEXT } from "@/lib/voip-api-context";
 import { useActivityRecordingPoll } from "@/lib/use-activity-recording-poll";
 import { LEAD_NAV_FALLBACK_PATH, parseLeadNavigation } from "@/lib/lead-navigation";
+import { canScheduleCallbackFromLead } from "@/lib/lead-callback-schedule";
 
 type Lead = {
   id: string;
@@ -508,7 +509,7 @@ function LeadDetailInner() {
     assignedUserId: string;
     scheduledForISO: string;
   }) {
-    if (!lead || (lead.status !== "NEW" && lead.status !== "CALLBACK_SCHEDULED")) return;
+    if (!lead || !canScheduleCallbackFromLead(lead)) return;
     setSaving(true);
     setCallbackSubmitError(null);
     setError(null);
@@ -668,10 +669,7 @@ function LeadDetailInner() {
     );
   }
 
-  const canScheduleCallback =
-    lead.status === "NEW" ||
-    (lead.status === "CALLBACK_SCHEDULED" &&
-      String(lead.callbackStatus ?? "PENDING").trim().toUpperCase() === "PENDING");
+  const canScheduleCallback = canScheduleCallbackFromLead(lead);
   const showNextForMeeting = status !== "MEETING_BOOKED";
 
   return (

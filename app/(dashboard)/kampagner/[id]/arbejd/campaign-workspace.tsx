@@ -42,6 +42,7 @@ import { PowerDialerPhone, type PowerPhoneState } from "@/app/components/power-d
 import { useActivityRecordingPoll } from "@/lib/use-activity-recording-poll";
 import { scrollWorkspaceToTop } from "@/lib/scroll-workspace-to-top";
 import { KNOWN_LEAD_SOURCES, parseLeadNavigation } from "@/lib/lead-navigation";
+import { canScheduleCallbackFromLead } from "@/lib/lead-callback-schedule";
 import { DIALER_AUTO_PAUSED_KEY, DIALER_START_PATH, markDialerPauseExit } from "@/lib/dialer-pause-exit";
 import {
   dialNumberMenu,
@@ -1334,7 +1335,7 @@ export function CampaignWorkspace({
     assignedUserId: string;
     scheduledForISO: string;
   }) {
-    if (!activeLead || (activeLead.status !== "NEW" && activeLead.status !== "CALLBACK_SCHEDULED")) return;
+    if (!activeLead || !canScheduleCallbackFromLead(activeLead)) return;
     setSaving(true);
     setCallbackSubmitError(null);
     setError(null);
@@ -1656,11 +1657,7 @@ export function CampaignWorkspace({
     String(current.meetingOutcomeStatus ?? "").trim().toUpperCase() === MEETING_OUTCOME_REBOOK &&
     Boolean(current.meetingScheduledFor);
 
-  const canScheduleCallback =
-    current != null &&
-    (current.status === "NEW" ||
-      (current.status === "CALLBACK_SCHEDULED" &&
-        String(current.callbackStatus ?? "PENDING").trim().toUpperCase() === "PENDING"));
+  const canScheduleCallback = current != null && canScheduleCallbackFromLead(current);
 
   const showNextForMeeting = status !== "MEETING_BOOKED";
   const nextLabel = closeAfterSave
