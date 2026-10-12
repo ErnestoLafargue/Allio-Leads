@@ -4,6 +4,8 @@
  * Triggers (møde booket / samtale ≥ 60 s) kalder `scheduleLeadRecordingSync`,
  * som venter kort (så Telnyx når at gemme filen) og kører per-lead backfill.
  * Hard rule: «Møde booket» henter ALLE optagelser (ingen skip, ingen 14-dages grænse).
+ * Hard rule: samtaler ≥ 60 s gemmes altid (uanset udfald) — skippes ikke fordi leadet
+ * allerede har en anden lydfil. Standard-retention er 12 måneder.
  * Cron bruger `findLeadsNeedingRecordingSync` til at genfinde gamle mangler.
  */
 import { after } from "next/server";
@@ -27,8 +29,16 @@ export function isMeetingBookedRecordingReason(reason: string): boolean {
   );
 }
 
+export function isLongCallRecordingReason(reason: string): boolean {
+  return (
+    reason === "hangup_long_call" ||
+    reason === "webrtc_long_call" ||
+    reason === "cron:long_call"
+  );
+}
+
 export function shouldSkipIfLeadAlreadyHasRecording(reason: string): boolean {
-  return !isMeetingBookedRecordingReason(reason);
+  return !isMeetingBookedRecordingReason(reason) && !isLongCallRecordingReason(reason);
 }
 
 export function recordingSyncFromIso(reason: string, nowMs = Date.now()): string | null {
@@ -77,6 +87,7 @@ export async function leadHasPlayableRecording(leadId: string): Promise<boolean>
 /**
  * Kør per-lead Telnyx-backfill (uden delay).
  * Ved møde booket hentes ALLE optagelser (ingen skip, ingen 14-dages grænse).
+ * Samtaler ≥ 60 s gemmes altid uanset udfald (ingen skip fordi leadet har en anden fil).
  * Øvrige triggers skipper hvis leadet allerede har en afspilbar fil.
  */
 export async function syncLeadRecordingsNow(
@@ -90,13 +101,15 @@ export async function syncLeadRecordingsNow(
   }
 
   const meetingBooked = isMeetingBookedRecordingReason(reason);
-  if (!meetingBooked && (await leadHasPlayableRecording(leadId))) {
+  const longCall = isLongCallRecordingReason(reason);
+  const forcePersist = meetingBooked || longCall;
+  if (!forcePersist && (await leadHasPlayableRecording(leadId))) {
     console.log(`[recordings-auto-sync] skip lead=${leadId} reason=${reason}: already_has_recording`);
     return { skipped: true, ok: true, message: "already_has_recording" };
   }
 
   const fromIso = recordingSyncFromIso(reason);
-  console.log(`[recordings-auto-sync] sync lead=${leadId} reason=${reason} forceAll=${meetingBooked}`);
+  console.log(`[recordings-auto-sync] sync lead=${leadId} reason=${reason} forceAll=${forcePersist}`);
 
   let sessionBatchStart = 0;
   let created = 0;
@@ -111,9 +124,9 @@ export async function syncLeadRecordingsNow(
       toIso: null,
       dryRun: false,
       copyToBlob: true,
-      maxSessionQueries: meetingBooked ? 40 : 25,
+      maxSessionQueries: forcePersist ? 40 : 25,
       sessionBatchStart,
-      maxPhonePages: meetingBooked ? 8 : 4,
+      maxPhonePages: forcePersist ? 8 : 4,
       includePhoneFilters: sessionBatchStart === 0,
     });
 
@@ -128,7 +141,7 @@ export async function syncLeadRecordingsNow(
     updated += out.result.stats.updated;
     matched += out.result.stats.matched;
 
-    if (!meetingBooked || out.result.nextSessionBatchStart == null) break;
+    if (!forcePersist || out.result.nextSessionBatchStart == null) break;
     sessionBatchStart = out.result.nextSessionBatchStart;
   }
 
@@ -249,6 +262,7 @@ export async function findLeadsNeedingRecordingSync(params?: {
       },
       select: {
         leadId: true,
+        callControlId: true,
         endedAt: true,
         bridgedAt: true,
         answeredAt: true,
@@ -258,6 +272,34 @@ export async function findLeadsNeedingRecordingSync(params?: {
       take: 200,
     }),
   ]);
+
+  const qualifyingLongCalls = longCalls.filter((call) => {
+    if (!call.leadId) return false;
+    return meetsAutoSyncTalkThreshold(
+      talkSecondsFromCallTimestamps({
+        endedAt: call.endedAt,
+        bridgedAt: call.bridgedAt,
+        answeredAt: call.answeredAt,
+      }),
+    );
+  });
+
+  const longCallLegIds = qualifyingLongCalls.map((c) => c.callControlId).filter(Boolean);
+  const savedLongCallLegs =
+    longCallLegIds.length > 0
+      ? await prisma.leadActivityEvent.findMany({
+          where: {
+            kind: LEAD_ACTIVITY_KIND.CALL_RECORDING,
+            telnyxCallLegId: { in: longCallLegIds },
+            recordingUrl: { not: null },
+            NOT: { recordingUrl: "" },
+          },
+          select: { leadId: true, telnyxCallLegId: true },
+        })
+      : [];
+  const savedLongCallKeys = new Set(
+    savedLongCallLegs.map((r) => `${r.leadId}:${r.telnyxCallLegId ?? ""}`),
+  );
 
   const byLead = new Map<string, RecordingSyncCandidate>();
 
@@ -269,27 +311,16 @@ export async function findLeadsNeedingRecordingSync(params?: {
     });
   }
 
-  for (const call of longCalls) {
+  for (const call of qualifyingLongCalls) {
     if (!call.leadId) continue;
-    const talk = talkSecondsFromCallTimestamps({
-      endedAt: call.endedAt,
-      bridgedAt: call.bridgedAt,
-      answeredAt: call.answeredAt,
+    const alreadySaved = savedLongCallKeys.has(`${call.leadId}:${call.callControlId}`);
+    if (alreadySaved) continue;
+    if (byLead.has(call.leadId)) continue;
+    byLead.set(call.leadId, {
+      leadId: call.leadId,
+      sortAt: call.endedAt?.getTime() ?? 0,
+      source: "long_call",
     });
-    if (!meetsAutoSyncTalkThreshold(talk)) continue;
-    // Mangler URL på loggen, eller lead mangler evt. CALL_RECORDING — begge går videre
-    // til hasPlayable-check nedenfor. Long-call uden recordingUrl prioriteres.
-    const sortAt = call.endedAt?.getTime() ?? 0;
-    const existing = byLead.get(call.leadId);
-    if (!existing || sortAt > existing.sortAt) {
-      byLead.set(call.leadId, {
-        leadId: call.leadId,
-        sortAt,
-        source: "long_call",
-      });
-    } else if (existing.source === "meeting_booked" && !call.recordingUrl) {
-      // Behold meeting_booked, men opdatér ikke sort — allerede booket
-    }
   }
 
   const candidates = [...byLead.values()].sort((a, b) => b.sortAt - a.sortAt);
@@ -297,7 +328,7 @@ export async function findLeadsNeedingRecordingSync(params?: {
   const needing: RecordingSyncCandidate[] = [];
   for (const c of candidates) {
     if (needing.length >= limit) break;
-    if (await leadHasPlayableRecording(c.leadId)) continue;
+    if (c.source === "meeting_booked" && (await leadHasPlayableRecording(c.leadId))) continue;
     needing.push(c);
   }
   return needing;

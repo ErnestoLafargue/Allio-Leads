@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+  isLongCallRecordingReason,
   isMeetingBookedRecordingReason,
   meetsAutoSyncTalkThreshold,
   MIN_TALK_SECONDS_FOR_AUTO_SYNC,
@@ -58,8 +59,16 @@ describe("møde booket hard rule", () => {
 
   it("springer ikke over eksisterende filer når møde er booket", () => {
     expect(shouldSkipIfLeadAlreadyHasRecording("meeting_booked")).toBe(false);
-    expect(shouldSkipIfLeadAlreadyHasRecording("hangup_long_call")).toBe(true);
-    expect(shouldSkipIfLeadAlreadyHasRecording("webrtc_long_call")).toBe(true);
+    expect(shouldSkipIfLeadAlreadyHasRecording("hangup_long_call")).toBe(false);
+    expect(shouldSkipIfLeadAlreadyHasRecording("webrtc_long_call")).toBe(false);
+    expect(shouldSkipIfLeadAlreadyHasRecording("cron:long_call")).toBe(false);
+  });
+
+  it("kender lange samtaler ≥ 60 s uanset udfald", () => {
+    expect(isLongCallRecordingReason("hangup_long_call")).toBe(true);
+    expect(isLongCallRecordingReason("webrtc_long_call")).toBe(true);
+    expect(isLongCallRecordingReason("cron:long_call")).toBe(true);
+    expect(isLongCallRecordingReason("meeting_booked")).toBe(false);
   });
 
   it("henter uden 14-dages grænse når møde er booket", () => {
