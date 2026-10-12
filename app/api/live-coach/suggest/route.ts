@@ -4,6 +4,7 @@ import { createAnthropicClient } from "@/lib/anthropic-client";
 import { OBJECTION_CATEGORIES, type ObjectionCategory } from "@/lib/call-analysis/schema";
 import { parseCoachText } from "@/lib/live-coach/card";
 import { LIVE_COACH_PROMPT_VERSION, liveCoachMonthlyBudgetUsd, liveCoachSpentThisMonth } from "@/lib/live-coach/events";
+import { feedbackBank } from "@/lib/live-coach/feedback";
 import { activeScriptResponses, objectionBank } from "@/lib/live-coach/script-responses";
 import { liveCoachSystemPrompt, liveCoachUserMessage, streamSuggestion, type CoachLine } from "@/lib/live-coach/suggest";
 import { getViewer } from "@/lib/scripts-traening/queries";
@@ -36,7 +37,7 @@ export async function POST(req: Request) {
   });
   const stream = streamSuggestion({
     client: createAnthropicClient(),
-    system: liveCoachSystemPrompt(await activeScriptResponses(), await objectionBank()),
+    system: liveCoachSystemPrompt(await activeScriptResponses(), await objectionBank(), await feedbackBank()),
     userMessage: liveCoachUserMessage(lines, trigger),
     onDone: ({ costUsd, text }) => {
       const card = parseCoachText(text);

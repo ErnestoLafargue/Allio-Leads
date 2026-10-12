@@ -7,6 +7,7 @@ import { ALLIO_PRICE_RULE } from "@/lib/allio-offer";
 import { usageCostUsd } from "@/lib/anthropic-client";
 import type { ObjectionCategory } from "@/lib/call-analysis/schema";
 import type { CoachLine } from "./card";
+import type { FeedbackBank } from "./feedback";
 import type { ObjectionBank } from "./script-responses";
 
 export type { CoachLine } from "./card";
@@ -16,12 +17,19 @@ export const LIVE_COACH_MODEL = "claude-haiku-5-5";
 export function liveCoachSystemPrompt(
   scriptResponses: Partial<Record<ObjectionCategory, string>>,
   bank: ObjectionBank = {},
+  feedback: FeedbackBank = {},
 ): string {
   const answers = Object.entries(scriptResponses)
     .map(([k, v]) => `- ${k}: ${v}`)
     .join("\n");
   const real = Object.entries(bank)
     .map(([k, list]) => `- ${k}:\n${(list ?? []).map((t) => `  · «${t}»`).join("\n")}`)
+    .join("\n");
+  const liked = Object.entries(feedback)
+    .flatMap(([k, e]) => (e?.liked ?? []).map((l) => `- ${k}: «${l.line}» (${l.net} netto 👍)`))
+    .join("\n");
+  const avoid = Object.entries(feedback)
+    .flatMap(([k, e]) => (e?.avoid ?? []).map((l) => `- ${k}: «${l.line}»`))
     .join("\n");
   return `Du er live-coach for en dansk mødebooker fra Allio, mens sælgeren taler i telefon med en klinik. Du hører samtalen og giver sælgeren ét kort med det bedste næste, sælgeren kan sige.
 
@@ -49,7 +57,13 @@ Er der intet at hjælpe med lige nu, så skriv kun: SIGNAL: ingen
 ${answers || "- (ingen)"}
 
 ## Rigtige stærke svar fra jeres samtaler (inspiration, tilpas dem)
-${real || "- (ingen endnu)"}`;
+${real || "- (ingen endnu)"}
+
+## Sælgernes vurderinger af tidligere kort
+Svar, sælgerne har givet 👍 — brug dem som forbillede:
+${liked || "- (ingen endnu)"}
+Svar, sælgerne har givet 👎 — undgå disse formuleringer og den type svar:
+${avoid || "- (ingen endnu)"}`;
 }
 
 export function liveCoachUserMessage(lines: readonly CoachLine[], trigger: ObjectionCategory | null): string {

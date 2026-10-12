@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { effectiveResponses, feedbackBank } from "@/lib/live-coach/feedback";
 import { activeScriptLines, activeScriptResponses } from "@/lib/live-coach/script-responses";
 import { getViewer } from "@/lib/scripts-traening/queries";
 
@@ -34,12 +35,15 @@ export async function POST() {
   };
 
   try {
-    const [agentKey, customerKey, responses, script] = await Promise.all([
+    const [agentKey, customerKey, scriptResponses, script, feedback] = await Promise.all([
       createKey(),
       createKey(),
       activeScriptResponses(),
       activeScriptLines(),
+      feedbackBank(),
     ]);
+    // Straks-kortene lærer af sælgernes 👍/👎 (lib/live-coach/feedback.ts).
+    const responses = effectiveResponses(scriptResponses, feedback);
     return NextResponse.json({ agentKey, customerKey, responses, script, agentName: viewer.name });
   } catch (err) {
     console.warn("[live-coach/session]", err instanceof Error ? err.message : err);
