@@ -7,35 +7,49 @@ import { ALLIO_PRICE_RULE } from "@/lib/allio-offer";
 import { usageCostUsd } from "@/lib/anthropic-client";
 import type { ObjectionCategory } from "@/lib/call-analysis/schema";
 import type { CoachLine } from "./card";
+import type { ObjectionBank } from "./script-responses";
 
 export type { CoachLine } from "./card";
 
-export const LIVE_COACH_MODEL = "claude-haiku-4-5-20251001";
-/** Haiku 4.5 (USD pr. 1M tokens): input 1, output 5; cache-skriv 1,25, cache-læs 0,1. */
-const HAIKU_PRICE_FACTOR = 1 / 5;
+export const LIVE_COACH_MODEL = "claude-haiku-5-5";
 
-export function liveCoachSystemPrompt(scriptResponses: Partial<Record<ObjectionCategory, string>>): string {
+export function liveCoachSystemPrompt(
+  scriptResponses: Partial<Record<ObjectionCategory, string>>,
+  bank: ObjectionBank = {},
+): string {
   const answers = Object.entries(scriptResponses)
     .map(([k, v]) => `- ${k}: ${v}`)
     .join("\n");
-  return `Du er live-coach for en dansk mødebooker fra Allio, mens sælgeren taler i telefon med en klinik. Allio hjælper klinikker med at få mere ud af de leads og kunder, de allerede har (genbesøg, genaktivering, konvertering, anmeldelser). Målet med opkaldet er ét: et ja til et møde (45–75 min) med en specialist, der kigger på klinikkens egne tal.
+  const real = Object.entries(bank)
+    .map(([k, list]) => `- ${k}:\n${(list ?? []).map((t) => `  · «${t}»`).join("\n")}`)
+    .join("\n");
+  return `Du er live-coach for en dansk mødebooker fra Allio, mens sælgeren taler i telefon med en klinik. Du hører samtalen og giver sælgeren ét kort med det bedste næste, sælgeren kan sige.
 
-Du ser de seneste replikker. Giv ÉT kort, der hjælper sælgeren med det næste, sælgeren skal sige — kort, konkret og til at sige højt.
-
-Svar PRÆCIS i dette format og intet andet:
-SIGNAL: <ét af: tryghed, klarhed, okonomi, skepsis, timing, lav_interesse, ingen>
-HVORFOR: <3–6 ord om hvad kunden mangler — skal altid udfyldes>
-REPLIK: <én kort sætning, højst 20 ord, som sælgeren kan sige nu>
-
+## Allio og målet
+Allio hjælper klinikker med at øge kundernes livstidsværdi og omsætningen ud fra den kundedata, de allerede har i deres bookingsystem — uden at bruge penge på markedsføring: genaktivering af inaktive kunder med personlige SMS'er, kunder der er ved at falde fra ud fra deres booking-frekvens, flere Google-anmeldelser, samlet indbakke og AI-klinikassistent.
+Målet med opkaldet er ét: et ja til et møde, hvor en specialist viser klinikken, hvad der er at hente ud fra dens egne data. Nævn ALDRIG mødets længde (ingen minutter, ingen «halv time»).
+Tal du må bruge (fra Pitch 8): ca. 40 % af en kliniks tidligere kunder er inaktive; Allio genaktiverer typisk 2–5 % af dem, svarende til 7–18 ekstra bookinger om måneden; klinikker på den størrelse ser typisk 10–20 ekstra bookinger og 10–20 ekstra gode Google-anmeldelser om måneden. Brug kun disse tal — opfind aldrig andre tal, kundenavne eller cases.
 Pris: ${ALLIO_PRICE_RULE}
 
-Regler:
-- Tag udgangspunkt i det kunden lige har sagt. Opfind aldrig tal, navne eller cases.
-- Ved en indvending: brug jeres bedste svar nedenfor som grundlag, men tilpas det til kundens ord.
-- Er der intet at hjælpe med, så skriv SIGNAL: ingen.
+## Sådan laver du kortet
+1. Forstå, hvad kunden lige har sagt og mener — også hvis kunden ikke er færdig. Er det en indvending, så find kategorien.
+2. Tag udgangspunkt i det bedste svar nedenfor: ugens script først, og de rigtige svar fra jeres egne bookede samtaler som inspiration.
+3. Tilpas svaret til netop denne kunde og samtale: brug kundens egne ord og detaljer (fx deres system, antal kunder, at de har travlt), og byg videre på det, sælgeren allerede har sagt. Gentag ikke noget, sælgeren lige har sagt.
+4. Opbygning: anerkend kort (3–5 ord) → vend det mod værdien for kunden → slut med et spørgsmål eller et valg, der fører mod mødet (fx «mandag eller onsdag?»).
+5. Spørger kunden til prisen: værdien først (specialisten viser, hvad der er at hente på jeres egne data), derefter prisen — aldrig prisen som det første.
+6. Talesprog, dansk, til at sige højt. Højst 2 korte sætninger (ca. 25 ord i alt). Ingen floskler som «jeg forstår din bekymring».
 
-Jeres bedste svar på indvendinger (fra ugens script):
-${answers || "- (ingen)"}`;
+## Svarformat — præcis dette og intet andet
+SIGNAL: <ét af: tryghed, klarhed, okonomi, skepsis, timing, lav_interesse, ingen>
+HVORFOR: <3–6 ord om hvad kunden mangler>
+REPLIK: <højst 2 korte sætninger, som sælgeren kan sige nu>
+Er der intet at hjælpe med lige nu, så skriv kun: SIGNAL: ingen
+
+## Ugens script — bedste svar på indvendinger
+${answers || "- (ingen)"}
+
+## Rigtige stærke svar fra jeres samtaler (inspiration, tilpas dem)
+${real || "- (ingen endnu)"}`;
 }
 
 export function liveCoachUserMessage(lines: readonly CoachLine[], trigger: ObjectionCategory | null): string {
@@ -58,6 +72,8 @@ export function streamSuggestion(params: {
         const stream = params.client.messages.stream({
           model: LIVE_COACH_MODEL,
           max_tokens: 200,
+          // Hurtigst muligt svar: ingen tænkning (tilladt på Haiku 5.5 ved effort high eller lavere).
+          thinking: { type: "disabled" },
           system: [{ type: "text", text: params.system, cache_control: { type: "ephemeral" } }],
           messages: [{ role: "user", content: params.userMessage }],
         });
@@ -67,7 +83,7 @@ export function streamSuggestion(params: {
           controller.enqueue(encoder.encode(delta));
         });
         const message = await stream.finalMessage();
-        params.onDone?.({ costUsd: usageCostUsd(message.usage) * HAIKU_PRICE_FACTOR, ms: Date.now() - started, text });
+        params.onDone?.({ costUsd: usageCostUsd(message.usage, LIVE_COACH_MODEL), ms: Date.now() - started, text });
         controller.close();
       } catch (err) {
         controller.error(err);

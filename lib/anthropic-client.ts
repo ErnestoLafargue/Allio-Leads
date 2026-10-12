@@ -13,8 +13,16 @@ import type * as z from "zod/v4";
 export const CLAUDE_MODEL = "claude-opus-5";
 export const FALLBACK_BETA = "server-side-fallback-2026-07-01";
 
-/** claude-opus-5 (USD pr. 1M tokens): input 5, output 25; cache-skriv 1,25×, cache-læs 0,1× input. */
-const PRICE = { input: 5, output: 25, cacheWrite: 6.25, cacheRead: 0.5 };
+type Price = { input: number; output: number; cacheWrite: number; cacheRead: number };
+/** USD pr. 1M tokens (listepriser); cache-skriv 1,25× og cache-læs 0,1× input. */
+const PRICES: Record<string, Price> = {
+  "claude-opus-5": { input: 5, output: 25, cacheWrite: 6.25, cacheRead: 0.5 },
+  "claude-sonnet-5-5": { input: 2, output: 10, cacheWrite: 2.5, cacheRead: 0.2 },
+  "claude-haiku-5-5": { input: 0.1, output: 0.5, cacheWrite: 0.125, cacheRead: 0.01 },
+  "claude-haiku-4-5-20251001": { input: 1, output: 5, cacheWrite: 1.25, cacheRead: 0.1 },
+};
+/** Modeller med server-side refusal-fallback ("default"-formen) på Claude API'et. */
+const FALLBACK_MODELS: ReadonlySet<string> = new Set(["claude-opus-5", "claude-sonnet-5-5"]);
 
 export function createAnthropicClient(): Anthropic {
   const workspaceId = process.env.ANTHROPIC_WORKSPACE_ID?.trim();
@@ -28,12 +36,13 @@ export type Usage = {
   cache_read_input_tokens?: number | null;
 };
 
-export function usageCostUsd(u: Usage): number {
+export function usageCostUsd(u: Usage, model: string = CLAUDE_MODEL): number {
+  const price = PRICES[model] ?? PRICES[CLAUDE_MODEL]!;
   return (
-    (u.input_tokens * PRICE.input +
-      u.output_tokens * PRICE.output +
-      (u.cache_creation_input_tokens ?? 0) * PRICE.cacheWrite +
-      (u.cache_read_input_tokens ?? 0) * PRICE.cacheRead) /
+    (u.input_tokens * price.input +
+      u.output_tokens * price.output +
+      (u.cache_creation_input_tokens ?? 0) * price.cacheWrite +
+      (u.cache_read_input_tokens ?? 0) * price.cacheRead) /
     1_000_000
   );
 }
@@ -58,15 +67,19 @@ export async function structuredCall<S extends z.ZodType>(params: {
   userMessage: string;
   schema: S;
   maxTokens: number;
+  /** Standard: CLAUDE_MODEL. */
+  model?: string;
+  /** Tænkedybde (output_config.effort); standard er modellens egen. */
+  effort?: "low" | "medium" | "high" | "xhigh" | "max";
 }): Promise<{ output: z.infer<S>; usage: Usage; costUsd: number; model: string }> {
+  const model = params.model ?? CLAUDE_MODEL;
   const stream = params.client.beta.messages.stream({
-    model: CLAUDE_MODEL,
+    model,
     max_tokens: params.maxTokens,
-    betas: [FALLBACK_BETA],
-    fallbacks: "default",
+    ...(FALLBACK_MODELS.has(model) ? { betas: [FALLBACK_BETA], fallbacks: "default" as const } : {}),
     system: [{ type: "text", text: params.system, cache_control: { type: "ephemeral" } }],
     messages: [{ role: "user", content: params.userMessage }],
-    output_config: { format: betaZodOutputFormat(params.schema) },
+    output_config: { format: betaZodOutputFormat(params.schema), ...(params.effort ? { effort: params.effort } : {}) },
   });
   let usage: Usage = { input_tokens: 0, output_tokens: 0 };
   let stopReason: string | null = null;
@@ -82,14 +95,14 @@ export async function structuredCall<S extends z.ZodType>(params: {
   try {
     message = await stream.finalMessage();
   } catch (err) {
-    const costUsd = usageCostUsd(usage);
+    const costUsd = usageCostUsd(usage, model);
     const reason = stopReason === "max_tokens" ? "svaret blev afskåret (max_tokens)" : "svaret kunne ikke læses";
     throw new ClaudeCallError(
       `Claude: ${reason} — ${err instanceof Error ? err.message : String(err)} — pris $${costUsd.toFixed(4)}`,
       costUsd,
     );
   }
-  const costUsd = usageCostUsd(message.usage);
+  const costUsd = usageCostUsd(message.usage, model);
   if (message.stop_reason === "refusal") {
     throw new ClaudeCallError(
       `Claude afviste (${message.stop_details?.category ?? "ukendt kategori"}) — pris $${costUsd.toFixed(4)}`,

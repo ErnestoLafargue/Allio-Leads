@@ -1,8 +1,15 @@
 /**
  * Analyse af én samtale via Claude API'et (workeren) — samme systemprompt og skema som i
  * Claude-sessionen. Systemprompten caches, så kun transskriptionen betales fuldt pr. samtale.
+ *
+ * Model: Claude Haiku 5.5 med effort «high» (ANALYSIS_MODEL/ANALYSIS_EFFORT kan overstyre).
+ * Kvalitetstest mod Opus på guldsættet (scripts/model-eval.ts, 30 samtaler): 0 citatfejl, score
+ * ±7 point, ~$0,006 pr. samtale — mod ~$0,09 for Opus 5.
  */
 import { createAnthropicClient, structuredCall } from "@/lib/anthropic-client";
+
+export const ANALYSIS_MODEL = process.env.ANALYSIS_MODEL?.trim() || "claude-haiku-5-5";
+const ANALYSIS_EFFORT = (process.env.ANALYSIS_EFFORT?.trim() || "high") as "low" | "medium" | "high" | "xhigh" | "max";
 import { ANALYSIS_SYSTEM_PROMPT } from "./prompt";
 import { CallAnalysisSchema } from "./schema";
 import { loadAnalysisInput, saveCallAnalysis } from "./store";
@@ -18,6 +25,8 @@ export async function analyzeCallViaApi(
     userMessage,
     schema: CallAnalysisSchema,
     maxTokens: 32000,
+    model: ANALYSIS_MODEL,
+    effort: ANALYSIS_EFFORT,
   });
   const saved = await saveCallAnalysis({
     callRecordingId,

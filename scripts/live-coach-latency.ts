@@ -16,7 +16,7 @@ import { createAnthropicClient } from "@/lib/anthropic-client";
 import type { StoredCallAnalysis } from "@/lib/call-analysis/schema";
 import { fetchTelnyxRecordingMp3, withTempDir } from "@/lib/call-transcription/audio";
 import { parseCoachText } from "@/lib/live-coach/card";
-import { activeScriptResponses } from "@/lib/live-coach/script-responses";
+import { activeScriptResponses, objectionBank } from "@/lib/live-coach/script-responses";
 import { SONIOX_RT_URL, SpeakerTranscript, type SonioxToken } from "@/lib/live-coach/soniox-stream";
 import { liveCoachSystemPrompt, liveCoachUserMessage, streamSuggestion } from "@/lib/live-coach/suggest";
 import { detectObjection } from "@/lib/live-coach/triggers";
@@ -118,7 +118,7 @@ async function main() {
   const sonioxKey = process.env.SONIOX_API_KEY!.trim();
   const telnyxKey = process.env.TELNYX_API_KEY!.trim();
   const client = createAnthropicClient();
-  const system = liveCoachSystemPrompt(await activeScriptResponses());
+  const system = liveCoachSystemPrompt(await activeScriptResponses(), await objectionBank());
   const samples = await pickSamples(n);
   const results: { category: string; trigger: number | null; ai: number | null; lag: number | null }[] = [];
 
