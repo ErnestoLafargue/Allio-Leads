@@ -25,13 +25,15 @@ export default function IndstillingerPage() {
   }
 
   return (
-    <div className="space-y-6">
+    <div className="space-y-10">
       <div>
-        <h2 className="text-base font-semibold text-stone-900">Brugere</h2>
+        <h1 className="text-xl font-semibold text-stone-900">Indstillinger</h1>
         <p className="mt-1 text-sm text-stone-600">
-          Opret, skift mellem administrator og sælger, eller slet brugere (via gear ved kontoen).
+          Administration af brugere: opret, skift mellem administrator og sælger, eller slet brugere (via gear ved
+          kontoen).
         </p>
       </div>
+
       <UsersAdminPanel />
     </div>
   );
