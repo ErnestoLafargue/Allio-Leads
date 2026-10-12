@@ -15,3 +15,13 @@ export async function activeScriptResponses(): Promise<Partial<Record<ObjectionC
   for (const o of script?.objections ?? []) if (o.response && !out[o.category]) out[o.category] = o.response;
   return out;
 }
+
+/** Linjerne i det aktive ugens script i rækkefølge — til script-trackeren (SCRIPT/AFVIGELSE/TILBAGE). */
+export async function activeScriptLines(): Promise<{ phase: string; text: string }[]> {
+  const active = await prisma.salesScriptVersion.findFirst({
+    where: { kind: "WEEKLY", isActive: true },
+    select: { content: true },
+  });
+  const script = active?.content as unknown as WeeklyScript | undefined;
+  return (script?.sections ?? []).flatMap((s) => s.lines.map((l) => ({ phase: s.key, text: l.text })));
+}

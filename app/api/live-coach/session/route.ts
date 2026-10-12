@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { activeScriptResponses } from "@/lib/live-coach/script-responses";
+import { activeScriptLines, activeScriptResponses } from "@/lib/live-coach/script-responses";
 import { getViewer } from "@/lib/scripts-traening/queries";
 
 const SONIOX_TEMP_KEY_URL = "https://api.soniox.com/v1/auth/temporary-api-key";
@@ -34,8 +34,13 @@ export async function POST() {
   };
 
   try {
-    const [agentKey, customerKey, responses] = await Promise.all([createKey(), createKey(), activeScriptResponses()]);
-    return NextResponse.json({ agentKey, customerKey, responses, agentName: viewer.name });
+    const [agentKey, customerKey, responses, script] = await Promise.all([
+      createKey(),
+      createKey(),
+      activeScriptResponses(),
+      activeScriptLines(),
+    ]);
+    return NextResponse.json({ agentKey, customerKey, responses, script, agentName: viewer.name });
   } catch (err) {
     console.warn("[live-coach/session]", err instanceof Error ? err.message : err);
     return NextResponse.json({ error: "Kunne ikke starte live-coachen" }, { status: 502 });

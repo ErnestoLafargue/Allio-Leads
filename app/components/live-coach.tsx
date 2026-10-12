@@ -11,12 +11,13 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import type { ObjectionCategory } from "@/lib/call-analysis/schema";
 import { SIGNAL_LABELS } from "@/lib/scripts-traening/labels";
 import { startSonioxStream, SpeakerTranscript, type SonioxStream } from "@/lib/live-coach/soniox-stream";
+import { ScriptTracker, type ScriptLine, type TrackerState } from "@/lib/live-coach/script-tracker";
 import { detectObjection, triggerCard, type CoachCard } from "@/lib/live-coach/triggers";
 import { parseCoachText, type CoachLine } from "@/lib/live-coach/card";
 
 export type LiveCoachLine = CoachLine & { final: boolean };
 
-type Session = { responses: Partial<Record<ObjectionCategory, string>>; agentName: string };
+type Session = { responses: Partial<Record<ObjectionCategory, string>>; script: ScriptLine[]; agentName: string };
 
 const SIGNAL_STYLE: Record<string, string> = {
   tryghed: "bg-sky-100 text-sky-800",
@@ -40,6 +41,12 @@ export function LiveCoach(props: {
   const [card, setCard] = useState<(CoachCard & { eventId: string | null; helpful: boolean | null }) | null>(null);
   const [status, setStatus] = useState<"off" | "starting" | "listening" | "error">("off");
   const [error, setError] = useState<string | null>(null);
+  const [scriptView, setScriptView] = useState<{ state: TrackerState; next: ScriptLine | null } | null>(null);
+  const tracker = useRef<ScriptTracker | null>(null);
+  const syncScript = useCallback(() => {
+    const t = tracker.current;
+    setScriptView(t ? { state: t.state, next: t.nextLine } : null);
+  }, []);
 
   const session = useRef<Session | null>(null);
   const history = useRef<LiveCoachLine[]>([]);
@@ -106,6 +113,8 @@ export function LiveCoach(props: {
           if (parsed.silent || !parsed.line) continue;
           if (!measured) {
             measured = true;
+            tracker.current?.onDeviation();
+            syncScript();
             const ms = performance.now() - heardAt;
             onLatency?.(ms, "ai");
             if (eventId) void logEvent({ id: eventId, latencyMs: ms });
@@ -124,7 +133,7 @@ export function LiveCoach(props: {
         /* afbrudt af et nyere kort */
       }
     },
-    [onLatency, logEvent],
+    [onLatency, logEvent, syncScript],
   );
 
   useEffect(() => {
@@ -144,7 +153,9 @@ export function LiveCoach(props: {
       if (!res.ok) throw new Error("Kunne ikke starte live-coachen");
       const data = (await res.json()) as Session & { agentKey: string; customerKey: string };
       if (cancelled) return;
-      session.current = { responses: data.responses, agentName: data.agentName };
+      session.current = { responses: data.responses, script: data.script ?? [], agentName: data.agentName };
+      tracker.current = data.script?.length ? new ScriptTracker(data.script) : null;
+      syncScript();
       const terms = ["Allio", ...data.agentName.split(/\s+/).slice(0, 1)];
 
       const customerStream = await startSonioxStream({
@@ -158,6 +169,8 @@ export function LiveCoach(props: {
           const trigger = detectObjection(completed ?? customer.current.utterance);
           if (trigger && trigger.category !== shownCategory.current) {
             shownCategory.current = trigger.category;
+            tracker.current?.onDeviation();
+            syncScript();
             const instant = triggerCard(trigger, session.current?.responses ?? {});
             if (instant) {
               const ms = performance.now() - heardAt;
@@ -189,7 +202,11 @@ export function LiveCoach(props: {
             onError: (m) => setError(m),
             onTokens: (tokens) => {
               const completed = agent.current.apply(tokens);
-              if (completed) history.current.push({ speaker: "agent", text: completed, final: true });
+              if (completed) {
+                history.current.push({ speaker: "agent", text: completed, final: true });
+                tracker.current?.onAgentUtterance(completed);
+                syncScript();
+              }
               publish();
             },
           }),
@@ -209,7 +226,7 @@ export function LiveCoach(props: {
       streams.forEach((s) => s.stop());
       setStatus("off");
     };
-  }, [active, micStream, remoteStream, askClaude, publish, onLatency, logEvent]);
+  }, [active, micStream, remoteStream, askClaude, publish, onLatency, logEvent, syncScript]);
 
   if (!active) return null;
   return (
@@ -219,6 +236,12 @@ export function LiveCoach(props: {
         <span>{status === "listening" ? "● lytter" : status === "starting" ? "starter…" : status === "error" ? "fejl" : ""}</span>
       </div>
       {error ? <p className="mt-1 text-xs text-rose-700">{error}</p> : null}
+      {scriptView?.next && scriptView.state !== "afvigelse" ? (
+        <p className="mt-2 rounded-lg bg-stone-50 px-2 py-1.5 text-xs text-stone-700">
+          <span className="font-semibold">{scriptView.state === "tilbage" ? "Tilbage til: " : "Næste i scriptet: "}</span>
+          {scriptView.next.text}
+        </p>
+      ) : null}
       {card ? (
         <div className="mt-2 space-y-1">
           <div className="flex items-center gap-2">

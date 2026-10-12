@@ -130,3 +130,23 @@ Der er rettet en fejl i afslutningen af streamen («Request timeout»). Latensen
 - **Pris:** ca. $0,0018 pr. AI-kort.
 
 **Næste:** fase 2, script-trackeren (SCRIPT, AFVIGELSE og TILBAGE) og indkoblingen i samtalevisningen med en tænd/sluk-knap. Derefter fase 3, hvor Ernesto tester i rigtige opkald.
+
+## 11. Fase 2 (12/10, testmiljøet)
+- **Koblet til samtalen, ikke til opkaldstypen.**
+  - `lib/live-coach/call-audio.ts` er et fælles register for det aktive opkalds lydspor.
+  - `CampaignVoipStrip` (klik-for-at-ringe og predictive) og `PowerDialerPhone` (power dialer) melder sig ind med 1 linje hver, når samtalen er «live».
+  - `LiveCoachDock` monteres én gang i dashboard-layoutet. Den vises under ethvert aktivt opkald med knappen «Live-coach: til/fra», som er slået fra som standard og huskes pr. browser.
+  - Ændringen i de eksisterende filer er i alt 6 linjer (2 imports, 2 kald og 2 linjer i layoutet).
+- **Script-tracker** (`lib/live-coach/script-tracker.ts`):
+  - Sælgerens færdige ytringer matches mod de næste 4 linjer i ugens script (28 linjer) med ordoverlap. Bøjninger tælles med, og pladsholdere som «[navn]» ignoreres.
+  - Et match giver **SCRIPT** med «Næste i scriptet».
+  - Et straks-kort eller AI-kort giver **AFVIGELSE**, og kortet vises.
+  - Når sælgeren har svaret, skifter tilstanden til **TILBAGE** med «Tilbage til: …», indtil scriptet rammes igen.
+- **Test:** sessionen leverer scriptlinjerne. Arbejdsvisningen, lead-siden og testsiden svarer 200. Unit-tests dækker trackeren.
+
+**Fase 3 (næste):** Ernesto tester i rigtige opkald.
+1. Åbn dev-serveren via Cursors port forward.
+2. Tænd «Live-coach» og ring til en testkunde eller dig selv.
+3. Giv 👍/👎 på kortene.
+
+Målinger: latens og 👍-andel fra `LiveCoachEvent`.

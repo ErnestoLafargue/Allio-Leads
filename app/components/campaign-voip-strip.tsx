@@ -4,6 +4,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { CampaignDialMode } from "@/lib/dial-mode";
 import { normalizePhoneToE164ForDial, stripDialFormatting } from "@/lib/phone-e164";
 import { useAudioLevel } from "@/lib/use-audio-level";
+import { useCallAudioPublisher } from "@/lib/live-coach/call-audio";
 import {
   ensureMicPermissionAndEnumerate,
   headsetSetupBlockedReason,
@@ -573,6 +574,7 @@ export function CampaignVoipStrip({
 
   const outLevel = useAudioLevel(micMonitorStream);
   const inLevel = useAudioLevel(activeCall ? remoteStream : null);
+  useCallAudioPublisher("campaign-strip", micMonitorStream, remoteStream, lineStatus === "live");
 
   // Under aktivt opkald: varighed = Date.now() − startAt (følger væguret, så throttlet
   // setInterval ikke får uret til at hænge bagud). Vi har brug for ~1 re-render/sek.

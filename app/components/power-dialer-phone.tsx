@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useAudioLevel } from "@/lib/use-audio-level";
+import { useCallAudioPublisher } from "@/lib/live-coach/call-audio";
 import {
   ensureMicPermissionAndEnumerate,
   headsetSetupBlockedReason,
@@ -636,6 +637,7 @@ export function PowerDialerPhone({
 
   const outLevel = useAudioLevel(micStream);
   const inLevel = useAudioLevel(lineStatus === "live" ? remoteStream : null);
+  useCallAudioPublisher("power-dialer", micStream, remoteStream, lineStatus === "live");
   const durationLabel = liveSince ? formatDuration((Date.now() - liveSince) / 1000) : "00:00";
 
   const pill =
