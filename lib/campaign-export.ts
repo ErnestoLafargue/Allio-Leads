@@ -1,8 +1,11 @@
-import * as XLSX from "xlsx";
-import Papa from "papaparse";
 import type { Lead, User } from "@prisma/client";
 import { FIELD_GROUPS, parseFieldConfig } from "@/lib/campaign-fields";
 import { parseCustomFields } from "@/lib/custom-fields";
+import {
+  generateExportCsv,
+  generateExportXlsx,
+  stampFilenameBase,
+} from "@/lib/data-export/formats";
 import { LEAD_STATUS_LABELS, type LeadStatus } from "@/lib/lead-status";
 import { MEETING_OUTCOME_LABELS } from "@/lib/meeting-outcome";
 
@@ -174,41 +177,13 @@ export function buildExportRows(
 }
 
 export function generateCampaignCsv(headers: string[], rows: Record<string, string>[]): Buffer {
-  const objects = rows.map((r) => {
-    const o: Record<string, string> = {};
-    for (const h of headers) {
-      o[h] = r[h] ?? "";
-    }
-    return o;
-  });
-  const csv = Papa.unparse(objects, { columns: headers, header: true, delimiter: ";" });
-  const bom = "\uFEFF";
-  return Buffer.from(bom + csv, "utf-8");
+  return generateExportCsv(headers, rows);
 }
 
 export function generateCampaignXlsx(headers: string[], rows: Record<string, string>[]): Buffer {
-  const aoa: string[][] = [headers];
-  for (const r of rows) {
-    aoa.push(headers.map((h) => r[h] ?? ""));
-  }
-  const ws = XLSX.utils.aoa_to_sheet(aoa);
-  const wb = XLSX.utils.book_new();
-  XLSX.utils.book_append_sheet(wb, ws, "Leads");
-  return XLSX.write(wb, { type: "buffer", bookType: "xlsx" }) as Buffer;
+  return generateExportXlsx(headers, rows);
 }
 
 export function exportFilenameBase(campaignName: string): string {
-  const safe = campaignName
-    .replace(/[/\\?%*:|"<>]/g, "-")
-    .trim()
-    .slice(0, 80);
-  const stamp = new Intl.DateTimeFormat("en-GB", {
-    timeZone: "Europe/Copenhagen",
-    day: "2-digit",
-    month: "2-digit",
-    year: "numeric",
-  })
-    .format(new Date())
-    .replace(/\//g, "-");
-  return `${safe || "kampagne"}_${stamp}`;
+  return stampFilenameBase(campaignName || "kampagne");
 }

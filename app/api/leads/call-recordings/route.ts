@@ -6,6 +6,8 @@ import { isLeadStatus, LEAD_STATUS_LABELS, type LeadStatus } from "@/lib/lead-st
 
 const PAGE_SIZE_DEFAULT = 40;
 const PAGE_SIZE_MAX = 100;
+/** Korte klip (fx voicemail/ingen svar) vises ikke på Lydfiler. */
+export const MIN_LYDFILER_DURATION_SECONDS = 12;
 
 function buildLeadWhere(params: {
   q: string;
@@ -54,6 +56,7 @@ export async function GET(req: Request) {
   const where = {
     kind: LEAD_ACTIVITY_KIND.CALL_RECORDING,
     recordingUrl: { not: null },
+    durationSeconds: { gte: MIN_LYDFILER_DURATION_SECONDS },
     ...(agentUserId ? { userId: agentUserId } : {}),
     ...(Object.keys(leadWhere).length > 0 ? { lead: leadWhere } : {}),
   };

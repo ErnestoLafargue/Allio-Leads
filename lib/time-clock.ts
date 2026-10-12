@@ -204,11 +204,24 @@ export function buildOverviewRows(args: {
     };
   });
 
-  rows.sort((a, b) => {
-    if (a.clockedIn !== b.clockedIn) return a.clockedIn ? -1 : 1;
-    return a.name.localeCompare(b.name, "da");
-  });
+  rows.sort(compareOverviewRows);
   return rows;
+}
+
+/** 0 = stemplet ind nu, 1 = har tider (ude), 2 = ingen. */
+export function overviewRowSortRank(row: { entries: { open?: boolean }[] }): number {
+  if (row.entries.some((e) => e.open)) return 0;
+  if (row.entries.length > 0) return 1;
+  return 2;
+}
+
+export function compareOverviewRows(
+  a: Pick<TimeClockUserRow, "name" | "entries">,
+  b: Pick<TimeClockUserRow, "name" | "entries">,
+): number {
+  const rank = overviewRowSortRank(a) - overviewRowSortRank(b);
+  if (rank !== 0) return rank;
+  return a.name.localeCompare(b.name, "da");
 }
 
 export function liveOpenSeconds(openEntry: TimeClockEntryDto | null | undefined, nowMs: number): number {

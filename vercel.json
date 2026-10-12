@@ -19,10 +19,5 @@
       "path": "/api/cron/sync-podio-outcomes",
       "schedule": "30 3 * * *"
     }
-  ],
-  "git": {
-    "deploymentEnabled": {
-      "scripts-og-traening": false
-    }
-  }
+  ]
 }

@@ -1,7 +1,8 @@
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { requireSession } from "@/lib/api-auth";
-import { LEAD_LOCK_CLEAR, isLockActive } from "@/lib/lead-lock";
+import { LEAD_LOCK_CLEAR, isLockActive, sellerMayEditLead } from "@/lib/lead-lock";
+import { canScheduleCallbackFromLead } from "@/lib/lead-callback-schedule";
 import { isCallbackTimeInCopenhagenBusinessWindow } from "@/lib/callback-datetime";
 import { parseCustomFields, stringifyCustomFields } from "@/lib/custom-fields";
 import { normalizeLeaderboardOutcomeStatus } from "@/lib/lead-outcome-log";
@@ -68,25 +69,42 @@ export async function POST(req: Request, { params }: Params) {
     const isReschedule =
       lead.status === "CALLBACK_SCHEDULED" &&
       String(lead.callbackStatus ?? "").trim().toUpperCase() === "PENDING";
-    if (!isReschedule && lead.status !== "NEW") {
+    if (!canScheduleCallbackFromLead(lead)) {
       return NextResponse.json(
-        { error: "Callback kan kun planlægges fra et «Ny»-lead i kampagnekøen." },
+        {
+          error:
+            lead.status === "MEETING_BOOKED"
+              ? "Tilbagekald kan ikke planlægges på et booket møde. Skift udfaldet først."
+              : "Tilbagekald kan ikke planlægges på dette lead.",
+        },
         { status: 400 },
       );
     }
 
     const role = session.user.role;
     if (role !== "ADMIN") {
-      if (
-        isReschedule
-          ? lead.callbackReservedByUserId !== userId
-          : !isLockActive(lead, now) || lead.lockedByUserId !== userId
-      ) {
+      if (isReschedule) {
+        if (lead.callbackReservedByUserId !== userId) {
+          return NextResponse.json(
+            { error: "Kun den tildelte bruger eller admin kan flytte dette tilbagekald." },
+            { status: 403 },
+          );
+        }
+      } else if (lead.status === "NEW") {
+        if (!isLockActive(lead, now) || lead.lockedByUserId !== userId) {
+          return NextResponse.json(
+            {
+              error:
+                "Du skal have leadet aktivt i kampagne-arbejdet (låst til dig) for at planlægge callback.",
+            },
+            { status: 403 },
+          );
+        }
+      } else if (!sellerMayEditLead(role, userId, lead, now)) {
         return NextResponse.json(
           {
-            error: isReschedule
-              ? "Kun den tildelte bruger eller admin kan flytte dette tilbagekald."
-              : "Du skal have leadet aktivt i kampagne-arbejdet (låst til dig) for at planlægge callback.",
+            error:
+              "Dette lead er låst af en anden bruger. Du kan ikke planlægge tilbagekald lige nu.",
           },
           { status: 403 },
         );
@@ -146,6 +164,9 @@ export async function POST(req: Request, { params }: Params) {
             ? body.meetingContactPhonePrivate.trim()
             : lead.meetingContactPhonePrivate,
         status: "CALLBACK_SCHEDULED",
+        voicemailMarkedAt: null,
+        notHomeMarkedAt: null,
+        lastOutcomeAt: isReschedule ? lead.lastOutcomeAt : now,
         callbackScheduledFor: scheduledFor,
         callbackReservedByUserId: assignedUserId,
         callbackCreatedByUserId: lead.callbackCreatedByUserId ?? userId,

@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   buildOverviewRows,
   clockedSeconds,
+  compareOverviewRows,
   formatClockedDuration,
   formatClockedLive,
   isValidDayKey,
@@ -146,6 +147,36 @@ describe("buildOverviewRows", () => {
     expect(rows[1]?.clockedIn).toBe(false);
     expect(rows[1]?.totalSeconds).toBe(3600);
     expect(rows[2]?.entries).toEqual([]);
+  });
+
+  it("lægger stemplet ind øverst, derefter tider i dag, før tomme navne", () => {
+    const rows = buildOverviewRows({
+      users: [
+        { id: "anne", name: "Anne", username: "anne", role: "SELLER" },
+        { id: "bo", name: "Bo", username: "bo", role: "SELLER" },
+        { id: "zara", name: "Zara", username: "zara", role: "SELLER" },
+      ],
+      dayEntries: [
+        entry({
+          id: "out",
+          userId: "anne",
+          punchedInAt: new Date("2026-10-12T07:00:00.000Z"),
+          punchedOutAt: new Date("2026-10-12T08:00:00.000Z"),
+        }),
+      ],
+      openEntries: [
+        entry({
+          id: "in",
+          userId: "zara",
+          punchedOutAt: null,
+          punchedInAt: new Date("2026-10-12T11:00:00.000Z"),
+        }),
+      ],
+      now: NOW,
+      includeOpenFromOtherDays: true,
+    });
+    expect(rows.map((r) => r.userId)).toEqual(["zara", "anne", "bo"]);
+    expect(compareOverviewRows(rows[0]!, rows[1]!)).toBeLessThan(0);
   });
 
   it("beregner live-tid fra åben stempling uden at dobbeltælle lukkede", () => {
