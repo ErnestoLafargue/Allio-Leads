@@ -35,7 +35,7 @@ export function LiveCoachDock() {
   if (!call) return null;
   return (
     <div className="fixed bottom-4 right-4 z-50 flex w-[22rem] max-w-[calc(100vw-2rem)] flex-col items-end gap-2">
-      {enabled ? <LiveCoach micStream={call.mic} remoteStream={call.remote} active /> : null}
+      {enabled ? <LiveCoach micStream={call.mic} remoteStream={call.remote} leadId={call.leadId} active /> : null}
       <button
         type="button"
         onClick={toggle}

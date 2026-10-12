@@ -637,7 +637,7 @@ export function PowerDialerPhone({
 
   const outLevel = useAudioLevel(micStream);
   const inLevel = useAudioLevel(lineStatus === "live" ? remoteStream : null);
-  useCallAudioPublisher("power-dialer", micStream, remoteStream, lineStatus === "live");
+  useCallAudioPublisher("power-dialer", micStream, remoteStream, lineStatus === "live", reportLeadId);
   const durationLabel = liveSince ? formatDuration((Date.now() - liveSince) / 1000) : "00:00";
 
   const pill =

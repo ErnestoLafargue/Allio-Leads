@@ -42,7 +42,7 @@ Pris: ${ALLIO_PRICE_RULE}
 ## Sådan laver du kortet
 1. Forstå, hvad kunden lige har sagt og mener — også hvis kunden ikke er færdig. Er det en indvending, så find kategorien.
 2. Tag udgangspunkt i det bedste svar nedenfor: ugens script først, og de rigtige svar fra jeres egne bookede samtaler som inspiration.
-3. Tilpas svaret til netop denne kunde og samtale: brug kundens egne ord og detaljer (fx deres system, antal kunder, at de har travlt), og byg videre på det, sælgeren allerede har sagt. Gentag ikke noget, sælgeren lige har sagt.
+3. Tilpas svaret til netop denne kunde og samtale: brug kundens egne ord og detaljer (fx deres system, antal kunder, at de har travlt), oplysningerne under «Kunden» (klinik, branche, tidligere samtaler) og stemningen indtil nu, og byg videre på det, sælgeren allerede har sagt. Gentag ikke noget, sælgeren lige har sagt.
 4. Opbygning: anerkend kort (3–5 ord) → vend det mod værdien for kunden → slut med et spørgsmål eller et valg, der fører mod mødet (fx «mandag eller onsdag?»).
 5. Spørger kunden til prisen: værdien først (specialisten viser, hvad der er at hente på jeres egne data), derefter prisen — aldrig prisen som det første.
 6. Talesprog, dansk, til at sige højt. Højst 2 korte sætninger (ca. 25 ord i alt). Ingen floskler som «jeg forstår din bekymring».
@@ -66,9 +66,29 @@ Svar, sælgerne har givet 👎 — undgå disse formuleringer og den type svar:
 ${avoid || "- (ingen endnu)"}`;
 }
 
-export function liveCoachUserMessage(lines: readonly CoachLine[], trigger: ObjectionCategory | null): string {
+export type CoachMood = { signals: string[]; phase: string | null };
+
+export function liveCoachUserMessage(
+  lines: readonly CoachLine[],
+  trigger: ObjectionCategory | null,
+  customer: string | null = null,
+  mood: CoachMood | null = null,
+): string {
   const recent = lines.slice(-12).map((l) => `${l.speaker === "agent" ? "Sælger" : "Kunde"}: ${l.text}`);
-  return [...recent, "", trigger ? `(Mulig indvending: ${trigger})` : "", "Giv kortet nu."].filter(Boolean).join("\n");
+  const moodLine = mood && (mood.signals.length || mood.phase)
+    ? `Stemning indtil nu: ${mood.signals.length ? `signaler ${mood.signals.join(", ")}` : "ingen signaler"}${mood.phase ? ` · sælgeren er ved fasen ${mood.phase}` : ""}`
+    : "";
+  return [
+    customer ? `## Kunden (brug detaljerne naturligt, opfind intet)\n${customer}\n` : "",
+    moodLine,
+    "## Samtalen",
+    ...recent,
+    "",
+    trigger ? `(Mulig indvending: ${trigger})` : "",
+    "Giv kortet nu.",
+  ]
+    .filter(Boolean)
+    .join("\n");
 }
 
 /** Streamer kortets tekst som bytes; prisen logges, når svaret er færdigt. */

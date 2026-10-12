@@ -7,7 +7,7 @@
  */
 import { useEffect, useSyncExternalStore } from "react";
 
-export type CallAudio = { mic: MediaStream | null; remote: MediaStream };
+export type CallAudio = { mic: MediaStream | null; remote: MediaStream; leadId: string | null };
 
 const sources = new Map<string, CallAudio>();
 const listeners = new Set<() => void>();
@@ -15,7 +15,7 @@ let snapshot: CallAudio | null = null;
 
 function notify() {
   const last = [...sources.values()].at(-1) ?? null;
-  if (last?.remote !== snapshot?.remote || last?.mic !== snapshot?.mic) snapshot = last;
+  if (last?.remote !== snapshot?.remote || last?.mic !== snapshot?.mic || last?.leadId !== snapshot?.leadId) snapshot = last;
   listeners.forEach((l) => l());
 }
 
@@ -26,11 +26,17 @@ export function setCallAudio(id: string, audio: CallAudio | null): void {
 }
 
 /** Melder et aktivt opkald ind (null = intet opkald); afmeldes automatisk ved unmount. */
-export function useCallAudioPublisher(id: string, mic: MediaStream | null, remote: MediaStream | null, active: boolean): void {
+export function useCallAudioPublisher(
+  id: string,
+  mic: MediaStream | null,
+  remote: MediaStream | null,
+  active: boolean,
+  leadId: string | null = null,
+): void {
   useEffect(() => {
-    setCallAudio(id, active && remote ? { mic, remote } : null);
+    setCallAudio(id, active && remote ? { mic, remote, leadId } : null);
     return () => setCallAudio(id, null);
-  }, [id, mic, remote, active]);
+  }, [id, mic, remote, active, leadId]);
 }
 
 /** Det aktuelle opkalds lydspor (eller null). */

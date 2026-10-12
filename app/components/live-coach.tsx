@@ -32,12 +32,16 @@ export function LiveCoach(props: {
   micStream: MediaStream | null;
   remoteStream: MediaStream | null;
   active: boolean;
+  /** Leadet der ringes til — giver coachen kundens profil og tidligere samtaler. */
+  leadId?: string | null;
   /** Valgfrit: vis/brug transskriptionen (fx testsiden). */
   onTranscript?: (lines: LiveCoachLine[]) => void;
   /** Valgfrit: målt tid fra kundens ord til kortet (ms). */
   onLatency?: (ms: number, source: CoachCard["source"]) => void;
 }) {
-  const { micStream, remoteStream, active, onTranscript, onLatency } = props;
+  const { micStream, remoteStream, active, onTranscript, onLatency, leadId = null } = props;
+  /** Stemningen gennem samtalen: de signaler, kunden har vist indtil nu. */
+  const signalsSeen = useRef<string[]>([]);
   const [card, setCard] = useState<(CoachCard & { eventId: string | null; helpful: boolean | null }) | null>(null);
   const [status, setStatus] = useState<"off" | "starting" | "listening" | "error">("off");
   const [error, setError] = useState<string | null>(null);
@@ -96,7 +100,12 @@ export function LiveCoach(props: {
         const res = await fetch("/api/live-coach/suggest", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ lines, trigger }),
+          body: JSON.stringify({
+            lines,
+            trigger,
+            leadId,
+            mood: { signals: signalsSeen.current.slice(-6), phase: tracker.current?.nextLine?.phase ?? null },
+          }),
           signal: ctrl.signal,
         });
         if (!res.ok || !res.body) return; // fx månedsloftet (429): coachen forbliver tavs
@@ -115,6 +124,7 @@ export function LiveCoach(props: {
             measured = true;
             tracker.current?.onDeviation();
             syncScript();
+            if (parsed.signal) signalsSeen.current.push(parsed.signal);
             const ms = performance.now() - heardAt;
             onLatency?.(ms, "ai");
             if (eventId) void logEvent({ id: eventId, latencyMs: ms });
@@ -133,7 +143,7 @@ export function LiveCoach(props: {
         /* afbrudt af et nyere kort */
       }
     },
-    [onLatency, logEvent, syncScript],
+    [onLatency, logEvent, syncScript, leadId],
   );
 
   useEffect(() => {
@@ -141,6 +151,7 @@ export function LiveCoach(props: {
     let cancelled = false;
     const streams: SonioxStream[] = [];
     history.current = [];
+    signalsSeen.current = [];
     agent.current = new SpeakerTranscript();
     customer.current = new SpeakerTranscript();
     shownCategory.current = null;
@@ -169,6 +180,7 @@ export function LiveCoach(props: {
           const trigger = detectObjection(completed ?? customer.current.utterance);
           if (trigger && trigger.category !== shownCategory.current) {
             shownCategory.current = trigger.category;
+            signalsSeen.current.push(trigger.signal);
             tracker.current?.onDeviation();
             syncScript();
             const instant = triggerCard(trigger, session.current?.responses ?? {});

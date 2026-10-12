@@ -574,7 +574,7 @@ export function CampaignVoipStrip({
 
   const outLevel = useAudioLevel(micMonitorStream);
   const inLevel = useAudioLevel(activeCall ? remoteStream : null);
-  useCallAudioPublisher("campaign-strip", micMonitorStream, remoteStream, lineStatus === "live");
+  useCallAudioPublisher("campaign-strip", micMonitorStream, remoteStream, lineStatus === "live", leadId);
 
   // Under aktivt opkald: varighed = Date.now() − startAt (følger væguret, så throttlet
   // setInterval ikke får uret til at hænge bagud). Vi har brug for ~1 re-render/sek.

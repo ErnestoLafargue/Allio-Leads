@@ -4,9 +4,10 @@ import { createAnthropicClient } from "@/lib/anthropic-client";
 import { OBJECTION_CATEGORIES, type ObjectionCategory } from "@/lib/call-analysis/schema";
 import { parseCoachText } from "@/lib/live-coach/card";
 import { LIVE_COACH_PROMPT_VERSION, liveCoachMonthlyBudgetUsd, liveCoachSpentThisMonth } from "@/lib/live-coach/events";
+import { customerContext } from "@/lib/live-coach/customer-context";
 import { feedbackBank } from "@/lib/live-coach/feedback";
 import { activeScriptResponses, objectionBank } from "@/lib/live-coach/script-responses";
-import { liveCoachSystemPrompt, liveCoachUserMessage, streamSuggestion, type CoachLine } from "@/lib/live-coach/suggest";
+import { liveCoachSystemPrompt, liveCoachUserMessage, streamSuggestion, type CoachLine, type CoachMood } from "@/lib/live-coach/suggest";
 import { getViewer } from "@/lib/scripts-traening/queries";
 
 /**
@@ -18,7 +19,12 @@ import { getViewer } from "@/lib/scripts-traening/queries";
 export async function POST(req: Request) {
   const viewer = await getViewer();
   if (!viewer) return NextResponse.json({ error: "Ikke logget ind" }, { status: 401 });
-  const body = (await req.json().catch(() => null)) as { lines?: CoachLine[]; trigger?: string | null } | null;
+  const body = (await req.json().catch(() => null)) as {
+    lines?: CoachLine[];
+    trigger?: string | null;
+    leadId?: string | null;
+    mood?: CoachMood | null;
+  } | null;
   const lines = (body?.lines ?? [])
     .filter((l) => (l.speaker === "agent" || l.speaker === "customer") && typeof l.text === "string")
     .map((l) => ({ speaker: l.speaker, text: l.text.slice(0, 600) }))
@@ -31,6 +37,14 @@ export async function POST(req: Request) {
     ? (body!.trigger as ObjectionCategory)
     : null;
 
+  const customer = typeof body?.leadId === "string" && body.leadId ? await customerContext(body.leadId) : null;
+  const mood: CoachMood | null = body?.mood
+    ? {
+        signals: (Array.isArray(body.mood.signals) ? body.mood.signals : []).filter((x) => typeof x === "string").slice(-6),
+        phase: typeof body.mood.phase === "string" ? body.mood.phase : null,
+      }
+    : null;
+
   const event = await prisma.liveCoachEvent.create({
     data: { userId: viewer.userId, source: "ai", category: trigger, promptVersion: LIVE_COACH_PROMPT_VERSION },
     select: { id: true },
@@ -38,7 +52,7 @@ export async function POST(req: Request) {
   const stream = streamSuggestion({
     client: createAnthropicClient(),
     system: liveCoachSystemPrompt(await activeScriptResponses(), await objectionBank(), await feedbackBank()),
-    userMessage: liveCoachUserMessage(lines, trigger),
+    userMessage: liveCoachUserMessage(lines, trigger, customer, mood),
     onDone: ({ costUsd, text }) => {
       const card = parseCoachText(text);
       void prisma.liveCoachEvent
