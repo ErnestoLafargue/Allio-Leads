@@ -2,7 +2,8 @@
  * Ugens script — tre måder:
  *   --export <dir>   Skriv prompt + input (evidenspakke) til en Claude-session (første gang, uden API).
  *   --publish <dir>  Validér <dir>/out.json mod skemaet og evidenspakken, og udgiv (kilde "session").
- *   --api            Generér og udgiv direkte via Claude API'et (sådan kører det fremover).
+ *   --api            Generér, finpuds og udgiv direkte via Claude API'et (sådan kører det fremover).
+ *   --polish         Finpuds det aktive script (lag 2) og udgiv det som ny version.
  *
  * Brug:  set -a; . ./.env.local; . ./.env.branch; set +a
  *        npx tsx --tsconfig tsconfig.json scripts/weekly-script.ts --export /root/allio-analysis/weekly
@@ -12,7 +13,7 @@ import path from "node:path";
 import { assertExpectedDatabase } from "@/lib/db-guard";
 import { prisma } from "@/lib/prisma";
 import { evidenceCallIds, type EvidencePack } from "@/lib/sales-scripts/evidence";
-import { buildWeeklyScriptInput, generateWeeklyScriptViaApi } from "@/lib/sales-scripts/generate";
+import { buildWeeklyScriptInput, generateWeeklyScriptViaApi, polishActiveWeeklyScript } from "@/lib/sales-scripts/generate";
 import { WEEKLY_SCRIPT_PROMPT_VERSION, WEEKLY_SCRIPT_SYSTEM_PROMPT } from "@/lib/sales-scripts/prompt";
 import { publishWeeklyScript, sanitizeWeeklyScript } from "@/lib/sales-scripts/publish";
 import { weeklyScriptJsonSchema } from "@/lib/sales-scripts/schema";
@@ -73,13 +74,19 @@ async function main() {
     return;
   }
 
+  if (process.argv.includes("--polish")) {
+    const r = await polishActiveWeeklyScript();
+    console.log(`Finpudset ugens script udgivet som version ${r.version} — pris $${r.costUsd.toFixed(4)}`);
+    return;
+  }
+
   if (process.argv.includes("--api")) {
     const r = await generateWeeklyScriptViaApi();
     console.log(`Udgivet ugens script version ${r.version} via API — pris $${r.costUsd.toFixed(4)}`);
     return;
   }
 
-  throw new Error("Brug --export <dir>, --publish <dir> eller --api");
+  throw new Error("Brug --export <dir>, --publish <dir>, --api eller --polish");
 }
 
 main()

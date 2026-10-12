@@ -96,7 +96,7 @@ export default async function ScriptsPage() {
             </details>
           </header>
 
-          <div className="grid gap-6 lg:grid-cols-[minmax(0,1fr)_22rem]">
+          <div className="grid gap-6 lg:grid-cols-[minmax(0,1.35fr)_minmax(0,1fr)]">
             {/* Manuskriptet: læses fra en ende af som én samtale */}
             <article className="rounded-2xl bg-white p-5 shadow-sm ring-1 ring-stone-200 sm:p-8">
               <ol className="space-y-8">
@@ -139,19 +139,19 @@ export default async function ScriptsPage() {
 
             {/* Indvendinger: klik for at se det bedste svar */}
             <aside className="lg:sticky lg:top-6 lg:self-start">
-              <h3 className="mb-2 text-sm font-semibold text-stone-900">Indvendinger</h3>
+              <h3 className="mb-3 text-base font-semibold text-stone-900">Indvendinger</h3>
               <div className="divide-y divide-stone-100 overflow-hidden rounded-2xl bg-white shadow-sm ring-1 ring-stone-200">
                 {script.objections.map((o, i) => (
                   <details key={i} className="group">
-                    <summary className="flex cursor-pointer list-none items-start justify-between gap-2 px-4 py-3 hover:bg-stone-50">
+                    <summary className="flex cursor-pointer list-none items-start justify-between gap-3 px-5 py-4 hover:bg-stone-50">
                       <span>
-                        <span className="block text-sm font-medium text-stone-900">{OBJECTION_LABELS[o.category]}</span>
-                        <span className="block text-xs text-stone-500">“{o.customerSays}”</span>
+                        <span className="block text-[15px] font-semibold text-stone-900">{OBJECTION_LABELS[o.category]}</span>
+                        <span className="mt-0.5 block text-sm text-stone-500">“{o.customerSays}”</span>
                       </span>
                       <Chevron />
                     </summary>
-                    <div className="space-y-2 px-4 pb-4">
-                      <p className="border-l-2 border-emerald-600 pl-3 text-sm leading-relaxed text-stone-900">{o.response}</p>
+                    <div className="space-y-2 px-5 pb-5">
+                      <p className="border-l-2 border-emerald-600 pl-3 text-[15px] leading-relaxed text-stone-900">{o.response}</p>
                       <p className="text-[11px] text-stone-400">
                         {o.evidence}
                         <EvidenceLinks ids={o.evidenceCalls} canOpen={canOpen} />

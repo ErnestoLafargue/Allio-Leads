@@ -8,6 +8,7 @@ import { prisma } from "@/lib/prisma";
 import { loadAnalyzedCalls } from "@/lib/scripts-traening/analyzed-calls";
 import { buildEvidencePack, evidenceCallIds, type EvidencePack } from "./evidence";
 import { WEEKLY_SCRIPT_PROMPT_VERSION, WEEKLY_SCRIPT_SYSTEM_PROMPT, buildWeeklyScriptUserMessage } from "./prompt";
+import { POLISH_PROMPT_VERSION, polishWeeklyScript } from "./polish";
 import { isoWeekKey, publishWeeklyScript, sanitizeWeeklyScript } from "./publish";
 import { WeeklyScriptSchema, type WeeklyScript } from "./schema";
 
@@ -36,20 +37,45 @@ export async function buildWeeklyScriptInput(
 /** Genererer og udgiver ugens script via Claude API'et (workeren/scriptet — ingen godkendelse). */
 export async function generateWeeklyScriptViaApi(client = createAnthropicClient(), now = new Date()) {
   const { userMessage, evidence, basedOnCalls } = await buildWeeklyScriptInput(now);
-  const { output, costUsd } = await structuredCall({
+  const draft = await structuredCall({
     client,
     system: WEEKLY_SCRIPT_SYSTEM_PROMPT,
     userMessage,
     schema: WeeklyScriptSchema,
     maxTokens: 32000,
   });
-  const script = sanitizeWeeklyScript(output, evidenceCallIds(evidence));
+  // Lag 2: finpudsning til ét sammenhængende manuskript (samme evidens, ingen nye tal).
+  const polished = await polishWeeklyScript(client, sanitizeWeeklyScript(draft.output, evidenceCallIds(evidence)));
+  const script = sanitizeWeeklyScript(polished.script, evidenceCallIds(evidence));
+  const costUsd = draft.costUsd + polished.costUsd;
   const published = await publishWeeklyScript({
     script,
     evidence,
     basedOnCalls,
     generatedBy: "api",
-    promptVersion: WEEKLY_SCRIPT_PROMPT_VERSION,
+    promptVersion: `${WEEKLY_SCRIPT_PROMPT_VERSION}+${POLISH_PROMPT_VERSION}`,
+    costUsd,
+    now,
+  });
+  return { ...published, costUsd };
+}
+
+/** Finpudser det aktive ugens script (lag 2) og udgiver det som ny version med samme evidens. */
+export async function polishActiveWeeklyScript(client = createAnthropicClient(), now = new Date()) {
+  const active = await prisma.salesScriptVersion.findFirst({
+    where: { kind: "WEEKLY", isActive: true },
+    select: { content: true, evidence: true, basedOnCalls: true, promptVersion: true },
+  });
+  if (!active) throw new Error("Der er intet aktivt ugens script at finpudse.");
+  const evidence = active.evidence as unknown as EvidencePack;
+  const allowed = evidenceCallIds(evidence);
+  const { script, costUsd } = await polishWeeklyScript(client, active.content as unknown as WeeklyScript);
+  const published = await publishWeeklyScript({
+    script: sanitizeWeeklyScript(script, allowed),
+    evidence,
+    basedOnCalls: active.basedOnCalls,
+    generatedBy: "api",
+    promptVersion: `${active.promptVersion}+${POLISH_PROMPT_VERSION}`,
     costUsd,
     now,
   });
