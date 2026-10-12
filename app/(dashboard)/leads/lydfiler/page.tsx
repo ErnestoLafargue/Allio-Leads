@@ -29,17 +29,35 @@ type Row = {
 
 type SortKey = "time" | "company" | "status" | "campaign" | "agent";
 
+type UserOption = { id: string; name: string; username: string; role: string };
+
 export default function LydfilerPage() {
   const [qDraft, setQDraft] = useState("");
   const [statusDraft, setStatusDraft] = useState<string>("");
+  const [userDraft, setUserDraft] = useState<string>("");
   const [committedQ, setCommittedQ] = useState("");
   const [committedStatus, setCommittedStatus] = useState("");
+  const [committedUserId, setCommittedUserId] = useState("");
+  const [userOptions, setUserOptions] = useState<UserOption[]>([]);
   const [sort, setSort] = useState<SortKey>("time");
   const [dir, setDir] = useState<"asc" | "desc">("desc");
   const [page, setPage] = useState(1);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [data, setData] = useState<{ items: Row[]; total: number; totalPages: number } | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    void (async () => {
+      const res = await fetch("/api/users/for-assignment");
+      if (!res.ok || cancelled) return;
+      const list = (await res.json().catch(() => [])) as UserOption[];
+      if (!cancelled && Array.isArray(list)) setUserOptions(list);
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -51,6 +69,7 @@ export default function LydfilerPage() {
     sp.set("dir", dir);
     if (committedQ.trim()) sp.set("q", committedQ.trim());
     if (committedStatus) sp.set("status", committedStatus);
+    if (committedUserId) sp.set("userId", committedUserId);
     const res = await fetch(`/api/leads/call-recordings?${sp.toString()}`);
     const j = await res.json().catch(() => ({}));
     if (!res.ok) {
@@ -65,7 +84,7 @@ export default function LydfilerPage() {
       totalPages: typeof j.totalPages === "number" ? j.totalPages : 1,
     });
     setLoading(false);
-  }, [page, sort, dir, committedQ, committedStatus]);
+  }, [page, sort, dir, committedQ, committedStatus, committedUserId]);
 
   useEffect(() => {
     void load();
@@ -84,6 +103,7 @@ export default function LydfilerPage() {
   function applyFilters() {
     setCommittedQ(qDraft);
     setCommittedStatus(statusDraft);
+    setCommittedUserId(userDraft);
     setPage(1);
   }
 
@@ -96,8 +116,8 @@ export default function LydfilerPage() {
         <div>
           <h1 className="text-xl font-semibold text-stone-900">Lydfiler</h1>
           <p className="text-sm text-stone-500">
-            Alle opkaldsoptagelser med kunde, lead, tidspunkt og leadets nuværende udfald. Klik på kolonnetitler for at
-            sortere.
+            Alle opkaldsoptagelser med kunde, lead, tidspunkt og leadets nuværende udfald. Filtrér på udfald og
+            hvilken bruger der har lavet optagelsen. Klik på kolonnetitler for at sortere.
           </p>
         </div>
         <div className="flex flex-wrap items-end gap-2">
@@ -123,6 +143,22 @@ export default function LydfilerPage() {
               {(LEAD_STATUSES as readonly LeadStatus[]).map((s) => (
                 <option key={s} value={s}>
                   {LEAD_STATUS_LABELS[s]}
+                </option>
+              ))}
+            </select>
+          </label>
+          <label className="flex flex-col gap-0.5 text-xs font-medium text-stone-600">
+            Bruger
+            <select
+              value={userDraft}
+              onChange={(e) => setUserDraft(e.target.value)}
+              className="min-w-[10rem] rounded-md border border-stone-200 bg-white px-2 py-1.5 text-sm text-stone-900 shadow-sm outline-none ring-stone-400 focus:ring-2"
+            >
+              <option value="">Alle</option>
+              {userOptions.map((u) => (
+                <option key={u.id} value={u.id}>
+                  {u.name}
+                  {u.role === "ADMIN" ? " · Admin" : ""}
                 </option>
               ))}
             </select>

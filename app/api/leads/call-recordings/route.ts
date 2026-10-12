@@ -8,22 +8,11 @@ const PAGE_SIZE_DEFAULT = 40;
 const PAGE_SIZE_MAX = 100;
 
 function buildLeadWhere(params: {
-  role: string;
-  userId: string;
   q: string;
   statusFilter: string;
 }): Record<string, unknown> {
-  const { role, userId, q, statusFilter } = params;
+  const { q, statusFilter } = params;
   const parts: Record<string, unknown>[] = [];
-
-  if (role !== "ADMIN") {
-    parts.push({
-      OR: [{ status: { not: "CALLBACK_SCHEDULED" as const } }, { callbackReservedByUserId: userId }],
-    });
-    parts.push({
-      OR: [{ status: { not: "MEETING_BOOKED" as const } }, { bookedByUserId: userId }],
-    });
-  }
 
   if (q) {
     parts.push({
@@ -53,12 +42,11 @@ export async function GET(req: Request) {
   );
   const q = searchParams.get("q")?.trim() ?? "";
   const statusFilter = searchParams.get("status")?.trim().toUpperCase() ?? "";
+  const agentUserId = searchParams.get("userId")?.trim() ?? "";
   const sort = (searchParams.get("sort") || "time").toLowerCase();
   const dir = searchParams.get("dir") === "asc" ? "asc" : "desc";
 
   const leadWhere = buildLeadWhere({
-    role: session.user.role,
-    userId: session.user.id,
     q,
     statusFilter,
   });
@@ -66,6 +54,7 @@ export async function GET(req: Request) {
   const where = {
     kind: LEAD_ACTIVITY_KIND.CALL_RECORDING,
     recordingUrl: { not: null },
+    ...(agentUserId ? { userId: agentUserId } : {}),
     ...(Object.keys(leadWhere).length > 0 ? { lead: leadWhere } : {}),
   };
 
@@ -93,7 +82,8 @@ export async function GET(req: Request) {
   }
 
   try {
-    const canMergeUncoupled = session.user.role === "ADMIN" && !statusFilter && sort === "time";
+    const canMergeUncoupled =
+      session.user.role === "ADMIN" && !statusFilter && !agentUserId && sort === "time";
     const fetchTake = canMergeUncoupled ? page * pageSize : pageSize;
     const fetchSkip = canMergeUncoupled ? 0 : (page - 1) * pageSize;
 

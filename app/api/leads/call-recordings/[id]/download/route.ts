@@ -2,8 +2,6 @@ import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { requireSession } from "@/lib/api-auth";
 import { LEAD_ACTIVITY_KIND } from "@/lib/lead-activity-kinds";
-import { canAccessBookedMeetingNotes } from "@/lib/lead-meeting-access";
-import { canAccessCallbackLead } from "@/lib/lead-callback-access";
 
 const MAX_RECORDING_BYTES = 45 * 1024 * 1024;
 
@@ -57,7 +55,7 @@ async function fetchRecordingBytes(url: string): Promise<{ body: Buffer; content
  * Streamer optagelsen som vedhæftning (samme adgang som lydfil-listen).
  */
 export async function GET(_req: Request, { params }: Params) {
-  const { session, response } = await requireSession();
+  const { response } = await requireSession();
   if (response) return response;
 
   const { id: eventId } = await params;
@@ -76,9 +74,6 @@ export async function GET(_req: Request, { params }: Params) {
         select: {
           id: true,
           companyName: true,
-          status: true,
-          bookedByUserId: true,
-          callbackReservedByUserId: true,
         },
       },
     },
@@ -86,13 +81,6 @@ export async function GET(_req: Request, { params }: Params) {
 
   if (!ev?.recordingUrl) {
     return NextResponse.json({ error: "Ikke fundet." }, { status: 404 });
-  }
-
-  if (!canAccessCallbackLead(session.user.role, session.user.id, ev.lead)) {
-    return NextResponse.json({ error: "Ingen adgang." }, { status: 403 });
-  }
-  if (!canAccessBookedMeetingNotes(session.user.role, session.user.id, ev.lead)) {
-    return NextResponse.json({ error: "Ingen adgang." }, { status: 403 });
   }
 
   let bytes: Buffer;
