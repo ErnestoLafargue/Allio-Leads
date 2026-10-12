@@ -66,6 +66,7 @@ model User {
   dashboardsCreated    Dashboard[]               @relation("DashboardCreatedBy")
   campaignAssignments  CampaignAssignment[]
   campaignAssignmentsCreated CampaignAssignment[] @relation("CampaignAssignmentCreatedBy")
+  timeClockEntries     TimeClockEntry[]
 }
 
 /// Én række pr. bruger pr. kalenderdag (København) ved vellykket login.
@@ -80,6 +81,25 @@ model UserLoginDay {
 
   @@unique([userId, dayKey])
   @@index([dayKey])
+}
+
+/// Eksplicit stempel ind/ud (Planday-agtig tidsregistrering). Én åben række pr. bruger
+/// (punchedOutAt IS NULL) håndhæves af et partial unique index i migrationen.
+model TimeClockEntry {
+  id           String    @id @default(cuid())
+  userId       String
+  punchedInAt  DateTime
+  punchedOutAt DateTime?
+  /// YYYY-MM-DD for stempel-ind i Europe/Copenhagen
+  dayKey       String
+  createdAt    DateTime  @default(now())
+  updatedAt    DateTime  @updatedAt
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, dayKey])
+  @@index([dayKey])
+  @@index([userId, punchedOutAt])
 }
 
 /// Akkumuleret login-tilstedeværelse pr. bruger pr. kalenderdag (København).

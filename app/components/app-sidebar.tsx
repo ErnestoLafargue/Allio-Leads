@@ -4,8 +4,10 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { signOut } from "next-auth/react";
 import { useCallback, useEffect, useMemo, useState } from "react";
+import { TimeClockButton } from "@/app/components/time-clock-button";
+import { useDesktopComputer } from "@/lib/use-desktop-computer";
 
-type LeafItem = { href: string; label: string; adminOnly?: boolean };
+type LeafItem = { href: string; label: string; adminOnly?: boolean; desktopOnly?: boolean };
 
 type SidebarSection =
   | {
@@ -14,6 +16,7 @@ type SidebarSection =
       href: string;
       label: string;
       adminOnly?: boolean;
+      desktopOnly?: boolean;
       icon: (props: { className?: string }) => React.ReactElement;
     }
   | {
@@ -22,6 +25,7 @@ type SidebarSection =
       label: string;
       icon: (props: { className?: string }) => React.ReactElement;
       adminOnly?: boolean;
+      desktopOnly?: boolean;
       items: LeafItem[];
     };
 
@@ -183,6 +187,26 @@ function MenuIcon({ open }: { open: boolean }) {
   );
 }
 
+function ClockIcon({ className }: { className?: string }) {
+  return (
+    <svg
+      className={className}
+      width="22"
+      height="22"
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="1.8"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      aria-hidden
+    >
+      <circle cx="12" cy="12" r="9" />
+      <path d="M12 7v5l3 2" />
+    </svg>
+  );
+}
+
 function DashboardIcon({ className }: { className?: string }) {
   return (
     <svg
@@ -222,6 +246,14 @@ const SIDEBAR_SECTIONS: SidebarSection[] = [
     href: "/scoreboard",
     label: "Scoreboard",
     icon: ScoreboardIcon,
+  },
+  {
+    kind: "link",
+    id: "stempling",
+    href: "/stempling",
+    label: "Stempling",
+    icon: ClockIcon,
+    desktopOnly: true,
   },
   {
     kind: "link",
@@ -294,13 +326,15 @@ export function AppSidebar({
   const [mobileOpen, setMobileOpen] = useState(false);
 
   const isAdmin = role === "ADMIN";
+  const isComputer = useDesktopComputer();
   const visibleSections = useMemo(
     () =>
       SIDEBAR_SECTIONS.filter((s) => {
-        if (s.kind === "link") return !s.adminOnly || isAdmin;
-        return !s.adminOnly || isAdmin;
+        if (s.adminOnly && !isAdmin) return false;
+        if (s.desktopOnly && !isComputer) return false;
+        return true;
       }),
-    [isAdmin],
+    [isAdmin, isComputer],
   );
 
   const visibleGroupItems = useCallback(
@@ -724,8 +758,9 @@ export function AppSidebar({
 
         {/* User panel */}
         <div className="mt-auto border-t border-white/10 px-2 pb-3 pt-3">
+          {isComputer ? <TimeClockButton compact={!expanded} /> : null}
           <div
-            className="group/user flex items-center gap-3 rounded-lg px-2 py-1.5"
+            className="group/user mt-1 flex items-center gap-3 rounded-lg px-2 py-1.5"
             title={userName}
           >
             <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-white/10 text-sm font-semibold text-white ring-1 ring-white/15">
