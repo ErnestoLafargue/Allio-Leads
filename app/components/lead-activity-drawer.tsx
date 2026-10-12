@@ -393,6 +393,7 @@ function ActivityTimelineRow({
                         afspilleren midt i afspilning — src-skift håndteres inde i afspilleren. */}
                     <LeadRecordingPlayer
                       src={row.recordingUrl}
+                      eventId={row.id}
                       durationSecondsHint={row.durationSeconds}
                       variant="default"
                     />

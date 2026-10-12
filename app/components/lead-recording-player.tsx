@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
+import { createMonoPlayback, supportsMonoPlayback, type MonoPlayback } from "@/lib/mono-playback";
 
 function formatClock(totalSeconds: number): string {
   if (!Number.isFinite(totalSeconds) || totalSeconds < 0) return "0:00";
@@ -11,22 +12,39 @@ function formatClock(totalSeconds: number): string {
 
 type Props = {
   src: string;
+  /** LeadActivityEvent-id — afspilles via same-origin, så dual-track kan mixes. */
+  eventId?: string | null;
   /** Fra Telnyx webhook / DB — vises indtil metadata er indlæst */
   durationSecondsHint?: number | null;
   /** visuel variant */
   variant?: "default" | "adminInline";
 };
 
+function resolvedPlaybackUrl(src: string, eventId?: string | null): string {
+  const id = eventId?.trim();
+  if (id) return `/api/leads/call-recordings/${encodeURIComponent(id)}/audio`;
+  return src;
+}
+
 /**
  * Afspiller samtaleoptagelse med tydelig varighed, play/pause og scrub (slider).
+ *
+ * Dual-track filer (sælger/kunde på hvert sit spor) mixes til stereo i browseren,
+ * så begge stemmer kommer i begge højttalere. Selve filen gemmes uændret med 2 spor.
  *
  * `playbackSrc` fryses mens der spilles, så Telnyx-sync/webhook der skifter
  * `recordingUrl` (Telnyx → Blob) ikke genstarter `<audio>` midt i — det
  * blokerede ellers `play()` uden ny bruger-gesture og stoppede efter få sekunder.
  */
-export function LeadRecordingPlayer({ src, durationSecondsHint, variant = "default" }: Props) {
+export function LeadRecordingPlayer({
+  src,
+  eventId,
+  durationSecondsHint,
+  variant = "default",
+}: Props) {
   const audioRef = useRef<HTMLAudioElement | null>(null);
-  const [playbackSrc, setPlaybackSrc] = useState(src);
+  const resolvedSrc = resolvedPlaybackUrl(src, eventId);
+  const [playbackSrc, setPlaybackSrc] = useState(resolvedSrc);
   const [duration, setDuration] = useState<number | null>(
     typeof durationSecondsHint === "number" && durationSecondsHint > 0
       ? durationSecondsHint
@@ -42,19 +60,43 @@ export function LeadRecordingPlayer({ src, durationSecondsHint, variant = "defau
     playingRef.current = playing;
   }, [playing]);
 
+  const mixCapable = supportsMonoPlayback(playbackSrc);
+  const mixRef = useRef<MonoPlayback | null>(null);
+
+  const ensureMixedPlayback = useCallback(
+    (el: HTMLAudioElement) => {
+      if (!mixCapable) return;
+      mixRef.current ??= createMonoPlayback();
+      mixRef.current.ensure(el);
+    },
+    [mixCapable],
+  );
+
+  const suspendMixedPlayback = useCallback(() => {
+    mixRef.current?.suspend();
+  }, []);
+
+  useEffect(
+    () => () => {
+      mixRef.current?.close();
+      mixRef.current = null;
+    },
+    [],
+  );
+
   /** Opdatér intern src kun når der ikke spilles — ellers vent til pause/slut. */
   const pendingSrcRef = useRef<string | null>(null);
   useEffect(() => {
-    if (src === playbackSrc) {
+    if (resolvedSrc === playbackSrc) {
       pendingSrcRef.current = null;
       return;
     }
     if (playingRef.current) {
-      pendingSrcRef.current = src;
+      pendingSrcRef.current = resolvedSrc;
       return;
     }
     pendingSrcRef.current = null;
-    setPlaybackSrc(src);
+    setPlaybackSrc(resolvedSrc);
     setReady(false);
     setError(null);
     setCurrent(0);
@@ -63,7 +105,7 @@ export function LeadRecordingPlayer({ src, durationSecondsHint, variant = "defau
     } else {
       setDuration(null);
     }
-  }, [src, playbackSrc, durationSecondsHint]);
+  }, [resolvedSrc, playbackSrc, durationSecondsHint]);
 
   const applyPendingSrc = useCallback(() => {
     const pending = pendingSrcRef.current;
@@ -95,8 +137,9 @@ export function LeadRecordingPlayer({ src, durationSecondsHint, variant = "defau
     setCurrent(0);
     const el = audioRef.current;
     if (el) el.currentTime = 0;
+    suspendMixedPlayback();
     applyPendingSrc();
-  }, [applyPendingSrc]);
+  }, [applyPendingSrc, suspendMixedPlayback]);
 
   const onPause = useCallback(() => {
     const el = audioRef.current;
@@ -104,9 +147,10 @@ export function LeadRecordingPlayer({ src, durationSecondsHint, variant = "defau
     // faktisk er stoppet (ikke ended, som håndteres i onEnded).
     if (el && !el.ended && el.paused) {
       setPlaying(false);
+      suspendMixedPlayback();
       applyPendingSrc();
     }
-  }, [applyPendingSrc]);
+  }, [applyPendingSrc, suspendMixedPlayback]);
 
   const onPlay = useCallback(() => {
     setPlaying(true);
@@ -143,12 +187,13 @@ export function LeadRecordingPlayer({ src, durationSecondsHint, variant = "defau
       void el.pause();
       setPlaying(false);
     } else {
+      ensureMixedPlayback(el);
       void el.play().then(
         () => setPlaying(true),
         () => setError("Afspilning blev blokeret eller fejlede."),
       );
     }
-  }, [playing]);
+  }, [playing, ensureMixedPlayback]);
 
   const seekTo = useCallback(
     (value: number) => {
@@ -173,8 +218,10 @@ export function LeadRecordingPlayer({ src, durationSecondsHint, variant = "defau
   return (
     <div className={`mt-2 ${wrap}`}>
       <audio
+        key={mixCapable ? "mixed" : "native"}
         ref={audioRef}
         src={playbackSrc}
+        crossOrigin={mixCapable ? "anonymous" : undefined}
         preload="metadata"
         className="hidden"
         onLoadedMetadata={onMeta}

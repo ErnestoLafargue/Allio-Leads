@@ -298,6 +298,7 @@ export default function LydfilerPage() {
                           <div className="min-w-0 flex-1">
                             <LeadRecordingPlayer
                               src={r.recordingUrl}
+                              eventId={r.downloadEventId}
                               durationSecondsHint={r.durationSeconds}
                               variant="adminInline"
                             />
