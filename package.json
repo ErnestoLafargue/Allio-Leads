@@ -21,6 +21,7 @@
     "seed": "tsx prisma/seed.ts"
   },
   "dependencies": {
+    "@anthropic-ai/sdk": "^0.128.0",
     "@prisma/client": "^5.22.0",
     "@telnyx/webrtc": "^2.26.3",
     "@vercel/blob": "^0.27.3",
@@ -36,7 +37,8 @@
     "react-dom": "19.2.4",
     "react-grid-layout": "^2.2.4",
     "recharts": "^3.10.1",
-    "xlsx": "^0.18.5"
+    "xlsx": "^0.18.5",
+    "zod": "^4.6.5"
   },
   "devDependencies": {
     "@tailwindcss/postcss": "^4",

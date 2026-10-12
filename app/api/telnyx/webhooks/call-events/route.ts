@@ -18,7 +18,7 @@ import {
   resolvePowerLegKind,
 } from "@/lib/power-dialer-events";
 import { LEAD_ACTIVITY_KIND, formatPhoneForActivitySummary } from "@/lib/lead-activity-kinds";
-import { startTelnyxRecording } from "@/lib/telnyx-call-control";
+import { appRecordingEnabled, startTelnyxRecording } from "@/lib/telnyx-call-control";
 import { persistTelnyxRecordingToAllio } from "@/lib/telnyx-recording-storage";
 import { isVercelBlobUrl } from "@/lib/telnyx-recordings-backfill";
 import {
@@ -175,11 +175,11 @@ export async function POST(req: Request) {
         });
       }
       // Click-to-call (kind=manual): ingen AMD, men agenten har eksplicit valgt at ringe
-      // → start optagelse straks når lead besvarer. Dispatcher-flow optager separat
-      // i handleAmdHuman efter AMD har bekræftet menneske.
+      // → start optagelse straks når lead besvarer — kun hvis app-optagelse er slået til;
+      // ellers optager Telnyx' voice profile opkaldet komplet i stereo (se appRecordingEnabled).
       if (clientState?.kind === "manual" && clientState.leadId) {
         const apiKey = process.env.TELNYX_API_KEY?.trim();
-        if (apiKey) {
+        if (apiKey && appRecordingEnabled()) {
           queueMicrotask(() => {
             startTelnyxRecording({
               apiKey,
@@ -200,7 +200,7 @@ export async function POST(req: Request) {
         // at sætte ref) — start optagelse når vi kan koble til præcis ét lead via numre.
         // outbound-lead = parallel dialer; der startes optagelse først ved AMD=menneske.
         const apiKey = process.env.TELNYX_API_KEY?.trim();
-        if (apiKey) {
+        if (apiKey && appRecordingEnabled()) {
           const dir = String(payload.direction ?? "").toLowerCase();
           if (dir !== "inbound") {
             const leadIdGuess = await findUniqueLeadIdByCallParties(
