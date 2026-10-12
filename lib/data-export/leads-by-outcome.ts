@@ -198,15 +198,16 @@ const FIXED_CUSTOM_FIELDS = [
   ...DEFAULT_CVR_EXTENSION_FIELDS,
 ];
 
+/** Første kolonner (fast rækkefølge) → øvrige → Noter altid sidst. */
 export const OUTCOME_EXPORT_HEADERS: string[] = [
   "Lead ID",
   "Kampagne (booket fra)",
   "Kampagne (nuværende)",
+  "CVR",
+  "Møde booket af",
+  "Virksomhedsnavn",
   "Historisk udfald",
   "Nuværende udfald",
-  "CVR",
-  "Virksomhedsnavn",
-  "Noter",
   "Virksomhed Tlf",
   "Privat Tlf",
   "Email",
@@ -219,12 +220,12 @@ export const OUTCOME_EXPORT_HEADERS: string[] = [
   "Historisk udfaldsdato",
   "Møde booket den",
   "Møde planlagt",
-  "Møde booket af",
   "Mødeansvarlig",
   "Mødeudfald",
   "Mødekontakt navn",
   "Mødekontakt email",
   "Mødekontakt telefon (privat)",
+  "Noter",
 ];
 
 /**
