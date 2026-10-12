@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import { parseDashboardWidgets } from "./parse-config";
 import { evaluateTargetProgress, normalizeTargetConfig } from "./targets";
 import { performanceIndex } from "./metric-catalog";
 import { copenhagenWeekDayKeys, resolveDashboardPeriod } from "./resolve-period";
@@ -35,6 +36,47 @@ describe("dashboard targets", () => {
     expect(p.targetValue).toBe(0);
     expect(p.pctOfTarget).toBe(0);
     expect(p.index).toBe("red");
+  });
+
+  it("bruger fast mål når det er sat", () => {
+    const p = evaluateTargetProgress({
+      actual: 9,
+      activeDays: 1,
+      target: { perActiveDay: 5, fixedTotal: 20 },
+    });
+    expect(p.targetValue).toBe(20);
+    expect(p.pctOfTarget).toBe(45);
+    expect(p.remaining).toBe(11);
+  });
+
+  it("fast ugemål tilsidesætter aktive dage", () => {
+    const p = evaluateTargetProgress({
+      actual: 0,
+      activeDays: 2,
+      target: { fixedTotal: 8 },
+    });
+    expect(p.targetValue).toBe(8);
+    expect(p.pctOfTarget).toBe(0);
+    expect(p.index).toBe("red");
+  });
+});
+
+describe("parseDashboardWidgets target", () => {
+  it("bevarer fast mål", () => {
+    const widgets = parseDashboardWidgets([
+      {
+        id: "w1",
+        title: "Mødemål Denne Måned",
+        metricId: "meetings_target",
+        period: "this_month",
+        groupBy: "none",
+        viz: "progress",
+        target: { perActiveDay: 3, fixedTotal: 20 },
+      },
+    ]);
+    expect(widgets).toHaveLength(1);
+    expect(widgets[0]?.target?.fixedTotal).toBe(20);
+    expect(widgets[0]?.target?.perActiveDay).toBe(3);
   });
 });
 

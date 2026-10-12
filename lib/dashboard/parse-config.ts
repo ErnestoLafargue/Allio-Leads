@@ -1,4 +1,32 @@
-import type { DashboardLayoutItem, DashboardWidgetConfig } from "@/lib/dashboard/types";
+import type {
+  DashboardLayoutItem,
+  DashboardTargetConfig,
+  DashboardWidgetConfig,
+} from "@/lib/dashboard/types";
+
+function parsePositiveNumber(value: unknown): number | undefined {
+  if (typeof value === "number" && Number.isFinite(value) && value > 0) return value;
+  if (typeof value === "string" && value.trim()) {
+    const n = Number(value);
+    if (Number.isFinite(n) && n > 0) return n;
+  }
+  return undefined;
+}
+
+function parseTarget(raw: unknown): DashboardTargetConfig | undefined {
+  if (!raw || typeof raw !== "object") return undefined;
+  const o = raw as Record<string, unknown>;
+  const perActiveDay = parsePositiveNumber(o.perActiveDay);
+  const fixedTotalRaw = parsePositiveNumber(o.fixedTotal);
+  const redBelowPct = parsePositiveNumber(o.redBelowPct);
+  const yellowBelowPct = parsePositiveNumber(o.yellowBelowPct);
+  const target: DashboardTargetConfig = {};
+  if (perActiveDay != null) target.perActiveDay = perActiveDay;
+  if (fixedTotalRaw != null) target.fixedTotal = Math.round(fixedTotalRaw);
+  if (redBelowPct != null) target.redBelowPct = redBelowPct;
+  if (yellowBelowPct != null) target.yellowBelowPct = yellowBelowPct;
+  return Object.keys(target).length > 0 ? target : undefined;
+}
 
 export function parseDashboardLayout(raw: unknown): DashboardLayoutItem[] {
   if (!Array.isArray(raw)) return [];
@@ -62,9 +90,8 @@ export function parseDashboardWidgets(raw: unknown): DashboardWidgetConfig[] {
     if (o.filters && typeof o.filters === "object") {
       widget.filters = o.filters as DashboardWidgetConfig["filters"];
     }
-    if (o.target && typeof o.target === "object") {
-      widget.target = o.target as DashboardWidgetConfig["target"];
-    }
+    const target = parseTarget(o.target);
+    if (target) widget.target = target;
     out.push(widget);
   }
   return out;

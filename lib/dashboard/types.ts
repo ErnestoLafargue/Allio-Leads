@@ -26,8 +26,13 @@ export type DashboardLayoutItem = {
 };
 
 export type DashboardTargetConfig = {
-  /** Møder (eller anden metric) pr. aktiv login-dag */
-  perActiveDay: number;
+  /** Møder (eller anden metric) pr. aktiv login-dag. Bruges kun hvis fixedTotal ikke er sat. */
+  perActiveDay?: number;
+  /**
+   * Fast mødemål for widgettens periode (uge/måned/dag).
+   * Midlertidig løsning: tilsidesætter beregning ud fra aktive login-dage.
+   */
+  fixedTotal?: number;
   /** Under denne % → rød (default 80) */
   redBelowPct?: number;
   /** Under denne % (men ≥ rød) → gul (default 100) */

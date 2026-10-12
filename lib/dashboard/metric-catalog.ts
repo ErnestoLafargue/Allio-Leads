@@ -157,7 +157,8 @@ export const METRIC_CATALOG: MetricDefinition[] = [
   {
     id: "meetings_target",
     label: "Mødemål",
-    description: "Møder mod mål (standard: 3 pr. aktiv login-dag).",
+    description:
+      "Møder mod mål. Sæt et fast uge- eller månedsmål på widgetten (ellers 3 pr. aktiv login-dag).",
     unit: "count",
     source: "target.meetings_per_active_day",
     periods: ["today", "this_week", "this_month"],

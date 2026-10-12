@@ -48,6 +48,12 @@ function defaultWidget(metric: MetricDefinition): DashboardWidgetConfig {
   };
 }
 
+function targetGoalLabel(period: DashboardPeriod): string {
+  if (period === "this_month") return "Månedsmål (antal møder)";
+  if (period === "this_week") return "Ugemål (antal møder)";
+  return "Dagsmål (antal møder)";
+}
+
 function nextLayoutItem(layout: DashboardLayoutItem[], id: string): DashboardLayoutItem {
   const maxY = layout.reduce((m, l) => Math.max(m, l.y + l.h), 0);
   return { i: id, x: 0, y: maxY, w: 4, h: 3, minW: 2, minH: 2 };
@@ -484,26 +490,61 @@ export function DashboardBuilder({ dashboardId }: Props) {
                 </select>
               </label>
               {selected.metricId === "meetings_target" ? (
-                <label className="block space-y-1">
-                  <span className="text-xs font-medium text-stone-600">
-                    Møder pr. aktiv dag
-                  </span>
-                  <input
-                    type="number"
-                    min={1}
-                    max={50}
-                    value={selected.target?.perActiveDay ?? DEFAULT_MEETINGS_PER_ACTIVE_DAY}
-                    onChange={(e) =>
-                      updateSelected({
-                        target: {
-                          ...selected.target,
-                          perActiveDay: Math.max(1, Number(e.target.value) || 3),
-                        },
-                      })
-                    }
-                    className="w-full rounded-md border border-stone-300 px-2 py-1.5 text-sm"
-                  />
-                </label>
+                <>
+                  <label className="block space-y-1">
+                    <span className="text-xs font-medium text-stone-600">
+                      {targetGoalLabel(selected.period)}
+                    </span>
+                    <input
+                      type="number"
+                      min={1}
+                      max={10000}
+                      placeholder="Fx 20"
+                      value={selected.target?.fixedTotal ?? ""}
+                      onChange={(e) => {
+                        const raw = e.target.value.trim();
+                        const n = Number(raw);
+                        const next = { ...selected.target };
+                        if (raw === "" || !Number.isFinite(n) || n <= 0) {
+                          delete next.fixedTotal;
+                        } else {
+                          next.fixedTotal = Math.min(10000, Math.round(n));
+                        }
+                        if (next.perActiveDay == null) {
+                          next.perActiveDay = DEFAULT_MEETINGS_PER_ACTIVE_DAY;
+                        }
+                        updateSelected({ target: next });
+                      }}
+                      className="w-full rounded-md border border-stone-300 px-2 py-1.5 text-sm"
+                    />
+                    <span className="block text-[11px] text-stone-500">
+                      Fast mål for denne widget. Gem og opdatér for at se det på kortet.
+                    </span>
+                  </label>
+                  <label className="block space-y-1">
+                    <span className="text-xs font-medium text-stone-600">
+                      Møder pr. aktiv dag
+                    </span>
+                    <input
+                      type="number"
+                      min={1}
+                      max={50}
+                      value={selected.target?.perActiveDay ?? DEFAULT_MEETINGS_PER_ACTIVE_DAY}
+                      onChange={(e) =>
+                        updateSelected({
+                          target: {
+                            ...selected.target,
+                            perActiveDay: Math.max(1, Number(e.target.value) || 3),
+                          },
+                        })
+                      }
+                      className="w-full rounded-md border border-stone-300 px-2 py-1.5 text-sm"
+                    />
+                    <span className="block text-[11px] text-stone-500">
+                      Bruges kun hvis fast mål ovenfor er tomt.
+                    </span>
+                  </label>
+                </>
               ) : null}
               <label className="block space-y-1">
                 <span className="text-xs font-medium text-stone-600">Sælgere (valgfri)</span>
