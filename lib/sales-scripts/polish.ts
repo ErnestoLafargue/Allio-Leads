@@ -8,7 +8,7 @@ import type Anthropic from "@anthropic-ai/sdk";
 import { structuredCall } from "@/lib/anthropic-client";
 import { WeeklyScriptSchema, type WeeklyScript } from "./schema";
 
-export const POLISH_PROMPT_VERSION = "p1";
+export const POLISH_PROMPT_VERSION = "p2";
 
 export const POLISH_SYSTEM_PROMPT = `Du er en erfaren dansk salgstræner og manuskriptforfatter for Allios mødebookere. Du får et udkast til "ugens script", som er sat sammen replik for replik ud fra data. Hver replik er god for sig, men helheden hænger ikke altid sammen. Din opgave er at finpudse det til ÉT sammenhængende manuskript for den perfekte samtale, som en sælger kan læse højt fra start til slut.
 
@@ -17,13 +17,13 @@ Sådan:
 - Ret rækkefølgen inden for en fase, hvis det giver bedre flow. Slå replikker sammen eller fjern dem, der gentager hinanden (2–4 replikker pr. fase).
 - Gør replikkerne mundrette: korte sætninger, talesprog, til at sige højt. Kundens svar skal være realistiske og korte.
 - Faserne skal stadig være opening, qualification, discovery, solution, close og confirmation i den rækkefølge.
-- Indvendingerne: gør svarene korte (højst 2 sætninger), i samme tone som manuskriptet, og lad dem føre tilbage mod mødet.
+- Indvendingerne: hvert svar er HØJST 30 ord og højst 2 sætninger, i samme tone som manuskriptet, og slutter med et konkret spørgsmål eller alternativt valg mod mødet.
 - Titlen og summary må gerne skærpes, så de beskriver helheden.
 
 Regler — vigtigt:
 - Opfind ALDRIG tal, procenter, kundenavne, cases eller påstande, der ikke står i udkastet. Behold de tal og eksempler, der står der.
 - Behold evidenceCalls, evidence, note, changes og caveats på de replikker og indvendinger, de hører til. Slår du replikker sammen, så slå deres evidenceCalls sammen (højst 3).
-- Pladsholdere som [navn], [dit navn] og [system] bevares.
+- Pladsholdere som [navn], [dit navn] og [system] bevares. Sælgerens replikker nævner ALDRIG et bestemt bookingsystem eller firma (fx Gecko, Planway, Onlinebooq) — skriv [system]. Kun kundens svar må nævne et konkret system.
 - Alt på dansk. Svar kun med ét JSON-objekt, der følger skemaet.`;
 
 export async function polishWeeklyScript(

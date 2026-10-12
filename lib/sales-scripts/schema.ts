@@ -32,7 +32,7 @@ export const WeeklyScriptSchema = z.object({
     z.object({
       category: z.enum(OBJECTION_CATEGORIES),
       customerSays: z.string(),
-      response: z.string().describe("Det bedste svar: højst 2 korte sætninger, der slutter med et konkret spørgsmål eller alternativt valg"),
+      response: z.string().describe("Det bedste svar: højst 30 ord og 2 sætninger, der slutter med et konkret spørgsmål eller alternativt valg"),
       evidence: z.string(),
       evidenceCalls: EvidenceCalls,
     }),
