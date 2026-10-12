@@ -854,3 +854,25 @@ model BlockedTime {
   @@index([userId, startDateTime])
   @@index([startDateTime, endDateTime])
 }
+
+/// Live-coach: ét kort vist til en sælger (lag 1 = ugens script, lag 2 = AI), med latens, pris og 👍/👎.
+model LiveCoachEvent {
+  id            String   @id @default(cuid())
+  userId        String
+  /// "trigger" (straks-kort fra ugens script) | "ai" (Claude Haiku)
+  source        String
+  category      String?
+  signal        String?
+  line          String?
+  /// Fra kundens ord til kortet blev vist (ms, målt i browseren)
+  latencyMs     Int?
+  /// Kun AI-kort: pris for kaldet
+  costUsd       Float    @default(0)
+  promptVersion String?
+  /// Sælgerens vurdering: true = 👍, false = 👎, null = ingen
+  helpful       Boolean?
+  createdAt     DateTime @default(now())
+
+  @@index([createdAt])
+  @@index([userId, createdAt])
+}

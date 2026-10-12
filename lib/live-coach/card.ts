@@ -10,7 +10,7 @@ const SIGNALS: ReadonlySet<string> = new Set(["tryghed", "klarhed", "okonomi", "
 /** Læser et (evt. ufærdigt) svar i formatet SIGNAL/HVORFOR/REPLIK. */
 export function parseCoachText(text: string): { signal: CoachSignal | null; why: string; line: string; silent: boolean } {
   const field = (name: string) => text.match(new RegExp(`${name}:\\s*([^\\n]*)`))?.[1]?.trim() ?? "";
-  const rawSignal = field("SIGNAL").toLowerCase().replace("ø", "o");
+  const rawSignal = field("SIGNAL").toLowerCase().replace(/ø/g, "o").replace(/[*_\s]+/g, "_").replace(/^_|_$/g, "");
   return {
     signal: SIGNALS.has(rawSignal) ? (rawSignal as CoachSignal) : null,
     why: field("HVORFOR"),

@@ -37,7 +37,7 @@ export function LiveCoach(props: {
   onLatency?: (ms: number, source: CoachCard["source"]) => void;
 }) {
   const { micStream, remoteStream, active, onTranscript, onLatency } = props;
-  const [card, setCard] = useState<CoachCard | null>(null);
+  const [card, setCard] = useState<(CoachCard & { eventId: string | null; helpful: boolean | null }) | null>(null);
   const [status, setStatus] = useState<"off" | "starting" | "listening" | "error">("off");
   const [error, setError] = useState<string | null>(null);
 
@@ -49,6 +49,27 @@ export function LiveCoach(props: {
   const shownCategory = useRef<ObjectionCategory | null>(null);
   const inFlight = useRef<AbortController | null>(null);
 
+  const logEvent = useCallback(async (body: Record<string, unknown>): Promise<string | null> => {
+    try {
+      const res = await fetch("/api/live-coach/event", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(body),
+      });
+      return res.ok ? (((await res.json()) as { id?: string }).id ?? null) : null;
+    } catch {
+      return null;
+    }
+  }, []);
+
+  const rate = useCallback(
+    (helpful: boolean) => {
+      setCard((c) => (c ? { ...c, helpful } : c));
+      if (card?.eventId) void logEvent({ id: card.eventId, helpful });
+    },
+    [card?.eventId, logEvent],
+  );
+
   const publish = useCallback(() => {
     if (!onTranscript) return;
     const live: LiveCoachLine[] = [];
@@ -58,7 +79,7 @@ export function LiveCoach(props: {
   }, [onTranscript]);
 
   const askClaude = useCallback(
-    async (trigger: ObjectionCategory | null, heardAt: number) => {
+    async (trigger: ObjectionCategory | null, heardAt: number, fallbackWhy = "") => {
       inFlight.current?.abort();
       const ctrl = new AbortController();
       inFlight.current = ctrl;
@@ -71,7 +92,8 @@ export function LiveCoach(props: {
           body: JSON.stringify({ lines, trigger }),
           signal: ctrl.signal,
         });
-        if (!res.ok || !res.body) return;
+        if (!res.ok || !res.body) return; // fx månedsloftet (429): coachen forbliver tavs
+        const eventId = res.headers.get("X-Coach-Event");
         const reader = res.body.getReader();
         const decoder = new TextDecoder();
         let text = "";
@@ -84,15 +106,25 @@ export function LiveCoach(props: {
           if (parsed.silent || !parsed.line) continue;
           if (!measured) {
             measured = true;
-            onLatency?.(performance.now() - heardAt, "ai");
+            const ms = performance.now() - heardAt;
+            onLatency?.(ms, "ai");
+            if (eventId) void logEvent({ id: eventId, latencyMs: ms });
           }
-          setCard({ source: "ai", category: trigger, signal: parsed.signal ?? "klarhed", why: parsed.why, line: parsed.line });
+          setCard({
+            source: "ai",
+            category: trigger,
+            signal: parsed.signal ?? "klarhed",
+            why: parsed.why || fallbackWhy,
+            line: parsed.line,
+            eventId,
+            helpful: null,
+          });
         }
       } catch {
         /* afbrudt af et nyere kort */
       }
     },
-    [onLatency],
+    [onLatency, logEvent],
   );
 
   useEffect(() => {
@@ -128,10 +160,14 @@ export function LiveCoach(props: {
             shownCategory.current = trigger.category;
             const instant = triggerCard(trigger, session.current?.responses ?? {});
             if (instant) {
-              setCard(instant);
-              onLatency?.(performance.now() - heardAt, "trigger");
+              const ms = performance.now() - heardAt;
+              setCard({ ...instant, eventId: null, helpful: null });
+              onLatency?.(ms, "trigger");
+              void logEvent({ source: "trigger", category: instant.category, signal: instant.signal, line: instant.line, latencyMs: ms }).then(
+                (id) => setCard((c) => (c && c.source === "trigger" && c.line === instant.line ? { ...c, eventId: id } : c)),
+              );
             }
-            void askClaude(trigger.category, heardAt);
+            void askClaude(trigger.category, heardAt, trigger.why);
           }
           if (completed) {
             history.current.push({ speaker: "customer", text: completed, final: true });
@@ -173,7 +209,7 @@ export function LiveCoach(props: {
       streams.forEach((s) => s.stop());
       setStatus("off");
     };
-  }, [active, micStream, remoteStream, askClaude, publish, onLatency]);
+  }, [active, micStream, remoteStream, askClaude, publish, onLatency, logEvent]);
 
   if (!active) return null;
   return (
@@ -192,7 +228,22 @@ export function LiveCoach(props: {
             <span className="text-xs text-stone-600">{card.why}</span>
           </div>
           <p className="text-sm font-medium text-stone-900">“{card.line}”</p>
-          <p className="text-[10px] text-stone-400">{card.source === "trigger" ? "fra ugens script" : "tilpasset af AI"}</p>
+          <div className="flex items-center justify-between">
+            <p className="text-[10px] text-stone-400">{card.source === "trigger" ? "fra ugens script" : "tilpasset af AI"}</p>
+            <div className="flex gap-1" aria-label="Var kortet brugbart?">
+              {([true, false] as const).map((v) => (
+                <button
+                  key={String(v)}
+                  type="button"
+                  onClick={() => rate(v)}
+                  aria-pressed={card.helpful === v}
+                  className={`rounded px-1.5 py-0.5 text-xs ${card.helpful === v ? "bg-stone-800 text-white" : "bg-stone-100 hover:bg-stone-200"}`}
+                >
+                  {v ? "👍" : "👎"}
+                </button>
+              ))}
+            </div>
+          </div>
         </div>
       ) : status === "listening" ? (
         <p className="mt-2 text-xs text-stone-400">Følg scriptet — coachen melder sig, når kunden har brug for noget.</p>

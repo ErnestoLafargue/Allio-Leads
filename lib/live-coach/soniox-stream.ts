@@ -130,7 +130,7 @@ export async function startSonioxStream(params: {
       tap.port.onmessage = null;
       source.disconnect();
       void ctx.close();
-      if (ws.readyState === WebSocket.OPEN) ws.send(new ArrayBuffer(0));
+      if (ws.readyState === WebSocket.OPEN) ws.send("");
       setTimeout(() => ws.close(), 1500);
     },
   };

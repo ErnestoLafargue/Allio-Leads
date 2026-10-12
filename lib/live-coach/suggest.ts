@@ -23,8 +23,8 @@ Du ser de seneste replikker. Giv ÉT kort, der hjælper sælgeren med det næste
 
 Svar PRÆCIS i dette format og intet andet:
 SIGNAL: <ét af: tryghed, klarhed, okonomi, skepsis, timing, lav_interesse, ingen>
-HVORFOR: <3–6 ord om hvad kunden mangler>
-REPLIK: <én sætning, højst 30 ord, som sælgeren kan sige nu>
+HVORFOR: <3–6 ord om hvad kunden mangler — skal altid udfyldes>
+REPLIK: <én kort sætning, højst 20 ord, som sælgeren kan sige nu>
 
 Regler:
 - Tag udgangspunkt i det kunden lige har sagt. Opfind aldrig tal, navne eller cases.
@@ -45,7 +45,7 @@ export function streamSuggestion(params: {
   client: Anthropic;
   system: string;
   userMessage: string;
-  onDone?: (info: { costUsd: number; ms: number }) => void;
+  onDone?: (info: { costUsd: number; ms: number; text: string }) => void;
 }): ReadableStream<Uint8Array> {
   const started = Date.now();
   const encoder = new TextEncoder();
@@ -58,9 +58,13 @@ export function streamSuggestion(params: {
           system: [{ type: "text", text: params.system, cache_control: { type: "ephemeral" } }],
           messages: [{ role: "user", content: params.userMessage }],
         });
-        stream.on("text", (delta) => controller.enqueue(encoder.encode(delta)));
+        let text = "";
+        stream.on("text", (delta) => {
+          text += delta;
+          controller.enqueue(encoder.encode(delta));
+        });
         const message = await stream.finalMessage();
-        params.onDone?.({ costUsd: usageCostUsd(message.usage) * HAIKU_PRICE_FACTOR, ms: Date.now() - started });
+        params.onDone?.({ costUsd: usageCostUsd(message.usage) * HAIKU_PRICE_FACTOR, ms: Date.now() - started, text });
         controller.close();
       } catch (err) {
         controller.error(err);

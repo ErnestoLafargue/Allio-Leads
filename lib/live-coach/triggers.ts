@@ -15,61 +15,121 @@ export type ObjectionTrigger = {
   patterns: RegExp[];
 };
 
-/** Rækkefølgen betyder noget: den første indvending, der matcher, vinder. */
+/**
+ * Rækkefølgen betyder noget: den første indvending, der matcher, vinder. Mønstrene er bygget ud fra
+ * kundernes egne formuleringer i de analyserede samtaler (dansk og engelsk) — måles med
+ * scripts/live-coach-trigger-eval.ts (træfsikkerhed pr. kategori og falske alarmer).
+ */
 export const OBJECTION_TRIGGERS: ObjectionTrigger[] = [
+  {
+    category: "send_email",
+    signal: "skepsis",
+    why: "Vil skubbe beslutningen væk",
+    patterns: [
+      /\bsend(e|er)?\b.{0,40}\b(e-?mail|mail|sms)\b/,
+      /\bpå (en |min |vores |hendes )?(e-?mail|mail)\b/,
+      /\b(få|have|læse) (en |det på )?(e-?mail|mail)\b/,
+      /\bsend (me |us )?(the |an )?e-?mail\b/,
+    ],
+  },
   {
     category: "price",
     signal: "okonomi",
     why: "Kender ikke værdien endnu",
-    patterns: [/hvad koster/, /\bpris(en)?\b/, /for dyrt|lyder dyrt|er det dyrt/, /har ikke råd|ikke budget/],
+    patterns: [
+      /\bkoste[rt]?\b/,
+      /\bpris(en|erne)?\b/,
+      /\bbetale\b/,
+      /\bpenge\b/,
+      /\bdyrt?\b/,
+      /\bgratis\b/,
+      /\bkrone[r]?\b/,
+      /\bråd til\b|\bbudget\b/,
+      /\bhow much\b|\bprice\b|\bcosts?\b/,
+    ],
   },
   {
     category: "has_booking_system",
     signal: "klarhed",
-    why: "Tror Allio kun er booking",
-    patterns: [/(har|bruger) (allerede )?(et |en )?(booking|bookingsystem|system)/, /\b(planway|onlinebooq|geckobook|easypractice|ordinationen)\b/],
+    why: "Tror Allio er et nyt system",
+    patterns: [
+      /\bbooking ?system(et)?\b|\bbookingkalender\b|\bbooking selv\b/,
+      /\b(har|bruger) (allerede )?(et |en )?booking/,
+      /\b(planway|onlinebooq|onlinebook|geckobook|gecko|easypractice|ordinationen|timbooking|tim (&|og) booking|salonized|fresha|bookbeauty)\b/,
+      /\b(ikke|ikke interesseret i at) skifte\b|\bskifte (til )?(bookingsystem|system|kalender)\b/,
+      /\b(andet|eget) system\b/,
+    ],
   },
   {
     category: "has_agency",
     signal: "klarhed",
     why: "Tror I erstatter bureauet",
-    patterns: [/(har|bruger) (allerede )?(et |en )?(bureau|marketingbureau|reklamebureau)/, /nogen der (laver|styrer) (vores )?marketing/],
-  },
-  {
-    category: "send_email",
-    signal: "skepsis",
-    why: "Vil skubbe beslutningen væk",
-    patterns: [/send (mig )?(noget |lidt |en )?(på )?(mail|e-?mail)/, /på mail/, /skrive en mail/],
-  },
-  {
-    category: "no_time",
-    signal: "timing",
-    why: "Ser ikke tid til det",
-    patterns: [/har ikke tid|ingen tid|travlt/, /ikke lige nu|midt i en (behandling|kunde)/],
-  },
-  {
-    category: "fully_booked",
-    signal: "lav_interesse",
-    why: "Tror de ikke mangler kunder",
-    patterns: [/fuldt? booket|fyldt op|har (rigeligt|nok) (at lave|kunder)/],
+    patterns: [
+      /\b(marketing|markedsføring)(sfirma|sbureau|team|en)?\b/,
+      /\b(bureau|reklamebureau|marketingbureau)\b/,
+      /\bannonce(r|ring)\b/,
+      /\bliciteret ud\b|\banother company\b|\bstyrer det\b/,
+    ],
   },
   {
     category: "talk_to_partner",
     signal: "tryghed",
     why: "Skal have makker med",
-    patterns: [/snakke med (min|mine) (partner|kompagnon|mand|kone|chef)/, /ikke mig der bestemmer/],
+    patterns: [
+      /\b(min|mine|vores) (partner|kompagnon|mand|kone|chef|kollega|kolleger|ansatte|medejer)\b/,
+      /\b(snakke|tale|drøfte|diskutere) (det )?(lige )?med (ham|hende|dem)\b/,
+      /\bikke mig,? der (ejer|bestemmer)\b|\bto,? der bestemmer\b/,
+      /\b(hendes|hans) (butik|klinik|salon)\b/,
+    ],
+  },
+  {
+    category: "fully_booked",
+    signal: "lav_interesse",
+    why: "Tror de ikke mangler kunder",
+    patterns: [
+      /\bfuld(t)? ?booket\b|\bfully booked\b|\bfyldt op\b|\b(ret|rimelig) booket\b/,
+      /\b(mangler|brug for) (faktisk )?(ikke|ingen) (flere )?kunder\b|\bikke brug for flere\b/,
+      /\bventetid\b|\bkapacitet\b|\bhøjsæson\b/,
+      /\bikke (plads|tider)\b|\bthat'?s enough\b/,
+    ],
+  },
+  {
+    category: "bad_timing",
+    signal: "timing",
+    why: "Forkert tidspunkt lige nu",
+    patterns: [
+      /\b(ring|ringe|vende tilbage|kontakte)\b.{0,30}\b(senere|i morgen|på (mandag|tirsdag|onsdag|torsdag|fredag)|om \d+|i slutningen|til (efteråret|foråret)|næste (uge|måned)|(et )?andet tidspunkt)\b/,
+      /\b(relevant|aktuelt) lige nu\b|\bpå nuværende tidspunkt\b/,
+      /\bcall (me )?(a bit )?later\b|\bcall later\b/,
+      /\bvente og se\b|\btil (efteråret|foråret)\b|\befter (sommer(en)?|jul(en)?|nytår)\b|\bi det nye år\b/,
+    ],
+  },
+  {
+    category: "no_time",
+    signal: "timing",
+    why: "Ser ikke tid til det",
+    patterns: [
+      /\b(har ikke|ingen|ikke ret meget|ikke rigtig) tid\b/,
+      /\btravlt\b|\boptaget\b|\bskynd dig\b/,
+      /\b(står|er) (lige )?med en kunde\b|\bkunden lige nu\b|\bhar en kunde\b|\bmidt i en\b/,
+      /\bnødt til at bede dig\b|\bi'?m working\b|\bwith patients\b/,
+    ],
   },
   {
     category: "think_about_it",
     signal: "tryghed",
     why: "Usikker, mangler konkret grund",
-    patterns: [/tænke over det|overveje det|vende det/],
+    patterns: [/\b(tænke|tygge) (lidt )?(over|på) det\b/, /\boverveje\b/, /\bthink about it\b/, /\bbeslutte mig\b/],
   },
   {
     category: "not_interested",
     signal: "lav_interesse",
     why: "Ser ikke relevansen endnu",
-    patterns: [/ikke interesseret|interesserer (mig|os) ikke|nej tak/],
+    patterns: [
+      /\bikke (rigtig )?interesse(ret)?\b|\binteresserer (mig|os) ikke\b|\bingen interesse\b|\bnot interested\b/,
+      /\bnej tak\b|\bikke relevant\b|\bikke et match\b|\bspilde (jeres|din) tid\b/,
+      /\b(ikke|ingen) brug for (jer|det)\b|\b(ikke|ingen) (vil )?(give |giver )?mening\b/,
+    ],
   },
 ];
 
@@ -83,6 +143,8 @@ export const DEFAULT_RESPONSES: Partial<Record<ObjectionCategory, string>> = {
     "Det forstår jeg godt. Derfor kommer vi ud til jer og kigger på jeres egne tal — det tager en time, og så ved du, om der er noget at komme efter.",
   price:
     "Det kommer an på, hvad der giver mening for jer. Lad os først se potentialet i jeres egne tal — så kan du holde prisen op mod noget konkret.",
+  bad_timing:
+    "Helt fair. Hvornår passer det bedre? Lad os sætte et konkret tidspunkt nu, så du slipper for at tænke på det.",
   send_email:
     "Det kan jeg godt, men en mail viser kun Allio generelt. Det interessante er, hvad det betyder for jer med jeres egne tal — skal vi ikke tage en time på det?",
 };

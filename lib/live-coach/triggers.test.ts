@@ -41,5 +41,7 @@ describe("parseCoachText", () => {
     });
     expect(parseCoachText("SIGNAL: klarhed\nHVORFOR: Tror det").line).toBe("");
     expect(parseCoachText("SIGNAL: ingen").silent).toBe(true);
+    expect(parseCoachText("SIGNAL: Lav interesse\nHVORFOR: x\nREPLIK: y").signal).toBe("lav_interesse");
+    expect(parseCoachText("SIGNAL: **Økonomi**").signal).toBe("okonomi");
   });
 });
