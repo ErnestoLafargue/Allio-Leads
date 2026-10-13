@@ -2,6 +2,7 @@ import {
   normalizePhoneToE164ForDial,
   stripDialFormatting,
 } from "@/lib/phone-e164";
+import { isPowerSonioxUnavailableError } from "@/lib/power-greeting-soniox";
 
 function resolveOutboundCallFromField(from: string): string {
   const t = from.trim();
@@ -120,6 +121,21 @@ function formatTelnyxError(json: unknown): string | null {
     (x): x is string => typeof x === "string" && x.trim().length > 0,
   );
   return parts.length ? parts.join(" — ") : null;
+}
+
+async function fetchWithTimeout(url: string, init: RequestInit, timeoutMs: number): Promise<Response> {
+  const ac = new AbortController();
+  const timer = setTimeout(() => ac.abort(), timeoutMs);
+  try {
+    return await fetch(url, { ...init, signal: ac.signal });
+  } catch (err) {
+    if (err instanceof Error && err.name === "AbortError") {
+      throw new Error(`Timeout efter ${timeoutMs} ms`);
+    }
+    throw err;
+  } finally {
+    clearTimeout(timer);
+  }
 }
 
 /**
@@ -1201,6 +1217,7 @@ export async function startTelnyxCallTranscription(params: {
   apiKey: string;
   callControlId: string;
   commandId?: string;
+  timeoutMs?: number;
 }): Promise<ActionResult> {
   const body: Record<string, unknown> = {
     transcription_engine: "Soniox",
@@ -1217,7 +1234,7 @@ export async function startTelnyxCallTranscription(params: {
   if (params.commandId) body.command_id = params.commandId;
 
   try {
-    const res = await fetch(
+    const res = await fetchWithTimeout(
       `${TELNYX_API_BASE}/calls/${encodeURIComponent(params.callControlId)}/actions/transcription_start`,
       {
         method: "POST",
@@ -1228,9 +1245,16 @@ export async function startTelnyxCallTranscription(params: {
         },
         body: JSON.stringify(body),
       },
+      params.timeoutMs ?? 2500,
     );
-    if (res.status === 422) return { ok: true, raw: null };
     const json: unknown = await res.json().catch(() => null);
+    if (res.status === 422) {
+      const message = formatTelnyxError(json) || "";
+      if (isPowerSonioxUnavailableError(422, message)) {
+        return { ok: false, status: 422, message, telnyx: json };
+      }
+      return { ok: true, raw: json };
+    }
     if (!res.ok) {
       return {
         ok: false,
@@ -1254,11 +1278,12 @@ export async function stopTelnyxCallTranscription(params: {
   apiKey: string;
   callControlId: string;
   commandId?: string;
+  timeoutMs?: number;
 }): Promise<ActionResult> {
   const body: Record<string, unknown> = {};
   if (params.commandId) body.command_id = params.commandId;
   try {
-    const res = await fetch(
+    const res = await fetchWithTimeout(
       `${TELNYX_API_BASE}/calls/${encodeURIComponent(params.callControlId)}/actions/transcription_stop`,
       {
         method: "POST",
@@ -1269,6 +1294,7 @@ export async function stopTelnyxCallTranscription(params: {
         },
         body: JSON.stringify(body),
       },
+      params.timeoutMs ?? 1500,
     );
     if (res.status === 422) return { ok: true, raw: null };
     const json: unknown = await res.json().catch(() => null);

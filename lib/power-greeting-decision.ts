@@ -14,6 +14,11 @@ export type PowerGreetingSignals = {
   greeting: GreetingHint | null;
   /** Grace period is over — must pick CONNECT or VOICEMAIL. */
   timedOut: boolean;
+  /**
+   * Soniox transcription is running on this leg. When false (no credits, start
+   * failed, or skipped), AMD decides immediately — Power Dialer must still work.
+   */
+  sonioxListening?: boolean;
 };
 
 /**
@@ -23,6 +28,7 @@ export type PowerGreetingSignals = {
  */
 export function decidePowerGreetingAction(input: PowerGreetingSignals): PowerGreetingAction {
   const { amd, greeting, timedOut } = input;
+  const sonioxListening = input.sonioxListening !== false;
 
   if (greeting === "human") return "CONNECT";
   if (greeting === "voicemail") {
@@ -34,7 +40,7 @@ export function decidePowerGreetingAction(input: PowerGreetingSignals): PowerGre
   if (amd === "human") return "CONNECT";
 
   if (amd === "machine" || amd === "fax") {
-    if (!timedOut) return "WAIT";
+    if (sonioxListening && !timedOut) return "WAIT";
     return "VOICEMAIL";
   }
 

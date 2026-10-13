@@ -61,6 +61,13 @@ import {
   type GreetingHint,
 } from "@/lib/power-greeting-classify";
 import { decidePowerGreetingAction } from "@/lib/power-greeting-decision";
+import {
+  isPowerSonioxListeningHint,
+  notePowerSonioxStartResult,
+  POWER_GREETING_SONIOX_LISTEN,
+  POWER_SONIOX_START_TIMEOUT_MS,
+  shouldAttemptPowerSoniox,
+} from "@/lib/power-greeting-soniox";
 import { claimPowerDialerLeads, listPowerDialerCandidates } from "@/lib/power-dialer-batch";
 import { countPowerChannelsInUse, resolvePowerChannelLimit } from "@/lib/power-dialer-channels";
 import {
@@ -842,18 +849,44 @@ export async function handlePowerLeadAnswered(leadCallControlId: string): Promis
     return;
   }
   const apiKey = telnyxApiKey();
-  if (apiKey) {
-    const started = await startTelnyxCallTranscription({
-      apiKey,
-      callControlId: leadCallControlId,
-      commandId: `power-soniox-${leadCallControlId}`,
-    });
-    if (!started.ok) {
-      console.warn("[power-dialer] Soniox-transskription kunne ikke startes:", started.message.slice(0, 180));
+  let sonioxListening = false;
+  try {
+    if (apiKey && shouldAttemptPowerSoniox()) {
+      const started = await startTelnyxCallTranscription({
+        apiKey,
+        callControlId: leadCallControlId,
+        commandId: `power-soniox-${leadCallControlId}`,
+        timeoutMs: POWER_SONIOX_START_TIMEOUT_MS,
+      });
+      notePowerSonioxStartResult(
+        started.ok,
+        started.ok ? 200 : started.status,
+        started.ok ? "" : started.message,
+      );
+      if (started.ok) {
+        await prisma.dialerCallLog.updateMany({
+          where: { callControlId: leadCallControlId, greetingHint: null },
+          data: { greetingHint: POWER_GREETING_SONIOX_LISTEN },
+        });
+        sonioxListening = true;
+      } else {
+        console.warn(
+          "[power-dialer] Soniox-transskription kunne ikke startes — AMD kører alene:",
+          started.message.slice(0, 180),
+        );
+      }
     }
+  } catch (err) {
+    notePowerSonioxStartResult(false, 0, err instanceof Error ? err.message : "Soniox-start fejlede");
+    console.warn("[power-dialer] Soniox-start kastede — AMD kører alene:", err);
   }
   await new Promise((r) =>
-    setTimeout(r, POWER_AMD_TOTAL_ANALYSIS_MS + POWER_GREETING_MACHINE_GRACE_MS),
+    setTimeout(
+      r,
+      sonioxListening
+        ? POWER_AMD_TOTAL_ANALYSIS_MS + POWER_GREETING_MACHINE_GRACE_MS
+        : POWER_AMD_TOTAL_ANALYSIS_MS,
+    ),
   );
   await settlePowerGreeting(leadCallControlId, { timedOut: true });
 }
@@ -887,12 +920,15 @@ async function settlePowerGreeting(
     amd: amd === "human" || amd === "machine" || amd === "fax" || amd === "unknown" ? amd : null,
     greeting,
     timedOut: opts.timedOut,
+    sonioxListening: isPowerSonioxListeningHint(leg.greetingHint),
   });
   if (action === "WAIT") return;
 
   const campaign = await loadPowerCampaign(leg.campaignId);
   if (!campaign) return;
-  await stopPowerGreetingTranscription(leadCallControlId);
+  if (isPowerSonioxListeningHint(leg.greetingHint) || greeting) {
+    await stopPowerGreetingTranscription(leadCallControlId);
+  }
   if (action === "CONNECT") {
     await connectPowerLeadToAgent({ leadCallControlId });
     return;
@@ -908,13 +944,18 @@ async function settlePowerGreeting(
 async function stopPowerGreetingTranscription(leadCallControlId: string): Promise<void> {
   const apiKey = telnyxApiKey();
   if (!apiKey) return;
-  const stopped = await stopTelnyxCallTranscription({
-    apiKey,
-    callControlId: leadCallControlId,
-    commandId: `power-soniox-stop-${leadCallControlId}`,
-  });
-  if (!stopped.ok) {
-    console.warn("[power-dialer] Soniox-stop fejlede:", stopped.message.slice(0, 180));
+  try {
+    const stopped = await stopTelnyxCallTranscription({
+      apiKey,
+      callControlId: leadCallControlId,
+      commandId: `power-soniox-stop-${leadCallControlId}`,
+      timeoutMs: 1500,
+    });
+    if (!stopped.ok) {
+      console.warn("[power-dialer] Soniox-stop fejlede:", stopped.message.slice(0, 180));
+    }
+  } catch (err) {
+    console.warn("[power-dialer] Soniox-stop kastede:", err);
   }
 }
 
@@ -968,8 +1009,10 @@ export async function handlePowerLeadAmd(
   });
   if (!again || again.resolvedAt || again.bridgedAt || again.bridgeRequestedAt || again.endedAt) return;
 
-  const waitMs =
-    amd === "human"
+  const sonioxListening = isPowerSonioxListeningHint(again.greetingHint);
+  const waitMs = !sonioxListening
+    ? 0
+    : amd === "human"
       ? 0
       : amd === "machine" || amd === "fax"
         ? POWER_GREETING_MACHINE_GRACE_MS

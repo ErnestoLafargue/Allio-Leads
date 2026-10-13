@@ -144,8 +144,8 @@ export function PowerDialerSettingsFields({ value, onChange, disabled }: Props) 
         />
         <span>
           Telefonsvarer-genkendelse (AMD + Soniox). Usikker AMD og uklar tale sendes altid til
-          sælger. Kun tydelige telefonsvarer-fraser lægges på automatisk. Fra: forbind så snart
-          nogen tager telefonen.
+          sælger. Kun tydelige telefonsvarer-fraser lægges på automatisk. Uden Soniox-credits kører
+          AMD alene. Fra: forbind så snart nogen tager telefonen.
         </span>
       </label>
 
