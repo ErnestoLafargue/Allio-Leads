@@ -5,7 +5,7 @@
  * viser ét lille kort — signal, hvad kunden mangler og én replik.
  *  - Lag 1 (straks): indvending genkendt på kundens første ord → jeres bedste svar fra ugens script.
  *  - Lag 2 (~1 s): Claude Haiku tilpasser replikken til samtalen, når kunden er færdig (eller ved en indvending).
- * Tavs, når der ikke er noget at hjælpe med.
+ * Tavs, når der ikke er noget at hjælpe med — og når kunden er en telefonsvarer eller omstilling.
  */
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { ObjectionCategory } from "@/lib/call-analysis/schema";
@@ -14,6 +14,7 @@ import { startSonioxStream, SpeakerTranscript, type SonioxStream } from "@/lib/l
 import { ScriptTracker, type ScriptLine, type TrackerState } from "@/lib/live-coach/script-tracker";
 import { detectObjection, triggerCard, type CoachCard } from "@/lib/live-coach/triggers";
 import { parseCoachText, type CoachLine } from "@/lib/live-coach/card";
+import { MachineGate, type GateState } from "@/lib/live-coach/machine-gate";
 
 export type LiveCoachLine = CoachLine & { final: boolean };
 
@@ -59,6 +60,8 @@ export function LiveCoach(props: {
   const customerStart = useRef(0);
   const shownCategory = useRef<ObjectionCategory | null>(null);
   const inFlight = useRef<AbortController | null>(null);
+  const gate = useRef(new MachineGate());
+  const [machine, setMachine] = useState<GateState>("unknown");
 
   const logEvent = useCallback(async (body: Record<string, unknown>): Promise<string | null> => {
     try {
@@ -155,6 +158,8 @@ export function LiveCoach(props: {
     agent.current = new SpeakerTranscript();
     customer.current = new SpeakerTranscript();
     shownCategory.current = null;
+    gate.current = new MachineGate();
+    setMachine("unknown");
     setCard(null);
     setError(null);
     setStatus("starting");
@@ -176,6 +181,16 @@ export function LiveCoach(props: {
         onError: (m) => setError(m),
         onTokens: (tokens) => {
           const completed = customer.current.apply(tokens);
+          const allowed = gate.current.onCustomer(completed ?? customer.current.utterance, completed !== null);
+          setMachine(gate.current.state);
+          if (!allowed) {
+            // Telefonsvarer/omstilling: ingen kort, intet AI-kald, og maskinens tekst kommer ikke med i samtalen.
+            inFlight.current?.abort();
+            shownCategory.current = null;
+            setCard(null);
+            publish();
+            return;
+          }
           const heardAt = customerStart.current + customer.current.lastEndMs;
           const trigger = detectObjection(completed ?? customer.current.utterance);
           if (trigger && trigger.category !== shownCategory.current) {
@@ -248,13 +263,17 @@ export function LiveCoach(props: {
         <span>{status === "listening" ? "● lytter" : status === "starting" ? "starter…" : status === "error" ? "fejl" : ""}</span>
       </div>
       {error ? <p className="mt-1 text-xs text-rose-700">{error}</p> : null}
-      {scriptView?.next && scriptView.state !== "afvigelse" ? (
+      {scriptView?.next && scriptView.state !== "afvigelse" && !gate.current.silent ? (
         <p className="mt-2 rounded-lg bg-stone-50 px-2 py-1.5 text-xs text-stone-700">
           <span className="font-semibold">{scriptView.state === "tilbage" ? "Tilbage til: " : "Næste i scriptet: "}</span>
           {scriptView.next.text}
         </p>
       ) : null}
-      {card ? (
+      {machine === "voicemail" || machine === "ivr" ? (
+        <p className="mt-2 text-xs text-stone-400">
+          {machine === "voicemail" ? "Telefonsvarer — coachen er tavs." : "Omstilling/kø — coachen venter på en person."}
+        </p>
+      ) : card ? (
         <div className="mt-2 space-y-1">
           <div className="flex items-center gap-2">
             <span className={`rounded-full px-2 py-0.5 text-xs font-semibold ${SIGNAL_STYLE[card.signal] ?? "bg-stone-100 text-stone-700"}`}>

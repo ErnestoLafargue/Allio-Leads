@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { DEFAULT_RESPONSES, detectObjection, triggerCard } from "./triggers";
+import { DEFAULT_RESPONSES, detectMachine, detectObjection, triggerCard } from "./triggers";
 
 describe("detectObjection", () => {
   it("genkender indvendinger på ufærdig tale", () => {
@@ -43,5 +43,30 @@ describe("parseCoachText", () => {
     expect(parseCoachText("SIGNAL: ingen").silent).toBe(true);
     expect(parseCoachText("SIGNAL: Lav interesse\nHVORFOR: x\nREPLIK: y").signal).toBe("lav_interesse");
     expect(parseCoachText("SIGNAL: **Økonomi**").signal).toBe("okonomi");
+  });
+});
+
+describe("detectMachine", () => {
+  it("genkender telefonsvarere fra rigtige opkald", () => {
+    expect(detectMachine("Hej, du har ringet til Hellerup Laserklinik. Vi er i øjeblikket optaget af behandlinger, men læg en besked med dit navn")).toBe("voicemail");
+    expect(detectMachine("Indtal venligst din besked efter tonen.")).toBe("voicemail");
+    expect(detectMachine("Dette er telefonsvareren for den person, du forsøger at kontakte")).toBe("voicemail");
+    expect(detectMachine("Velkommen til voicemail")).toBe("voicemail");
+    expect(detectMachine("The person you are calling is not available")).toBe("voicemail");
+  });
+
+  it("genkender omstillinger, køer og menuer", () => {
+    expect(detectMachine("Hej, du har ringet til Rosenfeldt Fotografi, vent venligst.")).toBe("ivr");
+    expect(detectMachine("Vent venligst. Dit opkald stilles nu om til en medarbejder.")).toBe("ivr");
+    expect(detectMachine("Du er nummer 1 i køen.")).toBe("ivr");
+    expect(detectMachine("Velkommen til Vickuras. Du har nu følgende valgmuligheder")).toBe("ivr");
+    expect(detectMachine("Tast 1 for at aflyse en tid; tast 2 for personlig betjening.")).toBe("ivr");
+  });
+
+  it("lader almindelige kunder være", () => {
+    expect(detectMachine("Ja hej, det er Lise")).toBeNull();
+    expect(detectMachine("Klinik Sol, det er Mette")).toBeNull();
+    expect(detectMachine("Hvad koster det?")).toBeNull();
+    expect(detectMachine("Vi har ikke tid lige nu")).toBeNull();
   });
 });
