@@ -34,6 +34,12 @@ export const POWER_COOLDOWN_RESET_INTERVAL_MS = 60_000;
 /** Premium-AMD: kun total_analysis_time_millis og greeting_duration_millis gælder for premium. */
 export const POWER_AMD_TOTAL_ANALYSIS_MS = 3500;
 
+/** Vent på Soniox-frase efter AMD=machine, så et «hallo» ikke hænges af. */
+export const POWER_GREETING_MACHINE_GRACE_MS = 900;
+
+/** Vent på tydelig voicemail-frase når AMD er usikker, før vi forbinder sælger. */
+export const POWER_GREETING_UNKNOWN_GRACE_MS = 650;
+
 /** Uforbundne lead-ben uden events afsluttes af oprydningen efter ringetid + dette. */
 export const POWER_STALE_LEG_EXTRA_MS = 5 * 60 * 1000;
 

@@ -3,7 +3,6 @@
 import {
   POWER_DIALER_DEFAULTS,
   POWER_DIALER_LIMITS,
-  type PowerAmdUncertainAction,
   type PowerDialerSettings,
   type PowerPauseMode,
 } from "@/lib/power-dialer-settings";
@@ -114,28 +113,6 @@ export function PowerDialerSettingsFields({ value, onChange, disabled }: Props) 
       </label>
 
       <fieldset className="space-y-2 border-0 p-0">
-        <legend className="text-xs font-medium text-stone-700">Når AMD er usikker</legend>
-        {(
-          [
-            ["CONNECT", "Forbind til sælger (anbefalet)"],
-            ["REQUEUE", "Læg på og prøv leadet igen senere"],
-          ] as const satisfies ReadonlyArray<readonly [PowerAmdUncertainAction, string]>
-        ).map(([id, label]) => (
-          <label key={id} className="flex cursor-pointer items-start gap-2 text-xs text-stone-700">
-            <input
-              type="radio"
-              name="powerAmdUncertainAction"
-              checked={value.amdUncertainAction === id}
-              disabled={disabled}
-              onChange={() => onChange({ ...value, amdUncertainAction: id })}
-              className="mt-0.5"
-            />
-            {label}
-          </label>
-        ))}
-      </fieldset>
-
-      <fieldset className="space-y-2 border-0 p-0">
         <legend className="text-xs font-medium text-stone-700">Pause</legend>
         {(
           [
@@ -166,7 +143,9 @@ export function PowerDialerSettingsFields({ value, onChange, disabled }: Props) 
           className="mt-0.5 h-3.5 w-3.5 rounded border-stone-400 text-emerald-700"
         />
         <span>
-          Telefonsvarer-genkendelse (AMD). Fra: forbind så snart nogen tager telefonen.
+          Telefonsvarer-genkendelse (AMD + Soniox). Usikker AMD og uklar tale sendes altid til
+          sælger. Kun tydelige telefonsvarer-fraser lægges på automatisk. Fra: forbind så snart
+          nogen tager telefonen.
         </span>
       </label>
 

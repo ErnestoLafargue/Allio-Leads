@@ -561,6 +561,10 @@ model DialerCallLog {
   /// Power: vores årsag (hangupCause er Telnyx'): CONNECTED | NO_ANSWER | INVALID_NUMBER | VOICEMAIL |
   /// AMD_UNCERTAIN_REQUEUE | DROP_NO_AGENT | DROP_LEAD_HUNGUP | CANCELLED_OVERDIAL | TECHNICAL
   resolution        String?
+  /// Power + Soniox: "human" | "voicemail" når frasen er sikker.
+  greetingHint      String?
+  /// Seneste transskriberede hilsen (debug / aktivitet).
+  greetingText      String?  @db.Text
 
   campaign Campaign @relation(fields: [campaignId], references: [id], onDelete: Cascade)
   lead     Lead?    @relation(fields: [leadId], references: [id], onDelete: SetNull)

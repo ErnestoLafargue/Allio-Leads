@@ -28,11 +28,12 @@ export type PowerAmdAction = "CONNECT" | "VOICEMAIL" | "REQUEUE_UNCERTAIN";
 
 export function decidePowerAmdAction(
   amd: AmdInternalResult,
-  uncertainAction: PowerAmdUncertainAction,
+  _uncertainAction: PowerAmdUncertainAction,
 ): PowerAmdAction {
   if (amd === "human") return "CONNECT";
   if (amd === "machine" || amd === "fax") return "VOICEMAIL";
-  return uncertainAction === "CONNECT" ? "CONNECT" : "REQUEUE_UNCERTAIN";
+  // Usikkerhed går altid til sælger — aldrig læg på og håb.
+  return "CONNECT";
 }
 
 /** Telnyx hangup_cause for ubesvarede opkald, der betyder «ingen tog den». */

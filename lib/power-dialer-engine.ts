@@ -18,6 +18,8 @@ import {
   pickTelnyxFromNumber,
   appRecordingEnabled,
   startTelnyxRecording,
+  startTelnyxCallTranscription,
+  stopTelnyxCallTranscription,
 } from "@/lib/telnyx-call-control";
 import {
   computeDropBrake,
@@ -36,6 +38,8 @@ import {
   POWER_AGENT_MAX_ATTEMPTS,
   POWER_AMD_TOTAL_ANALYSIS_MS,
   POWER_COOLDOWN_RESET_INTERVAL_MS,
+  POWER_GREETING_MACHINE_GRACE_MS,
+  POWER_GREETING_UNKNOWN_GRACE_MS,
   POWER_DROP_BRAKE_MIN_SAMPLE,
   POWER_DROP_BRAKE_WINDOW_MS,
   POWER_MAINTENANCE_INTERVAL_MS,
@@ -46,12 +50,17 @@ import {
 } from "@/lib/power-dialer-constants";
 import {
   classifyPowerLeadHangup,
-  decidePowerAmdAction,
   POWER_DROP_RESOLUTIONS,
   type PowerResolution,
 } from "@/lib/power-dialer-outcomes";
 import type { AmdInternalResult } from "@/lib/telnyx-amd-result";
 import { applyPowerLeadResolution } from "@/lib/power-dialer-lead-outcome";
+import {
+  classifyPowerGreeting,
+  mergeGreetingHint,
+  type GreetingHint,
+} from "@/lib/power-greeting-classify";
+import { decidePowerGreetingAction } from "@/lib/power-greeting-decision";
 import { claimPowerDialerLeads, listPowerDialerCandidates } from "@/lib/power-dialer-batch";
 import { countPowerChannelsInUse, resolvePowerChannelLimit } from "@/lib/power-dialer-channels";
 import {
@@ -827,8 +836,110 @@ export async function handlePowerLeadAnswered(leadCallControlId: string): Promis
   });
   if (!leg) return;
   const campaign = await loadPowerCampaign(leg.campaignId);
-  if (campaign && !campaign.settings.amdEnabled) {
+  if (!campaign) return;
+  if (!campaign.settings.amdEnabled) {
     await connectPowerLeadToAgent({ leadCallControlId });
+    return;
+  }
+  const apiKey = telnyxApiKey();
+  if (apiKey) {
+    const started = await startTelnyxCallTranscription({
+      apiKey,
+      callControlId: leadCallControlId,
+      commandId: `power-soniox-${leadCallControlId}`,
+    });
+    if (!started.ok) {
+      console.warn("[power-dialer] Soniox-transskription kunne ikke startes:", started.message.slice(0, 180));
+    }
+  }
+  await new Promise((r) =>
+    setTimeout(r, POWER_AMD_TOTAL_ANALYSIS_MS + POWER_GREETING_MACHINE_GRACE_MS),
+  );
+  await settlePowerGreeting(leadCallControlId, { timedOut: true });
+}
+
+function parseGreetingHint(raw: string | null | undefined): GreetingHint | null {
+  if (raw === "human" || raw === "voicemail") return raw;
+  return null;
+}
+
+async function settlePowerGreeting(
+  leadCallControlId: string,
+  opts: { timedOut: boolean },
+): Promise<void> {
+  const leg = await prisma.dialerCallLog.findUnique({
+    where: { callControlId: leadCallControlId },
+    select: {
+      campaignId: true,
+      amdResult: true,
+      greetingHint: true,
+      bridgeRequestedAt: true,
+      bridgedAt: true,
+      resolvedAt: true,
+      endedAt: true,
+    },
+  });
+  if (!leg || leg.resolvedAt || leg.bridgedAt || leg.bridgeRequestedAt || leg.endedAt) return;
+
+  const amd = (leg.amdResult as AmdInternalResult | null) ?? null;
+  const greeting = parseGreetingHint(leg.greetingHint);
+  const action = decidePowerGreetingAction({
+    amd: amd === "human" || amd === "machine" || amd === "fax" || amd === "unknown" ? amd : null,
+    greeting,
+    timedOut: opts.timedOut,
+  });
+  if (action === "WAIT") return;
+
+  const campaign = await loadPowerCampaign(leg.campaignId);
+  if (!campaign) return;
+  await stopPowerGreetingTranscription(leadCallControlId);
+  if (action === "CONNECT") {
+    await connectPowerLeadToAgent({ leadCallControlId });
+    return;
+  }
+  await resolvePowerLeadLeg({
+    callControlId: leadCallControlId,
+    resolution: "VOICEMAIL",
+    hangup: true,
+    campaign,
+  });
+}
+
+async function stopPowerGreetingTranscription(leadCallControlId: string): Promise<void> {
+  const apiKey = telnyxApiKey();
+  if (!apiKey) return;
+  const stopped = await stopTelnyxCallTranscription({
+    apiKey,
+    callControlId: leadCallControlId,
+    commandId: `power-soniox-stop-${leadCallControlId}`,
+  });
+  if (!stopped.ok) {
+    console.warn("[power-dialer] Soniox-stop fejlede:", stopped.message.slice(0, 180));
+  }
+}
+
+export async function handlePowerLeadTranscription(
+  leadCallControlId: string,
+  transcript: string,
+  confidence?: number | null,
+): Promise<void> {
+  const hint = classifyPowerGreeting(transcript, confidence);
+  if (!transcript.trim()) return;
+  const leg = await prisma.dialerCallLog.findUnique({
+    where: { callControlId: leadCallControlId },
+    select: { greetingHint: true, resolvedAt: true, bridgedAt: true, endedAt: true, bridgeRequestedAt: true },
+  });
+  if (!leg || leg.resolvedAt || leg.bridgedAt || leg.endedAt || leg.bridgeRequestedAt) return;
+  const merged = mergeGreetingHint(parseGreetingHint(leg.greetingHint), hint);
+  await prisma.dialerCallLog.updateMany({
+    where: { callControlId: leadCallControlId, resolvedAt: null, bridgedAt: null, endedAt: null },
+    data: {
+      greetingHint: merged === "uncertain" ? leg.greetingHint : merged,
+      greetingText: transcript.slice(0, 500),
+    },
+  });
+  if (merged === "human" || merged === "voicemail") {
+    await settlePowerGreeting(leadCallControlId, { timedOut: false });
   }
 }
 
@@ -846,28 +957,29 @@ export async function handlePowerLeadAmd(
     select: { campaignId: true, bridgeRequestedAt: true, bridgedAt: true, resolvedAt: true, endedAt: true },
   });
   if (!leg || leg.resolvedAt || leg.bridgedAt) return;
-  const campaign = await loadPowerCampaign(leg.campaignId);
-  if (!campaign) return;
+  if (leg.bridgeRequestedAt) return;
 
-  if (kind === "greeting") {
-    // Beep efter en afgørelse ignoreres — det må aldrig lægge en igangværende samtale på.
-    if (leg.bridgeRequestedAt || amd !== "machine") return;
-    await resolvePowerLeadLeg({ callControlId: leadCallControlId, resolution: "VOICEMAIL", hangup: true, campaign });
-    return;
-  }
+  if (kind === "greeting" && amd !== "machine") return;
 
-  const action = decidePowerAmdAction(amd, campaign.settings.amdUncertainAction);
-  if (action === "CONNECT") {
-    if (leg.endedAt) return;
-    await connectPowerLeadToAgent({ leadCallControlId });
-    return;
-  }
-  await resolvePowerLeadLeg({
-    callControlId: leadCallControlId,
-    resolution: action === "VOICEMAIL" ? "VOICEMAIL" : "AMD_UNCERTAIN_REQUEUE",
-    hangup: true,
-    campaign,
+  await settlePowerGreeting(leadCallControlId, { timedOut: false });
+  const again = await prisma.dialerCallLog.findUnique({
+    where: { callControlId: leadCallControlId },
+    select: { bridgeRequestedAt: true, resolvedAt: true, endedAt: true, bridgedAt: true, greetingHint: true },
   });
+  if (!again || again.resolvedAt || again.bridgedAt || again.bridgeRequestedAt || again.endedAt) return;
+
+  const waitMs =
+    amd === "human"
+      ? 0
+      : amd === "machine" || amd === "fax"
+        ? POWER_GREETING_MACHINE_GRACE_MS
+        : POWER_GREETING_UNKNOWN_GRACE_MS;
+  if (waitMs <= 0) {
+    await settlePowerGreeting(leadCallControlId, { timedOut: true });
+    return;
+  }
+  await new Promise((r) => setTimeout(r, waitMs));
+  await settlePowerGreeting(leadCallControlId, { timedOut: true });
 }
 
 export async function handlePowerLegBridged(callControlId: string, direction: "lead" | "agent"): Promise<void> {

@@ -1194,6 +1194,103 @@ export async function startTelnyxRecording(params: {
 }
 
 /**
+ * Start realtids-transskription på et besvaret ben. Telnyx sender `call.transcription`
+ * (Soniox stt-rt via Telnyx — ingen inbound WebSocket på Vercel).
+ */
+export async function startTelnyxCallTranscription(params: {
+  apiKey: string;
+  callControlId: string;
+  commandId?: string;
+}): Promise<ActionResult> {
+  const body: Record<string, unknown> = {
+    transcription_engine: "Soniox",
+    transcription_tracks: "inbound",
+    transcription_engine_config: {
+      transcription_engine: "Soniox",
+      transcription_model: "soniox/stt-rt-v4",
+      language: "da",
+      interim_results: true,
+      enable_endpoint_detection: true,
+      max_endpoint_delay_ms: 500,
+    },
+  };
+  if (params.commandId) body.command_id = params.commandId;
+
+  try {
+    const res = await fetch(
+      `${TELNYX_API_BASE}/calls/${encodeURIComponent(params.callControlId)}/actions/transcription_start`,
+      {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${params.apiKey}`,
+          "Content-Type": "application/json",
+          Accept: "application/json",
+        },
+        body: JSON.stringify(body),
+      },
+    );
+    if (res.status === 422) return { ok: true, raw: null };
+    const json: unknown = await res.json().catch(() => null);
+    if (!res.ok) {
+      return {
+        ok: false,
+        status: res.status,
+        message: formatTelnyxError(json) || `Telnyx HTTP ${res.status}`,
+        telnyx: json,
+      };
+    }
+    return { ok: true, raw: json };
+  } catch (err) {
+    return {
+      ok: false,
+      status: 0,
+      message: err instanceof Error ? err.message : "Ukendt fejl ved start af transskription.",
+    };
+  }
+}
+
+/** Stop realtids-transskription (422 = allerede stoppet / aldrig startet). */
+export async function stopTelnyxCallTranscription(params: {
+  apiKey: string;
+  callControlId: string;
+  commandId?: string;
+}): Promise<ActionResult> {
+  const body: Record<string, unknown> = {};
+  if (params.commandId) body.command_id = params.commandId;
+  try {
+    const res = await fetch(
+      `${TELNYX_API_BASE}/calls/${encodeURIComponent(params.callControlId)}/actions/transcription_stop`,
+      {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${params.apiKey}`,
+          "Content-Type": "application/json",
+          Accept: "application/json",
+        },
+        body: JSON.stringify(body),
+      },
+    );
+    if (res.status === 422) return { ok: true, raw: null };
+    const json: unknown = await res.json().catch(() => null);
+    if (!res.ok) {
+      return {
+        ok: false,
+        status: res.status,
+        message: formatTelnyxError(json) || `Telnyx HTTP ${res.status}`,
+        telnyx: json,
+      };
+    }
+    return { ok: true, raw: json };
+  } catch (err) {
+    return {
+      ok: false,
+      status: 0,
+      message: err instanceof Error ? err.message : "Ukendt fejl ved stop af transskription.",
+    };
+  }
+}
+
+/**
  * GET /v2/call_control_applications/{id} — udgående kanalgrænse for appen (null = ingen grænse sat).
  * Power Dialer bruger den som loft for samtidige lead-opkald på tværs af kampagner.
  */

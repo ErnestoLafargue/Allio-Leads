@@ -7,9 +7,14 @@ import {
   handlePowerLeadAmd,
   handlePowerLeadAnswered,
   handlePowerLeadEnded,
+  handlePowerLeadTranscription,
   handlePowerLegBridged,
   isPowerCampaign,
 } from "@/lib/power-dialer-engine";
+import {
+  extractTelnyxTranscriptConfidence,
+  extractTelnyxTranscriptText,
+} from "@/lib/power-greeting-classify";
 import {
   meetsAutoSyncTalkThreshold,
   scheduleLeadRecordingSync,
@@ -26,6 +31,7 @@ export const POWER_EVENT_TYPES: ReadonlySet<string> = new Set([
   "call.machine.premium.detection.ended",
   "call.machine.greeting.ended",
   "call.machine.premium.greeting.ended",
+  "call.transcription",
 ]);
 
 export type PowerLegKind = "lead" | "agent";
@@ -97,6 +103,19 @@ export async function processPowerDialerEvent(params: {
     case "call.machine.premium.greeting.ended": {
       if (kind === "lead") {
         await handlePowerLeadAmd(callControlId, mapTelnyxAmdResult(str(payload.result)), "greeting");
+      }
+      return;
+    }
+    case "call.transcription": {
+      if (kind === "lead") {
+        const text = extractTelnyxTranscriptText(payload);
+        if (text) {
+          await handlePowerLeadTranscription(
+            callControlId,
+            text,
+            extractTelnyxTranscriptConfidence(payload),
+          );
+        }
       }
       return;
     }
