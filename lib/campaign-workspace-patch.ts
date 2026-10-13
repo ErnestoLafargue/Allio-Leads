@@ -1,4 +1,5 @@
 import type { LeadStatus } from "@/lib/lead-status";
+import type { MeetingType } from "@/lib/meeting-type";
 
 /** Felter til PATCH /api/leads/:id fra kampagne-arbejdsformularen. */
 export type CampaignLeadFormSnapshot = {
@@ -19,6 +20,8 @@ export type CampaignLeadFormSnapshot = {
   meetingContactEmail: string;
   meetingContactPhonePrivate: string;
   meetingCompanyName: string;
+  meetingType?: MeetingType | string;
+  meetingAddress?: string;
 };
 
 /**
@@ -52,6 +55,8 @@ export function buildCampaignLeadPatchBody(
     body.meetingContactEmail = s.meetingContactEmail.trim();
     body.meetingContactPhonePrivate = s.meetingContactPhonePrivate.trim();
     body.meetingCompanyName = s.meetingCompanyName.trim();
+    if (s.meetingType !== undefined) body.meetingType = s.meetingType;
+    if (s.meetingAddress !== undefined) body.meetingAddress = s.meetingAddress.trim();
     if (opts?.adminSkipBookingOverlap) {
       body.adminSkipBookingOverlap = true;
     }
