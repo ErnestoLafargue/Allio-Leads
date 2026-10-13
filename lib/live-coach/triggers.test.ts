@@ -40,11 +40,13 @@ describe("parseCoachText", () => {
       why: "Kender ikke værdien",
       line: "Lad os se på jeres tal først.",
       silent: false,
+      fresh: false,
     });
     expect(parseCoachText("SIGNAL: klarhed\nHVORFOR: Tror det").line).toBe("");
     expect(parseCoachText("SIGNAL: ingen").silent).toBe(true);
     const full = parseCoachText("SIGNAL: okonomi\nINDVENDING: price\nKUNDE: Nysgerrig, men prisbevidst\nHVORFOR: x\nREPLIK: y");
     expect(full.objection).toBe("price");
+    expect(parseCoachText("SIGNAL: okonomi\nNYT: ja\nREPLIK: y").fresh).toBe(true);
     expect(full.customer).toBe("Nysgerrig, men prisbevidst");
     expect(parseCoachText("SIGNAL: ingen\nINDVENDING: ingen\nKUNDE: Positiv").objection).toBeNull();
     expect(parseCoachText("SIGNAL: Lav interesse\nHVORFOR: x\nREPLIK: y").signal).toBe("lav_interesse");

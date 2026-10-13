@@ -2,13 +2,14 @@
  * Holder coach-kortet stille, så sælgeren kan nå at læse det højt. Et kort bliver stående, til:
  *  - sælgeren har sagt noget, der ligner replikken (så er det «brugt», og næste indvending må komme),
  *  - sælgeren lukker det, eller
- *  - kunden kommer med en ANDEN indvending, og kortet har stået i mindst MIN_DWELL_MS.
- * Samme indvending igen giver aldrig et nyt kort. AI-versionen må kun afløse straks-kortet (fra
+ *  - kortet har stået i mindst MIN_DWELL_MS, og samtalen har udviklet sig: kunden kommer med en ANDEN
+ *    indvending, eller AI vurderer, at kortet ikke længere passer (fresh).
+ * Samme indvending igen giver ikke et nyt kort, før samtalen har flyttet sig. AI-versionen må kun afløse straks-kortet (fra
  * ugens script) for samme indvending i de første sekunder, før sælgeren er gået i gang.
  */
 import { normalizeSpeech } from "./triggers";
 
-export const MIN_DWELL_MS = 20_000;
+export const MIN_DWELL_MS = 25_000;
 export const MAX_DWELL_MS = 90_000;
 export const REFINE_WINDOW_MS = 3_000;
 
@@ -39,13 +40,16 @@ export class CardLock {
   current: LockedCard | null = null;
   private heard = "";
 
-  /** Må et nyt kort for denne indvending (null = uden kategori) vises nu? */
-  canShow(category: string | null, source: "trigger" | "ai", now: number): boolean {
+  /**
+   * Må et nyt kort for denne indvending (null = uden kategori) vises nu? `fresh` = AI vurderer, at
+   * samtalen har udviklet sig, så kortet på skærmen ikke længere passer.
+   */
+  canShow(category: string | null, source: "trigger" | "ai", now: number, fresh = false): boolean {
     const c = this.current;
     if (!c || c.used || now - c.shownAt >= MAX_DWELL_MS) return true;
     if (source === "ai" && c.source === "trigger" && category === c.category && now - c.shownAt <= REFINE_WINDOW_MS) return true;
-    if (category === null || category === c.category) return false;
-    return now - c.shownAt >= MIN_DWELL_MS;
+    if (now - c.shownAt < MIN_DWELL_MS) return false;
+    return (category !== null && category !== c.category) || fresh;
   }
 
   show(card: Omit<LockedCard, "used">): void {

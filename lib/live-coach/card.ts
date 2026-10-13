@@ -18,9 +18,11 @@ export type ParsedCoachText = {
   why: string;
   line: string;
   silent: boolean;
+  /** AI: samtalen har udviklet sig, så kortet på skærmen ikke længere passer. */
+  fresh: boolean;
 };
 
-/** Læser et (evt. ufærdigt) svar i formatet SIGNAL/INDVENDING/KUNDE/HVORFOR/REPLIK. */
+/** Læser et (evt. ufærdigt) svar i formatet SIGNAL/INDVENDING/KUNDE/NYT/HVORFOR/REPLIK. */
 export function parseCoachText(text: string): ParsedCoachText {
   const field = (name: string) => text.match(new RegExp(`${name}:\\s*([^\\n]*)`))?.[1]?.trim() ?? "";
   const rawSignal = field("SIGNAL").toLowerCase().replace(/ø/g, "o").replace(/[*_\s]+/g, "_").replace(/^_|_$/g, "");
@@ -32,5 +34,6 @@ export function parseCoachText(text: string): ParsedCoachText {
     why: field("HVORFOR"),
     line: field("REPLIK"),
     silent: rawSignal === "ingen",
+    fresh: /^ja\b/i.test(field("NYT")),
   };
 }

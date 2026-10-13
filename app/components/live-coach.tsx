@@ -5,8 +5,9 @@
  * hjælper KUN med indvendinger — plus en kort vurdering af kunden. Den gentager ikke scriptet.
  *  - Når kunden kommer med en indvending, spørges Claude Haiku (~1 s) om det bedste svar til netop
  *    denne kunde. Kommer AI-svaret ikke hurtigt nok, vises jeres bedste svar fra ugens script.
- *  - Kortet bliver stående, til sælgeren har sagt noget, der ligner (card-lock.ts) — samme indvending
- *    igen giver ikke et nyt kort, og en ny indvending må først afløse det efter et stykke tid.
+ *  - Kortet bliver stående, til sælgeren har sagt noget, der ligner (card-lock.ts). Ellers skifter
+ *    det højst hvert 25. sekund, og kun når samtalen har udviklet sig (ny indvending, eller AI
+ *    vurderer, at kortet ikke længere passer).
  *  - Tavs ved telefonsvarere og omstillinger (machine-gate.ts).
  */
 import { useCallback, useEffect, useRef, useState } from "react";
@@ -111,9 +112,9 @@ export function LiveCoach(props: {
 
   /** Viser et kort, hvis låsen tillader det — ellers huskes en ny indvending som «også nævnt». */
   const tryShow = useCallback(
-    (next: Omit<ShownCard, "used">, heardAt: number): boolean => {
+    (next: Omit<ShownCard, "used">, heardAt: number, fresh = false): boolean => {
       const now = performance.now();
-      if (!lock.current.canShow(next.category, next.source, now)) {
+      if (!lock.current.canShow(next.category, next.source, now, fresh)) {
         if (next.category && next.category !== lock.current.current?.category) setPending(next.category);
         return false;
       }
@@ -170,6 +171,7 @@ export function LiveCoach(props: {
             helpful: null,
           },
           heardAt,
+          parsed.fresh,
         );
         if (shownNow) {
           if (fallbackTimer.current) clearTimeout(fallbackTimer.current);
@@ -190,6 +192,8 @@ export function LiveCoach(props: {
       signalsSeen.current.push(signal);
       if (!lock.current.canShow(category, "trigger", performance.now())) {
         if (category !== lock.current.current?.category) setPending(category);
+        // Har kortet stået længe nok, må AI vurdere, om samtalen har udviklet sig (NYT: ja).
+        if (lock.current.canShow(category, "ai", performance.now(), true)) void askClaude(category, heardAt);
         return;
       }
       if (fallbackTimer.current) clearTimeout(fallbackTimer.current);

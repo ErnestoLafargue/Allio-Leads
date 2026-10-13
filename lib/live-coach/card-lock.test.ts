@@ -19,6 +19,14 @@ describe("CardLock", () => {
     expect(lock.canShow(null, "ai", 5_000)).toBe(false);
   });
 
+  it("skifter efter et stykke tid, når samtalen har udviklet sig", () => {
+    const lock = new CardLock();
+    lock.show({ category: "price", line: LINE, source: "ai", shownAt: 0 });
+    expect(lock.canShow("price", "ai", 10_000, true)).toBe(false);
+    expect(lock.canShow("price", "ai", MIN_DWELL_MS, true)).toBe(true);
+    expect(lock.canShow("price", "trigger", MIN_DWELL_MS)).toBe(false);
+  });
+
   it("lader en ny indvending komme efter et stykke tid", () => {
     const lock = new CardLock();
     lock.show({ category: "price", line: LINE, source: "ai", shownAt: 0 });
