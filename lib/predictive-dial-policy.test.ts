@@ -140,6 +140,22 @@ describe("predictive dialer smoke", () => {
     expect(
       predictiveActionAfterRemoteEnd({ hadLive: true, autoOutcome: "VOICEMAIL", canFailover: false }),
     ).toEqual({ type: "advance", outcome: "VOICEMAIL" });
+    expect(
+      predictiveActionAfterRemoteEnd({
+        hadLive: false,
+        autoOutcome: "VOICEMAIL",
+        canFailover: false,
+        isCallbackLead: true,
+      }),
+    ).toEqual({ type: "stay" });
+    expect(
+      predictiveActionAfterRemoteEnd({
+        hadLive: true,
+        autoOutcome: "VOICEMAIL",
+        canFailover: true,
+        isCallbackLead: true,
+      }),
+    ).toEqual({ type: "failover" });
 
     const leadId = "lead-a";
     const nextKey = predictiveAutoStartKey(leadId, "failover", true);

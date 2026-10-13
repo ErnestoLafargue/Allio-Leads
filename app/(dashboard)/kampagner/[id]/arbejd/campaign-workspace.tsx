@@ -43,7 +43,13 @@ import { useActivityRecordingPoll } from "@/lib/use-activity-recording-poll";
 import { scrollWorkspaceToTop } from "@/lib/scroll-workspace-to-top";
 import { KNOWN_LEAD_SOURCES, parseLeadNavigation } from "@/lib/lead-navigation";
 import { canScheduleCallbackFromLead } from "@/lib/lead-callback-schedule";
+import { isCallbackWorkLead } from "@/lib/lead-callback-access";
 import { DIALER_AUTO_PAUSED_KEY, DIALER_START_PATH, markDialerPauseExit } from "@/lib/dialer-pause-exit";
+import {
+  MEETING_TYPE_ONLINE,
+  type MeetingType,
+  normalizeMeetingType,
+} from "@/lib/meeting-type";
 import {
   dialNumberMenu,
   normalizeDialPhonePriority,
@@ -76,6 +82,8 @@ type Lead = {
   meetingContactEmail?: string;
   meetingContactPhonePrivate?: string;
   meetingCompanyName?: string;
+  meetingType?: string;
+  meetingAddress?: string;
   lockedByUserId?: string | null;
   lockedAt?: string | null;
   lockExpiresAt?: string | null;
@@ -301,6 +309,7 @@ export function CampaignWorkspace({
   /** Fejl ved baggrundsgem af forrige lead (blokér ikke næste lead). */
   const [backgroundSyncError, setBackgroundSyncError] = useState<string | null>(null);
   const [integrationsSyncHint, setIntegrationsSyncHint] = useState(false);
+  const [callbackMissHint, setCallbackMissHint] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [done, setDone] = useState(false);
   /** Lås på leads der stadig gemmes i baggrunden — heartbeat som aktivt lead. */
@@ -364,6 +373,8 @@ export function CampaignWorkspace({
   const [meetingContactEmail, setMeetingContactEmail] = useState("");
   const [meetingContactPhonePrivate, setMeetingContactPhonePrivate] = useState("");
   const [meetingCompanyName, setMeetingCompanyName] = useState("");
+  const [meetingType, setMeetingType] = useState<MeetingType>(MEETING_TYPE_ONLINE);
+  const [meetingAddress, setMeetingAddress] = useState("");
   const [meetingContactErrors, setMeetingContactErrors] = useState<MeetingContactFieldErrors>({});
   const [meetingNotesRequiredOpen, setMeetingNotesRequiredOpen] = useState(false);
   const [callbackDialogOpen, setCallbackDialogOpen] = useState(false);
@@ -395,6 +406,10 @@ export function CampaignWorkspace({
   useEffect(() => {
     activeLeadRef.current = activeLead;
   }, [activeLead]);
+
+  useEffect(() => {
+    setCallbackMissHint(false);
+  }, [activeLead?.id]);
 
   useEffect(() => {
     prefetchedLeadRef.current = prefetchedLead;
@@ -493,6 +508,8 @@ export function CampaignWorkspace({
     setMeetingContactEmail(l.meetingContactEmail ?? "");
     setMeetingContactPhonePrivate(l.meetingContactPhonePrivate ?? "");
     setMeetingCompanyName(l.meetingCompanyName ?? "");
+    setMeetingType(normalizeMeetingType(l.meetingType));
+    setMeetingAddress(l.meetingAddress ?? "");
   }, [campaignSystemType]);
 
   // Nummer og kundebillede skifter i samme render. Ellers kan auto-opkald nå at bruge forrige leads nummer.
@@ -687,6 +704,7 @@ export function CampaignWorkspace({
     // Power: næste lead kommer fra dispatcheren — ingen manuel forhåndsreservation.
     // Historik: gem lukker leadet, så næste i køen må ikke reserveres.
     if (isPowerAutoDialSession || closeAfterSave) return;
+    if (isCallbackWorkLead(activeLead)) return;
     if (prefetchedLeadRef.current?.id) return;
     void prefetchNextLead(activeLead.id);
     // prefetch kun ved lead-skift; cache håndteres via ref
@@ -812,6 +830,9 @@ export function CampaignWorkspace({
     async (lead: AssignedLead) => {
       if (typeof window === "undefined") return;
       await flushPendingLeadPatches();
+      if (isCallbackWorkLead(activeLeadRef.current) && activeLeadRef.current?.id !== lead.id) {
+        return;
+      }
       if (campaignDialMode === "POWER_DIALER") {
         setError(null);
         setPowerDialerConnecting(true);
@@ -923,6 +944,8 @@ export function CampaignWorkspace({
       meetingContactEmail,
       meetingContactPhonePrivate,
       meetingCompanyName,
+      meetingType,
+      meetingAddress,
     };
   }
   const getFormSnapshotRef = useRef(getFormSnapshot);
@@ -959,6 +982,8 @@ export function CampaignWorkspace({
     setMeetingContactEmail(updated.meetingContactEmail ?? "");
     setMeetingContactPhonePrivate(updated.meetingContactPhonePrivate ?? "");
     setMeetingCompanyName(updated.meetingCompanyName ?? "");
+    setMeetingType(normalizeMeetingType(updated.meetingType));
+    setMeetingAddress(updated.meetingAddress ?? "");
     setError(null);
     return { next: [], updated };
   }
@@ -1090,6 +1115,15 @@ export function CampaignWorkspace({
     predictiveOutcome?: LeadStatus,
   ) {
     if (!activeLead) return;
+    const autoMissOnCallback =
+      isCallbackWorkLead(activeLead) &&
+      (predictiveOutcome === "VOICEMAIL" || predictiveOutcome === "NOT_HOME");
+    if (autoMissOnCallback) {
+      requestCallHangupBeforeAdvance();
+      setStatus(predictiveOutcome);
+      setCallbackMissHint(true);
+      return;
+    }
     requestCallHangupBeforeAdvance();
 
     /** Mødebooking: overlap-validering synkront; Cal.eu/Podio sync kører i baggrunden på serveren. */
@@ -1102,6 +1136,7 @@ export function CampaignWorkspace({
         meetingContactEmail,
         meetingContactPhonePrivate,
         meetingCompanyName,
+        { meetingType, meetingAddress },
       );
       if (contactErr) setMeetingContactErrors(contactErr);
       else setMeetingContactErrors({});
@@ -2023,6 +2058,9 @@ export function CampaignWorkspace({
             {closeAfterSave
               ? " — «Gem og luk» registrerer udfaldet og lukker leadet."
               : " — eller «Gem og næste» med «Ny» for at lægge leadet tilbage som nyt i køen."}
+            {callbackMissHint
+              ? " Telefonsvarer eller intet svar — sæt tilbagekaldet igen, hvis I skal ringe senere. Der gås ikke videre automatisk."
+              : null}
           </div>
         )}
         {showOriginalCancelledMeetingInfo && (
@@ -2104,12 +2142,21 @@ export function CampaignWorkspace({
           dialMenu={dialNumberMenu(phone, privatePhone, dialPhonePriority)}
           dialMode={campaignDialMode}
           autoStartCall={voipAutoStart}
+          isCallbackLead={isCallbackWorkLead(current)}
           onUnansweredTimeout={() => {
             setStatus("VOICEMAIL");
+            if (isCallbackWorkLead(activeLeadRef.current)) {
+              setCallbackMissHint(true);
+              return;
+            }
             queueMicrotask(() => void onNextRef.current(undefined, undefined, "VOICEMAIL"));
           }}
           onPredictiveAutoOutcome={(outcome) => {
             setStatus(outcome);
+            if (isCallbackWorkLead(activeLeadRef.current)) {
+              setCallbackMissHint(true);
+              return;
+            }
             queueMicrotask(() => void onNextRef.current(undefined, undefined, outcome));
           }}
           onUpdateLeadPhone={handleUpdateLeadPhoneFromVoip}
@@ -2193,6 +2240,8 @@ export function CampaignWorkspace({
           meetingContactEmail,
           meetingContactPhonePrivate,
           meetingCompanyName,
+          meetingType,
+          meetingAddress,
           onMeetingContactName: (v) => {
             setMeetingContactName(v);
             setMeetingContactErrors((prev) => ({ ...prev, name: undefined }));
@@ -2209,6 +2258,10 @@ export function CampaignWorkspace({
             setMeetingCompanyName(v);
             setMeetingContactErrors((prev) => ({ ...prev, meetingCompany: undefined }));
           },
+          onMeetingAddress: (v) => {
+            setMeetingAddress(v);
+            setMeetingContactErrors((prev) => ({ ...prev, address: undefined }));
+          },
           contactRequired: status === "MEETING_BOOKED",
           meetingContactErrors: status === "MEETING_BOOKED" ? meetingContactErrors : undefined,
         }}
@@ -2217,6 +2270,8 @@ export function CampaignWorkspace({
           leadId: current.id,
           calendarUserId: current.assignedUserId ?? defaultMeetingAssigneeId,
           initialMeetingLocal: status === "MEETING_BOOKED" ? meetingScheduledFor || undefined : undefined,
+          meetingType,
+          onMeetingTypeChange: setMeetingType,
           isSubmitting: saving,
           allowMeetingConfirm: status === "MEETING_BOOKED",
           allowAdminAvailabilityOverride: isAdmin,
