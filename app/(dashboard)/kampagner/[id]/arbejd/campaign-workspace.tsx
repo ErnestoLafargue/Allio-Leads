@@ -1760,30 +1760,38 @@ export function CampaignWorkspace({
     );
   }
 
+  const powerLeadOpen = isPowerAutoDialSession && Boolean(current);
+
   return (
     <div
       ref={workspaceRootRef}
-      className="relative flex min-h-[calc(100dvh-5.5rem)] flex-col gap-4 pb-4"
+      className={
+        powerLeadOpen
+          ? "relative grid min-h-[calc(100dvh-5.5rem)] grid-cols-1 gap-4 pb-4 [grid-template-areas:'header'_'phone'_'rest']"
+          : "relative flex min-h-[calc(100dvh-5.5rem)] flex-col gap-4 pb-4"
+      }
     >
       {isPowerAutoDialSession ? (
-        <PowerDialerPhone
-          campaignId={powerPoolMode ? initialCampaignId : campaignId}
-          enabled={!powerServer?.superseded}
-          leadLabel={current?.companyName ?? null}
-          reportLeadId={current?.id ?? null}
-          leadDial={
-            current
-              ? {
-                  leadId: current.id,
-                  leadPhone: dialPhoneForOpenLead({ phone, privatePhone }, dialPhonePriority),
-                  dialMenu: dialNumberMenu(phone, privatePhone, dialPhonePriority),
-                  onUpdateLeadPhone: handleUpdateLeadPhoneFromVoip,
-                }
-              : null
-          }
-          hangupSignal={voipHangupSignal}
-          onStateChange={setPowerPhone}
-        />
+        <div className={powerLeadOpen ? "min-w-0 [grid-area:phone]" : undefined}>
+          <PowerDialerPhone
+            campaignId={powerPoolMode ? initialCampaignId : campaignId}
+            enabled={!powerServer?.superseded}
+            leadLabel={current?.companyName ?? null}
+            reportLeadId={current?.id ?? null}
+            leadDial={
+              current
+                ? {
+                    leadId: current.id,
+                    leadPhone: dialPhoneForOpenLead({ phone, privatePhone }, dialPhonePriority),
+                    dialMenu: dialNumberMenu(phone, privatePhone, dialPhonePriority),
+                    onUpdateLeadPhone: handleUpdateLeadPhoneFromVoip,
+                  }
+                : null
+            }
+            hangupSignal={voipHangupSignal}
+            onStateChange={setPowerPhone}
+          />
+        </div>
       ) : null}
 
       {isPowerAutoDialSession && powerServer?.superseded ? (
@@ -1909,6 +1917,7 @@ export function CampaignWorkspace({
 
       {current ? (
       <>
+      <div className={powerLeadOpen ? "flex min-w-0 flex-col gap-4 [grid-area:header]" : "contents"}>
       <div className="shrink-0">
         <Link href={returnPath} className="text-sm text-stone-500 hover:text-stone-800">
           ← Kampagner
@@ -2177,6 +2186,7 @@ export function CampaignWorkspace({
           </>
         }
       />
+      </div>
 
       {showVoipStrip && (
         <CampaignVoipStrip
@@ -2214,6 +2224,7 @@ export function CampaignWorkspace({
         />
       )}
 
+      <div className={powerLeadOpen ? "flex min-w-0 flex-col gap-4 [grid-area:rest]" : "contents"}>
       {showBackgroundSaveHint && (
         <p className="shrink-0 text-xs text-stone-500" aria-live="polite">
           Gemmer forrige lead i baggrunden…
@@ -2330,6 +2341,7 @@ export function CampaignWorkspace({
         virkNoDataToken={virkNoDataToken}
         bottomBar={renderNextButton()}
       />
+      </div>
       </>
       ) : null}
 
