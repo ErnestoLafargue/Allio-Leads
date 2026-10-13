@@ -35,12 +35,18 @@ describe("parseCoachText", () => {
     const { parseCoachText } = await import("./card");
     expect(parseCoachText("SIGNAL: økonomi\nHVORFOR: Kender ikke værdien\nREPLIK: Lad os se på jeres tal først.")).toEqual({
       signal: "okonomi",
+      objection: null,
+      customer: "",
       why: "Kender ikke værdien",
       line: "Lad os se på jeres tal først.",
       silent: false,
     });
     expect(parseCoachText("SIGNAL: klarhed\nHVORFOR: Tror det").line).toBe("");
     expect(parseCoachText("SIGNAL: ingen").silent).toBe(true);
+    const full = parseCoachText("SIGNAL: okonomi\nINDVENDING: price\nKUNDE: Nysgerrig, men prisbevidst\nHVORFOR: x\nREPLIK: y");
+    expect(full.objection).toBe("price");
+    expect(full.customer).toBe("Nysgerrig, men prisbevidst");
+    expect(parseCoachText("SIGNAL: ingen\nINDVENDING: ingen\nKUNDE: Positiv").objection).toBeNull();
     expect(parseCoachText("SIGNAL: Lav interesse\nHVORFOR: x\nREPLIK: y").signal).toBe("lav_interesse");
     expect(parseCoachText("SIGNAL: **Økonomi**").signal).toBe("okonomi");
   });
