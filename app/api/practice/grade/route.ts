@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { createAnthropicClient } from "@/lib/anthropic-client";
 import { OBJECTION_CATEGORIES, type ObjectionCategory } from "@/lib/call-analysis/schema";
 import { gradePracticeAnswer, practiceSystemPrompt } from "@/lib/live-coach/practice";
+import { playbookTemplatesText } from "@/lib/objection-playbook/read";
 import { activeScriptResponses, objectionBank } from "@/lib/live-coach/script-responses";
 import { getViewer } from "@/lib/scripts-traening/queries";
 
@@ -16,7 +17,7 @@ export async function POST(req: Request) {
   try {
     const { feedback, costUsd } = await gradePracticeAnswer({
       client: createAnthropicClient(),
-      system: practiceSystemPrompt(await activeScriptResponses(), await objectionBank()),
+      system: practiceSystemPrompt(await activeScriptResponses(), await objectionBank(), await playbookTemplatesText()),
       category: b.category as ObjectionCategory,
       customerLine: b.customerLine.slice(0, 400),
       answer: b.answer,

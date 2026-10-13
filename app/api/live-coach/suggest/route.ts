@@ -7,6 +7,7 @@ import { LIVE_COACH_PROMPT_VERSION, liveCoachMonthlyBudgetUsd, liveCoachSpentThi
 import { customerContext } from "@/lib/live-coach/customer-context";
 import { feedbackBank } from "@/lib/live-coach/feedback";
 import { activeScriptResponses, objectionBank } from "@/lib/live-coach/script-responses";
+import { playbookTemplatesText } from "@/lib/objection-playbook/read";
 import { liveCoachSystemPrompt, liveCoachUserMessage, streamSuggestion, type CoachLine, type CoachMood, type ShownCard } from "@/lib/live-coach/suggest";
 import { getViewer } from "@/lib/scripts-traening/queries";
 
@@ -60,7 +61,7 @@ export async function POST(req: Request) {
   });
   const stream = streamSuggestion({
     client: createAnthropicClient(),
-    system: liveCoachSystemPrompt(await activeScriptResponses(), await objectionBank(), await feedbackBank()),
+    system: liveCoachSystemPrompt(await activeScriptResponses(), await objectionBank(), await feedbackBank(), await playbookTemplatesText()),
     userMessage: liveCoachUserMessage(lines, trigger, customer, mood, shown),
     onDone: ({ costUsd, text }) => {
       const card = parseCoachText(text);

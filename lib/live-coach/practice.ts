@@ -5,7 +5,7 @@
  */
 import * as z from "zod/v4";
 import type Anthropic from "@anthropic-ai/sdk";
-import { ALLIO_PRICE_RULE } from "@/lib/allio-offer";
+import { ALLIO_HARD_RULES, ALLIO_PRODUCT } from "@/lib/allio-product";
 import { structuredCall } from "@/lib/anthropic-client";
 import type { ObjectionCategory } from "@/lib/call-analysis/schema";
 import { prisma } from "@/lib/prisma";
@@ -63,13 +63,18 @@ export const PracticeFeedbackSchema = z.object({
 });
 export type PracticeFeedback = z.infer<typeof PracticeFeedbackSchema>;
 
-export function practiceSystemPrompt(scriptResponses: Partial<Record<ObjectionCategory, string>>, bank: ObjectionBank): string {
+export function practiceSystemPrompt(
+  scriptResponses: Partial<Record<ObjectionCategory, string>>,
+  bank: ObjectionBank,
+  playbook = "",
+): string {
   const answers = Object.entries(scriptResponses).map(([k, v]) => `- ${k}: ${v}`).join("\n");
   const real = Object.entries(bank).map(([k, list]) => `- ${k}: ${(list ?? []).map((t) => `«${t}»`).join(" / ")}`).join("\n");
   return `Du er salgstræner for Allios mødebookere. En sælger øver sig: kunden har sagt en indvending, og sælgeren har svaret. Giv kort, konkret og venlig feedback på dansk.
 
-Målet med opkaldet er et ja til et møde, hvor en specialist viser klinikken, hvad der er at hente ud fra dens egne data. Allio øger kundernes livstidsværdi ud fra klinikkens egen kundedata (genaktivering via personlige SMS'er, kunder der er ved at falde fra), uden markedsføringskroner. Tal fra Pitch 8: ca. 40 % inaktive kunder; 2–5 % genaktiveres = 7–18 ekstra bookinger om måneden. Opfind aldrig andre tal.
-Pris: ${ALLIO_PRICE_RULE}
+Målet med opkaldet er et ja til et møde, hvor en specialist viser klinikken, hvad der er at hente ud fra dens egne data.
+
+${ALLIO_PRODUCT}
 
 Et godt svar: anerkender kort → vender indvendingen mod værdien for kunden → slutter med et spørgsmål eller valg mod mødet. Kort og i talesprog.
 Score: 80–100 = det ville sandsynligvis føre videre; 50–79 = godt, men mangler noget; under 50 = indvendingen blev ikke vendt.
@@ -77,8 +82,13 @@ Score: 80–100 = det ville sandsynligvis føre videre; 50–79 = godt, men mang
 Ugens script — bedste svar:
 ${answers || "- (ingen)"}
 
+Indvendingsbogen — skabeloner (brug den, der passer, som facit for et godt svar):
+${playbook || "- (ingen)"}
+
 Rigtige stærke svar fra jeres bookede samtaler:
-${real || "- (ingen)"}`;
+${real || "- (ingen)"}
+
+${ALLIO_HARD_RULES}`;
 }
 
 export async function gradePracticeAnswer(params: {

@@ -4,7 +4,7 @@
  * modstand giver et kort; ellers kommer kun vurderingen af kunden.
  */
 import type Anthropic from "@anthropic-ai/sdk";
-import { ALLIO_PRICE_RULE } from "@/lib/allio-offer";
+import { ALLIO_HARD_RULES, ALLIO_PRODUCT } from "@/lib/allio-product";
 import { usageCostUsd } from "@/lib/anthropic-client";
 import type { ObjectionCategory } from "@/lib/call-analysis/schema";
 import type { CoachLine } from "./card";
@@ -19,6 +19,7 @@ export function liveCoachSystemPrompt(
   scriptResponses: Partial<Record<ObjectionCategory, string>>,
   bank: ObjectionBank = {},
   feedback: FeedbackBank = {},
+  playbook = "",
 ): string {
   const answers = Object.entries(scriptResponses)
     .map(([k, v]) => `- ${k}: ${v}`)
@@ -34,11 +35,10 @@ export function liveCoachSystemPrompt(
     .join("\n");
   return `Du er live-coach for en dansk mødebooker fra Allio, mens sælgeren taler i telefon med en klinik. Du hører samtalen og giver sælgeren ét kort med det bedste næste, sælgeren kan sige.
 
-## Allio og målet
-Allio hjælper klinikker med at øge kundernes livstidsværdi og omsætningen ud fra den kundedata, de allerede har i deres bookingsystem — uden at bruge penge på markedsføring: genaktivering af inaktive kunder med personlige SMS'er, kunder der er ved at falde fra ud fra deres booking-frekvens, flere Google-anmeldelser, samlet indbakke og AI-klinikassistent.
+## Målet
 Målet med opkaldet er ét: et ja til et møde, hvor en specialist viser klinikken, hvad der er at hente ud fra dens egne data. Nævn ALDRIG mødets længde (ingen minutter, ingen «halv time»).
-Tal du må bruge (fra Pitch 8): ca. 40 % af en kliniks tidligere kunder er inaktive; Allio genaktiverer typisk 2–5 % af dem, svarende til 7–18 ekstra bookinger om måneden; klinikker på den størrelse ser typisk 10–20 ekstra bookinger og 10–20 ekstra gode Google-anmeldelser om måneden. Brug kun disse tal — opfind aldrig andre tal, kundenavne eller cases.
-Pris: ${ALLIO_PRICE_RULE}
+
+${ALLIO_PRODUCT}
 
 ## Din opgave
 Sælgeren kan selv sit script — gentag det aldrig, og foreslå aldrig «næste linje i pitchen». Du melder dig kun, når kunden kommer med en indvending, tvivl eller modstand (også skjult: «det lyder spændende, men …», tøven), når kunden er nysgerrig og vil vide mere, eller når kunden er klar til mødet. Svarer kunden bare neutralt eller med småsnak, er der intet kort (SIGNAL: ingen) — men vurdér stadig kunden.
@@ -86,6 +86,10 @@ TRÆK: ingen
 ## Ugens script — bedste svar på indvendinger
 ${answers || "- (ingen)"}
 
+## Indvendingsbogen — skabeloner for de hyppigste indvendinger
+Find den indvending, der passer bedst, tag udgangspunkt i dens skabelon og træk, og tilpas den til netop denne kunde og samtale ([pladsholdere] udfyldes med kundens egne ord og detaljer).
+${playbook || "- (ingen endnu)"}
+
 ## Rigtige stærke svar fra jeres samtaler (inspiration, tilpas dem)
 ${real || "- (ingen endnu)"}
 
@@ -93,7 +97,9 @@ ${real || "- (ingen endnu)"}
 Svar, sælgerne har givet 👍 — brug dem som forbillede:
 ${liked || "- (ingen endnu)"}
 Svar, sælgerne har givet 👎 — undgå disse formuleringer og den type svar:
-${avoid || "- (ingen endnu)"}`;
+${avoid || "- (ingen endnu)"}
+
+${ALLIO_HARD_RULES}`;
 }
 
 export type CoachMood = { signals: string[]; phase: string | null; seconds?: number | null; objections?: string[] };

@@ -7,6 +7,7 @@ const TABS = [
   { href: "/scripts-og-traening", label: "Overblik", exact: true },
   { href: "/scripts-og-traening/samtaler", label: "Mine samtaler" },
   { href: "/scripts-og-traening/scripts", label: "Scripts" },
+  { href: "/scripts-og-traening/indvendinger", label: "Indvendinger" },
   { href: "/scripts-og-traening/traening", label: "Træning" },
   { href: "/scripts-og-traening/indsigter", label: "Indsigter" },
   { href: "/scripts-og-traening/oev", label: "Øv indvendinger" },
