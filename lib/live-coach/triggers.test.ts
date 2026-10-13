@@ -50,6 +50,7 @@ describe("parseCoachText", () => {
     expect(parseCoachText("SIGNAL: okonomi\nNYT: ja\nREPLIK: y").fresh).toBe(true);
     expect(parseCoachText("SIGNAL: skepsis\nTRÆK: Spørg\nREPLIK: y").move).toBe("sporg");
     expect(parseCoachText("SIGNAL: klarhed\nTRÆK: **luk**").move).toBe("luk");
+    expect(parseCoachText("SIGNAL: klarhed\nTRÆK: forklar").move).toBe("forklar");
     expect(full.customer).toBe("Nysgerrig, men prisbevidst");
     expect(parseCoachText("SIGNAL: ingen\nINDVENDING: ingen\nKUNDE: Positiv").objection).toBeNull();
     expect(parseCoachText("SIGNAL: Lav interesse\nHVORFOR: x\nREPLIK: y").signal).toBe("lav_interesse");

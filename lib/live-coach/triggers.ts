@@ -217,8 +217,8 @@ export function detectMachine(customerText: string): MachineKind | null {
 }
 
 /**
- * Købssignaler: kunden spørger, hvordan/hvornår det foregår, eller siger, det lyder interessant.
- * Giver intet straks-kort — men får AI til at vurdere med det samme, om det er tid til at lukke.
+ * Nysgerrighed og købssignaler: kunden spørger, hvordan/hvornår det foregår, eller siger, det lyder
+ * interessant. Giver intet straks-kort — men får AI til at vurdere med det samme (forklar eller luk).
  */
 const BUYING_PATTERNS: RegExp[] = [
   /\bhvordan (foregår|fungerer|virker) (det|sådan|møde)/,

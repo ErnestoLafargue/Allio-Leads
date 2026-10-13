@@ -41,6 +41,7 @@ const SIGNAL_STYLE: Record<string, string> = {
 
 const MOVE_STYLE: Record<CoachMove, { label: string; className: string }> = {
   sporg: { label: "Spørg ind", className: "bg-sky-600 text-white" },
+  forklar: { label: "Forklar", className: "bg-violet-600 text-white" },
   behandl: { label: "Behandl", className: "bg-amber-500 text-white" },
   luk: { label: "Luk mødet", className: "bg-emerald-600 text-white" },
 };
@@ -172,8 +173,9 @@ export function LiveCoach(props: {
         const parsed = parseCoachText(await res.text());
         if (parsed.customer) setAssessment(parsed.customer);
         if (parsed.signal) signalsSeen.current.push(parsed.signal);
-        // Kun indvendinger og lukke-øjeblikke giver et kort — ellers bruges svaret kun til vurderingen.
-        if (parsed.silent || !parsed.line || (!trigger && !parsed.objection && parsed.move !== "luk")) return;
+        // Kun indvendinger, nysgerrighed og lukke-øjeblikke giver et kort — ellers bruges svaret kun til vurderingen.
+        const moveWithoutObjection = parsed.move === "luk" || parsed.move === "forklar";
+        if (parsed.silent || !parsed.line || (!trigger && !parsed.objection && !moveWithoutObjection)) return;
         const category = trigger ?? parsed.objection;
         if (category && !objectionsSeen.current.includes(category)) objectionsSeen.current.push(category);
         const shownNow = tryShow(

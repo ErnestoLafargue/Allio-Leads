@@ -9,7 +9,7 @@ export type CoachLine = { speaker: "agent" | "customer"; text: string };
 const SIGNALS: ReadonlySet<string> = new Set(["tryghed", "klarhed", "okonomi", "skepsis", "timing", "lav_interesse"]);
 const CATEGORIES: ReadonlySet<string> = new Set([...OBJECTION_TRIGGERS.map((t) => t.category), "other"]);
 
-export type CoachMove = "sporg" | "behandl" | "luk";
+export type CoachMove = "sporg" | "forklar" | "behandl" | "luk";
 
 export type ParsedCoachText = {
   signal: CoachSignal | null;
@@ -22,13 +22,13 @@ export type ParsedCoachText = {
   silent: boolean;
   /** AI: samtalen har udviklet sig, så kortet på skærmen ikke længere passer. */
   fresh: boolean;
-  /** Det træk, AI anbefaler: spørg ind, behandl indvendingen eller luk mødet. */
+  /** Det træk, AI anbefaler: spørg ind, forklar produktet, behandl indvendingen eller luk mødet. */
   move: CoachMove | null;
 };
 
 function parseMove(raw: string): CoachMove | null {
   const m = raw.toLowerCase().replace(/ø/g, "o").replace(/[^a-z]/g, "");
-  return m === "sporg" || m === "behandl" || m === "luk" ? m : null;
+  return m === "sporg" || m === "forklar" || m === "behandl" || m === "luk" ? m : null;
 }
 
 /** Læser et (evt. ufærdigt) svar i formatet SIGNAL/INDVENDING/KUNDE/KVALIFIKATION/TRÆK/NYT/HVORFOR/REPLIK. */
