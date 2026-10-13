@@ -2,7 +2,7 @@ import { auth } from "@/auth";
 import { redirect } from "next/navigation";
 import { AppSidebar } from "@/app/components/app-sidebar";
 import { PresenceHeartbeat } from "@/app/components/presence-heartbeat";
-import { LiveCoachMain, LiveCoachPanel } from "@/app/components/live-coach-panel";
+import { LiveCoachDock } from "@/app/components/live-coach-dock";
 
 export default async function DashboardLayout({
   children,
@@ -15,14 +15,14 @@ export default async function DashboardLayout({
   return (
     <div className="min-h-full bg-stone-50">
       <PresenceHeartbeat />
-      <LiveCoachPanel />
+      <LiveCoachDock />
       <AppSidebar
         userName={session.user.name ?? session.user.email ?? ""}
         role={session.user.role}
       />
-      <LiveCoachMain>
+      <main className="min-h-screen px-4 py-6 lg:pl-[5rem] lg:pr-6">
         <div className="mx-auto w-full max-w-screen-2xl">{children}</div>
-      </LiveCoachMain>
+      </main>
     </div>
   );
 }
