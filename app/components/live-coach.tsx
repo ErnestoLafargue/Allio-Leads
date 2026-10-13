@@ -264,7 +264,7 @@ export function LiveCoach(props: {
             </span>
             <span className="text-xs text-stone-600">{card.why}</span>
           </div>
-          <p className={bare ? "rounded-lg border-l-4 border-violet-500 bg-white/70 px-3 py-2 text-base font-medium leading-snug text-stone-900" : "text-sm font-medium text-stone-900"}>
+          <p className={bare ? "rounded-lg border-l-4 border-emerald-600 bg-emerald-50/50 px-3 py-2 text-base font-medium leading-snug text-stone-900" : "text-sm font-medium text-stone-900"}>
             “{card.line}”
           </p>
           <div className="flex items-center justify-between">

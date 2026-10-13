@@ -11,8 +11,8 @@ import { setLiveCoachOpen, useLiveCoachOpen } from "@/lib/live-coach/panel-state
 import { LiveCoach, type LiveCoachLine } from "./live-coach";
 
 /** Panelets bredde — hovedindholdet får samme margin i højre side. */
-const PANEL_WIDTH = "lg:w-[clamp(17rem,22vw,26rem)]";
-const MAIN_PADDING = "lg:pr-[calc(clamp(17rem,22vw,26rem)+1.5rem)]";
+const PANEL_WIDTH = "lg:w-[24rem]";
+const MAIN_PADDING = "lg:pr-[25.5rem]";
 
 function CoachIcon({ className }: { className?: string }) {
   return (
@@ -37,14 +37,14 @@ export function LiveCoachToggle() {
       title={open ? "Luk live-coach" : "Åbn live-coach"}
       className={`flex w-24 shrink-0 flex-col items-center justify-center gap-1.5 rounded-2xl border px-2 py-4 text-xs font-semibold backdrop-blur-sm transition ${
         open
-          ? "border-violet-400/70 bg-violet-300/40 text-violet-900 shadow-sm shadow-violet-200"
-          : "border-violet-300/60 bg-violet-200/25 text-violet-800 hover:border-violet-400/70 hover:bg-violet-200/45"
+          ? "border-emerald-400/70 bg-emerald-50/60 text-emerald-800"
+          : "border-stone-300/70 bg-white/30 text-stone-600 hover:border-emerald-300 hover:bg-white/60 hover:text-emerald-800"
       }`}
     >
       <CoachIcon />
       <span>Live-coach</span>
-      <span className={`flex items-center gap-1 text-[10px] font-medium ${call ? "text-violet-800" : "text-violet-500"}`}>
-        <span className={`h-1.5 w-1.5 rounded-full ${call ? "bg-violet-600" : "bg-violet-300"}`} />
+      <span className={`flex items-center gap-1 text-[10px] font-medium ${call ? "text-emerald-700" : "text-stone-400"}`}>
+        <span className={`h-1.5 w-1.5 rounded-full ${call ? "bg-emerald-500" : "bg-stone-300"}`} />
         {open ? (call ? "lytter" : "åben") : "lukket"}
       </span>
     </button>
@@ -75,7 +75,7 @@ function ActiveCallCoach({ call }: { call: CallAudio }) {
           <ol className="mt-2 space-y-1.5 text-sm">
             {lines.slice(-12).map((l, i) => (
               <li key={i} className={l.final ? "" : "opacity-60"}>
-                <span className={`mr-1.5 text-xs font-semibold ${l.speaker === "customer" ? "text-sky-700" : "text-violet-700"}`}>
+                <span className={`mr-1.5 text-xs font-semibold ${l.speaker === "customer" ? "text-sky-700" : "text-emerald-700"}`}>
                   {SPEAKER_LABEL[l.speaker]}:
                 </span>
                 <span className="text-stone-800">{l.text}</span>
@@ -97,18 +97,18 @@ export function LiveCoachPanel() {
   if (!open) return null;
   return (
     <aside
-      className={`fixed inset-y-0 right-0 z-40 flex w-full flex-col border-l border-violet-200/80 bg-violet-50/75 shadow-2xl shadow-violet-200/50 backdrop-blur-md ${PANEL_WIDTH}`}
+      className={`fixed inset-y-0 right-0 z-40 flex w-full flex-col border-l border-stone-200 bg-white/95 shadow-2xl backdrop-blur ${PANEL_WIDTH}`}
       aria-label="Live-coach"
     >
-      <header className="flex items-center justify-between border-b border-violet-200/80 px-4 py-3">
+      <header className="flex items-center justify-between border-b border-stone-200 px-4 py-3">
         <div className="flex items-center gap-2 text-stone-800">
-          <CoachIcon className="text-violet-700" />
+          <CoachIcon className="text-emerald-700" />
           <span className="text-sm font-semibold">Live-coach</span>
         </div>
         <button
           type="button"
           onClick={() => setLiveCoachOpen(false)}
-          className="rounded-lg px-2 py-1 text-lg leading-none text-violet-500 hover:bg-violet-100 hover:text-violet-900"
+          className="rounded-lg px-2 py-1 text-lg leading-none text-stone-500 hover:bg-stone-100 hover:text-stone-800"
           aria-label="Luk live-coach"
         >
           ×
