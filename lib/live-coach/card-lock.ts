@@ -68,6 +68,11 @@ export class CardLock {
     return true;
   }
 
+  /** Kortet skrives færdigt (samme kort): opdatér replikken, som sælgerens tale sammenlignes med. */
+  refine(line: string): void {
+    if (this.current) this.current.line = line;
+  }
+
   dismiss(): void {
     if (this.current) this.current.used = true;
   }

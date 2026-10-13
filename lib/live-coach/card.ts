@@ -31,7 +31,7 @@ function parseMove(raw: string): CoachMove | null {
   return m === "sporg" || m === "forklar" || m === "behandl" || m === "luk" ? m : null;
 }
 
-/** Læser et (evt. ufærdigt) svar i formatet SIGNAL/INDVENDING/KUNDE/KVALIFIKATION/TRÆK/NYT/HVORFOR/REPLIK. */
+/** Læser et (evt. ufærdigt) svar i formatet SIGNAL/INDVENDING/KVAL/TRÆK/NYT/REPLIK/HVORFOR/KUNDE. */
 export function parseCoachText(text: string): ParsedCoachText {
   const field = (name: string) => text.match(new RegExp(`${name}:\\s*([^\\n]*)`))?.[1]?.trim() ?? "";
   const rawSignal = field("SIGNAL").toLowerCase().replace(/ø/g, "o").replace(/[*_\s]+/g, "_").replace(/^_|_$/g, "");

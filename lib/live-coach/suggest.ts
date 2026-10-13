@@ -4,7 +4,7 @@
  * modstand giver et kort; ellers kommer kun vurderingen af kunden.
  */
 import type Anthropic from "@anthropic-ai/sdk";
-import { ALLIO_HARD_RULES, ALLIO_PRODUCT } from "@/lib/allio-product";
+import { ALLIO_COACH, ALLIO_HARD_RULES } from "@/lib/allio-product";
 import { usageCostUsd } from "@/lib/anthropic-client";
 import type { ObjectionCategory } from "@/lib/call-analysis/schema";
 import type { CoachLine } from "./card";
@@ -38,7 +38,7 @@ export function liveCoachSystemPrompt(
 ## Målet
 Målet med opkaldet er ét: et ja til et møde, hvor en specialist viser klinikken, hvad der er at hente ud fra dens egne data. Nævn ALDRIG mødets længde (ingen minutter, ingen «halv time»).
 
-${ALLIO_PRODUCT}
+${ALLIO_COACH}
 
 ## Din opgave
 Sælgeren kan selv sit script — gentag det aldrig, og foreslå aldrig «næste linje i pitchen». Du melder dig kun, når kunden kommer med en indvending, tvivl eller modstand (også skjult: «det lyder spændende, men …», tøven), når kunden er nysgerrig og vil vide mere, eller når kunden er klar til mødet. Svarer kunden bare neutralt eller med småsnak, er der intet kort (SIGNAL: ingen) — men vurdér stadig kunden.
@@ -67,21 +67,20 @@ Er der en åben indvending, er trækket aldrig luk. Har kunden afvist klart to g
 5. Spørger kunden til prisen: værdien først (specialisten viser, hvad der er at hente på jeres egne data), derefter prisen — aldrig prisen som det første.
 6. Talesprog, dansk, til at sige højt. Højst 2 korte sætninger (ca. 25 ord i alt) — ved forklar højst 3 korte sætninger (ca. 40 ord). Ingen floskler som «jeg forstår din bekymring».
 
-## Svarformat — præcis dette og intet andet
+## Svarformat — præcis dette og intet andet (i denne rækkefølge; vurdér situationen, før du skriver replikken)
 SIGNAL: <ét af: tryghed, klarhed, okonomi, skepsis, timing, lav_interesse, ingen>
 INDVENDING: <ét af: has_booking_system, has_agency, no_time, price, send_email, not_interested, think_about_it, talk_to_partner, fully_booked, bad_timing, other, ingen>
-KUNDE: <3–8 ord: din vurdering af kunden lige nu, fx «Nysgerrig, men bange for tidsforbrug» eller «Varm — klar til et tidspunkt»>
-KVALIFIKATION: <problem erkendt ja/nej/ukendt · beslutningstager ja/nej/ukendt · interesse lav/middel/høj · røgslør ja/nej>
+KVAL: <fx «problem=ja beslutter=? interesse=høj røgslør=nej»>
 TRÆK: <spørg, forklar, behandl, luk eller ingen>
 NYT: <ja eller nej — kun relevant, når der er et kort på skærmen>
-HVORFOR: <3–6 ord om hvad kunden mangler>
 REPLIK: <højst 2 korte sætninger, som sælgeren kan sige nu>
+HVORFOR: <2–5 ord om hvad kunden mangler>
+KUNDE: <3–6 ord: din vurdering af kunden lige nu, fx «Nysgerrig, men bange for tid» eller «Varm — klar til et tidspunkt»>
 Er der hverken indvending, modstand eller et købssignal lige nu (fx neutral snak eller kunden svarer bare på et spørgsmål), så skriv KUN disse linjer og stop:
 SIGNAL: ingen
 INDVENDING: ingen
-KUNDE: <din vurdering>
-KVALIFIKATION: <som ovenfor>
 TRÆK: ingen
+KUNDE: <din vurdering>
 
 ## Ugens script — bedste svar på indvendinger
 ${answers || "- (ingen)"}

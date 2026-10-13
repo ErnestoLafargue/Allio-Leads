@@ -23,10 +23,10 @@ import { CardLock } from "@/lib/live-coach/card-lock";
 export type LiveCoachLine = CoachLine & { final: boolean };
 
 type Session = { responses: Partial<Record<ObjectionCategory, string>>; script: ScriptLine[]; agentName: string };
-type ShownCard = CoachCard & { eventId: string | null; helpful: boolean | null; used: boolean; move?: CoachMove | null };
+type ShownCard = CoachCard & { eventId: string | null; helpful: boolean | null; used: boolean; move?: CoachMove | null; uid?: string };
 
 /** Vent så længe på AI-svaret, før jeres svar fra ugens script vises i stedet. */
-const FALLBACK_AFTER_MS = 3_500;
+const FALLBACK_AFTER_MS = 2_500;
 /** Højst ét vurderings-kald pr. så mange ms, når kunden ikke kommer med en indvending. */
 const ASSESS_EVERY_MS = 12_000;
 
@@ -167,34 +167,50 @@ export function LiveCoach(props: {
           }),
           signal: ctrl.signal,
         });
-        if (!res.ok) return; // fx månedsloftet (429): coachen forbliver tavs
+        if (!res.ok || !res.body) return; // fx månedsloftet (429): coachen forbliver tavs
         const eventId = res.headers.get("X-Coach-Event");
-        // Kortet vises først, når det er færdigskrevet — så teksten ikke ændrer sig, mens man læser.
-        const parsed = parseCoachText(await res.text());
-        if (parsed.customer) setAssessment(parsed.customer);
-        if (parsed.signal) signalsSeen.current.push(parsed.signal);
-        // Kun indvendinger, nysgerrighed og lukke-øjeblikke giver et kort — ellers bruges svaret kun til vurderingen.
-        const moveWithoutObjection = parsed.move === "luk" || parsed.move === "forklar";
-        if (parsed.silent || !parsed.line || (!trigger && !parsed.objection && !moveWithoutObjection)) return;
-        const category = trigger ?? parsed.objection;
-        if (category && !objectionsSeen.current.includes(category)) objectionsSeen.current.push(category);
-        const shownNow = tryShow(
-          {
-            source: "ai",
-            category,
-            signal: parsed.signal ?? "klarhed",
-            move: parsed.move,
-            why: parsed.why,
-            line: parsed.line,
-            eventId,
-            helpful: null,
-          },
-          heardAt,
-          parsed.fresh,
-        );
-        if (shownNow) {
-          if (fallbackTimer.current) clearTimeout(fallbackTimer.current);
-          if (eventId) void logEvent({ id: eventId, latencyMs: performance.now() - heardAt });
+        // Kortet vises, så snart replikken begynder (indvending, kvalifikation og træk står før den),
+        // og skrives færdigt i samme kort — det er ikke et nyt kort, så låsen påvirkes ikke.
+        const reader = res.body!.getReader();
+        const decoder = new TextDecoder();
+        let text = "";
+        let decided = false;
+        let onScreen = false;
+        const uid = `${Date.now()}-${Math.random()}`;
+        let parsed = parseCoachText("");
+        for (;;) {
+          const { done, value } = await reader.read();
+          if (value) text += decoder.decode(value, { stream: true });
+          parsed = parseCoachText(text);
+          if (!decided && (parsed.silent || parsed.line || done)) {
+            decided = true;
+            if (parsed.signal) signalsSeen.current.push(parsed.signal);
+            // Kun indvendinger, nysgerrighed og lukke-øjeblikke giver et kort — ellers bruges svaret kun til vurderingen.
+            const moveWithoutObjection = parsed.move === "luk" || parsed.move === "forklar";
+            if (!parsed.silent && parsed.line && (trigger || parsed.objection || moveWithoutObjection)) {
+              const category = trigger ?? parsed.objection;
+              if (category && !objectionsSeen.current.includes(category)) objectionsSeen.current.push(category);
+              onScreen = tryShow(
+                { source: "ai", category, signal: parsed.signal ?? "klarhed", move: parsed.move, why: parsed.why, line: parsed.line, eventId, helpful: null, uid },
+                heardAt,
+                parsed.fresh,
+              );
+              if (onScreen) {
+                if (fallbackTimer.current) clearTimeout(fallbackTimer.current);
+                if (eventId) void logEvent({ id: eventId, latencyMs: performance.now() - heardAt });
+              }
+            }
+          } else if (onScreen && parsed.line) {
+            // Replikken (og bagefter «hvorfor») skrives færdig i samme kort.
+            lock.current.refine(parsed.line);
+            const { line, why } = parsed;
+            setCard((c) => (c && c.uid === uid ? { ...c, line, why: why || c.why } : c));
+          }
+          if (done) {
+            // Vurderingen af kunden står sidst i svaret.
+            if (parsed.customer) setAssessment(parsed.customer);
+            break;
+          }
         }
       } catch {
         /* afbrudt af en nyere indvending */
