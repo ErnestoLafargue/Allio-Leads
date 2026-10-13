@@ -9,6 +9,8 @@ export type CoachLine = { speaker: "agent" | "customer"; text: string };
 const SIGNALS: ReadonlySet<string> = new Set(["tryghed", "klarhed", "okonomi", "skepsis", "timing", "lav_interesse"]);
 const CATEGORIES: ReadonlySet<string> = new Set([...OBJECTION_TRIGGERS.map((t) => t.category), "other"]);
 
+export type CoachMove = "sporg" | "behandl" | "luk";
+
 export type ParsedCoachText = {
   signal: CoachSignal | null;
   /** Den indvending, kortet svarer på (null = ingen/ukendt). */
@@ -20,9 +22,16 @@ export type ParsedCoachText = {
   silent: boolean;
   /** AI: samtalen har udviklet sig, så kortet på skærmen ikke længere passer. */
   fresh: boolean;
+  /** Det træk, AI anbefaler: spørg ind, behandl indvendingen eller luk mødet. */
+  move: CoachMove | null;
 };
 
-/** Læser et (evt. ufærdigt) svar i formatet SIGNAL/INDVENDING/KUNDE/NYT/HVORFOR/REPLIK. */
+function parseMove(raw: string): CoachMove | null {
+  const m = raw.toLowerCase().replace(/ø/g, "o").replace(/[^a-z]/g, "");
+  return m === "sporg" || m === "behandl" || m === "luk" ? m : null;
+}
+
+/** Læser et (evt. ufærdigt) svar i formatet SIGNAL/INDVENDING/KUNDE/KVALIFIKATION/TRÆK/NYT/HVORFOR/REPLIK. */
 export function parseCoachText(text: string): ParsedCoachText {
   const field = (name: string) => text.match(new RegExp(`${name}:\\s*([^\\n]*)`))?.[1]?.trim() ?? "";
   const rawSignal = field("SIGNAL").toLowerCase().replace(/ø/g, "o").replace(/[*_\s]+/g, "_").replace(/^_|_$/g, "");
@@ -35,6 +44,7 @@ export function parseCoachText(text: string): ParsedCoachText {
     line: field("REPLIK"),
     silent: rawSignal === "ingen",
     fresh: /^ja\b/i.test(field("NYT")),
+    move: parseMove(field("TRÆK")),
   };
 }
 

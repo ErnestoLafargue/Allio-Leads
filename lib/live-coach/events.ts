@@ -4,7 +4,7 @@
 import { prisma } from "@/lib/prisma";
 
 /** Version af live-coachens prompt og regler — gemmes på hvert kort. */
-export const LIVE_COACH_PROMPT_VERSION = "lc10";
+export const LIVE_COACH_PROMPT_VERSION = "lc11";
 
 export function liveCoachMonthlyBudgetUsd(): number {
   const v = Number(process.env.LIVE_COACH_MONTHLY_BUDGET_USD);

@@ -15,18 +15,18 @@ import type { ObjectionCategory } from "@/lib/call-analysis/schema";
 import { OBJECTION_LABELS, SIGNAL_LABELS } from "@/lib/scripts-traening/labels";
 import { startSonioxStream, SpeakerTranscript, type SonioxStream } from "@/lib/live-coach/soniox-stream";
 import { ScriptTracker, type ScriptLine } from "@/lib/live-coach/script-tracker";
-import { detectObjection, triggerCard, type CoachCard } from "@/lib/live-coach/triggers";
-import { parseCoachText, splitReply, type CoachLine } from "@/lib/live-coach/card";
+import { detectBuyingSignal, detectObjection, triggerCard, type CoachCard } from "@/lib/live-coach/triggers";
+import { parseCoachText, splitReply, type CoachLine, type CoachMove } from "@/lib/live-coach/card";
 import { MachineGate, type GateState } from "@/lib/live-coach/machine-gate";
 import { CardLock } from "@/lib/live-coach/card-lock";
 
 export type LiveCoachLine = CoachLine & { final: boolean };
 
 type Session = { responses: Partial<Record<ObjectionCategory, string>>; script: ScriptLine[]; agentName: string };
-type ShownCard = CoachCard & { eventId: string | null; helpful: boolean | null; used: boolean };
+type ShownCard = CoachCard & { eventId: string | null; helpful: boolean | null; used: boolean; move?: CoachMove | null };
 
 /** Vent så længe på AI-svaret, før jeres svar fra ugens script vises i stedet. */
-const FALLBACK_AFTER_MS = 2_500;
+const FALLBACK_AFTER_MS = 3_500;
 /** Højst ét vurderings-kald pr. så mange ms, når kunden ikke kommer med en indvending. */
 const ASSESS_EVERY_MS = 12_000;
 
@@ -37,6 +37,12 @@ const SIGNAL_STYLE: Record<string, string> = {
   skepsis: "bg-rose-100 text-rose-800",
   timing: "bg-orange-100 text-orange-800",
   lav_interesse: "bg-stone-200 text-stone-700",
+};
+
+const MOVE_STYLE: Record<CoachMove, { label: string; className: string }> = {
+  sporg: { label: "Spørg ind", className: "bg-sky-600 text-white" },
+  behandl: { label: "Behandl", className: "bg-amber-500 text-white" },
+  luk: { label: "Luk mødet", className: "bg-emerald-600 text-white" },
 };
 
 const objectionLabel = (c: string | null) => (c ? (OBJECTION_LABELS[c as ObjectionCategory] ?? c) : null);
@@ -75,6 +81,9 @@ export function LiveCoach(props: {
   const inFlight = useRef<AbortController | null>(null);
   const fallbackTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const lastAskAt = useRef(0);
+  /** Konteksten til AI: hvornår opkaldet startede, og hvilke indvendinger kunden har haft. */
+  const callStartedAt = useRef(0);
+  const objectionsSeen = useRef<string[]>([]);
 
   const logEvent = useCallback(async (body: Record<string, unknown>): Promise<string | null> => {
     try {
@@ -147,7 +156,12 @@ export function LiveCoach(props: {
             lines,
             trigger,
             leadId,
-            mood: { signals: signalsSeen.current.slice(-6), phase: tracker.current?.nextLine?.phase ?? null },
+            mood: {
+              signals: signalsSeen.current.slice(-6),
+              phase: tracker.current?.nextLine?.phase ?? null,
+              seconds: (performance.now() - callStartedAt.current) / 1000,
+              objections: objectionsSeen.current,
+            },
             shown: shown ? { category: shown.category, line: shown.line } : null,
           }),
           signal: ctrl.signal,
@@ -158,13 +172,16 @@ export function LiveCoach(props: {
         const parsed = parseCoachText(await res.text());
         if (parsed.customer) setAssessment(parsed.customer);
         if (parsed.signal) signalsSeen.current.push(parsed.signal);
-        // Kun indvendinger giver et kort — ellers bruges svaret kun til vurderingen af kunden.
-        if (parsed.silent || !parsed.line || (!trigger && !parsed.objection)) return;
+        // Kun indvendinger og lukke-øjeblikke giver et kort — ellers bruges svaret kun til vurderingen.
+        if (parsed.silent || !parsed.line || (!trigger && !parsed.objection && parsed.move !== "luk")) return;
+        const category = trigger ?? parsed.objection;
+        if (category && !objectionsSeen.current.includes(category)) objectionsSeen.current.push(category);
         const shownNow = tryShow(
           {
             source: "ai",
-            category: trigger ?? parsed.objection,
+            category,
             signal: parsed.signal ?? "klarhed",
+            move: parsed.move,
             why: parsed.why,
             line: parsed.line,
             eventId,
@@ -190,6 +207,7 @@ export function LiveCoach(props: {
   const onObjection = useCallback(
     (category: ObjectionCategory, heardAt: number, why: string, signal: CoachCard["signal"]) => {
       signalsSeen.current.push(signal);
+      if (!objectionsSeen.current.includes(category)) objectionsSeen.current.push(category);
       if (!lock.current.canShow(category, "trigger", performance.now())) {
         if (category !== lock.current.current?.category) setPending(category);
         // Har kortet stået længe nok, må AI vurdere, om samtalen har udviklet sig (NYT: ja).
@@ -221,6 +239,8 @@ export function LiveCoach(props: {
     gate.current = new MachineGate();
     lock.current = new CardLock();
     lastAskAt.current = 0;
+    callStartedAt.current = performance.now();
+    objectionsSeen.current = [];
     setMachine("unknown");
     setCard(null);
     setAssessment(null);
@@ -263,8 +283,11 @@ export function LiveCoach(props: {
           }
           if (completed) {
             history.current.push({ speaker: "customer", text: completed, final: true });
-            // Ingen tydelig indvending: lad AI vurdere kunden (og fange skjulte indvendinger) — men sjældent.
-            if (!trigger && performance.now() - lastAskAt.current >= ASSESS_EVERY_MS) void askClaude(null, heardAt);
+            // Købssignal: lad AI vurdere med det samme, om det er tid til at lukke. Ellers vurderes kunden
+            // (og skjulte indvendinger fanges) højst hvert 12. sekund.
+            if (!trigger && (detectBuyingSignal(completed) || performance.now() - lastAskAt.current >= ASSESS_EVERY_MS)) {
+              void askClaude(null, heardAt);
+            }
             heardCategory.current = null;
           }
           publish();
@@ -335,6 +358,11 @@ export function LiveCoach(props: {
           {card ? (
             <div className={`mt-2 space-y-1 transition-opacity ${card.used ? "opacity-50" : ""}`}>
               <div className="flex items-center gap-2">
+                {card.move ? (
+                  <span className={`rounded-full px-2 py-0.5 text-xs font-semibold ${MOVE_STYLE[card.move].className}`}>
+                    {MOVE_STYLE[card.move].label}
+                  </span>
+                ) : null}
                 <span className={`rounded-full px-2 py-0.5 text-xs font-semibold ${SIGNAL_STYLE[card.signal] ?? "bg-stone-100 text-stone-700"}`}>
                   {(objectionLabel(card.category) ?? SIGNAL_LABELS[card.signal]).toUpperCase()}
                 </span>

@@ -215,3 +215,23 @@ export function detectMachine(customerText: string): MachineKind | null {
   if (IVR_PATTERNS.some((p) => p.test(text))) return "ivr";
   return null;
 }
+
+/**
+ * Købssignaler: kunden spørger, hvordan/hvornår det foregår, eller siger, det lyder interessant.
+ * Giver intet straks-kort — men får AI til at vurdere med det samme, om det er tid til at lukke.
+ */
+const BUYING_PATTERNS: RegExp[] = [
+  /\bhvordan (foregår|fungerer|virker) (det|sådan|møde)/,
+  /\bhvornår (kan|kunne|skulle|vil) (i|vi|han|hun|den)\b/,
+  /\blyder (da |faktisk |egentlig |jo )*(rigtig |meget )?(spændende|interessant|godt|fint|smart|fornuftigt)\b/,
+  /\b(det|det kunne være|det er) (da )?(rigtig )?(interessant|spændende)\b/,
+  /\bhvad (skal|kræver|gør) (jeg|vi)\b/,
+  /\bhvad sker der (så|nu)\b/,
+  /\b(ja|jo),? (lad os|det kan vi godt|gerne|send)\b/,
+  /\bhvor (lang|langt|lang tid)\b.{0,20}\b(tager|varer)\b/,
+];
+
+export function detectBuyingSignal(customerText: string): boolean {
+  const text = normalizeSpeech(customerText);
+  return Boolean(text) && BUYING_PATTERNS.some((p) => p.test(text));
+}

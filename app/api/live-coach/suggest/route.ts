@@ -43,6 +43,10 @@ export async function POST(req: Request) {
     ? {
         signals: (Array.isArray(body.mood.signals) ? body.mood.signals : []).filter((x) => typeof x === "string").slice(-6),
         phase: typeof body.mood.phase === "string" ? body.mood.phase : null,
+        seconds: typeof body.mood.seconds === "number" && Number.isFinite(body.mood.seconds) ? body.mood.seconds : null,
+        objections: (Array.isArray(body.mood.objections) ? body.mood.objections : [])
+          .filter((x): x is string => typeof x === "string")
+          .slice(-6),
       }
     : null;
   const shown: ShownCard | null =

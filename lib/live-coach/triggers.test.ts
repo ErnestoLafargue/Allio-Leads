@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { DEFAULT_RESPONSES, detectMachine, detectObjection, triggerCard } from "./triggers";
+import { DEFAULT_RESPONSES, detectBuyingSignal, detectMachine, detectObjection, triggerCard } from "./triggers";
 
 describe("detectObjection", () => {
   it("genkender indvendinger på ufærdig tale", () => {
@@ -41,12 +41,15 @@ describe("parseCoachText", () => {
       line: "Lad os se på jeres tal først.",
       silent: false,
       fresh: false,
+      move: null,
     });
     expect(parseCoachText("SIGNAL: klarhed\nHVORFOR: Tror det").line).toBe("");
     expect(parseCoachText("SIGNAL: ingen").silent).toBe(true);
     const full = parseCoachText("SIGNAL: okonomi\nINDVENDING: price\nKUNDE: Nysgerrig, men prisbevidst\nHVORFOR: x\nREPLIK: y");
     expect(full.objection).toBe("price");
     expect(parseCoachText("SIGNAL: okonomi\nNYT: ja\nREPLIK: y").fresh).toBe(true);
+    expect(parseCoachText("SIGNAL: skepsis\nTRÆK: Spørg\nREPLIK: y").move).toBe("sporg");
+    expect(parseCoachText("SIGNAL: klarhed\nTRÆK: **luk**").move).toBe("luk");
     expect(full.customer).toBe("Nysgerrig, men prisbevidst");
     expect(parseCoachText("SIGNAL: ingen\nINDVENDING: ingen\nKUNDE: Positiv").objection).toBeNull();
     expect(parseCoachText("SIGNAL: Lav interesse\nHVORFOR: x\nREPLIK: y").signal).toBe("lav_interesse");
@@ -89,5 +92,15 @@ describe("splitReply", () => {
     ]);
     expect(splitReply("Det er 2.500 kr. om måneden. Skal vi sige mandag?")).toEqual(["Det er 2.500 kr. om måneden.", "Skal vi sige mandag?"]);
     expect(splitReply("Kort svar")).toEqual(["Kort svar"]);
+  });
+});
+
+describe("detectBuyingSignal", () => {
+  it("fanger købssignaler og lader almindelig snak være", () => {
+    expect(detectBuyingSignal("Okay, hvordan foregår det så?")).toBe(true);
+    expect(detectBuyingSignal("Det lyder faktisk rigtig spændende")).toBe(true);
+    expect(detectBuyingSignal("Hvornår kan I komme?")).toBe(true);
+    expect(detectBuyingSignal("Vi er tre behandlere")).toBe(false);
+    expect(detectBuyingSignal("Nej tak, vi har det fint")).toBe(false);
   });
 });

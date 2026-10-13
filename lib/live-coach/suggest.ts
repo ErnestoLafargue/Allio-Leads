@@ -40,15 +40,29 @@ Målet med opkaldet er ét: et ja til et møde, hvor en specialist viser klinikk
 Tal du må bruge (fra Pitch 8): ca. 40 % af en kliniks tidligere kunder er inaktive; Allio genaktiverer typisk 2–5 % af dem, svarende til 7–18 ekstra bookinger om måneden; klinikker på den størrelse ser typisk 10–20 ekstra bookinger og 10–20 ekstra gode Google-anmeldelser om måneden. Brug kun disse tal — opfind aldrig andre tal, kundenavne eller cases.
 Pris: ${ALLIO_PRICE_RULE}
 
-## Din opgave: kun indvendinger og modstand
-Sælgeren kan selv sit script — gentag det aldrig, og foreslå aldrig «næste linje i pitchen». Du melder dig KUN, når kunden kommer med en indvending, tvivl eller modstand (også skjult: «det lyder spændende, men …», «vi har ikke brug for flere kunder», tøven). Svarer kunden bare positivt, neutralt eller med småsnak, så er der intet kort (SIGNAL: ingen) — men vurdér stadig kunden.
+## Din opgave
+Sælgeren kan selv sit script — gentag det aldrig, og foreslå aldrig «næste linje i pitchen». Du melder dig kun i tre situationer: kunden kommer med en indvending, tvivl eller modstand (også skjult: «det lyder spændende, men …», tøven), ELLER kunden viser et købssignal, så det er tid til at lukke. Svarer kunden bare neutralt eller med småsnak, er der intet kort (SIGNAL: ingen) — men vurdér stadig kunden.
+
+## Forstå situationen, før du hjælper (kvalifikation)
+Gennemgå samtalen og «Kunden»-oplysningerne og afgør — inden du skriver replikken:
+- Har kunden erkendt problemet (fx at de har inaktive kunder / huller i kalenderen)? ja / nej / ukendt
+- Taler vi med den, der bestemmer? ja / nej / ukendt
+- Interesse lige nu: lav / middel / høj — ud fra kundens ord og tone, ikke ud fra høflighed.
+- Er indvendingen reel og konkret, eller et røgslør for at slippe af med sælgeren? Typiske røgslør: «send en mail», «ikke interesseret» før kunden har hørt værdien, «jeg skal lige tænke over det» uden grund.
+- Er en tidligere indvending allerede besvaret, og har kunden accepteret svaret?
+
+Vælg derefter ét TRÆK:
+- spørg: Indvendingen er uklar, generel eller et røgslør — eller du mangler det, der skal til for at svare godt (hvad de bruger i dag, hvor mange kunder, hvem bestemmer). Replikken er ét kort, åbent spørgsmål, der afdækker den egentlige årsag. Intet pitch.
+- behandl: Indvendingen er reel og konkret, og vi forstår årsagen. Anerkend kort → vend til værdien for netop denne kunde → slut med et valg mod mødet.
+- luk: Kunden viser købssignal (spørger hvordan/hvornår det foregår, siger det lyder interessant, bekræfter problemet uden ny indvending), eller en indvending er besvaret, og kunden accepterer. Replikken går direkte efter mødet: evt. én kort opsummering med kundens egne ord, og så et valg mellem to tidspunkter. Skal kunden tale med en partner, så luk med et møde, hvor partneren er med.
+Har kunden afvist klart to gange, så spørg ind én gang til den egentlige årsag — pres ikke længere.
 
 ## Sådan laver du kortet
 1. Find den primære indvending — det, der reelt står i vejen for mødet. Har kunden flere, så tag den vigtigste, ikke den seneste bisætning.
    Er der allerede et kort på skærmen (står under «Kortet på skærmen»), så vurdér, om samtalen har udviklet sig: kunden har reageret på svaret, kommet med noget nyt, eller indvendingen har skiftet karakter (fx fra «hvad koster det» til «vi har ikke råd»). Kun da skriver du NYT: ja og et nyt svar, der bygger videre på, hvor samtalen er nu. Passer kortet stadig, så skriv NYT: nej. Skift aldrig bare for at formulere det samme svar anderledes, og aldrig fordi kunden gentager sig selv — er du i tvivl, så NYT: nej.
 2. Tag udgangspunkt i det bedste svar nedenfor: ugens script først, og de rigtige svar fra jeres egne bookede samtaler som inspiration.
 3. Tilpas svaret til netop denne kunde: brug kundens egne ord og detaljer (fx deres system, antal kunder, at de har travlt), oplysningerne under «Kunden» og stemningen indtil nu. Gentag ikke noget, sælgeren lige har sagt.
-4. Opbygning: anerkend kort (3–5 ord) → vend det mod værdien for kunden → slut med et spørgsmål eller et valg, der fører mod mødet (fx «mandag eller onsdag?»).
+4. Følg dit TRÆK (spørg / behandl / luk) ovenfor. Ved behandl og luk slutter replikken med et valg, der fører mod mødet (fx «mandag eller onsdag?»).
 5. Spørger kunden til prisen: værdien først (specialisten viser, hvad der er at hente på jeres egne data), derefter prisen — aldrig prisen som det første.
 6. Talesprog, dansk, til at sige højt. Højst 2 korte sætninger (ca. 25 ord i alt). Ingen floskler som «jeg forstår din bekymring».
 
@@ -56,13 +70,17 @@ Sælgeren kan selv sit script — gentag det aldrig, og foreslå aldrig «næste
 SIGNAL: <ét af: tryghed, klarhed, okonomi, skepsis, timing, lav_interesse, ingen>
 INDVENDING: <ét af: has_booking_system, has_agency, no_time, price, send_email, not_interested, think_about_it, talk_to_partner, fully_booked, bad_timing, other, ingen>
 KUNDE: <3–8 ord: din vurdering af kunden lige nu, fx «Nysgerrig, men bange for tidsforbrug» eller «Varm — klar til et tidspunkt»>
+KVALIFIKATION: <problem erkendt ja/nej/ukendt · beslutningstager ja/nej/ukendt · interesse lav/middel/høj · røgslør ja/nej>
+TRÆK: <spørg, behandl, luk eller ingen>
 NYT: <ja eller nej — kun relevant, når der er et kort på skærmen>
 HVORFOR: <3–6 ord om hvad kunden mangler>
 REPLIK: <højst 2 korte sætninger, som sælgeren kan sige nu>
-Er der ingen indvending eller modstand lige nu (fx kunden siger ja, bekræfter et problem eller er positiv), så skriv KUN disse tre linjer og stop:
+Er der hverken indvending, modstand eller et købssignal lige nu (fx neutral snak eller kunden svarer bare på et spørgsmål), så skriv KUN disse linjer og stop:
 SIGNAL: ingen
 INDVENDING: ingen
 KUNDE: <din vurdering>
+KVALIFIKATION: <som ovenfor>
+TRÆK: ingen
 
 ## Ugens script — bedste svar på indvendinger
 ${answers || "- (ingen)"}
@@ -77,7 +95,7 @@ Svar, sælgerne har givet 👎 — undgå disse formuleringer og den type svar:
 ${avoid || "- (ingen endnu)"}`;
 }
 
-export type CoachMood = { signals: string[]; phase: string | null };
+export type CoachMood = { signals: string[]; phase: string | null; seconds?: number | null; objections?: string[] };
 export type ShownCard = { category: string | null; line: string };
 
 export function liveCoachUserMessage(
@@ -88,8 +106,15 @@ export function liveCoachUserMessage(
   shown: ShownCard | null = null,
 ): string {
   const recent = lines.slice(-12).map((l) => `${l.speaker === "agent" ? "Sælger" : "Kunde"}: ${l.text}`);
-  const moodLine = mood && (mood.signals.length || mood.phase)
-    ? `Stemning indtil nu: ${mood.signals.length ? `signaler ${mood.signals.join(", ")}` : "ingen signaler"}${mood.phase ? ` · sælgeren er ved fasen ${mood.phase}` : ""}`
+  const moodLine = mood
+    ? [
+        `Stemning indtil nu: ${mood.signals.length ? `signaler ${mood.signals.join(", ")}` : "ingen signaler"}`,
+        mood.phase ? `sælgeren er ved fasen ${mood.phase}` : null,
+        mood.seconds ? `opkaldet har varet ${Math.round(mood.seconds)} sek.` : null,
+        mood.objections?.length ? `indvendinger indtil nu: ${mood.objections.join(", ")}` : null,
+      ]
+        .filter(Boolean)
+        .join(" · ")
     : "";
   return [
     customer ? `## Kunden (brug detaljerne naturligt, opfind intet)\n${customer}\n` : "",
@@ -119,7 +144,7 @@ export function streamSuggestion(params: {
       try {
         const stream = params.client.messages.stream({
           model: LIVE_COACH_MODEL,
-          max_tokens: 200,
+          max_tokens: 320,
           // Hurtigst muligt svar: ingen tænkning (tilladt på Haiku 5.5 ved effort high eller lavere).
           thinking: { type: "disabled" },
           system: [{ type: "text", text: params.system, cache_control: { type: "ephemeral" } }],
