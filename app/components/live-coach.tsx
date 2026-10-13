@@ -16,7 +16,7 @@ import { OBJECTION_LABELS, SIGNAL_LABELS } from "@/lib/scripts-traening/labels";
 import { startSonioxStream, SpeakerTranscript, type SonioxStream } from "@/lib/live-coach/soniox-stream";
 import { ScriptTracker, type ScriptLine } from "@/lib/live-coach/script-tracker";
 import { detectObjection, triggerCard, type CoachCard } from "@/lib/live-coach/triggers";
-import { parseCoachText, type CoachLine } from "@/lib/live-coach/card";
+import { parseCoachText, splitReply, type CoachLine } from "@/lib/live-coach/card";
 import { MachineGate, type GateState } from "@/lib/live-coach/machine-gate";
 import { CardLock } from "@/lib/live-coach/card-lock";
 
@@ -349,7 +349,13 @@ export function LiveCoach(props: {
                   ×
                 </button>
               </div>
-              <p className="text-sm font-medium text-stone-900">“{card.line}”</p>
+              <div className="space-y-1 border-l-2 border-emerald-600 pl-2.5 text-sm leading-snug text-stone-900">
+                {splitReply(card.line).map((part, i, all) => (
+                  <p key={i} className={i === all.length - 1 && part.endsWith("?") ? "font-semibold" : "font-medium"}>
+                    {part}
+                  </p>
+                ))}
+              </div>
               <div className="flex items-center justify-between">
                 <p className="text-[10px] text-stone-400">
                   {card.used ? "✓ sagt" : ""}

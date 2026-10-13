@@ -37,3 +37,15 @@ export function parseCoachText(text: string): ParsedCoachText {
     fresh: /^ja\b/i.test(field("NYT")),
   };
 }
+
+/**
+ * Deler replikken op i korte linjer, så den er nem at læse højt: én sætning pr. linje, og et
+ * afsluttende spørgsmål efter tankestreg («… — passer mandag eller onsdag?») på sin egen linje.
+ */
+export function splitReply(line: string): string[] {
+  return line
+    .replace(/\s+[—–-]\s+(?=[^—–-]*\?\s*$)/, "\n")
+    .split(/(?<=[.!?])\s+(?=[A-ZÆØÅ«"“])|\n/)
+    .map((s) => s.trim())
+    .filter(Boolean);
+}

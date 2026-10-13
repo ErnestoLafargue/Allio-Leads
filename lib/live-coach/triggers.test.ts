@@ -78,3 +78,16 @@ describe("detectMachine", () => {
     expect(detectMachine("Vi har ikke tid lige nu")).toBeNull();
   });
 });
+
+describe("splitReply", () => {
+  it("deler replikken i korte linjer med spørgsmålet til sidst", async () => {
+    const { splitReply } = await import("./card");
+    expect(splitReply("Helt fair. Specialisten viser først, hvad der er at hente på jeres egne data — passer mandag eller onsdag?")).toEqual([
+      "Helt fair.",
+      "Specialisten viser først, hvad der er at hente på jeres egne data",
+      "passer mandag eller onsdag?",
+    ]);
+    expect(splitReply("Det er 2.500 kr. om måneden. Skal vi sige mandag?")).toEqual(["Det er 2.500 kr. om måneden.", "Skal vi sige mandag?"]);
+    expect(splitReply("Kort svar")).toEqual(["Kort svar"]);
+  });
+});
