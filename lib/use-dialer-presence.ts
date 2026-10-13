@@ -32,6 +32,8 @@ export type AssignedLead = {
   phone: string;
   leadCallControlId: string | null;
   agentCallControlId: string | null;
+  /** Sættes i Power-pulje når leadet tilhører en anden kampagne end ankeret. */
+  campaignId?: string | null;
 };
 
 export type UseDialerPresenceOptions = {

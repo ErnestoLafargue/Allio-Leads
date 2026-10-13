@@ -507,6 +507,9 @@ model AgentSession {
   webrtcReady               Boolean  @default(false)
   /// Power: browserfanen der ejer sessionen (nyeste «Start» vinder).
   clientInstanceId          String?
+  /// Power-pulje: sessionen må modtage leads fra alle tildelte POWER_DIALER-kampagner.
+  /// campaignId er da anker (ældste tildelte) til WebRTC / from-number / occupancy.
+  powerPool                 Boolean  @default(false)
 
   user     User     @relation(fields: [userId], references: [id], onDelete: Cascade)
   campaign Campaign @relation(fields: [campaignId], references: [id], onDelete: Cascade)
@@ -514,6 +517,7 @@ model AgentSession {
   @@unique([userId, campaignId])
   @@index([campaignId, status, lastHeartbeat])
   @@index([userId, lastHeartbeat])
+  @@index([userId, powerPool])
 }
 
 /// Per-opkald log fra Telnyx. Skrives af webhook'en. Bruges af dispatcher til at vide

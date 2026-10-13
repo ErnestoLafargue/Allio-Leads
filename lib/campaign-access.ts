@@ -15,6 +15,11 @@ export function isDialPoolMode(raw: string | null | undefined): boolean {
   return mode === "CLICK_TO_CALL" || mode === "PREDICTIVE";
 }
 
+/** True hvis kampagnen er Power Dialer (til «Power: alle tildelte»). */
+export function isPowerPoolMode(raw: string | null | undefined): boolean {
+  return normalizeCampaignDialMode(raw) === "POWER_DIALER";
+}
+
 export function isAdminRole(role: string | null | undefined): boolean {
   return role === "ADMIN";
 }
@@ -96,6 +101,22 @@ export async function campaignIdsAssignedToUser(userId: string): Promise<string[
   return rows.map((r) => r.campaignId);
 }
 
+function sortAssignedCampaignsByCreatedAt(
+  rows: { campaign: { id: string; dialMode: string | null; createdAt: Date } }[],
+  eligible: (dialMode: string | null) => boolean,
+): string[] {
+  return rows
+    .map((r) => r.campaign)
+    .filter((c) => eligible(c.dialMode))
+    .sort((a, b) => {
+      const ta = a.createdAt.getTime();
+      const tb = b.createdAt.getTime();
+      if (ta !== tb) return ta - tb;
+      return a.id.localeCompare(b.id);
+    })
+    .map((c) => c.id);
+}
+
 /**
  * Kampagner til «Ring alle tildelte»: altid fra CampaignAssignment (ingen admin-bypass),
  * kun CLICK_TO_CALL / PREDICTIVE. Stabil sortering: createdAt asc, id asc.
@@ -110,16 +131,24 @@ export async function dialPoolCampaignIdsForUser(userId: string): Promise<string
       },
     },
   });
-  const eligible = rows
-    .map((r) => r.campaign)
-    .filter((c) => isDialPoolMode(c.dialMode))
-    .sort((a, b) => {
-      const ta = a.createdAt.getTime();
-      const tb = b.createdAt.getTime();
-      if (ta !== tb) return ta - tb;
-      return a.id.localeCompare(b.id);
-    });
-  return eligible.map((c) => c.id);
+  return sortAssignedCampaignsByCreatedAt(rows, isDialPoolMode);
+}
+
+/**
+ * Kampagner til «Power: alle tildelte»: altid fra CampaignAssignment (ingen admin-bypass),
+ * kun POWER_DIALER. Stabil sortering: createdAt asc, id asc (første = anker-kampagne).
+ */
+export async function powerPoolCampaignIdsForUser(userId: string): Promise<string[]> {
+  if (!userId.trim()) return [];
+  const rows = await prisma.campaignAssignment.findMany({
+    where: { userId },
+    select: {
+      campaign: {
+        select: { id: true, dialMode: true, createdAt: true },
+      },
+    },
+  });
+  return sortAssignedCampaignsByCreatedAt(rows, isPowerPoolMode);
 }
 
 /** Ren helper til unit test / round-robin uden DB. */

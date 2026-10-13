@@ -101,6 +101,8 @@ type Props = {
   voipSession?: boolean;
   /** «Ring alle tildelte»: reserve via pool-API, skift kampagne-kontekst pr. lead. */
   poolMode?: boolean;
+  /** «Power: alle tildelte»: Power-session på anker-kampagne, leads fra alle tildelte Power-kampagner. */
+  powerPoolMode?: boolean;
 };
 
 const LOCK_HEARTBEAT_MS = 25_000;
@@ -248,6 +250,7 @@ export function CampaignWorkspace({
   preferredLeadId,
   voipSession = false,
   poolMode = false,
+  powerPoolMode = false,
 }: Props) {
   const searchParams = useSearchParams();
   const [campaignId, setCampaignId] = useState(initialCampaignId);
@@ -266,7 +269,9 @@ export function CampaignWorkspace({
   const { data: session } = useSession();
   const sessionUserId = session?.user?.id ?? "";
   const isAdmin = session?.user?.role === "ADMIN";
-  const [campaignName, setCampaignName] = useState(poolMode ? "Alle tildelte" : "");
+  const [campaignName, setCampaignName] = useState(
+    powerPoolMode ? "Alle tildelte · Power" : poolMode ? "Alle tildelte" : "",
+  );
   const [campaignDialMode, setCampaignDialMode] = useState<CampaignDialMode>("NO_DIAL");
   const [dialPhonePriority, setDialPhonePriority] = useState<DialPhonePriority>("PRIVATE_FIRST");
   const [campaignSystemType, setCampaignSystemType] = useState<string | null>(null);
@@ -338,10 +343,13 @@ export function CampaignWorkspace({
     if (!cRes.ok) return;
     const c = await cRes.json();
     setCampaignId(nextCampaignId);
+    const baseName = typeof c.name === "string" ? c.name : "Kampagne";
     setCampaignName(
-      poolMode
-        ? `${typeof c.name === "string" ? c.name : "Kampagne"} · Alle tildelte`
-        : (c.name ?? ""),
+      powerPoolMode
+        ? `${baseName} · Alle tildelte · Power`
+        : poolMode
+          ? `${baseName} · Alle tildelte`
+          : (c.name ?? ""),
     );
     setCampaignDialMode(normalizeCampaignDialMode(c.dialMode));
     setDialPhonePriority(normalizeDialPhonePriority(c.dialPhonePriority));
@@ -352,7 +360,7 @@ export function CampaignWorkspace({
     );
     setFieldConfigJson(c.fieldConfig ?? "{}");
     setCampaignLeadCount(typeof c._count?.leads === "number" ? c._count.leads : null);
-  }, [poolMode]);
+  }, [poolMode, powerPoolMode]);
 
   const [companyName, setCompanyName] = useState("");
   const [phone, setPhone] = useState("");
@@ -545,9 +553,12 @@ export function CampaignWorkspace({
   /**
    * Power-session: låst ved sidens start og ændres ikke af URL'en bagefter (tildelte leads vises uden
    * at skrive leadId i URL'en, så arbejdsfladen aldrig falder tilbage til manuel kø).
+   * powerPoolMode = «Power: alle tildelte» (anker + leads på tværs af tildelte Power-kampagner).
    */
   const isPowerAutoDialSession =
-    !poolMode && campaignDialMode === "POWER_DIALER" && voipSession && !initialPreferredLeadId;
+    Boolean(voipSession) &&
+    !initialPreferredLeadId &&
+    (powerPoolMode || (!poolMode && campaignDialMode === "POWER_DIALER"));
   /** Pause er slået til: næste gem lukker kampagnen og sender sælgeren til Start. */
   const leaveAfterSave = isPowerAutoDialSession
     ? powerIntent === "pause"
@@ -616,7 +627,9 @@ export function CampaignWorkspace({
       // Power-session («Start» uden leadId): ingen manuel reservation — heller ikke fra en gammel
       // prefer-nøgle i sessionStorage, som ellers ville åbne et almindeligt lead i stedet.
       const skipReserveForPowerAuto =
-        dialMode === "POWER_DIALER" && Boolean(voipSession) && !initialPreferredLeadId;
+        (powerPoolMode || dialMode === "POWER_DIALER") &&
+        Boolean(voipSession) &&
+        !initialPreferredLeadId;
       const preferRaw =
         typeof window !== "undefined" && !skipReserveForPowerAuto
           ? sessionStorage.getItem(preferKeyFor(campaignId))
@@ -624,8 +637,11 @@ export function CampaignWorkspace({
       const explicitLeadId = preferredLeadId?.trim() || undefined;
       const preferLeadId = explicitLeadId ? undefined : preferRaw?.trim() || undefined;
 
-      setCampaignName(c.name ?? "");
-      setCampaignDialMode(dialMode);
+      const loadedName = typeof c.name === "string" ? c.name : "Kampagne";
+      setCampaignName(
+        powerPoolMode ? `${loadedName} · Alle tildelte · Power` : (c.name ?? ""),
+      );
+      setCampaignDialMode(powerPoolMode ? "POWER_DIALER" : dialMode);
       setDialPhonePriority(normalizeDialPhonePriority(c.dialPhonePriority));
       setCampaignSystemType(
         typeof c.systemCampaignType === "string" && c.systemCampaignType.trim()
@@ -683,10 +699,10 @@ export function CampaignWorkspace({
     return () => {
       cancelled = true;
     };
-    // Pool: genindlæs ikke når campaignId skifter midt i sessionen
+    // Pool / Power-pulje: genindlæs ikke når campaignId skifter midt i sessionen
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [
-    poolMode ? "pool" : campaignId,
+    powerPoolMode ? "power-pool" : poolMode ? "pool" : campaignId,
     preferredLeadId,
     voipSession,
     resetFormForPowerWaiting,
@@ -833,7 +849,7 @@ export function CampaignWorkspace({
       if (isCallbackWorkLead(activeLeadRef.current) && activeLeadRef.current?.id !== lead.id) {
         return;
       }
-      if (campaignDialMode === "POWER_DIALER") {
+      if (campaignDialMode === "POWER_DIALER" || powerPoolMode) {
         setError(null);
         setPowerDialerConnecting(true);
         try {
@@ -844,10 +860,18 @@ export function CampaignWorkspace({
             return;
           }
           const full = (await res.json()) as Lead & { campaignId?: string };
-          if (full.campaignId && full.campaignId !== campaignId) {
-            setPowerDialerConnecting(false);
-            setError("Lead tilhører en anden kampagne.");
-            return;
+          const leadCampaignId =
+            (typeof full.campaignId === "string" && full.campaignId.trim()) ||
+            (typeof lead.campaignId === "string" && lead.campaignId.trim()) ||
+            "";
+          if (leadCampaignId && leadCampaignId !== campaignId) {
+            if (powerPoolMode) {
+              await applyCampaignMeta(leadCampaignId);
+            } else {
+              setPowerDialerConnecting(false);
+              setError("Lead tilhører en anden kampagne.");
+              return;
+            }
           }
           const lockRes = await fetch(`/api/leads/${encodeURIComponent(lead.id)}/lock`, {
             method: "POST",
@@ -880,8 +904,15 @@ export function CampaignWorkspace({
         window.location.assign(targetUrl);
       }
     },
-    [campaignId, campaignDialMode, flushPendingLeadPatches],
+    [campaignId, campaignDialMode, powerPoolMode, applyCampaignMeta, flushPendingLeadPatches],
   );
+
+  /** Power-pulje: presence/dispatch bruger altid anker-kampagnen (ikke leadets kampagne). */
+  const powerPresenceCampaignId = powerPoolMode
+    ? initialCampaignId || null
+    : isPowerAutoDialSession && campaignId
+      ? campaignId
+      : null;
 
   const {
     server: powerServer,
@@ -890,7 +921,8 @@ export function CampaignWorkspace({
     skipWrapUp,
     takeOver,
   } = usePowerDialerPresence({
-    campaignId: isPowerAutoDialSession && campaignId ? campaignId : null,
+    campaignId: powerPresenceCampaignId,
+    powerPool: powerPoolMode,
     intent: powerIntent,
     leadOpen: Boolean(activeLead),
     lineLive: powerPhone.lineStatus === "live",
@@ -1735,7 +1767,7 @@ export function CampaignWorkspace({
     >
       {isPowerAutoDialSession ? (
         <PowerDialerPhone
-          campaignId={campaignId}
+          campaignId={powerPoolMode ? initialCampaignId : campaignId}
           enabled={!powerServer?.superseded}
           leadLabel={current?.companyName ?? null}
           reportLeadId={current?.id ?? null}
@@ -1905,8 +1937,12 @@ export function CampaignWorkspace({
               />
               {isPowerAutoDialSession
                 ? powerIntent === "pause"
-                  ? "Power Dialer på pause"
-                  : "Power Dialer aktiv"
+                  ? powerPoolMode
+                    ? "Power-pulje på pause"
+                    : "Power Dialer på pause"
+                  : powerPoolMode
+                    ? "Power-pulje aktiv"
+                    : "Power Dialer aktiv"
                 : autoDialPaused
                   ? "Auto-opkald sat på pause"
                   : campaignDialMode === "PREDICTIVE"

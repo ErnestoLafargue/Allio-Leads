@@ -208,8 +208,12 @@ export async function claimDispatchLeadBatch(
 
 export type PowerDialerCandidate = {
   leadId: string;
+  campaignId: string;
   e164: string;
   lastDialAttemptAt: Date | null;
+  unansweredAttempts: number;
+  importedAt: Date;
+  lastOutcomeAt: Date | null;
 };
 
 type PowerCandidateCampaign = CampaignQueueFields;
@@ -302,7 +306,15 @@ export async function listPowerDialerCandidates(
       dialFailoverPendingE164: r.dialFailoverPendingE164,
     });
     if (!target) continue;
-    out.push({ leadId: r.id, e164: target.e164, lastDialAttemptAt: r.lastDialAttemptAt });
+    out.push({
+      leadId: r.id,
+      campaignId: campaign.id,
+      e164: target.e164,
+      lastDialAttemptAt: r.lastDialAttemptAt,
+      unansweredAttempts: r.unansweredAttempts,
+      importedAt: r.importedAt,
+      lastOutcomeAt: r.lastOutcomeAt,
+    });
   }
   return out;
 }

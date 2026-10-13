@@ -68,6 +68,8 @@ export type PowerDispatchSnapshot = {
 type Options = {
   /** null = inaktiv (ingen heartbeats). */
   campaignId: string | null;
+  /** «Power: alle tildelte» — anker-kampagne + leads fra alle tildelte Power-kampagner. */
+  powerPool?: boolean;
   intent: "ready" | "pause";
   leadOpen: boolean;
   lineLive: boolean;
@@ -84,7 +86,7 @@ function newInstanceId(): string {
 }
 
 export function usePowerDialerPresence(options: Options) {
-  const { campaignId, intervalMs = 5000 } = options;
+  const { campaignId, powerPool = false, intervalMs = 5000 } = options;
   const [server, setServer] = useState<PowerServerState | null>(null);
   const [lastDispatch, setLastDispatch] = useState<PowerDispatchSnapshot | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -122,6 +124,7 @@ export function usePowerDialerPresence(options: Options) {
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
             campaignId,
+            powerPool: reportRef.current.powerPool === true,
             power: {
               clientInstanceId: instanceIdRef.current,
               intent: r.intent,
@@ -181,7 +184,10 @@ export function usePowerDialerPresence(options: Options) {
           const dres = await fetch("/api/dialer/dispatch", {
             method: "POST",
             headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ campaignId }),
+            body: JSON.stringify({
+              campaignId,
+              ...(latest.powerPool ? { powerPool: true } : {}),
+            }),
           }).catch(() => null);
           const djson = dres ? ((await dres.json().catch(() => null)) as Record<string, unknown> | null) : null;
           if (djson && typeof djson.code === "string") {
@@ -206,14 +212,14 @@ export function usePowerDialerPresence(options: Options) {
     } finally {
       inFlightRef.current = false;
     }
-  }, [campaignId]);
+  }, [campaignId, powerPool]);
 
   useEffect(() => {
     if (!campaignId) return;
     void tick();
     const timer = setInterval(() => void tick(), intervalMs);
     return () => clearInterval(timer);
-  }, [campaignId, intervalMs, tick]);
+  }, [campaignId, powerPool, intervalMs, tick]);
 
   // Luk sessionen, når siden forlades (kun denne fane — andre faners sessioner røres ikke).
   useEffect(() => {
@@ -221,7 +227,11 @@ export function usePowerDialerPresence(options: Options) {
     const instanceId = instanceIdRef.current;
     const sendOffline = () => {
       try {
-        const data = JSON.stringify({ campaignId, power: { clientInstanceId: instanceId, intent: "offline" } });
+        const data = JSON.stringify({
+          campaignId,
+          powerPool,
+          power: { clientInstanceId: instanceId, intent: "offline" },
+        });
         if (typeof navigator !== "undefined" && "sendBeacon" in navigator) {
           navigator.sendBeacon("/api/dialer/agent/presence", new Blob([data], { type: "application/json" }));
         } else {
@@ -241,7 +251,7 @@ export function usePowerDialerPresence(options: Options) {
       window.removeEventListener("pagehide", sendOffline);
       sendOffline();
     };
-  }, [campaignId]);
+  }, [campaignId, powerPool]);
 
   const refresh = useCallback(() => {
     void tick();
