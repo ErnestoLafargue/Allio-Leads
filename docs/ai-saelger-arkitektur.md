@@ -47,7 +47,11 @@ Stemmeagent (én pr. samtale)
    │               book_moede          → samme kode som app/api/meetings/book
    │               saet_udfald         → LeadOutcomeLog
    │               aftal_tilbagekald   → app/api/leads/[id]/schedule-callback
-   │   │               afslut_samtale
+   │   │               skriv_note          → noter undervejs på leadet (altid)
+               nyt_nummer          → kunden giver et andet nummer: noter det, ring det op, og henvis
+                                     til samtalen med den første kontakt
+               send_sms / send_email → gennem Allio Leads (senere)
+               afslut_samtale
    └─ lyd ud   ← tekst til tale (dansk, streaming) ← Claudes svar
    ▼
 Efter opkaldet: Telnyx-optagelse → worker → CallAnalysis (præcis som for mennesker)
@@ -61,8 +65,9 @@ Log: AiCallEvent (latens, pris, værktøjskald, udfald) + administrationsvisning
 - **AI-sælgeren er en bruger.** Opret en `User` (fx «AI-sælger») og brug den som sælger på opkald,
   udfald og møder. Så virker statistik, Indsigter, leaderboard og analyse uden særregler, og AI'ens
   samtaler kan sammenlignes direkte med menneskernes.
-- **Samme hjerne som coachen.** Prompt, svarbank og indvendingsgenkendelse deles med live-coachen.
-  Bliver ugens script bedre, bliver begge bedre.
+- **Egen hjerne, ikke ugens script (Ernesto, 13/10).** Adrians systemprompt bygges sammen med Ernesto
+  (spørgsmål og svar) og trænes én gang op på de bedste sælgersamtaler. Derefter lærer han kun af sine
+  egne samtaler. Teknik (Soniox, streaming, kundekontekst) deles med coachen.
 - **Booking går gennem samme kode som mennesker.** Overlap-tjek, Cal.eu og Podio skal ikke
   genimplementeres. Flyt logikken fra `app/api/meetings/book/route.ts` ud i en funktion i `lib/booking/`,
   som både routen og agenten kalder.
@@ -98,13 +103,14 @@ afspille et forudindspillet svar uden Claude. Først Claude Haiku med ét ords s
 en hurtigere udbyder (Groq/Cerebras) eller en lille klassifikator trænet på vores egne analyserede samtaler.
 
 ## 4d. Læring
-- **Fra lydfilerne (historikken):** alle samtaler er transskriberet og analyseret (`CallTranscript`,
-  `CallAnalysis`). Herfra bygges Adrians store, cachede systemprompt: hvad der adskiller bookede møder
-  fra nej, de stærkeste rigtige svar pr. indvending, åbninger og lukninger der virkede, og hele
-  eksempelsamtaler. Det er det samme grundlag som ugens script, bare større.
-- **Fra egne fejl:** Adrians opkald optages og analyseres af workeren som alle andre. Hver uge laves en
-  ny version af «Adrians playbook» med evidens (hvad virkede, hvad gav nej), med versioner og
-  tilbagerulning som ugens script. Nye indvendinger, han selv kom forbi, kommer i svarbanken.
+- **Opstart på sælgerdata (én gang):** kun lange samtaler med interesse og `CallAnalysis.overallScore`
+  over 60. Herfra: stærke svar pr. indvending, åbninger og lukninger der virkede, og eksempelsamtaler
+  i den store, cachede systemprompt.
+- **Derefter kun egne data:** Adrians opkald analyseres af workeren som alle andre. Jævnligt laves en ny
+  version af «Adrians playbook» med evidens fra hans egne samtaler (hvad virkede, hvad gav nej), med
+  versioner og tilbagerulning. Ingen ny sælgerdata.
+- **Stemme:** ElevenLabs-klon af Ernestos stemme fra hans egne optagelser (venstre kanal i stereo-
+  optagelserne siden 26/9, inkl. de 54 nye), testet mod færdige stemmer i lyttetesten.
 - **Træning før rigtige opkald:** Adrian øver mod en simuleret kunde (Claude spiller kunden ud fra rigtige
   kundecitater og indvendinger), og en dommer scorer samtalen. Bygger på «Øv indvendinger».
 
