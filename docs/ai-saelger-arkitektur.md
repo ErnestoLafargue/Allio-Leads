@@ -191,3 +191,34 @@ al genbrugt kode (live-coach, analyse, ugens script, booking) ligger dér.
 - **Træningsdata:** samtaler på 6 min eller mere med `overallScore` over 60.
 - **Noter (til specialisten, der tager ud):** bookingsystem, antal kunder i kartoteket, om prisen blev
   nævnt og reaktionen, hvad de har brugt før, og andet relevant for det fysiske møde.
+
+## 11. Ernestos svar (runde 2, 14/10): stemmer, flow og afbrydelser
+- **Stemmefavoritter fra lyttetesten:** Isabella (bedst samlet, v3 / v3 Conversational / v4 Turbo),
+  Christian (v3 Conversational, især «bum bum bum»), Camilla, Jonas og Noam (v3), Cartesia Katrine,
+  Mette og Søren. Christian på v4 Turbo var dårlig i replik 2. Plus en klon af Ernestos stemme.
+- **Tal:** ca. 40 % af kundekartoteket er inaktive; vi genaktiverer 2–12 % (helst 2–5 %), tilpasset så
+  det lander på 10–20 genbookinger om måneden for netop den klinik.
+- **Sekretær, der spørger ind:** «Det er et anliggende mellem Lars og mig og egentlig ikke dig
+  vedkommende. Kan jeg fange ham nu?» Ellers bruges tilbagekaldsværktøjet til det rigtige tidspunkt.
+- **Kunden afbryder:** Adrian siger sin halve sætning færdig og svarer, hvis det giver mening. Er det
+  noget, der ikke fører mod mødet, må han af og til køre videre. Det skal være en dialog, ikke en monolog.
+- **Adrian bryder ind:** når kunden taler for meget, eller har en forkert antagelse om, hvad vi er:
+  marketingbureau, skifte deres bookingsystem, få dem til at bruge flere penge, eller «sælgere»
+  (vi er mødebookere, ikke sælgere).
+- **Tavshed:** vent 3–5 sek. (til det lige bliver lidt akavet), men samtalen må ikke gå i stå.
+- **Telefonsvarer:** ingen besked; udfaldet sættes til voicemail.
+- **«Send mig en mail»:** betyder, at kunden ikke er interesseret endnu. Adrian kæmper for at tale
+  videre eller finder et nyt tidspunkt at tale.
+- **Efter booking:** kunden får inden dagen er omme en bekræftelse på SMS og mail. Adrian gentager
+  tidspunkt, sted og hvad mødet går ud på. Bruger kunden GeckoBooking, får de en mail, de skal
+  videresende til Gecko, så vi kan åbne integrationen før mødet.
+
+## 12. Mål for drift: flere Adrians samtidig og test af hvad der virker
+- **8–9 samtidige opkald** i starten, fordelt på ca. **3 tilgange × 3 stemmer** (et eksperiment).
+- Hvert opkald logger sin variant (tilgang, stemme, prompt-version) i `AiCallEvent`, og udfaldet
+  (møde booket, tilbagekald, nej) kobles på. Administrationsvisningen viser bookingrate pr. variant
+  med antal opkald, så vi ikke konkluderer på for få samtaler.
+- Fordelingen kan med tiden flytte flere opkald til det, der virker (multi-armed bandit), indtil der
+  vælges én tilgang og én stemme, som så kører 8 ad gangen.
+- Kapacitet: 8–9 samtidige samtaler = 8–9 Soniox-strømme, 8–9 TTS-strømme og Claude-kald parallelt.
+  Telnyx-linjer og Soniox/ElevenLabs-samtidighedsgrænser skal tjekkes mod abonnementerne.
