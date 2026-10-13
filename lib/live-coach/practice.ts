@@ -6,6 +6,7 @@
 import * as z from "zod/v4";
 import type Anthropic from "@anthropic-ai/sdk";
 import { ALLIO_HARD_RULES, ALLIO_PRODUCT } from "@/lib/allio-product";
+import { preferredAnswersText } from "./preferred-answers";
 import { structuredCall } from "@/lib/anthropic-client";
 import type { ObjectionCategory } from "@/lib/call-analysis/schema";
 import { prisma } from "@/lib/prisma";
@@ -81,6 +82,9 @@ Score: 80–100 = det ville sandsynligvis føre videre; 50–79 = godt, men mang
 
 Ugens script — bedste svar:
 ${answers || "- (ingen)"}
+
+Ernestos foretrukne svar (vægter højest — facit, når indvendingen passer):
+${preferredAnswersText()}
 
 Indvendingsbogen — skabeloner (brug den, der passer, som facit for et godt svar):
 ${playbook || "- (ingen)"}

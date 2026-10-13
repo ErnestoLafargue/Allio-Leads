@@ -5,6 +5,7 @@
  */
 import type Anthropic from "@anthropic-ai/sdk";
 import { ALLIO_COACH, ALLIO_HARD_RULES } from "@/lib/allio-product";
+import { preferredAnswersText } from "./preferred-answers";
 import { usageCostUsd } from "@/lib/anthropic-client";
 import type { ObjectionCategory } from "@/lib/call-analysis/schema";
 import type { CoachLine } from "./card";
@@ -84,6 +85,10 @@ KUNDE: <din vurdering>
 
 ## Ugens script — bedste svar på indvendinger
 ${answers || "- (ingen)"}
+
+## Ernestos foretrukne svar — vægter højest
+Passer indvendingen til en af disse, så tag udgangspunkt i netop dette svar (tilpas kun ordene til kunden), også selv om ugens script eller indvendingsbogen siger noget andet.
+${preferredAnswersText()}
 
 ## Indvendingsbogen — skabeloner for de hyppigste indvendinger
 Find den indvending, der passer bedst, tag udgangspunkt i dens skabelon og træk, og tilpas den til netop denne kunde og samtale ([pladsholdere] udfyldes med kundens egne ord og detaljer).

@@ -75,6 +75,8 @@ export type PlaybookEntry = PlaybookType &
     nBad: number;
     best: PlaybookExample | null;
     worst: PlaybookExample | null;
+    /** Skabelonen er Ernestos eget foretrukne svar (lib/live-coach/preferred-answers.ts). */
+    preferred?: boolean;
   };
 
 export type PlaybookStats = { objections: number; calls: number; classified: number; generatedAt: string };

@@ -4,6 +4,7 @@
 import type { ObjectionCategory } from "@/lib/call-analysis/schema";
 import { prisma } from "@/lib/prisma";
 import type { WeeklyScript } from "@/lib/sales-scripts/schema";
+import { withPreferred } from "./preferred-answers";
 
 export async function activeScriptResponses(): Promise<Partial<Record<ObjectionCategory, string>>> {
   const active = await prisma.salesScriptVersion.findFirst({
@@ -13,7 +14,8 @@ export async function activeScriptResponses(): Promise<Partial<Record<ObjectionC
   const script = active?.content as unknown as WeeklyScript | undefined;
   const out: Partial<Record<ObjectionCategory, string>> = {};
   for (const o of script?.objections ?? []) if (o.response && !out[o.category]) out[o.category] = o.response;
-  return out;
+  // Ernestos egne foretrukne svar vægter højest.
+  return withPreferred(out);
 }
 
 /** Linjerne i det aktive ugens script i rækkefølge — til script-trackeren (SCRIPT/AFVIGELSE/TILBAGE). */

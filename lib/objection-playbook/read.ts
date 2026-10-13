@@ -2,6 +2,7 @@
  * Den aktive indvendingsbog — til siden «Indvendinger», live-coachen og øve-tilstanden.
  */
 import { prisma } from "@/lib/prisma";
+import { PREFERRED_ANSWERS } from "@/lib/live-coach/preferred-answers";
 import { PLAYBOOK_KIND, type PlaybookEntry, type PlaybookStats } from "./schema";
 
 export async function activePlaybook(): Promise<{ entries: PlaybookEntry[]; stats: PlaybookStats; version: number; publishedAt: Date | null } | null> {
@@ -10,7 +11,12 @@ export async function activePlaybook(): Promise<{ entries: PlaybookEntry[]; stat
     select: { content: true, evidence: true, version: true, publishedAt: true },
   });
   if (!row) return null;
-  return { entries: row.content as unknown as PlaybookEntry[], stats: row.evidence as unknown as PlaybookStats, version: row.version, publishedAt: row.publishedAt };
+  // Ernestos foretrukne svar overskriver skabelonen for samme kategori.
+  const entries = (row.content as unknown as PlaybookEntry[]).map((e) => {
+    const p = PREFERRED_ANSWERS[e.category];
+    return p ? { ...e, template: p.line, principle: p.principle, move: "behandl" as const, preferred: true } : e;
+  });
+  return { entries, stats: row.evidence as unknown as PlaybookStats, version: row.version, publishedAt: row.publishedAt };
 }
 
 let cache: { at: number; text: string } | null = null;

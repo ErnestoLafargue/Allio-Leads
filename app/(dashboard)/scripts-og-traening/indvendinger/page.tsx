@@ -93,7 +93,7 @@ function Entry({ e, canOpen }: { e: PlaybookEntry; canOpen: ReadonlySet<string> 
       </summary>
       <div className="space-y-4 border-t border-stone-100 px-4 pb-4 pt-3">
         <section className="rounded-lg border-l-4 border-emerald-600 bg-stone-50 px-4 py-3">
-          <p className="text-xs font-semibold uppercase tracking-wide text-emerald-800">Skabelon</p>
+          <p className="text-xs font-semibold uppercase tracking-wide text-emerald-800">{e.preferred ? "Skabelon · Ernestos foretrukne svar" : "Skabelon"}</p>
           <div className="mt-1">
             <Template text={e.template} />
           </div>
