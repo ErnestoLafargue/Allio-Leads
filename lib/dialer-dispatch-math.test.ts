@@ -130,6 +130,30 @@ describe("computePowerDispatchPlan", () => {
     expect(p.target).toBe(6);
     expect(p.newCalls).toBe(6);
   });
+
+  it("ready=0 med opkald i luften ⇒ cancel alle ringende (regressionscase for pulje der glemmer agenter)", () => {
+    const p = plan({
+      readyAgents: 0,
+      ratio: 5,
+      unassignedInFlight: 8,
+      ringingUnanswered: 8,
+    });
+    expect(p.target).toBe(0);
+    expect(p.cancelRinging).toBe(8);
+  });
+
+  it("2 klar × 5 med 8 i luften ⇒ intet cancel (pulje-agenter skal tælle som klar)", () => {
+    const p = plan({
+      readyAgents: 2,
+      ratio: 5,
+      unassignedInFlight: 8,
+      ringingUnanswered: 8,
+      maxInFlight: 50,
+    });
+    expect(p.target).toBe(10);
+    expect(p.cancelRinging).toBe(0);
+    expect(p.newCalls).toBe(2);
+  });
 });
 
 describe("computeDropBrake", () => {

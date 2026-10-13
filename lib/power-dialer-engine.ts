@@ -109,14 +109,17 @@ function freshCutoff(now: Date): Date {
   return new Date(now.getTime() - PRESENCE_FRESH_WINDOW_MS);
 }
 
-/** Klar / WebRTC / frisk heartbeat / ikke i efterbehandling (uden kampagne-filter). */
-function dialableAgentReadyBits(now: Date): Prisma.AgentSessionWhereInput {
-  return {
-    status: "ready",
-    webrtcReady: true,
-    lastHeartbeat: { gte: freshCutoff(now) },
-    OR: [{ wrapUpUntil: null }, { wrapUpUntil: { lte: now } }],
-  };
+/**
+ * Klar / WebRTC / frisk heartbeat / ikke i efterbehandling.
+ * Returnerer AND-dele så kaldere kan lægge ekstra OR/AND uden at overskrive wrapUp-filteret.
+ */
+function dialableAgentReadyAnd(now: Date): Prisma.AgentSessionWhereInput[] {
+  return [
+    { status: "ready" },
+    { webrtcReady: true },
+    { lastHeartbeat: { gte: freshCutoff(now) } },
+    { OR: [{ wrapUpUntil: null }, { wrapUpUntil: { lte: now } }] },
+  ];
 }
 
 /** Sælgere dispatch må ringe op for på én kampagne (ikke Power-pulje-session). */
@@ -124,7 +127,7 @@ export function dialableAgentWhere(campaignId: string, now: Date): Prisma.AgentS
   return {
     campaignId,
     powerPool: false,
-    ...dialableAgentReadyBits(now),
+    AND: dialableAgentReadyAnd(now),
   };
 }
 
@@ -136,12 +139,47 @@ export function dialablePowerPoolAgentWhere(
   return {
     campaignId: anchorCampaignId,
     powerPool: true,
-    ...dialableAgentReadyBits(now),
+    AND: dialableAgentReadyAnd(now),
   };
 }
 
 export async function countDialableAgents(db: Db, campaignId: string, now: Date): Promise<number> {
   return db.agentSession.count({ where: dialableAgentWhere(campaignId, now) });
+}
+
+/**
+ * Sælgere der kan tage et svar på denne kampagne: enkeltkampagne-session ELLER
+ * Power-pulje-session hvor brugeren er tildelt kampagnen.
+ *
+ * Bruges til overskuds-afbrydelse. Uden pulje-agenter her blev «Power: alle tildelte»
+ * opkald lagt på med det samme (ready=0 pr. ikke-anker-kampagne → CANCELLED_OVERDIAL).
+ */
+export function dialableAgentsForCampaignCapacityWhere(
+  campaignId: string,
+  now: Date,
+): Prisma.AgentSessionWhereInput {
+  return {
+    AND: [
+      ...dialableAgentReadyAnd(now),
+      {
+        OR: [
+          { campaignId, powerPool: false },
+          {
+            powerPool: true,
+            user: { campaignAssignments: { some: { campaignId } } },
+          },
+        ],
+      },
+    ],
+  };
+}
+
+export async function countDialableAgentsForCampaignCapacity(
+  db: Db,
+  campaignId: string,
+  now: Date,
+): Promise<number> {
+  return db.agentSession.count({ where: dialableAgentsForCampaignCapacityWhere(campaignId, now) });
 }
 
 /** Klar sælgere til Power-pulje: pulje-anker + enkeltkampagne-sessioner på puljens kampagner. */
@@ -153,10 +191,14 @@ export async function countDialablePoolAgents(
   if (poolCampaignIds.length === 0) return 0;
   return db.agentSession.count({
     where: {
-      ...dialableAgentReadyBits(now),
-      OR: [
-        { campaignId: anchorCampaignId, powerPool: true },
-        { campaignId: { in: poolCampaignIds }, powerPool: false },
+      AND: [
+        ...dialableAgentReadyAnd(now),
+        {
+          OR: [
+            { campaignId: anchorCampaignId, powerPool: true },
+            { campaignId: { in: poolCampaignIds }, powerPool: false },
+          ],
+        },
       ],
     },
   });
@@ -672,6 +714,8 @@ export async function connectPowerLeadToAgent(params: {
 /**
  * Er der flere ringende opkald end de klare sælgere kan tage, lægges de ældste ringende på —
  * før nogen svarer — i stedet for at risikere et menneske uden sælger.
+ *
+ * Tæller også Power-pulje-sælgere tildelt kampagnen (ellers blev pulje-opkald lagt på med det samme).
  */
 export async function enforcePowerCapacity(
   campaignId: string,
@@ -681,7 +725,7 @@ export async function enforcePowerCapacity(
   if (!c) return 0;
   const now = new Date();
   const [ready, inFlight, brake] = await Promise.all([
-    countDialableAgents(prisma, campaignId, now),
+    countDialableAgentsForCampaignCapacity(prisma, campaignId, now),
     loadUnassignedInFlight(prisma, campaignId, now),
     getPowerDropBrake(prisma, campaignId, c.settings, now),
   ]);
@@ -703,6 +747,64 @@ export async function enforcePowerCapacity(
       resolution: "CANCELLED_OVERDIAL",
       hangup: true,
       campaign: c,
+    });
+    if (done) cancelled += 1;
+  }
+  return cancelled;
+}
+
+/**
+ * Pulje-dækkende overskudsregel: ét fælles mål (klare pulje-sælgere × højeste ratio),
+ * afbryd de ældste ringende på tværs af pulje-kampagnerne.
+ */
+export async function enforcePowerPoolCapacity(params: {
+  anchorCampaignId: string;
+  poolCampaigns: PowerCampaign[];
+}): Promise<number> {
+  const { anchorCampaignId, poolCampaigns } = params;
+  if (poolCampaigns.length === 0) return 0;
+  const now = new Date();
+  const byId = new Map(poolCampaigns.map((c) => [c.id, c]));
+  const dialRatio = pickPowerPoolDialRatio(poolCampaigns.map((c) => c.settings));
+  const sumMaxInFlight = poolCampaigns.reduce((n, c) => n + c.settings.maxInFlight, 0);
+
+  const [ready, brakeList, ...inFlights] = await Promise.all([
+    countDialablePoolAgents(prisma, {
+      anchorCampaignId,
+      poolCampaignIds: poolCampaigns.map((c) => c.id),
+      now,
+    }),
+    Promise.all(poolCampaigns.map((c) => getPowerDropBrake(prisma, c.id, c.settings, now))),
+    ...poolCampaigns.map((c) => loadUnassignedInFlight(prisma, c.id, now)),
+  ]);
+  const brakeActive = brakeList.some((b) => b.active);
+  const unassigned = inFlights.reduce((n, x) => n + x.unassigned, 0);
+  const ringing = inFlights.flatMap((x, i) =>
+    x.ringing.map((leg) => ({
+      ...leg,
+      campaignId: poolCampaigns[i]!.id,
+    })),
+  );
+  const plan = computePowerDispatchPlan({
+    readyAgents: ready,
+    ratio: dialRatio,
+    brakeActive,
+    maxInFlight: sumMaxInFlight,
+    unassignedInFlight: unassigned,
+    ringingUnanswered: ringing.length,
+    channelLimit: null,
+    channelsInUse: 0,
+  });
+  const toCancel = pickRingingLegsToCancel(ringing, plan.cancelRinging);
+  let cancelled = 0;
+  for (const leg of toCancel) {
+    const camp = byId.get(leg.campaignId);
+    if (!camp) continue;
+    const done = await resolvePowerLeadLeg({
+      callControlId: leg.callControlId,
+      resolution: "CANCELLED_OVERDIAL",
+      hangup: true,
+      campaign: camp,
     });
     if (done) cancelled += 1;
   }
@@ -1661,10 +1763,10 @@ export async function runPowerPoolDispatch(params: {
     }),
   );
 
-  let cancelled = 0;
-  for (const camp of powerCampaigns) {
-    cancelled += await enforcePowerCapacity(camp.id, camp);
-  }
+  const cancelled = await enforcePowerPoolCapacity({
+    anchorCampaignId: anchorCampaign.id,
+    poolCampaigns: powerCampaigns,
+  });
 
   const inFlightAfter = locked.unassigned + dispatched;
   let code: PowerDispatchCode = dispatched > 0 ? "DIALED" : "AT_CAPACITY";
