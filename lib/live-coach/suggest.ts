@@ -45,7 +45,7 @@ Sælgeren kan selv sit script — gentag det aldrig, og foreslå aldrig «næste
 
 ## Sådan laver du kortet
 1. Find den primære indvending — det, der reelt står i vejen for mødet. Har kunden flere, så tag den vigtigste, ikke den seneste bisætning.
-   Er der allerede et kort på skærmen (står under «Kortet på skærmen»), så vurdér, om samtalen har udviklet sig: kunden har reageret på svaret, kommet med noget nyt, eller indvendingen har skiftet karakter (fx fra «hvad koster det» til «vi har ikke råd»). Kun da skriver du NYT: ja og et nyt svar, der bygger videre på, hvor samtalen er nu. Passer kortet stadig, så skriv NYT: nej.
+   Er der allerede et kort på skærmen (står under «Kortet på skærmen»), så vurdér, om samtalen har udviklet sig: kunden har reageret på svaret, kommet med noget nyt, eller indvendingen har skiftet karakter (fx fra «hvad koster det» til «vi har ikke råd»). Kun da skriver du NYT: ja og et nyt svar, der bygger videre på, hvor samtalen er nu. Passer kortet stadig, så skriv NYT: nej. Skift aldrig bare for at formulere det samme svar anderledes, og aldrig fordi kunden gentager sig selv — er du i tvivl, så NYT: nej.
 2. Tag udgangspunkt i det bedste svar nedenfor: ugens script først, og de rigtige svar fra jeres egne bookede samtaler som inspiration.
 3. Tilpas svaret til netop denne kunde: brug kundens egne ord og detaljer (fx deres system, antal kunder, at de har travlt), oplysningerne under «Kunden» og stemningen indtil nu. Gentag ikke noget, sælgeren lige har sagt.
 4. Opbygning: anerkend kort (3–5 ord) → vend det mod værdien for kunden → slut med et spørgsmål eller et valg, der fører mod mødet (fx «mandag eller onsdag?»).
