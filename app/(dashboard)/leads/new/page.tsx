@@ -10,6 +10,10 @@ import {
   type MeetingContactFieldErrors,
 } from "@/lib/meeting-contact-validation";
 import type { LeadStatus } from "@/lib/lead-status";
+import {
+  MEETING_TYPE_ONLINE,
+  type MeetingType,
+} from "@/lib/meeting-type";
 
 type CampaignOption = { id: string; name: string };
 
@@ -58,6 +62,8 @@ function NewLeadPageInner() {
   const [meetingContactEmail, setMeetingContactEmail] = useState("");
   const [meetingContactPhonePrivate, setMeetingContactPhonePrivate] = useState("");
   const [meetingCompanyName, setMeetingCompanyName] = useState("");
+  const [meetingType, setMeetingType] = useState<MeetingType>(MEETING_TYPE_ONLINE);
+  const [meetingAddress, setMeetingAddress] = useState("");
   const [meetingContactErrors, setMeetingContactErrors] = useState<MeetingContactFieldErrors>({});
   const [custom, setCustom] = useState<Record<string, string>>({});
   const [error, setError] = useState<string | null>(null);
@@ -131,6 +137,7 @@ function NewLeadPageInner() {
         meetingContactEmail,
         meetingContactPhonePrivate,
         meetingCompanyName,
+        { meetingType, meetingAddress },
       );
       if (contactErrors) {
         setMeetingContactErrors(contactErrors);
@@ -141,44 +148,62 @@ function NewLeadPageInner() {
     setMeetingContactErrors({});
     setError(null);
     setLoading(true);
-    try {
-      const res = await fetch("/api/leads", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          campaignId,
-          companyName: trimmedCompanyName,
-          phone,
-          privatePhone,
-          email,
-          cvr,
-          address,
-          postalCode,
-          city,
-          industry,
-          notes,
-          meetingContactName: meetingContactName.trim(),
-          meetingContactEmail: meetingContactEmail.trim(),
-          meetingContactPhonePrivate: meetingContactPhonePrivate.trim(),
-          meetingCompanyName: meetingCompanyName.trim(),
-          status,
-          meetingScheduledFor: status === "MEETING_BOOKED" ? meetingScheduledFor : null,
-          customFields: custom,
-        }),
-      });
-      if (!res.ok) {
+    submitLockRef.current = true;
+
+    const payload = {
+      campaignId,
+      companyName: trimmedCompanyName,
+      phone,
+      privatePhone,
+      email,
+      cvr,
+      address,
+      postalCode,
+      city,
+      industry,
+      notes,
+      meetingContactName: meetingContactName.trim(),
+      meetingContactEmail: meetingContactEmail.trim(),
+      meetingContactPhonePrivate: meetingContactPhonePrivate.trim(),
+      meetingCompanyName: meetingCompanyName.trim(),
+      meetingType,
+      meetingAddress: meetingAddress.trim(),
+      status,
+      meetingScheduledFor: status === "MEETING_BOOKED" ? meetingScheduledFor : null,
+      customFields: custom,
+    };
+
+    // Forlad oprettelsen med det samme — POST kører færdig i baggrunden
+    // (keepalive så request ikke afbrydes ved navigation).
+    router.replace(returnAfterCreate);
+
+    void fetch("/api/leads", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload),
+      keepalive: true,
+    })
+      .then(async (res) => {
+        if (res.ok) return;
         const j = await res.json().catch(() => ({}));
-        setError(j.error ?? "Kunne ikke oprette");
-        setLoading(false);
-        return;
-      }
-      submitLockRef.current = true;
-      router.replace(returnAfterCreate);
-      router.refresh();
-    } catch {
-      setError("Netværksfejl — prøv igen.");
-      setLoading(false);
-    }
+        const msg =
+          typeof j.error === "string" ? j.error : "Kunne ikke oprette lead";
+        try {
+          sessionStorage.setItem("allio:leadCreateError", msg);
+        } catch {
+          /* ignore */
+        }
+      })
+      .catch(() => {
+        try {
+          sessionStorage.setItem(
+            "allio:leadCreateError",
+            "Netværksfejl — leadet blev måske ikke oprettet.",
+          );
+        } catch {
+          /* ignore */
+        }
+      });
   }
 
   if (loadingCampaigns) {
@@ -318,6 +343,8 @@ function NewLeadPageInner() {
               meetingContactEmail,
               meetingContactPhonePrivate,
               meetingCompanyName,
+              meetingType,
+              meetingAddress,
               onMeetingContactName: (v) => {
                 setMeetingContactName(v);
                 setMeetingContactErrors((prev) => ({ ...prev, name: undefined }));
@@ -334,16 +361,23 @@ function NewLeadPageInner() {
                 setMeetingCompanyName(v);
                 setMeetingContactErrors((prev) => ({ ...prev, meetingCompany: undefined }));
               },
+              onMeetingAddress: (v) => {
+                setMeetingAddress(v);
+                setMeetingContactErrors((prev) => ({ ...prev, address: undefined }));
+              },
               contactRequired: status === "MEETING_BOOKED",
               meetingContactErrors: status === "MEETING_BOOKED" ? meetingContactErrors : undefined,
             }}
             booking={{
               campaignId,
               initialMeetingLocal: status === "MEETING_BOOKED" ? meetingScheduledFor || undefined : undefined,
+              meetingType,
+              onMeetingTypeChange: setMeetingType,
               isSubmitting: loading,
               allowMeetingConfirm: status === "MEETING_BOOKED",
               onConfirmBooking: async (detail) => {
                 setMeetingScheduledFor(detail.localDateTimeISO);
+                setMeetingType(detail.meetingType);
                 setStatus("MEETING_BOOKED");
                 setError(null);
               },

@@ -1,17 +1,37 @@
 "use client";
 
 import Link from "next/link";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { LeadsBulkPanel } from "@/app/components/leads-bulk-panel";
 import { KNOWN_LEAD_SOURCES } from "@/lib/lead-navigation";
 import { DashboardTabs } from "@/app/components/dashboard-tabs";
 
+const LEAD_CREATE_ERROR_KEY = "allio:leadCreateError";
+
 export default function LeadsPage() {
   const [q, setQ] = useState("");
+  const [createError, setCreateError] = useState<string | null>(null);
+
+  useEffect(() => {
+    try {
+      const msg = sessionStorage.getItem(LEAD_CREATE_ERROR_KEY);
+      if (msg) {
+        sessionStorage.removeItem(LEAD_CREATE_ERROR_KEY);
+        setCreateError(msg);
+      }
+    } catch {
+      /* ignore */
+    }
+  }, []);
 
   return (
     <div className="space-y-6">
       <DashboardTabs />
+      {createError ? (
+        <p className="rounded-md border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-800" role="alert">
+          {createError}
+        </p>
+      ) : null}
       <div className="flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between">
         <div>
           <h1 className="text-xl font-semibold text-stone-900">Leads</h1>
