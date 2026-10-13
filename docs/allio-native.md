@@ -22,7 +22,7 @@ Allio Komplet, 2.500 kr./md. ekskl. moms. Bookingsystemet (Allio Booking) er gra
 | Synlighed, omdømme, ny lokation | Automatiske Google-anmeldelser |
 | Har bookingsystem, betaler pr. medarbejder | Allio Booking er gratis, og dataflytning er gratis |
 
-Vækstfunktionerne virker med *udvalgte* bookingsystemer (bl.a. Gecko Booking). Sig aldrig, at det virker med alle.
+Kunden skal ikke skifte bookingsystem: Allio lægger sig oven på det system, de har (integration eller dataoverførsel), og det må sælgeren gerne sige (Ernestos beslutning 13/10-2026). Allio Booking er et gratis alternativ, hvis de alligevel vil skifte.
 
 ## Den fuldt bookede klinik
 Den sværeste indvending («ingen plads», «booket 3 måneder frem», «tager ikke nye kunder ind»).
