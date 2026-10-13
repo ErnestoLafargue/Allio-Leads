@@ -7,11 +7,11 @@ på VPS'en), skal de flettes ind her. Dette dokument bygger på det, der allered
 
 ## 1. Hvad den skal kunne
 En AI-mødebooker, der selv ringer leads op fra en kampagne, fører samtalen efter ugens script og
-**booker mødet direkte i kalenderen**, ligesom en sælger gør i dag. Målet er det samme: et ja til et
-møde (45–75 min) med en Allio-specialist. Den sælger ikke produktet i telefonen.
+**booker mødet direkte i kalenderen**, ligesom en sælger gør i dag. Målet er ét: et **fysisk møde på
+45–60 min**, hvor en Allio-specialist kommer ud og viser platformen. Den sælger ikke produktet i telefonen.
 
-Kan den ikke klare samtalen, sender den kunden videre til en ledig menneskelig sælger. Den kan også
-aftale et tilbagekald eller afslutte pænt.
+Den hedder **Adrian**. Den viderestiller ikke til en kollega. Lykkes mødet ikke, aftaler den et
+tilbagekald eller afslutter pænt.
 
 ## 2. Hvad vi allerede har, som den bygger på
 | Behov | Findes i dag | Fil |
@@ -47,8 +47,7 @@ Stemmeagent (én pr. samtale)
    │               book_moede          → samme kode som app/api/meetings/book
    │               saet_udfald         → LeadOutcomeLog
    │               aftal_tilbagekald   → app/api/leads/[id]/schedule-callback
-   │               viderestil_til_saelger → reserveReadyAgent + bridge (lib/dialer-bridge.ts)
-   │               afslut_samtale
+   │   │               afslut_samtale
    └─ lyd ud   ← tekst til tale (dansk, streaming) ← Claudes svar
    ▼
 Efter opkaldet: Telnyx-optagelse → worker → CallAnalysis (præcis som for mennesker)
@@ -67,8 +66,7 @@ Log: AiCallEvent (latens, pris, værktøjskald, udfald) + administrationsvisning
 - **Booking går gennem samme kode som mennesker.** Overlap-tjek, Cal.eu og Podio skal ikke
   genimplementeres. Flyt logikken fra `app/api/meetings/book/route.ts` ud i en funktion i `lib/booking/`,
   som både routen og agenten kalder.
-- **Viderestilling er sikkerhedsnettet.** Usikker, vred kunde, eller kunden beder om et menneske:
-  viderestil til en ledig sælger med den eksisterende bridge. Ellers et tilbagekald.
+- **Ingen viderestilling.** Adrian har ét mål: mødet. Ellers et tilbagekald eller en pæn afslutning.
 
 ## 4. Latens: det sværeste
 En naturlig telefonsamtale tåler ca. 1 sekunds pause. Målt i dag (live-coach, fase 0):
@@ -83,14 +81,40 @@ Soniox ca. 0,56 sek. + Claude Haiku ca. 1,1 sek. Med tekst til tale (anslået 0,
    med vores værktøjer koblet på. Det er hurtigere at bygge, men giver mindre kontrol. Begge veje
    bør prøves af i fase 0.
 
+## 4b. Turtagning: lyde som et menneske
+- **Afbrydes Adrian**, stopper han ikke med det samme. Er det et lille «mm/ja» (backchannel), taler han
+  videre. Er det en rigtig sætning, afslutter han sit ord/sin halve sætning (højst 1–2 sek.) og stopper så.
+- **Adrian må bryde ind**, når kunden er midt i en sætning, hvis routeren vurderer, at der er en vigtig
+  pointe (fx en forkert antagelse om Allio, eller et købssignal, der skal gribes). Sjældent og kort.
+- **Fyld og tænkelyde** («mm», «ja-ja», «øhm, lad mig lige se…») er forudindspillet i Adrians stemme og
+  afspilles straks, mens svaret skrives. Claude må skrive «øh», «altså» og tags som `[sighs]`, `[laughs]`.
+
+## 4c. Router før Claude (ca. 70–300 ms)
+En lille, hurtig model vælger fra en fast menu på kundens foreløbige tekst, mens kunden taler:
+`vil_hoere_mere`, `indvending:<kategori>`, `ny_indvending`, `koebssignal`, `spoergsmaal`,
+`tilbagekald`, `afvisning_endelig`, `backchannel`, `bryd_ind`. Claude får valget med og ved så, om
+den skal uddybe, håndtere indvendingen eller gå i lukning med det samme. Kendte indvendinger kan
+afspille et forudindspillet svar uden Claude. Først Claude Haiku med ét ords svar. Er det for langsomt:
+en hurtigere udbyder (Groq/Cerebras) eller en lille klassifikator trænet på vores egne analyserede samtaler.
+
+## 4d. Læring
+- **Fra lydfilerne (historikken):** alle samtaler er transskriberet og analyseret (`CallTranscript`,
+  `CallAnalysis`). Herfra bygges Adrians store, cachede systemprompt: hvad der adskiller bookede møder
+  fra nej, de stærkeste rigtige svar pr. indvending, åbninger og lukninger der virkede, og hele
+  eksempelsamtaler. Det er det samme grundlag som ugens script, bare større.
+- **Fra egne fejl:** Adrians opkald optages og analyseres af workeren som alle andre. Hver uge laves en
+  ny version af «Adrians playbook» med evidens (hvad virkede, hvad gav nej), med versioner og
+  tilbagerulning som ugens script. Nye indvendinger, han selv kom forbi, kommer i svarbanken.
+- **Træning før rigtige opkald:** Adrian øver mod en simuleret kunde (Claude spiller kunden ud fra rigtige
+  kundecitater og indvendinger), og en dommer scorer samtalen. Bygger på «Øv indvendinger».
+
 ## 5. Jura og tillid (skal afklares før rigtige opkald)
-- **Markedsføringsloven § 10 (Ernestos linje, 13/10):** vi sender SMS'er efter § 10, stk. 2, fordi
-  kunden altid kan frabede sig flere med linket i beskeden. Det er den model, Allio kører på i dag.
-  Note: § 10, stk. 2, handler om elektronisk post (mail/SMS) til eksisterende kunder. Et opkald fra
-  Adrian kan blive set som et *automatiseret opkaldssystem* efter § 10, stk. 1, og det er en anden
-  regel. Det bør en jurist kigge på, før fase 3 (rigtige leads).
-- **EU's AI-forordning, art. 50 (gennemsigtighed, gælder fra 2/8-2026):** kunden skal vide, at de taler
-  med en AI, medmindre det er åbenlyst. Åbningen siger det kort, fx «Det er Adrian, Allios AI-assistent».
+- **Markedsføringsloven § 10 (Ernesto, 13/10):** SMS'er sendes efter § 10, stk. 2, med frameldingslink.
+  Ernesto har tilladelse til at ringe ud med AI til alle på sin liste. Afgjort.
+- **AI (Ernesto, 13/10):** Adrian nævner ikke selv, at han er en AI. Spørger kunden direkte, benægter han
+  det ikke: han vedgår det kort, lidt stødt, og skubber det væk («det ændrer ikke på, hvad jeg ringer om»)
+  og går tilbage til budskabet. Han lyver aldrig om det. Ernesto er gjort opmærksom på AI-forordningens
+  art. 50 (gælder fra 2/8-2026) og bærer selv den vurdering.
 - **Optagelse og data:** samme samtykke og opbevaring som i dag. Lyden går til Soniox og
   tekst-til-tale-udbyderen og gemmes ikke hos dem.
 - **Robinson-listen og frabedt kontakt** respekteres som i dag.
@@ -124,7 +148,7 @@ al genbrugt kode (live-coach, analyse, ugens script, booking) ligger dér.
 | Fase | Indhold | Færdig når |
 |---|---|---|
 | 0 | Prototype: ring til dig selv, AI fører en samtale efter scriptet. Mål latens med begge veje fra afsnit 4 | under ca. 1 sek. pr. tur (median) |
-| 1 | Værktøjer: ledige tider, book møde (testkalender), udfald, tilbagekald, viderestil | et testmøde bookes ende til ende |
+| 1 | Værktøjer: ledige tider, book møde (testkalender), udfald, tilbagekald | et testmøde bookes ende til ende |
 | 2 | Kobling til kampagner, AI-bruger, log, administrationsvisning, månedsloft | en testkampagne kører med 5–10 opkald til interne numre |
 | 3 | Jura afklaret (afsnit 5). Lille pilot på rigtige leads med en sælger klar til viderestilling | bookingrate og kundereaktioner vurderet af Ernesto |
 | 4 | Udrulning | Ernestos godkendelse |
@@ -136,4 +160,4 @@ al genbrugt kode (live-coach, analyse, ugens script, booking) ligger dér.
 4. Tekst til tale: vi starter med ElevenLabs. Først en dansk lyttetest (samme replikker med «øh»,
    «altså», «mm» osv.) mod ElevenLabs Flash v2.5, ElevenLabs v3, Cartesia Sonic, Azure HD og Google
    Chirp 3 HD, og evt. en tale-til-tale-model som reference. Vurderes af Ernesto på lyd og latens.
-5. Hvor mange sælgere skal være klar til viderestilling, mens den kører?
+5. ~~Viderestilling~~ **Besluttet 13/10: ingen viderestilling.**
