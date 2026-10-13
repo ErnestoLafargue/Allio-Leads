@@ -12,13 +12,12 @@ import {
   bridgeTelnyxCalls,
   buildTelnyxAgentSipUri,
   dialTelnyxOutbound,
-  getTelnyxConnectionId,
-  getTelnyxCredentialInfo,
   hangupTelnyxCall,
   isTelnyxChannelLimitError,
   pickTelnyxFromNumber,
 } from "@/lib/telnyx-call-control";
 import { encodeDialerClientState, PRESENCE_FRESH_WINDOW_MS } from "@/lib/dialer-shared";
+import { resolvePowerAgentOutboundConnectionId } from "@/lib/telnyx-power-agent";
 
 /** Statusser hvor et sent AMD=machine stadig må sætte VOICEMAIL (leadet er stadig i «åben» dialer-pulje). */
 const AMD_VOICEMAIL_ALLOWED: ReadonlySet<LeadStatus> = new Set(["NEW", "NOT_HOME"]);
@@ -97,53 +96,6 @@ export async function releaseAgentSession(params: {
       currentLeadId: null,
     },
   });
-}
-
-/**
- * Call Control `connection_id` til udgående opkald der skal ringe agentens WebRTC op.
- * Agentens browser logger ind på den **credential connection** der blev oprettet ved
- * provisioning (`User.telnyxCredentialId` → Telnyx `connection_id`). Hvis vi i stedet
- * bruger den globale `TELNYX_CONNECTION_ID` (fx powerdialer-app), ender bridge ofte i
- * `user_busy` fordi kaldet ikke rammer den samme SIP-registrering som WebRTC-klienten.
- */
-async function resolveAgentOutboundConnectionId(params: {
-  apiKey: string;
-  agentUserId: string;
-}): Promise<string | null> {
-  const user = await prisma.user.findUnique({
-    where: { id: params.agentUserId },
-    select: {
-      telnyxCredentialId: true,
-      telnyxCredentialConnectionId: true,
-    },
-  });
-  const cached = user?.telnyxCredentialConnectionId?.trim();
-  if (cached) {
-    return cached;
-  }
-
-  const credId = user?.telnyxCredentialId?.trim();
-  if (credId) {
-    const info = await getTelnyxCredentialInfo({
-      apiKey: params.apiKey,
-      telephonyCredentialId: credId,
-    });
-    const fromCred = info.connectionId?.trim();
-    if (fromCred) {
-      await prisma.user.updateMany({
-        where: { id: params.agentUserId },
-        data: { telnyxCredentialConnectionId: fromCred },
-      });
-      return fromCred;
-    }
-    if (typeof console !== "undefined") {
-      console.error("[dialer-bridge] Agent-credential uden connection_id — fallback til env", {
-        agentUserId: params.agentUserId,
-        fetchError: info.fetchError,
-      });
-    }
-  }
-  return getTelnyxConnectionId()?.trim() ?? null;
 }
 
 /**
@@ -228,9 +180,10 @@ export async function handleAmdHuman(params: {
     return { status: "no-agent" };
   }
 
-  const connectionId = await resolveAgentOutboundConnectionId({
+  const connectionId = await resolvePowerAgentOutboundConnectionId({
     apiKey: params.apiKey,
     agentUserId: reserved.userId,
+    allowGlobalFallback: true,
   });
   if (!connectionId) {
     await releaseAgentSession({ sessionId: reserved.sessionId, newStatus: "ready" });

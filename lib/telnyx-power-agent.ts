@@ -1,6 +1,7 @@
 import { prisma } from "@/lib/prisma";
 import {
   buildTelnyxAgentSipUri,
+  getTelnyxConnectionId,
   getTelnyxCredentialInfo,
   patchTelnyxCredentialConnection,
 } from "@/lib/telnyx-call-control";
@@ -45,7 +46,7 @@ export async function ensurePowerDialerAgentTelnyx(params: {
   let sipUsername = user.telnyxCredentialSipUsername?.trim() || null;
   let connectionId = user.telnyxCredentialConnectionId?.trim() || null;
 
-  if (params.force || !sipUsername || !connectionId) {
+  if (params.force || !sipUsername || !connectionId || !user.telnyxSipUriCallingEnabledAt) {
     const info = await getTelnyxCredentialInfo({
       apiKey: params.apiKey,
       telephonyCredentialId: user.telnyxCredentialId,
@@ -70,7 +71,15 @@ export async function ensurePowerDialerAgentTelnyx(params: {
   }
 
   let sipUriCallingEnabled = Boolean(user.telnyxSipUriCallingEnabledAt);
-  if ((params.force || !sipUriCallingEnabled) && connectionId) {
+  if (!connectionId) {
+    return {
+      ok: false,
+      sipUsername,
+      sipUriCallingEnabled,
+      message: "Telnyx-credential har intet connection_id — kan ikke slå SIP URI-opkald til.",
+    };
+  }
+  if (params.force || !sipUriCallingEnabled) {
     const patched = await patchTelnyxCredentialConnection({
       apiKey: params.apiKey,
       connectionId,
@@ -97,6 +106,47 @@ export async function ensurePowerDialerAgentTelnyx(params: {
     sipUriCallingEnabled,
     message: sipUsername ? undefined : "Telnyx returnerede intet SIP-brugernavn for credentialet.",
   };
+}
+
+/**
+ * Call Control-connection som rammer sælgerens WebRTC-registrering.
+ * Den globale TELNYX_CONNECTION_ID giver user_busy — brug kun den som sidste udvej.
+ */
+export async function resolvePowerAgentOutboundConnectionId(params: {
+  apiKey: string;
+  agentUserId: string;
+  allowGlobalFallback?: boolean;
+}): Promise<string | null> {
+  const user = await prisma.user.findUnique({
+    where: { id: params.agentUserId },
+    select: {
+      telnyxCredentialId: true,
+      telnyxCredentialConnectionId: true,
+    },
+  });
+  const cached = user?.telnyxCredentialConnectionId?.trim();
+  if (cached) return cached;
+
+  const credId = user?.telnyxCredentialId?.trim();
+  if (credId) {
+    const info = await getTelnyxCredentialInfo({
+      apiKey: params.apiKey,
+      telephonyCredentialId: credId,
+    });
+    const fromCred = info.connectionId?.trim();
+    if (fromCred) {
+      await prisma.user.updateMany({
+        where: { id: params.agentUserId },
+        data: { telnyxCredentialConnectionId: fromCred },
+      });
+      return fromCred;
+    }
+    console.error("[power-agent] Agent-credential uden connection_id", {
+      fetchError: info.fetchError ?? null,
+    });
+  }
+  if (params.allowGlobalFallback) return getTelnyxConnectionId()?.trim() ?? null;
+  return null;
 }
 
 /** SIP-URI Power Dialer ringer op: credentialets gencred…-navn, ellers forbindelsens brugernavn. */

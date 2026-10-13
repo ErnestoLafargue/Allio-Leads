@@ -110,6 +110,13 @@ export function pickTelnyxFromNumber(
   return pool[Math.abs(h) % pool.length] ?? null;
 }
 
+/** Telnyx sender ofte connection_id som tal i JSON — det skal stadig kunne caches som tekst. */
+export function telnyxIdField(v: unknown): string | null {
+  if (typeof v === "string" && v.trim()) return v.trim();
+  if (typeof v === "number" && Number.isFinite(v)) return String(v);
+  return null;
+}
+
 function formatTelnyxError(json: unknown): string | null {
   if (!json || typeof json !== "object") return null;
   const errors = (json as { errors?: unknown }).errors;
@@ -187,7 +194,7 @@ export type TelnyxCredentialSummary = {
 function normalizeCredentialRecord(d: Record<string, unknown>): TelnyxCredentialSummary | null {
   const toStr = (v: unknown): string | null =>
     typeof v === "string" && v.length > 0 ? v : null;
-  const id = toStr(d.id);
+  const id = telnyxIdField(d.id) ?? toStr(d.id);
   if (!id) return null;
   const status = toStr(d.status);
   const expired =
@@ -202,7 +209,7 @@ function normalizeCredentialRecord(d: Record<string, unknown>): TelnyxCredential
     status,
     expired,
     expiresAt: toStr(d.expires_at),
-    connectionId: toStr(d.connection_id),
+    connectionId: telnyxIdField(d.connection_id),
     tag: toStr(d.tag),
     createdAt: toStr(d.created_at),
     sipUsername: toStr(d.sip_username),
@@ -750,7 +757,7 @@ export async function getTelnyxCredentialInfo(params: {
             ? d.status.toLowerCase() === "expired"
             : undefined,
       expiresAt: toStr(d.expires_at),
-      connectionId: toStr(d.connection_id),
+      connectionId: telnyxIdField(d.connection_id),
       sipUsername: toStr(d.sip_username),
       createdAt: toStr(d.created_at),
       updatedAt: toStr(d.updated_at),

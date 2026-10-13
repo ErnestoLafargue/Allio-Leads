@@ -77,7 +77,11 @@ import {
   sortPowerPoolCandidates,
 } from "@/lib/power-dialer-pool";
 import { applyLeadCooldownResets } from "@/lib/lead-cooldown";
-import { powerAgentSipUri } from "@/lib/telnyx-power-agent";
+import {
+  ensurePowerDialerAgentTelnyx,
+  powerAgentSipUri,
+  resolvePowerAgentOutboundConnectionId,
+} from "@/lib/telnyx-power-agent";
 import { normalizeCampaignDialMode } from "@/lib/dial-mode";
 import {
   normalizeDialPhonePriority,
@@ -543,7 +547,6 @@ export async function connectPowerLeadToAgent(params: {
   retry?: { expectedAttempts: number; excludeUserIds: string[] };
 }): Promise<PowerConnectOutcome> {
   const apiKey = telnyxApiKey();
-  const connectionId = getTelnyxConnectionId();
   const now = new Date();
   const leg = await prisma.dialerCallLog.findUnique({
     where: { callControlId: params.leadCallControlId },
@@ -596,7 +599,7 @@ export async function connectPowerLeadToAgent(params: {
   }
 
   const campaign = await loadPowerCampaign(leg.campaignId);
-  if (!campaign || !apiKey || !connectionId) {
+  if (!campaign || !apiKey) {
     await resolvePowerLeadLeg({
       callControlId: params.leadCallControlId,
       resolution: "DROP_NO_AGENT",
@@ -625,6 +628,21 @@ export async function connectPowerLeadToAgent(params: {
   }
 
   const attempt = leg.agentAttempts + 1;
+  await ensurePowerDialerAgentTelnyx({ userId: agent.userId, apiKey }).catch(() => null);
+  const connectionId = await resolvePowerAgentOutboundConnectionId({
+    apiKey,
+    agentUserId: agent.userId,
+  });
+  if (!connectionId) {
+    await releasePowerAgentReservation({ sessionId: agent.sessionId });
+    await resolvePowerLeadLeg({
+      callControlId: params.leadCallControlId,
+      resolution: "DROP_NO_AGENT",
+      hangup: true,
+      campaign,
+    });
+    return "dropped";
+  }
   const fromNumber =
     leg.fromNumber?.trim() || pickTelnyxFromNumber(leg.leadId, { userId: agent.userId }) || "";
   const agentTelnyx = await prisma.user.findUnique({
