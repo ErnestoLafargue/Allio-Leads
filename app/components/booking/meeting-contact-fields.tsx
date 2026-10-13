@@ -1,6 +1,11 @@
 "use client";
 
 import type { MeetingContactFieldErrors } from "@/lib/meeting-contact-validation";
+import {
+  MEETING_TYPE_PHYSICAL,
+  type MeetingType,
+  normalizeMeetingType,
+} from "@/lib/meeting-type";
 
 export type MeetingContactFieldsProps = {
   meetingContactName: string;
@@ -13,6 +18,11 @@ export type MeetingContactFieldsProps = {
   meetingCompanyName?: string;
   onMeetingCompanyName?: (v: string) => void;
   meetingCompanyNameError?: string;
+  /** ONLINE | PHYSICAL — styrer om mødeadresse er påkrævet. */
+  meetingType?: MeetingType | string;
+  meetingAddress?: string;
+  onMeetingAddress?: (v: string) => void;
+  meetingAddressError?: string;
   className?: string;
   /** Når true: felterne er obligatoriske (HTML + visuelle markeringer ved fejl). */
   contactRequired?: boolean;
@@ -35,11 +45,20 @@ export function MeetingContactFields({
   meetingCompanyName,
   onMeetingCompanyName,
   meetingCompanyNameError,
+  meetingType,
+  meetingAddress,
+  onMeetingAddress,
+  meetingAddressError,
   className = "",
   contactRequired = false,
   fieldErrors,
 }: MeetingContactFieldsProps) {
   const e = fieldErrors ?? {};
+  const type = normalizeMeetingType(meetingType);
+  const isPhysical = type === MEETING_TYPE_PHYSICAL;
+  const addressRequired = contactRequired && isPhysical;
+  const showAddress = onMeetingAddress != null;
+
   return (
     <div
       className={[
@@ -118,6 +137,34 @@ export function MeetingContactFields({
         />
         {e.phone ? <p className="mt-1 text-xs text-red-600">{e.phone}</p> : null}
       </div>
+      {showAddress ? (
+        <div className={isPhysical ? "" : "opacity-80"}>
+          <label className="mb-1 block text-xs font-medium text-emerald-950">
+            Mødeadresse (hvis mødet er fysisk)
+            {addressRequired ? <span className="text-red-600"> *</span> : null}
+          </label>
+          <input
+            type="text"
+            autoComplete="street-address"
+            value={meetingAddress ?? ""}
+            onChange={(ev) => onMeetingAddress(ev.target.value)}
+            aria-invalid={Boolean(meetingAddressError ?? e.address)}
+            className={`w-full rounded-lg border bg-white px-3 py-2 text-sm text-stone-900 shadow-sm outline-none ${inputRingClass(meetingAddressError ?? e.address)}`}
+            placeholder="Fx Vesterbrogade 1, 1620 København V"
+            required={addressRequired}
+          />
+          {isPhysical ? (
+            <p className="mt-0.5 text-xs text-emerald-800/80">
+              Påkrævet ved fysisk møde — sendes til Podio og Cal.eu som lokation.
+            </p>
+          ) : (
+            <p className="mt-0.5 text-xs text-emerald-800/70">Valgfrit ved onlinemøde.</p>
+          )}
+          {(meetingAddressError ?? e.address) ? (
+            <p className="mt-1 text-xs text-red-600">{meetingAddressError ?? e.address}</p>
+          ) : null}
+        </div>
+      ) : null}
     </div>
   );
 }

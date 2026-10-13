@@ -5,6 +5,7 @@ import { BookingPanel, type BookingPanelProps } from "@/app/components/booking/b
 import { MeetingContactFields } from "@/app/components/booking/meeting-contact-fields";
 import { AdLibraryCard } from "@/app/components/ad-library-card";
 import type { MeetingContactFieldErrors } from "@/lib/meeting-contact-validation";
+import type { MeetingType } from "@/lib/meeting-type";
 
 type MeetingContactProps = {
   meetingContactName: string;
@@ -16,6 +17,9 @@ type MeetingContactProps = {
   /** Virksomhed til mødet — separat fra leadets companyName i Kunde-panelet. */
   meetingCompanyName: string;
   onMeetingCompanyName: (v: string) => void;
+  meetingType?: MeetingType | string;
+  meetingAddress?: string;
+  onMeetingAddress?: (v: string) => void;
   contactRequired: boolean;
   meetingContactErrors?: MeetingContactFieldErrors;
 };
@@ -109,6 +113,9 @@ export function LeadKundeNoterBooking({
     onMeetingContactPhonePrivate,
     meetingCompanyName,
     onMeetingCompanyName,
+    meetingType,
+    meetingAddress,
+    onMeetingAddress,
     contactRequired,
     meetingContactErrors,
   } = meetingContact;
@@ -173,6 +180,10 @@ export function LeadKundeNoterBooking({
             meetingCompanyName={meetingCompanyName}
             onMeetingCompanyName={onMeetingCompanyName}
             meetingCompanyNameError={contactRequired ? meetingContactErrors?.meetingCompany : undefined}
+            meetingType={meetingType}
+            meetingAddress={meetingAddress}
+            onMeetingAddress={onMeetingAddress}
+            meetingAddressError={contactRequired ? meetingContactErrors?.address : undefined}
             fieldErrors={contactRequired ? meetingContactErrors : undefined}
             meetingContactName={meetingContactName}
             meetingContactEmail={meetingContactEmail}
