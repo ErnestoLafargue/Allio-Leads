@@ -500,6 +500,28 @@ export function PowerDialerPhone({
       const token = stateToken(call.state);
       const current = activeCallRef.current;
       const isCurrent = current === call || (current && callIdentity(current) === callIdentity(call));
+      // #region agent log
+      fetch("http://localhost:7723/ingest/7a50d2a1-e6f0-436c-8453-6828c3db5e26", {
+        method: "POST",
+        headers: { "Content-Type": "application/json", "X-Debug-Session-Id": "c1392e" },
+        body: JSON.stringify({
+          sessionId: "c1392e",
+          runId: "pre-fix",
+          hypothesisId: "C",
+          location: "app/components/power-dialer-phone.tsx:handleNotification",
+          message: "webrtc notify",
+          data: {
+            token,
+            direction: call.direction ?? null,
+            enabled: enabledRef.current,
+            hasCurrent: Boolean(current),
+            outboundIntent: outboundDialIntentRef.current,
+          },
+          timestamp: Date.now(),
+        }),
+      }).catch(() => {});
+      console.warn("[dbg-c1392e] webrtc-notify", token, call.direction ?? null, enabledRef.current);
+      // #endregion
 
       if (CLOSED_STATES.has(token)) {
         if (isCurrent) {

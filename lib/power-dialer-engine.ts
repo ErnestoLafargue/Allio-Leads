@@ -627,6 +627,15 @@ export async function connectPowerLeadToAgent(params: {
   const attempt = leg.agentAttempts + 1;
   const fromNumber =
     leg.fromNumber?.trim() || pickTelnyxFromNumber(leg.leadId, { userId: agent.userId }) || "";
+  const agentTelnyx = await prisma.user.findUnique({
+    where: { id: agent.userId },
+    select: {
+      telnyxCredentialConnectionId: true,
+      telnyxSipUriCallingEnabledAt: true,
+      telnyxCredentialSipUsername: true,
+    },
+  });
+  const credConn = agentTelnyx?.telnyxCredentialConnectionId?.trim() || null;
   const dial = await dialTelnyxOutbound({
     connectionId,
     apiKey,
@@ -649,6 +658,37 @@ export async function connectPowerLeadToAgent(params: {
     timeoutSecs: POWER_AGENT_LEG_TIMEOUT_SECS,
     commandId: `power-agent-${params.leadCallControlId}-${attempt}`,
   });
+  // #region agent log
+  fetch("http://localhost:7723/ingest/7a50d2a1-e6f0-436c-8453-6828c3db5e26", {
+    method: "POST",
+    headers: { "Content-Type": "application/json", "X-Debug-Session-Id": "c1392e" },
+    body: JSON.stringify({
+      sessionId: "c1392e",
+      runId: "pre-fix",
+      hypothesisId: "A",
+      location: "lib/power-dialer-engine.ts:connectPowerLeadToAgent",
+      message: "agent dial",
+      data: {
+        dialOk: dial.ok,
+        dialStatus: dial.ok ? 200 : dial.status,
+        usedConnTail: connectionId.slice(-8),
+        credConnTail: credConn ? credConn.slice(-8) : null,
+        sameConn: Boolean(credConn) && credConn === connectionId,
+        sipUriOn: Boolean(agentTelnyx?.telnyxSipUriCallingEnabledAt),
+        sipIsGencred: Boolean(agentTelnyx?.telnyxCredentialSipUsername),
+        sipLooksGencred: agent.sipUri.toLowerCase().includes("gencred"),
+        attempt,
+      },
+      timestamp: Date.now(),
+    }),
+  }).catch(() => {});
+  console.warn("[dbg-c1392e] agent-dial", {
+    dialOk: dial.ok,
+    sameConn: Boolean(credConn) && credConn === connectionId,
+    sipUriOn: Boolean(agentTelnyx?.telnyxSipUriCallingEnabledAt),
+    sipLooksGencred: agent.sipUri.toLowerCase().includes("gencred"),
+  });
+  // #endregion
 
   if (!dial.ok) {
     console.error("[power-dialer] agent-ben kunne ikke ringes op", {
@@ -922,6 +962,28 @@ async function settlePowerGreeting(
     timedOut: opts.timedOut,
     sonioxListening: isPowerSonioxListeningHint(leg.greetingHint),
   });
+  // #region agent log
+  fetch("http://localhost:7723/ingest/7a50d2a1-e6f0-436c-8453-6828c3db5e26", {
+    method: "POST",
+    headers: { "Content-Type": "application/json", "X-Debug-Session-Id": "c1392e" },
+    body: JSON.stringify({
+      sessionId: "c1392e",
+      runId: "pre-fix",
+      hypothesisId: "D",
+      location: "lib/power-dialer-engine.ts:settlePowerGreeting",
+      message: "greeting settle",
+      data: {
+        action,
+        amd: leg.amdResult,
+        greetingHint: leg.greetingHint,
+        timedOut: opts.timedOut,
+        sonioxListening: isPowerSonioxListeningHint(leg.greetingHint),
+      },
+      timestamp: Date.now(),
+    }),
+  }).catch(() => {});
+  console.warn("[dbg-c1392e] settle", action, leg.amdResult, leg.greetingHint);
+  // #endregion
   if (action === "WAIT") return;
 
   const campaign = await loadPowerCampaign(leg.campaignId);
@@ -1174,6 +1236,22 @@ export async function handlePowerAgentEnded(params: {
   hangupCause: string | null;
   hangupSource: string | null;
 }): Promise<void> {
+  // #region agent log
+  fetch("http://localhost:7723/ingest/7a50d2a1-e6f0-436c-8453-6828c3db5e26", {
+    method: "POST",
+    headers: { "Content-Type": "application/json", "X-Debug-Session-Id": "c1392e" },
+    body: JSON.stringify({
+      sessionId: "c1392e",
+      runId: "pre-fix",
+      hypothesisId: "A",
+      location: "lib/power-dialer-engine.ts:handlePowerAgentEnded",
+      message: "agent hangup",
+      data: { hangupCause: params.hangupCause, hangupSource: params.hangupSource },
+      timestamp: Date.now(),
+    }),
+  }).catch(() => {});
+  console.warn("[dbg-c1392e] agent-hangup", params.hangupCause, params.hangupSource);
+  // #endregion
   const now = new Date();
   await prisma.dialerCallLog.updateMany({
     where: { callControlId: params.agentCallControlId, endedAt: null },
