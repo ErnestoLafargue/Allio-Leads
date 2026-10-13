@@ -336,13 +336,16 @@ export function LiveCoach(props: {
     };
   }, [active, micStream, remoteStream, askClaude, onObjection, publish]);
 
-  if (!active) return null;
+  // Efter opkaldet bliver det sidste kort og vurderingen stående, til næste opkald starter.
+  if (!active && !card && !assessment) return null;
   const silent = machine === "voicemail" || machine === "ivr";
   return (
     <div className="w-full max-w-md rounded-xl border border-stone-200 bg-white p-3 shadow-sm">
       <div className="flex items-center justify-between text-[11px] uppercase tracking-wide text-stone-500">
         <span>Live-coach</span>
-        <span>{status === "listening" ? "● lytter" : status === "starting" ? "starter…" : status === "error" ? "fejl" : ""}</span>
+        <span>
+          {!active ? "opkald slut" : status === "listening" ? "● lytter" : status === "starting" ? "starter…" : status === "error" ? "fejl" : ""}
+        </span>
       </div>
       {error ? <p className="mt-1 text-xs text-rose-700">{error}</p> : null}
       {silent ? (
