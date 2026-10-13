@@ -84,11 +84,13 @@ Soniox ca. 0,56 sek. + Claude Haiku ca. 1,1 sek. Med tekst til tale (anslået 0,
    bør prøves af i fase 0.
 
 ## 5. Jura og tillid (skal afklares før rigtige opkald)
-- **Markedsføringsloven § 10:** henvendelser via et *automatiseret opkaldssystem* til direkte
-  markedsføring kræver normalt forudgående samtykke. Det skal afklares med en jurist, om en
-  AI-sælger er omfattet, også når kunderne er virksomheder (klinikker).
-- **EU's AI-forordning (gennemsigtighed):** kunden skal vide, at de taler med en AI. Åbningen siger det
-  ærligt, ligesom sælgerne i dag siger «jeg er mødebooker».
+- **Markedsføringsloven § 10 (Ernestos linje, 13/10):** vi sender SMS'er efter § 10, stk. 2, fordi
+  kunden altid kan frabede sig flere med linket i beskeden. Det er den model, Allio kører på i dag.
+  Note: § 10, stk. 2, handler om elektronisk post (mail/SMS) til eksisterende kunder. Et opkald fra
+  Adrian kan blive set som et *automatiseret opkaldssystem* efter § 10, stk. 1, og det er en anden
+  regel. Det bør en jurist kigge på, før fase 3 (rigtige leads).
+- **EU's AI-forordning, art. 50 (gennemsigtighed, gælder fra 2/8-2026):** kunden skal vide, at de taler
+  med en AI, medmindre det er åbenlyst. Åbningen siger det kort, fx «Det er Adrian, Allios AI-assistent».
 - **Optagelse og data:** samme samtykke og opbevaring som i dag. Lyden går til Soniox og
   tekst-til-tale-udbyderen og gemmes ikke hos dem.
 - **Robinson-listen og frabedt kontakt** respekteres som i dag.
@@ -130,7 +132,8 @@ al genbrugt kode (live-coach, analyse, ugens script, booking) ligger dér.
 ## 9. Åbne spørgsmål til Ernesto
 1. Skal AI'en ringe til alle leads, eller kun til en del (fx genkald, gamle leads, uden for åbningstid)?
 2. Må den booke direkte, eller skal en sælger bekræfte mødet bagefter?
-3. Hvilken stemme og hvilket navn skal den have (fx «Adam» som i mails), og skal den sige, at den er AI,
-   i første sætning?
-4. Hvilken tekst-til-tale-udbyder? ElevenLabs-nøglen findes allerede i `.env.local`.
+3. ~~Navn~~ **Besluttet 13/10: Adrian.** Stemmen vælges ved en lyttetest (se 4).
+4. Tekst til tale: vi starter med ElevenLabs. Først en dansk lyttetest (samme replikker med «øh»,
+   «altså», «mm» osv.) mod ElevenLabs Flash v2.5, ElevenLabs v3, Cartesia Sonic, Azure HD og Google
+   Chirp 3 HD, og evt. en tale-til-tale-model som reference. Vurderes af Ernesto på lyd og latens.
 5. Hvor mange sælgere skal være klar til viderestilling, mens den kører?
