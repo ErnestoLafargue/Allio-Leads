@@ -7,6 +7,7 @@ import {
   formatDayLabel,
   serializeEntry,
   sumClockedSeconds,
+  validateAdminPunchTimes,
   type TimeClockOverview,
   type TimeClockStatus,
 } from "@/lib/time-clock";
@@ -140,4 +141,108 @@ export async function getTimeClockOverview(args: {
     clockedInCount: rows.filter((r) => r.clockedIn).length,
     rows,
   };
+}
+
+async function otherEntriesForUser(userId: string, exceptId?: string) {
+  return prisma.timeClockEntry.findMany({
+    where: exceptId ? { userId, id: { not: exceptId } } : { userId },
+    select: entrySelect,
+  });
+}
+
+export async function adminUpdateTimeClockEntry(args: {
+  entryId: string;
+  punchedInAt: Date;
+  punchedOutAt: Date | null;
+  now?: Date;
+}): Promise<void> {
+  const now = args.now ?? new Date();
+  const existing = await prisma.timeClockEntry.findUnique({
+    where: { id: args.entryId },
+    select: entrySelect,
+  });
+  if (!existing) {
+    throw new TimeClockError("Stemplingen blev ikke fundet.", "not_found");
+  }
+  const others = await otherEntriesForUser(existing.userId, existing.id);
+  const check = validateAdminPunchTimes({
+    punchedInAt: args.punchedInAt,
+    punchedOutAt: args.punchedOutAt,
+    now,
+    others,
+  });
+  if (!check.ok) throw new TimeClockError(check.message, check.code);
+
+  try {
+    await prisma.timeClockEntry.update({
+      where: { id: existing.id },
+      data: {
+        punchedInAt: args.punchedInAt,
+        punchedOutAt: args.punchedOutAt,
+        dayKey: copenhagenDayKey(args.punchedInAt),
+      },
+    });
+  } catch (e) {
+    if (isUniqueViolation(e)) {
+      throw new TimeClockError(
+        "Personen er allerede stemplet ind. Ret den åbne tid i stedet.",
+        "already_open",
+      );
+    }
+    throw e;
+  }
+}
+
+export async function adminCreateTimeClockEntry(args: {
+  userId: string;
+  punchedInAt: Date;
+  punchedOutAt: Date | null;
+  now?: Date;
+}): Promise<void> {
+  const now = args.now ?? new Date();
+  const user = await prisma.user.findUnique({
+    where: { id: args.userId },
+    select: { id: true },
+  });
+  if (!user) {
+    throw new TimeClockError("Brugeren blev ikke fundet.", "not_found");
+  }
+  const others = await otherEntriesForUser(args.userId);
+  const check = validateAdminPunchTimes({
+    punchedInAt: args.punchedInAt,
+    punchedOutAt: args.punchedOutAt,
+    now,
+    others,
+  });
+  if (!check.ok) throw new TimeClockError(check.message, check.code);
+
+  try {
+    await prisma.timeClockEntry.create({
+      data: {
+        userId: args.userId,
+        punchedInAt: args.punchedInAt,
+        punchedOutAt: args.punchedOutAt,
+        dayKey: copenhagenDayKey(args.punchedInAt),
+      },
+    });
+  } catch (e) {
+    if (isUniqueViolation(e)) {
+      throw new TimeClockError(
+        "Personen er allerede stemplet ind. Ret den åbne tid i stedet.",
+        "already_open",
+      );
+    }
+    throw e;
+  }
+}
+
+export async function adminDeleteTimeClockEntry(entryId: string): Promise<void> {
+  const existing = await prisma.timeClockEntry.findUnique({
+    where: { id: entryId },
+    select: { id: true },
+  });
+  if (!existing) {
+    throw new TimeClockError("Stemplingen blev ikke fundet.", "not_found");
+  }
+  await prisma.timeClockEntry.delete({ where: { id: entryId } });
 }
