@@ -4,6 +4,13 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useAudioLevel } from "@/lib/use-audio-level";
 import { useCallAudioPublisher } from "@/lib/live-coach/call-audio";
 import {
+  clearActiveDialerCampaignIfMatches,
+  setActiveDialerCampaign,
+  setActiveDialerLinePhase,
+} from "@/lib/active-dialer-campaign";
+import { linePhaseFromVoipStatus } from "@/lib/dialer-line-phase";
+import { reportDialerLineOccupancy } from "@/lib/report-dialer-line";
+import {
   ensureMicPermissionAndEnumerate,
   headsetSetupBlockedReason,
   labelForDeviceId,
@@ -14,11 +21,18 @@ import {
   VOIP_STORED_SPK_KEY,
   writeStoredDeviceId,
 } from "@/lib/voip-audio-devices";
+import {
+  chosenDialNumber,
+  showsDialNumberMenu,
+  type DialNumberMenuItem,
+} from "@/lib/lead-phones";
+import { normalizePhoneToE164ForDial, stripDialFormatting } from "@/lib/phone-e164";
 
 /**
  * Power Dialer-telefon: én vedvarende WebRTC-forbindelse for hele Power-sessionen (venteskærm og
  * lead-visning). Serveren ringer sælgeren op, når et menneske har svaret; telefonen svarer selv,
- * og Telnyx bridger lead og sælger. Komponenten må ikke unmountes, mens sessionen kører.
+ * og Telnyx bridger lead og sælger. Når et lead er åbent, vises samme nummerfelt som i klik-til-opkald,
+ * så sælgeren kan skifte nummer og ringe ud. Komponenten må ikke unmountes, mens sessionen kører.
  */
 
 export type PowerPhoneLineStatus = "idle" | "ringing" | "live";
@@ -29,6 +43,13 @@ export type PowerPhoneState = {
   problem: string | null;
 };
 
+export type PowerLeadDialProps = {
+  leadId: string;
+  leadPhone: string;
+  dialMenu: DialNumberMenuItem[];
+  onUpdateLeadPhone: (nextPhone: string) => Promise<{ ok: boolean; message?: string }>;
+};
+
 type Props = {
   campaignId: string;
   /** Sessionen er aktiv — indgående forbindelser besvares automatisk. */
@@ -37,6 +58,8 @@ type Props = {
   leadLabel: string | null;
   /** Lead som taletid rapporteres på (scoreboard). */
   reportLeadId: string | null;
+  /** Når lead er åbent: nummerfelt + «Ring op» (samme flow som klik-til-opkald). */
+  leadDial?: PowerLeadDialProps | null;
   /** Øges af parent for at lægge det aktuelle opkald på. */
   hangupSignal: number;
   onStateChange: (state: PowerPhoneState) => void;
@@ -59,6 +82,16 @@ type TelnyxClient = {
   remoteElement?: string;
   connect: () => void;
   disconnect: () => void;
+  newCall: (options: {
+    destinationNumber?: string;
+    callerNumber?: string;
+    remoteElement?: string;
+    micId?: string;
+    speakerId?: string;
+    audio?: MediaTrackConstraints | boolean;
+    localStream?: MediaStream;
+    clientState?: string;
+  }) => unknown;
   on: (eventName: string, callback: (...args: unknown[]) => void) => TelnyxClient;
   off: (eventName: string, callback?: (...args: unknown[]) => void) => TelnyxClient;
 };
@@ -125,6 +158,7 @@ export function PowerDialerPhone({
   enabled,
   leadLabel,
   reportLeadId,
+  leadDial = null,
   hangupSignal,
   onStateChange,
 }: Props) {
@@ -140,6 +174,16 @@ export function PowerDialerPhone({
   const [manualHeadsetConfirm, setManualHeadsetConfirm] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [micStream, setMicStream] = useState<MediaStream | null>(null);
+
+  // --- Nummerfelt når lead er åbent ---------------------------------------
+  const [activeDialPhone, setActiveDialPhone] = useState(() => (leadDial?.leadPhone || "").trim());
+  const [editingPhone, setEditingPhone] = useState(false);
+  const [phoneDraft, setPhoneDraft] = useState("");
+  const [savingPhone, setSavingPhone] = useState(false);
+  const [dialBusy, setDialBusy] = useState(false);
+  const [dialDetail, setDialDetail] = useState<string | null>(null);
+  const callerNumberRef = useRef("");
+  const lastLeadDialIdRef = useRef<string | null>(null);
 
   const inputDevs = useMemo(() => devices.filter((d) => d.kind === "audioinput"), [devices]);
   const outputDevs = useMemo(() => devices.filter((d) => d.kind === "audiooutput"), [devices]);
@@ -211,6 +255,24 @@ export function PowerDialerPhone({
   useEffect(() => {
     onStateChangeRef.current({ webrtcReady, lineStatus, problem });
   }, [webrtcReady, lineStatus, problem]);
+
+  useEffect(() => {
+    if (!enabled || lineStatus === "idle") {
+      setActiveDialerLinePhase(null);
+      reportDialerLineOccupancy(campaignId, null);
+      if (lineStatus === "idle") clearActiveDialerCampaignIfMatches(campaignId);
+      return;
+    }
+    const phase = linePhaseFromVoipStatus(lineStatus);
+    setActiveDialerCampaign(campaignId);
+    setActiveDialerLinePhase(phase);
+    reportDialerLineOccupancy(campaignId, phase);
+    return () => {
+      setActiveDialerLinePhase(null);
+      reportDialerLineOccupancy(campaignId, null);
+      clearActiveDialerCampaignIfMatches(campaignId);
+    };
+  }, [campaignId, enabled, lineStatus]);
 
   // Auto-init: genbrug tidligere givet mikrofon-tilladelse og gemte enheder.
   useEffect(() => {
@@ -440,6 +502,22 @@ export function PowerDialerPhone({
     }
   }, [reportLeadId]);
 
+  // Synkroniser nummerfelt når lead skifter (ikke midt i redigering).
+  useEffect(() => {
+    const leadId = leadDial?.leadId ?? null;
+    const phone = (leadDial?.leadPhone || "").trim();
+    if (leadId !== lastLeadDialIdRef.current) {
+      lastLeadDialIdRef.current = leadId;
+      setActiveDialPhone(phone);
+      setEditingPhone(false);
+      setPhoneDraft("");
+      setDialDetail(null);
+      setDialBusy(false);
+      return;
+    }
+    if (!editingPhone) setActiveDialPhone(phone);
+  }, [leadDial?.leadId, leadDial?.leadPhone, editingPhone]);
+
   const disconnectClient = useCallback(() => {
     const client = clientRef.current;
     clientRef.current = null;
@@ -465,11 +543,15 @@ export function PowerDialerPhone({
       });
       const json = (await res.json().catch(() => ({}))) as {
         loginToken?: string;
+        callerNumber?: string;
         error?: string;
         power?: { ready: boolean; message: string | null };
       };
       if (!res.ok || !json.loginToken) {
         throw new Error(json.error || `Kunne ikke hente login til telefonsystemet (HTTP ${res.status}).`);
+      }
+      if (typeof json.callerNumber === "string" && json.callerNumber.trim()) {
+        callerNumberRef.current = json.callerNumber.trim();
       }
       if (json.power && !json.power.ready) {
         console.warn("[power-phone] Telnyx-klargøring:", json.power.message);
@@ -616,6 +698,121 @@ export function PowerDialerPhone({
     hangUp();
   }, [hangupSignal, hangUp]);
 
+  const placeOutboundDial = useCallback(async () => {
+    if (!leadDial?.leadId || dialBusy) return;
+    if (!clientRef.current || !registered) {
+      setDialDetail("Telefonen er ikke klar endnu — vent lidt.");
+      return;
+    }
+    const raw = stripDialFormatting(editingPhone ? phoneDraft : activeDialPhone);
+    if (!raw) {
+      setDialDetail("Indtast et telefonnummer først.");
+      return;
+    }
+    const menu = leadDial.dialMenu;
+    if (showsDialNumberMenu(menu) && !editingPhone && !chosenDialNumber(menu, raw)) {
+      setDialDetail("Vælg et nummer fra listen, eller rediger nummeret.");
+      return;
+    }
+    const toE164 = normalizePhoneToE164ForDial(raw);
+    if (!toE164) {
+      setDialDetail("Ugyldigt telefonnummer.");
+      return;
+    }
+
+    setDialBusy(true);
+    setDialDetail(null);
+    try {
+      if (activeCallRef.current) {
+        hangUp();
+        await new Promise((r) => window.setTimeout(r, 350));
+      }
+      const prepRes = await fetch("/api/telnyx/manual-call/prepare", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ leadId: leadDial.leadId, voipApiContext: "power_session" }),
+        credentials: "same-origin",
+      });
+      if (!prepRes.ok) {
+        const data = (await prepRes.json().catch(() => null)) as { error?: string } | null;
+        throw new Error(data?.error || `Kunne ikke forberede opkald (HTTP ${prepRes.status}).`);
+      }
+      const prepData = (await prepRes.json()) as { clientState?: string };
+      const clientState =
+        typeof prepData.clientState === "string" && prepData.clientState.length > 0
+          ? prepData.clientState
+          : undefined;
+      if (!clientRef.current) throw new Error("Telefonforbindelsen forsvandt.");
+
+      const callOptions: Parameters<TelnyxClient["newCall"]>[0] = {
+        destinationNumber: toE164,
+        callerNumber: callerNumberRef.current || undefined,
+        remoteElement: remoteAudioId,
+      };
+      if (speakerId) callOptions.speakerId = speakerId;
+      if (micStream) callOptions.localStream = micStream.clone();
+      else if (micId) callOptions.micId = micId;
+      if (clientState) callOptions.clientState = clientState;
+
+      const call = clientRef.current.newCall(callOptions) as TelnyxCall;
+      activeCallRef.current = call;
+      if (call.remoteStream) setRemoteStream(call.remoteStream);
+      setLineStatus("ringing");
+      setDialDetail(`Ringer ${toE164}…`);
+      void fetch("/api/telnyx/webrtc/log-attempt", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          leadId: leadDial.leadId,
+          toE164,
+          voipApiContext: "power_session",
+        }),
+        credentials: "same-origin",
+      }).catch(() => undefined);
+    } catch (err) {
+      clearCall();
+      setDialDetail(err instanceof Error ? err.message : "Kunne ikke starte opkald.");
+    } finally {
+      setDialBusy(false);
+    }
+  }, [
+    leadDial,
+    dialBusy,
+    registered,
+    editingPhone,
+    phoneDraft,
+    activeDialPhone,
+    hangUp,
+    remoteAudioId,
+    speakerId,
+    micStream,
+    micId,
+    clearCall,
+  ]);
+
+  const saveLeadPhone = useCallback(async () => {
+    if (!leadDial || savingPhone) return;
+    const next = phoneDraft.trim();
+    if (!next) {
+      setDialDetail("Nummeret må ikke være tomt.");
+      return;
+    }
+    setSavingPhone(true);
+    setDialDetail(null);
+    try {
+      const result = await leadDial.onUpdateLeadPhone(next);
+      if (!result.ok) {
+        setDialDetail(result.message || "Kunne ikke gemme nummer.");
+        return;
+      }
+      setActiveDialPhone(next);
+      setEditingPhone(false);
+      setDialDetail(result.message || "Nummer opdateret.");
+    } finally {
+      setSavingPhone(false);
+    }
+  }, [leadDial, savingPhone, phoneDraft]);
+
   // Uret under samtale.
   useEffect(() => {
     if (liveSince === null) return;
@@ -744,6 +941,94 @@ export function PowerDialerPhone({
             </button>
           ) : null}
         </p>
+      ) : null}
+
+      {leadDial ? (
+        <div className="mt-3 rounded-xl border border-emerald-100 bg-white/85 px-3 py-3">
+          <label
+            htmlFor={`power-dial-${leadDial.leadId}`}
+            className="text-[11px] font-semibold uppercase tracking-wide text-emerald-900/85"
+          >
+            Telefonnummer (opkald)
+          </label>
+          <div className="mt-1 flex flex-wrap items-center gap-3">
+            {showsDialNumberMenu(leadDial.dialMenu) && !editingPhone ? (
+              <div className="relative min-w-[12rem] flex-1">
+                <select
+                  id={`power-dial-${leadDial.leadId}`}
+                  value={
+                    chosenDialNumber(leadDial.dialMenu, activeDialPhone)?.raw ??
+                    leadDial.dialMenu[0]?.raw ??
+                    ""
+                  }
+                  onChange={(e) => setActiveDialPhone(e.target.value)}
+                  aria-label="Vælg telefonnummer"
+                  className="w-full appearance-none rounded-md border border-emerald-200/80 bg-white py-2 pl-3 pr-9 font-mono text-sm font-medium tracking-wide text-stone-900 shadow-sm outline-none ring-emerald-400/40 focus:ring-2"
+                >
+                  {leadDial.dialMenu.map((item) => (
+                    <option key={`${item.kind}-${item.raw}`} value={item.raw}>
+                      {item.label}
+                    </option>
+                  ))}
+                </select>
+              </div>
+            ) : (
+              <input
+                id={`power-dial-${leadDial.leadId}`}
+                type="text"
+                inputMode="tel"
+                autoComplete="off"
+                value={editingPhone ? phoneDraft : activeDialPhone}
+                onChange={(e) => setPhoneDraft(e.target.value)}
+                readOnly={!editingPhone}
+                placeholder="Nummer til opkald"
+                className="min-w-[12rem] flex-1 rounded-md border border-emerald-200/80 bg-white px-3 py-2 font-mono text-sm font-medium tracking-wide text-stone-900 shadow-sm outline-none ring-emerald-400/40 focus:ring-2"
+              />
+            )}
+            <button
+              type="button"
+              onClick={() => {
+                if (editingPhone) {
+                  void saveLeadPhone();
+                  return;
+                }
+                setPhoneDraft(activeDialPhone || leadDial.leadPhone || "");
+                setEditingPhone(true);
+              }}
+              disabled={savingPhone}
+              className="rounded-md border border-emerald-200 bg-white px-3 py-2 text-xs font-semibold text-emerald-800 shadow-sm hover:bg-emerald-50 disabled:opacity-60"
+            >
+              {editingPhone ? (savingPhone ? "Gemmer…" : "Gem nummer") : "Rediger nummer"}
+            </button>
+            {editingPhone ? (
+              <button
+                type="button"
+                onClick={() => {
+                  setEditingPhone(false);
+                  setPhoneDraft("");
+                  setDialDetail(null);
+                }}
+                className="rounded-md border border-stone-200 bg-white px-3 py-2 text-xs font-semibold text-stone-700 shadow-sm hover:bg-stone-50"
+              >
+                Annuller
+              </button>
+            ) : (
+              <button
+                type="button"
+                onClick={() => void placeOutboundDial()}
+                disabled={dialBusy || !webrtcReady || editingPhone}
+                className="rounded-md bg-emerald-700 px-3 py-2 text-xs font-semibold text-white shadow-sm hover:bg-emerald-800 disabled:opacity-60"
+              >
+                {dialBusy ? "Ringer…" : lineStatus !== "idle" ? "Læg på og ring" : "Ring op"}
+              </button>
+            )}
+          </div>
+          {dialDetail ? (
+            <p className="mt-2 text-xs font-medium text-stone-700" role="status">
+              {dialDetail}
+            </p>
+          ) : null}
+        </div>
       ) : null}
 
       {dtmfOpen && lineStatus === "live" ? (

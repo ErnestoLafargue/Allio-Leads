@@ -1771,6 +1771,16 @@ export function CampaignWorkspace({
           enabled={!powerServer?.superseded}
           leadLabel={current?.companyName ?? null}
           reportLeadId={current?.id ?? null}
+          leadDial={
+            current
+              ? {
+                  leadId: current.id,
+                  leadPhone: dialPhoneForOpenLead({ phone, privatePhone }, dialPhonePriority),
+                  dialMenu: dialNumberMenu(phone, privatePhone, dialPhonePriority),
+                  onUpdateLeadPhone: handleUpdateLeadPhoneFromVoip,
+                }
+              : null
+          }
           hangupSignal={voipHangupSignal}
           onStateChange={setPowerPhone}
         />
