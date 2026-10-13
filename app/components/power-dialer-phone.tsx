@@ -72,7 +72,14 @@ type TelnyxCall = {
   telnyxIDs?: { telnyxCallControlId?: string; telnyxSessionId?: string; telnyxLegId?: string };
   remoteStream?: MediaStream;
   hangup?: () => Promise<void> | void;
-  answer?: (options?: { audio?: MediaTrackConstraints | boolean; video?: boolean }) => Promise<void> | void;
+  answer?: (options?: {
+    audio?: MediaTrackConstraints | boolean;
+    video?: boolean;
+    micId?: string;
+    speakerId?: string;
+    remoteElement?: string | HTMLAudioElement;
+    localStream?: MediaStream;
+  }) => Promise<void> | void;
   dtmf?: (digits: string) => void;
   muteAudio?: () => void;
   unmuteAudio?: () => void;
@@ -215,6 +222,10 @@ export function PowerDialerPhone({
 
   const clientRef = useRef<TelnyxClient | null>(null);
   const activeCallRef = useRef<TelnyxCall | null>(null);
+  const answeringCallIdRef = useRef<string | null>(null);
+  const outboundDialIntentRef = useRef(false);
+  const speakerIdRef = useRef(speakerId);
+  const micStreamRef = useRef<MediaStream | null>(null);
   const liveTalkRef = useRef<{ leadId: string | null; startedAt: number } | null>(null);
   const remoteAudioRef = useRef<HTMLAudioElement | null>(null);
   const enabledRef = useRef(enabled);
@@ -229,6 +240,8 @@ export function PowerDialerPhone({
   useEffect(() => {
     enabledRef.current = enabled;
     micIdRef.current = micId;
+    speakerIdRef.current = speakerId;
+    micStreamRef.current = micStream;
     reportLeadIdRef.current = reportLeadId;
     onStateChangeRef.current = onStateChange;
   });
@@ -430,12 +443,54 @@ export function PowerDialerPhone({
 
   const clearCall = useCallback(() => {
     activeCallRef.current = null;
+    answeringCallIdRef.current = null;
     setRemoteStream(null);
     setLineStatus("idle");
     setLiveSince(null);
     setMuted(false);
     setDtmfOpen(false);
   }, []);
+
+  const attachRemoteAudio = useCallback((stream: MediaStream | null | undefined) => {
+    if (!stream) return;
+    setRemoteStream(stream);
+    const el = remoteAudioRef.current;
+    if (!el) return;
+    if (el.srcObject !== stream) el.srcObject = stream;
+    void el.play().catch(() => undefined);
+    void setAudioElementSink(el, speakerIdRef.current);
+  }, []);
+
+  const answerInboundBridge = useCallback((call: TelnyxCall) => {
+    const id = callIdentity(call);
+    if (id && answeringCallIdRef.current === id) return;
+    if (id) answeringCallIdRef.current = id;
+    try {
+      const opts: Parameters<NonNullable<TelnyxCall["answer"]>>[0] = {
+        remoteElement: remoteAudioId,
+      };
+      if (micIdRef.current) opts.micId = micIdRef.current;
+      if (speakerIdRef.current) opts.speakerId = speakerIdRef.current;
+      // Genbrug den allerede åbne mic-stream — undgå ekstra getUserMedia med exact-deviceId
+      // som ofte fejler, mens monitor-streamen kører (OverconstrainedError → tavs/afbrudt bridge).
+      if (micStreamRef.current) {
+        try {
+          opts.localStream = micStreamRef.current.clone();
+        } catch {
+          /* SDK henter selv mic */
+        }
+      }
+      void Promise.resolve(call.answer?.(opts)).catch((err) => {
+        console.error("[power-phone] auto-svar fejlede:", err);
+        // Ét forsøg uden localStream/micId — bedre end tavs DROP_NO_AGENT.
+        void Promise.resolve(call.answer?.({ remoteElement: remoteAudioId })).catch((err2) => {
+          console.error("[power-phone] auto-svar retry fejlede:", err2);
+        });
+      });
+    } catch (err) {
+      console.error("[power-phone] auto-svar kald-fejl:", err);
+    }
+  }, [remoteAudioId]);
 
   const handleNotification = useCallback(
     (evt?: unknown) => {
@@ -456,31 +511,32 @@ export function PowerDialerPhone({
 
       if (!current || isCurrent) {
         if (!current) {
-          if (call.direction !== "inbound" || !enabledRef.current) {
-            // Power-sælgeren ringer ikke selv ud; uventede opkald afvises.
+          if (!enabledRef.current) return;
+          // Kun afvis sikre «outbound» vi ikke selv startede. Manglende direction
+          // er typisk indgående bridge fra Call Control — dem må vi IKKE lægge på.
+          if (call.direction === "outbound" && !outboundDialIntentRef.current) {
             void Promise.resolve(call.hangup?.()).catch(() => undefined);
             return;
           }
           activeCallRef.current = call;
           setLineStatus("ringing");
-          try {
-            const constraints = micIdRef.current
-              ? ({ audio: { deviceId: { exact: micIdRef.current } } } as { audio: MediaTrackConstraints })
-              : undefined;
-            void Promise.resolve(call.answer?.(constraints)).catch((err) => {
-              console.error("[power-phone] auto-svar fejlede:", err);
-            });
-          } catch (err) {
-            console.error("[power-phone] auto-svar kald-fejl:", err);
-          }
         }
-        if (call.remoteStream) setRemoteStream(call.remoteStream);
+        // Telnyx: answer kun i «ringing» — tidligere svar laver dobbelt PeerConnection / tavs audio.
+        if (
+          token === "ringing" &&
+          call.direction !== "outbound" &&
+          enabledRef.current
+        ) {
+          answerInboundBridge(call);
+        }
+        if (call.remoteStream) attachRemoteAudio(call.remoteStream);
         if (LIVE_STATES.has(token)) {
           setLineStatus("live");
           setLiveSince((prev) => prev ?? Date.now());
           if (!liveTalkRef.current) {
             liveTalkRef.current = { leadId: reportLeadIdRef.current, startedAt: Date.now() };
           }
+          if (call.remoteStream) attachRemoteAudio(call.remoteStream);
         } else if (RINGING_STATES.has(token)) {
           setLineStatus((prev) => (prev === "live" ? prev : "ringing"));
         }
@@ -488,11 +544,11 @@ export function PowerDialerPhone({
       }
 
       // Endnu et indgående opkald, mens sælgeren allerede er i et: afvis det.
-      if (call.direction === "inbound" && RINGING_STATES.has(token)) {
+      if (call.direction !== "outbound" && RINGING_STATES.has(token)) {
         void Promise.resolve(call.hangup?.()).catch(() => undefined);
       }
     },
-    [clearCall, reportTalkSeconds],
+    [clearCall, reportTalkSeconds, answerInboundBridge, attachRemoteAudio],
   );
 
   // Knyt det forbundne lead til taletiden, så snart leadet er vist.
@@ -722,6 +778,7 @@ export function PowerDialerPhone({
 
     setDialBusy(true);
     setDialDetail(null);
+    outboundDialIntentRef.current = true;
     try {
       if (activeCallRef.current) {
         hangUp();
@@ -756,7 +813,7 @@ export function PowerDialerPhone({
 
       const call = clientRef.current.newCall(callOptions) as TelnyxCall;
       activeCallRef.current = call;
-      if (call.remoteStream) setRemoteStream(call.remoteStream);
+      if (call.remoteStream) attachRemoteAudio(call.remoteStream);
       setLineStatus("ringing");
       setDialDetail(`Ringer ${toE164}…`);
       void fetch("/api/telnyx/webrtc/log-attempt", {
@@ -770,10 +827,14 @@ export function PowerDialerPhone({
         credentials: "same-origin",
       }).catch(() => undefined);
     } catch (err) {
+      outboundDialIntentRef.current = false;
       clearCall();
       setDialDetail(err instanceof Error ? err.message : "Kunne ikke starte opkald.");
     } finally {
       setDialBusy(false);
+      window.setTimeout(() => {
+        outboundDialIntentRef.current = false;
+      }, 2_000);
     }
   }, [
     leadDial,
@@ -788,6 +849,7 @@ export function PowerDialerPhone({
     micStream,
     micId,
     clearCall,
+    attachRemoteAudio,
   ]);
 
   const saveLeadPhone = useCallback(async () => {
