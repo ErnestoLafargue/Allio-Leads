@@ -34,12 +34,14 @@ export function LiveCoach(props: {
   active: boolean;
   /** Leadet der ringes til — giver coachen kundens profil og tidligere samtaler. */
   leadId?: string | null;
+  /** Uden egen ramme og med større replik (sidepanelet). */
+  bare?: boolean;
   /** Valgfrit: vis/brug transskriptionen (fx testsiden). */
   onTranscript?: (lines: LiveCoachLine[]) => void;
   /** Valgfrit: målt tid fra kundens ord til kortet (ms). */
   onLatency?: (ms: number, source: CoachCard["source"]) => void;
 }) {
-  const { micStream, remoteStream, active, onTranscript, onLatency, leadId = null } = props;
+  const { micStream, remoteStream, active, onTranscript, onLatency, leadId = null, bare = false } = props;
   /** Stemningen gennem samtalen: de signaler, kunden har vist indtil nu. */
   const signalsSeen = useRef<string[]>([]);
   const [card, setCard] = useState<(CoachCard & { eventId: string | null; helpful: boolean | null }) | null>(null);
@@ -242,7 +244,7 @@ export function LiveCoach(props: {
 
   if (!active) return null;
   return (
-    <div className="w-full max-w-md rounded-xl border border-stone-200 bg-white p-3 shadow-sm">
+    <div className={bare ? "w-full" : "w-full max-w-md rounded-xl border border-stone-200 bg-white p-3 shadow-sm"}>
       <div className="flex items-center justify-between text-[11px] uppercase tracking-wide text-stone-500">
         <span>Live-coach</span>
         <span>{status === "listening" ? "● lytter" : status === "starting" ? "starter…" : status === "error" ? "fejl" : ""}</span>
@@ -262,7 +264,9 @@ export function LiveCoach(props: {
             </span>
             <span className="text-xs text-stone-600">{card.why}</span>
           </div>
-          <p className="text-sm font-medium text-stone-900">“{card.line}”</p>
+          <p className={bare ? "rounded-lg border-l-4 border-emerald-600 bg-emerald-50/50 px-3 py-2 text-base font-medium leading-snug text-stone-900" : "text-sm font-medium text-stone-900"}>
+            “{card.line}”
+          </p>
           <div className="flex items-center justify-between">
             <p className="text-[10px] text-stone-400">{card.source === "trigger" ? "fra ugens script" : "tilpasset af AI"}</p>
             <div className="flex gap-1" aria-label="Var kortet brugbart?">
