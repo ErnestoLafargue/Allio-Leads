@@ -348,7 +348,7 @@ export function LiveCoach(props: {
               <p className="text-sm font-medium text-stone-900">“{card.line}”</p>
               <div className="flex items-center justify-between">
                 <p className="text-[10px] text-stone-400">
-                  {card.used ? "✓ sagt — klar til næste indvending" : card.source === "trigger" ? "fra ugens script" : "tilpasset kunden af AI"}
+                  {card.used ? "✓ sagt" : ""}
                 </p>
                 <div className="flex gap-1" aria-label="Var kortet brugbart?">
                   {([true, false] as const).map((v) => (
@@ -368,8 +368,6 @@ export function LiveCoach(props: {
                 <p className="text-[11px] text-stone-500">Kunden nævnte også: {objectionLabel(pending)}</p>
               ) : null}
             </div>
-          ) : status === "listening" ? (
-            <p className="mt-2 text-xs text-stone-400">Lytter — coachen melder sig, når kunden kommer med en indvending.</p>
           ) : null}
         </>
       )}
