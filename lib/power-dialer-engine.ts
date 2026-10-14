@@ -14,6 +14,9 @@ import {
   dialTelnyxOutbound,
   getTelnyxConnectionId,
   hangupTelnyxCall,
+  holdTelnyxCall,
+  unholdTelnyxCall,
+  speakTelnyxCall,
   isTelnyxChannelLimitError,
   pickTelnyxFromNumber,
   appRecordingEnabled,
@@ -44,6 +47,8 @@ import {
   POWER_DROP_BRAKE_WINDOW_MS,
   POWER_MAINTENANCE_INTERVAL_MS,
   POWER_MISSED_AGENT_BACKOFF_MS,
+  POWER_PARK_COMFORT_SPEAK,
+  POWER_PARK_TIMEOUT_MS,
   POWER_RESERVATION_STALE_MS,
   POWER_STALE_LEG_EXTRA_MS,
   powerQueueReservationTtlMs,
@@ -271,6 +276,8 @@ export async function loadUnassignedInFlight(
   campaignId: string,
   now: Date,
 ): Promise<{ unassigned: number; ringing: { callControlId: string; reservedAt: Date }[] }> {
+  // Tæl også parkerede/connecting mennesker (bridgeRequestedAt sat) — ellers overdialer vi
+  // mens kunden venter på hold. Ringing = kun ubesvarede (kan CANCELLED_OVERDIAL).
   const rows = await db.$queryRaw<InFlightRow[]>`
     SELECT q."activeCallControlId" AS "cc", q."reservedAt" AS "reservedAt", l."answeredAt" AS "answeredAt"
     FROM "DialerQueueItem" q
@@ -278,7 +285,7 @@ export async function loadUnassignedInFlight(
     WHERE q."campaignId" = ${campaignId}
       AND q."connectedAt" IS NULL
       AND q."expiresAt" > ${now}
-      AND (l."id" IS NULL OR (l."endedAt" IS NULL AND l."resolvedAt" IS NULL AND l."bridgeRequestedAt" IS NULL))`;
+      AND (l."id" IS NULL OR (l."endedAt" IS NULL AND l."resolvedAt" IS NULL AND l."bridgedAt" IS NULL))`;
   const ringing = rows
     .filter((r) => r.cc && !r.answeredAt)
     .map((r) => ({ callControlId: r.cc as string, reservedAt: new Date(r.reservedAt) }));
@@ -535,16 +542,124 @@ export async function releasePowerAgentReservation(
 // Forbind menneske → sælger
 // ---------------------------------------------------------------------------
 
-export type PowerConnectOutcome = "connecting" | "dropped" | "skipped";
+export type PowerConnectOutcome = "connecting" | "dropped" | "skipped" | "parked";
+
+/** Twilio-park: hold + comfort, hæng ikke op — kunden venter på næste sælger-forsøg. */
+async function parkPowerLeadWaitingForAgent(params: {
+  leadCallControlId: string;
+  apiKey: string | null;
+}): Promise<"parked"> {
+  const before = await prisma.dialerCallLog.findUnique({
+    where: { callControlId: params.leadCallControlId },
+    select: { state: true },
+  });
+  const alreadyParked = before?.state === "parked";
+  await prisma.dialerCallLog.updateMany({
+    where: {
+      callControlId: params.leadCallControlId,
+      endedAt: null,
+      bridgedAt: null,
+      resolvedAt: null,
+    },
+    data: { state: "parked" },
+  });
+  if (params.apiKey) {
+    await holdTelnyxCall({
+      apiKey: params.apiKey,
+      callControlId: params.leadCallControlId,
+      commandId: `power-hold-${params.leadCallControlId}`,
+    }).catch(() => undefined);
+    if (!alreadyParked) {
+      await speakTelnyxCall({
+        apiKey: params.apiKey,
+        callControlId: params.leadCallControlId,
+        payload: POWER_PARK_COMFORT_SPEAK,
+        commandId: `power-park-speak-${params.leadCallControlId}`,
+      }).catch(() => undefined);
+    }
+  }
+  // #region agent log
+  console.warn("[dbg-c1392e] park-wait", {
+    leadTail: params.leadCallControlId.slice(-8),
+    alreadyParked,
+  });
+  // #endregion
+  return "parked";
+}
+
+/**
+ * Genforbind mennesker der venter på hold, eller læg på når park-timeout er overskredet.
+ * Kaldes fra dispatch/maintenance når der er klar sælgere.
+ */
+export async function reconnectParkedPowerLeads(campaign: PowerCampaign): Promise<number> {
+  const now = Date.now();
+  const parked = await prisma.dialerCallLog.findMany({
+    where: {
+      campaignId: campaign.id,
+      direction: "outbound-lead",
+      answeredAt: { not: null },
+      bridgeRequestedAt: { not: null },
+      bridgedAt: null,
+      resolvedAt: null,
+      endedAt: null,
+      OR: [{ state: "parked" }, { state: "human" }],
+    },
+    select: { callControlId: true, bridgeRequestedAt: true, agentUserId: true },
+    orderBy: { bridgeRequestedAt: "asc" },
+    take: 20,
+  });
+  let reconnected = 0;
+  for (const leg of parked) {
+    const deadline = powerParkDeadlineMs(leg.bridgeRequestedAt);
+    if (now >= deadline) {
+      await resolvePowerLeadLeg({
+        callControlId: leg.callControlId,
+        resolution: "DROP_NO_AGENT",
+        hangup: true,
+        campaign,
+      });
+      continue;
+    }
+    // Undgå at starte nyt agent-ben mens et stadig ringer (bridgeTargetId sat).
+    const live = await prisma.dialerCallLog.findUnique({
+      where: { callControlId: leg.callControlId },
+      select: { bridgeTargetId: true },
+    });
+    if (live?.bridgeTargetId) {
+      const agentLeg = await prisma.dialerCallLog.findUnique({
+        where: { callControlId: live.bridgeTargetId },
+        select: { endedAt: true, bridgedAt: true },
+      });
+      if (agentLeg && !agentLeg.endedAt && !agentLeg.bridgedAt) continue;
+    }
+    const outcome = await connectPowerLeadToAgent({
+      leadCallControlId: leg.callControlId,
+      parkRetry: true,
+      excludeUserIds: leg.agentUserId ? [leg.agentUserId] : undefined,
+    });
+    if (outcome === "connecting") reconnected += 1;
+  }
+  return reconnected;
+}
+
+function powerParkDeadlineMs(bridgeRequestedAt: Date | null | undefined): number {
+  const start = bridgeRequestedAt?.getTime() ?? Date.now();
+  return start + POWER_PARK_TIMEOUT_MS;
+}
 
 /**
  * Forbind et besvaret lead-ben til den længst ledige sælger: ring sælgerens WebRTC op med
  * link_to + bridge_on_answer. Første forsøg kræver at ingen andre er i gang (CAS på
  * bridgeRequestedAt); retry kun fra agent-benets hangup (CAS på agentAttempts).
+ * parkRetry: genforbind et allerede «parkeret» lead uden ny CAS (Twilio-kø-mønster).
  */
 export async function connectPowerLeadToAgent(params: {
   leadCallControlId: string;
   retry?: { expectedAttempts: number; excludeUserIds: string[] };
+  /** Genforsøg mens kunden venter på hold — hangup først ved park-timeout. */
+  parkRetry?: boolean;
+  /** Ekstra ekskludering ved parkRetry (forrige agent der ikke svarede). */
+  excludeUserIds?: string[];
 }): Promise<PowerConnectOutcome> {
   const apiKey = telnyxApiKey();
   const now = new Date();
@@ -559,19 +674,29 @@ export async function connectPowerLeadToAgent(params: {
       bridgeRequestedAt: true,
       agentAttempts: true,
       fromNumber: true,
+      answeredAt: true,
     },
   });
   if (!leg?.leadId || leg.endedAt || leg.bridgedAt || leg.resolvedAt) return "skipped";
 
-  if (params.retry) {
-    if (leg.agentAttempts !== params.retry.expectedAttempts) return "skipped";
-    if (leg.agentAttempts >= POWER_AGENT_MAX_ATTEMPTS) {
+  if (params.parkRetry) {
+    if (!leg.bridgeRequestedAt) return "skipped";
+    if (Date.now() >= powerParkDeadlineMs(leg.bridgeRequestedAt)) {
       await resolvePowerLeadLeg({
         callControlId: params.leadCallControlId,
         resolution: "DROP_NO_AGENT",
         hangup: true,
       });
       return "dropped";
+    }
+  } else if (params.retry) {
+    if (leg.agentAttempts !== params.retry.expectedAttempts) return "skipped";
+    if (leg.agentAttempts >= POWER_AGENT_MAX_ATTEMPTS) {
+      // Twilio: hangup ikke med det samme — park og vent på næste ledige sælger.
+      return parkPowerLeadWaitingForAgent({
+        leadCallControlId: params.leadCallControlId,
+        apiKey,
+      });
     }
     const claim = await prisma.dialerCallLog.updateMany({
       where: {
@@ -600,16 +725,16 @@ export async function connectPowerLeadToAgent(params: {
 
   const campaign = await loadPowerCampaign(leg.campaignId);
   if (!campaign || !apiKey) {
-    await resolvePowerLeadLeg({
-      callControlId: params.leadCallControlId,
-      resolution: "DROP_NO_AGENT",
-      hangup: true,
-      campaign,
+    return parkPowerLeadWaitingForAgent({
+      leadCallControlId: params.leadCallControlId,
+      apiKey,
     });
-    return "dropped";
   }
 
-  const excluded = params.retry?.excludeUserIds ?? [];
+  const excluded = [
+    ...(params.retry?.excludeUserIds ?? []),
+    ...(params.excludeUserIds ?? []),
+  ];
   const agent = await reservePowerAgent({
     campaignId: leg.campaignId,
     leadId: leg.leadId,
@@ -618,16 +743,24 @@ export async function connectPowerLeadToAgent(params: {
     now,
   });
   if (!agent) {
-    await resolvePowerLeadLeg({
-      callControlId: params.leadCallControlId,
-      resolution: "DROP_NO_AGENT",
-      hangup: true,
-      campaign,
+    return parkPowerLeadWaitingForAgent({
+      leadCallControlId: params.leadCallControlId,
+      apiKey,
     });
-    return "dropped";
   }
 
   const attempt = leg.agentAttempts + 1;
+  if (params.parkRetry) {
+    await prisma.dialerCallLog.updateMany({
+      where: {
+        callControlId: params.leadCallControlId,
+        endedAt: null,
+        bridgedAt: null,
+        resolvedAt: null,
+      },
+      data: { agentAttempts: { increment: 1 }, state: "human" },
+    });
+  }
   await ensurePowerDialerAgentTelnyx({ userId: agent.userId, apiKey }).catch(() => null);
   const connectionId = await resolvePowerAgentOutboundConnectionId({
     apiKey,
@@ -635,14 +768,17 @@ export async function connectPowerLeadToAgent(params: {
   });
   if (!connectionId) {
     await releasePowerAgentReservation({ sessionId: agent.sessionId });
-    await resolvePowerLeadLeg({
-      callControlId: params.leadCallControlId,
-      resolution: "DROP_NO_AGENT",
-      hangup: true,
-      campaign,
+    return parkPowerLeadWaitingForAgent({
+      leadCallControlId: params.leadCallControlId,
+      apiKey,
     });
-    return "dropped";
   }
+  // Kunden kan være på hold fra et tidligere park — tag af før agent-dial/bridge.
+  await unholdTelnyxCall({
+    apiKey,
+    callControlId: params.leadCallControlId,
+    commandId: `power-unhold-${params.leadCallControlId}-${attempt}`,
+  }).catch(() => undefined);
   const fromNumber =
     leg.fromNumber?.trim() || pickTelnyxFromNumber(leg.leadId, { userId: agent.userId }) || "";
   const agentTelnyx = await prisma.user.findUnique({
@@ -722,13 +858,11 @@ export async function connectPowerLeadToAgent(params: {
         retry: { expectedAttempts: attempt, excludeUserIds: [...excluded, agent.userId] },
       });
     }
-    await resolvePowerLeadLeg({
-      callControlId: params.leadCallControlId,
-      resolution: "DROP_NO_AGENT",
-      hangup: true,
-      campaign,
+    // Twilio-mønster: hangup ikke — park og lad maintenance/dispatch prøve igen.
+    return parkPowerLeadWaitingForAgent({
+      leadCallControlId: params.leadCallControlId,
+      apiKey,
     });
-    return "dropped";
   }
 
   await prisma.$transaction([
@@ -1348,6 +1482,11 @@ export async function runPowerMaintenance(
   const now = new Date(nowMs);
   const apiKey = telnyxApiKey();
 
+  // 0) Parkerede mennesker: genforbind eller drop efter park-timeout.
+  await reconnectParkedPowerLeads(campaign).catch((err) => {
+    console.error("[power-dialer] reconnectParked fejlede:", err);
+  });
+
   // 1) Udløbne kø-reservationer uden forbindelse: læg evt. levende ben på og frigiv leadet.
   const expired = await prisma.dialerQueueItem.findMany({
     where: { campaignId: campaign.id, connectedAt: null, expiresAt: { lt: now } },
@@ -1566,6 +1705,8 @@ export async function runPowerDispatch(params: {
   if (!caller) return { ...base, code: "CALLER_NOT_READY" };
 
   await runPowerMaintenance(campaign);
+  // Genforbind parkerede mennesker før vi dialer flere leads (Twilio-kø).
+  await reconnectParkedPowerLeads(campaign);
 
   const channel = await resolvePowerChannelLimit();
 

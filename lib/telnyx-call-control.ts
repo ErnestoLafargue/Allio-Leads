@@ -1132,6 +1132,138 @@ export async function hangupTelnyxCall(params: {
 }
 
 /**
+ * Læg et besvaret Call Control-ben på hold (Twilio-lignende park mens vi finder sælger).
+ */
+export async function holdTelnyxCall(params: {
+  apiKey: string;
+  callControlId: string;
+  commandId?: string;
+}): Promise<ActionResult> {
+  const body: Record<string, unknown> = {};
+  if (params.commandId) body.command_id = params.commandId;
+  try {
+    const res = await fetch(
+      `${TELNYX_API_BASE}/calls/${encodeURIComponent(params.callControlId)}/actions/hold`,
+      {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${params.apiKey}`,
+          "Content-Type": "application/json",
+          Accept: "application/json",
+        },
+        body: JSON.stringify(body),
+      },
+    );
+    if (res.status === 422) return { ok: true, raw: null };
+    const json: unknown = await res.json().catch(() => null);
+    if (!res.ok) {
+      return {
+        ok: false,
+        status: res.status,
+        message: formatTelnyxError(json) || `Telnyx HTTP ${res.status}`,
+        telnyx: json,
+      };
+    }
+    return { ok: true, raw: json };
+  } catch (err) {
+    return {
+      ok: false,
+      status: 0,
+      message: err instanceof Error ? err.message : "Ukendt fejl ved hold.",
+    };
+  }
+}
+
+/** Tag et Call Control-ben af hold før bridge til sælger. */
+export async function unholdTelnyxCall(params: {
+  apiKey: string;
+  callControlId: string;
+  commandId?: string;
+}): Promise<ActionResult> {
+  const body: Record<string, unknown> = {};
+  if (params.commandId) body.command_id = params.commandId;
+  try {
+    const res = await fetch(
+      `${TELNYX_API_BASE}/calls/${encodeURIComponent(params.callControlId)}/actions/unhold`,
+      {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${params.apiKey}`,
+          "Content-Type": "application/json",
+          Accept: "application/json",
+        },
+        body: JSON.stringify(body),
+      },
+    );
+    if (res.status === 422) return { ok: true, raw: null };
+    const json: unknown = await res.json().catch(() => null);
+    if (!res.ok) {
+      return {
+        ok: false,
+        status: res.status,
+        message: formatTelnyxError(json) || `Telnyx HTTP ${res.status}`,
+        telnyx: json,
+      };
+    }
+    return { ok: true, raw: json };
+  } catch (err) {
+    return {
+      ok: false,
+      status: 0,
+      message: err instanceof Error ? err.message : "Ukendt fejl ved unhold.",
+    };
+  }
+}
+
+/** Kort TTS til kunden mens Power Dialer finder en sælger. */
+export async function speakTelnyxCall(params: {
+  apiKey: string;
+  callControlId: string;
+  payload: string;
+  language?: string;
+  voice?: string;
+  commandId?: string;
+}): Promise<ActionResult> {
+  const body: Record<string, unknown> = {
+    payload: params.payload,
+    language: params.language ?? "da-DK",
+    voice: params.voice ?? "female",
+  };
+  if (params.commandId) body.command_id = params.commandId;
+  try {
+    const res = await fetch(
+      `${TELNYX_API_BASE}/calls/${encodeURIComponent(params.callControlId)}/actions/speak`,
+      {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${params.apiKey}`,
+          "Content-Type": "application/json",
+          Accept: "application/json",
+        },
+        body: JSON.stringify(body),
+      },
+    );
+    if (res.status === 422) return { ok: true, raw: null };
+    const json: unknown = await res.json().catch(() => null);
+    if (!res.ok) {
+      return {
+        ok: false,
+        status: res.status,
+        message: formatTelnyxError(json) || `Telnyx HTTP ${res.status}`,
+        telnyx: json,
+      };
+    }
+    return { ok: true, raw: json };
+  } catch (err) {
+    return {
+      ok: false,
+      status: 0,
+      message: err instanceof Error ? err.message : "Ukendt fejl ved speak.",
+    };
+  }
+}
+
+/**
  * Svar et indkommende opkald på Telnyx call control siden (svarer typisk programmatisk
  * fra webhook efter call.initiated på inbound). Sjældent brugt fra Allio direkte —
  * agenter besvarer via deres WebRTC-klient.

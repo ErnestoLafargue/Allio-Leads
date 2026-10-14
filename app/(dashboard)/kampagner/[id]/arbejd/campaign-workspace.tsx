@@ -914,10 +914,14 @@ export function CampaignWorkspace({
       ? campaignId
       : null;
 
+  const powerPresenceFastPoll =
+    powerPhone.lineStatus === "ringing" || powerPhone.lineStatus === "live";
+
   const {
     server: powerServer,
     lastDispatch: powerLastDispatch,
     error: powerPresenceError,
+    refresh: refreshPowerPresence,
     skipWrapUp,
     takeOver,
   } = usePowerDialerPresence({
@@ -928,7 +932,16 @@ export function CampaignWorkspace({
     lineLive: powerPhone.lineStatus === "live",
     webrtcReady: powerPhone.webrtcReady,
     onAssignedLead: handleAssignedLead,
+    // Twilio/Flex: reservation → UI med det samme. Hurtig poll mens agent-ben ringer.
+    intervalMs: powerPresenceFastPoll ? 1000 : 5000,
   });
+
+  // Åbn lead så snart serveren har reserveret (ikke først efter næste 5s-tick).
+  useEffect(() => {
+    if (!isPowerAutoDialSession) return;
+    if (powerPhone.lineStatus !== "ringing" && powerPhone.lineStatus !== "live") return;
+    refreshPowerPresence();
+  }, [isPowerAutoDialSession, powerPhone.lineStatus, refreshPowerPresence]);
 
   const { stats: dialerStats, sipReady } = useDialerPresence({
     campaignId: isAutoDialModeForPresence && campaignId ? campaignId : null,
