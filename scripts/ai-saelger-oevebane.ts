@@ -3,10 +3,13 @@
  *
  *   npx tsx --tsconfig tsconfig.json scripts/ai-saelger-oevebane.ts <ud-mappe> [--playbooks lavt_pres,playbook_2] [--personas a,b] [--voice christian-v3c]
  *
+ * Hver samtale gemmes også som <navn>.json; findes den allerede i ud-mappen, genbruges den (så en afbrudt
+ * kørsel kan fortsættes uden at betale igen). En samtale, der fejler (fx API-kredit), stopper ikke resten.
+ *
  * Kræver ANTHROPIC_API_KEY eller ALLIO_ANTHROPIC_API_KEY (og ANTHROPIC_WORKSPACE_ID). Skriver én .md pr. samtale, resultater.json og
  * oversigt.md i ud-mappen. Rører ikke databasen.
  */
-import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { createAnthropicClient } from "@/lib/anthropic-client";
 import { APPROACHES, VOICES, type ApproachKey } from "@/lib/ai-saelger/agents";
@@ -49,8 +52,20 @@ async function main() {
     if (!file) return [];
     const playbook = readFileSync(file, "utf8");
     const variant = { key: `${approach}/${voice.key}`, approach, voice };
-    return personas.map((persona) => async (): Promise<Row> => {
-      const sim = await simulateCall({ client, variant, playbook, persona, todayKey });
+    return personas.map((persona) => async (): Promise<Row | null> => {
+      const name = `${approach}--${persona.key}`;
+      const saved = join(outDir, `${name}.json`);
+      if (existsSync(saved)) {
+        console.log(`${name}: genbrugt fra tidligere kørsel`);
+        return JSON.parse(readFileSync(saved, "utf8")) as Row;
+      }
+      let sim: SimResult;
+      try {
+        sim = await simulateCall({ client, variant, playbook, persona, todayKey });
+      } catch (e) {
+        console.log(`${name}: FEJL (${String(e).slice(0, 160)})`);
+        return null;
+      }
       let judge: JudgeResult | null = null;
       let judgeCost = 0;
       let error: string | undefined;
@@ -61,17 +76,20 @@ async function main() {
       } catch (e) {
         error = String(e);
       }
-      const name = `${approach}--${persona.key}`;
       writeFileSync(
         join(outDir, `${name}.md`),
         `# ${APPROACHES[approach].label} · ${persona.key}\n\nBooket: ${sim.booked ? `${sim.booked.dag} kl. ${sim.booked.tid}` : "nej"} · Udfald: ${sim.outcome ?? "–"} · Sluttede: ${sim.endedBy} · Pris: $${(sim.costUsd + judgeCost).toFixed(3)}\n\n## Samtalen\n${transcriptText(sim.lines)}\n\n## Noter\n${sim.notes.map((n) => `- ${n}`).join("\n") || "–"}\n\n## Dommeren\n\`\`\`json\n${JSON.stringify(judge ?? error, null, 2)}\n\`\`\`\n`,
       );
       console.log(`${name}: ${sim.booked ? "BOOKET" : "ikke booket"} (${sim.lines.filter((l) => l.speaker !== "værktøj").length} replikker, $${(sim.costUsd + judgeCost).toFixed(3)})`);
-      return { sim, judge, judgeCost, error };
+      const row: Row = { sim, judge, judgeCost, error };
+      writeFileSync(saved, JSON.stringify(row, null, 2));
+      return row;
     });
   });
 
-  const rows = await pool(jobs, 4);
+  const all = await pool(jobs, 4);
+  const rows = all.filter((r): r is Row => r !== null);
+  const failed = all.length - rows.length;
   writeFileSync(join(outDir, "resultater.json"), JSON.stringify(rows, null, 2));
   const total = rows.reduce((s, r) => s + r.sim.costUsd + r.judgeCost, 0);
   const byPb = playbooks.map((pb) => {
@@ -81,7 +99,7 @@ async function main() {
   });
   writeFileSync(
     join(outDir, "oversigt.md"),
-    `# Øvebanen ${todayKey}\n\nStemme: ${voice.key} · Samtaler: ${rows.length} · Pris i alt: $${total.toFixed(2)}\n\n| Playbook | Booket | Åbning | Dialog | Indvendinger | Lukning | Menneskelig | Regelbrud |\n|---|---|---|---|---|---|---|---|\n${byPb.join("\n")}\n\n## Pr. samtale\n${rows.map((r) => `- **${r.sim.variant.split("/")[0]} · ${r.sim.persona}:** ${r.sim.booked ? "booket" : "ikke booket"}. ${r.judge?.hvorfor_udfaldet ?? r.error ?? ""}`).join("\n")}\n`,
+    `# Øvebanen ${todayKey}\n\nStemme: ${voice.key} · Samtaler: ${rows.length}${failed ? ` (${failed} fejlede; kør igen for at fortsætte)` : ""} · Pris i alt: $${total.toFixed(2)}\n\n| Playbook | Booket | Åbning | Dialog | Indvendinger | Lukning | Menneskelig | Regelbrud |\n|---|---|---|---|---|---|---|---|\n${byPb.join("\n")}\n\n## Pr. samtale\n${rows.map((r) => `- **${r.sim.variant.split("/")[0]} · ${r.sim.persona}:** ${r.sim.booked ? "booket" : "ikke booket"}. ${r.judge?.hvorfor_udfaldet ?? r.error ?? ""}`).join("\n")}\n`,
   );
   console.log(`I alt $${total.toFixed(2)}`);
 }
