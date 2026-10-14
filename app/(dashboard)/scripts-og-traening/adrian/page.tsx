@@ -9,7 +9,6 @@ const VOICE_LABELS: Record<string, string> = {
   "christian-v3c": "Adrian (Christian, v3 Conversational)",
   "isabella-v3c": "Katrine (Isabella, v3 Conversational)",
   "isabella-v4t": "Katrine (Isabella, v4 Turbo)",
-  "ernesto-v3c": "Ernesto (Professional-stemme, v3 Conversational)",
 };
 
 export default async function AdrianPage() {
@@ -25,8 +24,8 @@ export default async function AdrianPage() {
         .sort((x, y) => Number(y.key === "claude-sonnet-5-5") - Number(x.key === "claude-sonnet-5-5"))}
       voices={[
         { key: FLASH_VOICE_KEYS.christian, label: "Adrian (Christian, Flash – hurtig, ens tone)", stitching: true },
-        ...(ernesto ? [{ key: FLASH_VOICE_KEYS.ernesto, label: "Ernesto (Professional-stemme, Turbo – hurtig, ens tone)", stitching: true }] : []),
-        ...[...VOICES, ...(ernesto ? [ernesto] : [])].map((v) => ({ key: v.key, label: VOICE_LABELS[v.key] ?? v.key, stitching: !v.model.startsWith("eleven_v3") })),
+        ...(ernesto ? [{ key: FLASH_VOICE_KEYS.ernesto, label: "Ernesto (din stemme)", stitching: true }] : []),
+        ...VOICES.map((v) => ({ key: v.key, label: VOICE_LABELS[v.key] ?? v.key, stitching: !v.model.startsWith("eleven_v3") })),
       ]}
     />
   );

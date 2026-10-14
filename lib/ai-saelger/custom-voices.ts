@@ -18,7 +18,8 @@ export async function ernestoVoiceId(): Promise<string | null> {
 /** Ernestos stemme som Voice (agenten hedder stadig Adrian), eller null hvis den ikke er optaget. */
 export async function ernestoVoice(): Promise<Voice | null> {
   const id = await ernestoVoiceId();
-  return id ? { key: ERNESTO_VOICE_KEY, agentName: "Adrian", provider: "elevenlabs", voiceId: id, model: "eleven_v3_conversational", audioTags: true } : null;
+  // Turbo v2.5: hans Professional-stemme er trænet til den (v3 er ikke trænet og lyder ikke som ham).
+  return id ? { key: ERNESTO_VOICE_KEY, agentName: "Adrian", provider: "elevenlabs", voiceId: id, model: "eleven_turbo_v2_5", audioTags: false } : null;
 }
 
 /**
