@@ -73,6 +73,7 @@ export async function POST(req: Request) {
   const state: ToolState = { booked: b?.state?.booked ?? null, outcome: b?.state?.outcome ?? null, notes: b?.state?.notes ?? [], todayKey: new Date().toISOString().slice(0, 10) };
 
   // Jev (label + bryd ind, ca. 130 ms) og træningen hentes samtidig. Fejler Jev, svarer Adrian uden hint.
+  const tPrep = performance.now();
   let route: JevRoute | null = null;
   let jevError: string | null = null;
   const [training] = await Promise.all([
@@ -83,6 +84,7 @@ export async function POST(req: Request) {
     ),
   ]);
   const system = aiSaelgerSystemPrompt(variant, playbook, training.section);
+  const prepMs = Math.round(performance.now() - tPrep);
   const label = (route as JevRoute | null)?.label;
 
   const agentMsgs: Anthropic.MessageParam[] = b?.agentMsgs?.length
@@ -123,6 +125,7 @@ export async function POST(req: Request) {
             turn,
             adrianMs: Math.round(performance.now() - t0),
             firstSentenceMs,
+            timings: { prepMs, jevMs: (route as JevRoute | null)?.ms ?? null, ...turn.timings, systemChars: system.length },
             agentMsgs,
             state: { booked: state.booked, outcome: state.outcome, notes: state.notes },
           });

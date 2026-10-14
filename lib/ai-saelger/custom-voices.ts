@@ -20,8 +20,28 @@ export async function ernestoVoice(): Promise<Voice | null> {
   return id ? { key: ERNESTO_VOICE_KEY, agentName: "Adrian", provider: "elevenlabs", voiceId: id, model: "eleven_v3_conversational", audioTags: true } : null;
 }
 
-/** Find en stemme ud fra nøglen (faste stemmer eller Ernestos). v3 Conversational målt hurtigere end Flash v2.5. */
+/**
+ * Stemmer til samtaler i realtid: samme stemmer på ElevenLabs Flash v2.5, der kan få teksten før med
+ * (previous_text), så tonen hænger sammen fra sætning til sætning (v3 Conversational kan ikke). Målt ca.
+ * 0,25 s til første lyd. Ikke en del af de 9 varianter i VOICES.
+ */
+export const FLASH_VOICE_KEYS = { christian: "christian-flash", ernesto: "ernesto-flash" } as const;
+
+/** Modeller, der understøtter previous_text/next_text (sammenhæng mellem sætninger). */
+export function supportsStitching(model: string): boolean {
+  return !model.startsWith("eleven_v3");
+}
+
+/** Find en stemme ud fra nøglen (faste stemmer, Flash-udgaverne eller Ernestos). */
 export async function resolveVoice(key: string | null | undefined): Promise<Voice | null> {
   if (key === ERNESTO_VOICE_KEY) return ernestoVoice();
+  if (key === FLASH_VOICE_KEYS.ernesto) {
+    const e = await ernestoVoice();
+    return e ? { ...e, key, model: "eleven_flash_v2_5", audioTags: false } : null;
+  }
+  if (key === FLASH_VOICE_KEYS.christian) {
+    const c = VOICES.find((v) => v.key === "christian-v3c")!;
+    return { ...c, key, model: "eleven_flash_v2_5", audioTags: false };
+  }
   return VOICES.find((v) => v.key === key) ?? null;
 }

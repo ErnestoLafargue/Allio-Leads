@@ -87,7 +87,14 @@ export const AGENT_MODELS = {
 } as const;
 export type AgentModel = keyof typeof AGENT_MODELS;
 
-export type AgentTurn = { spoken: string; tools: { name: string; input: Record<string, unknown> }[]; hangup: boolean; costUsd: number };
+export type AgentTurn = {
+  spoken: string;
+  tools: { name: string; input: Record<string, unknown> }[];
+  hangup: boolean;
+  costUsd: number;
+  /** Kun streamet: ms fra kaldet startede til Claudes første svar-hændelse og første tekst. */
+  timings?: { firstEventMs: number | null; firstTextMs: number | null };
+};
 
 /**
  * Én tur for Adrian: kalder modellen (med værktøjer) til han har noget at sige. `agentMsgs` udvides på
@@ -179,6 +186,8 @@ export async function agentTurnStream(params: {
   const tools: AgentTurn["tools"] = [];
   let hangup = false;
   let costUsd = 0;
+  const t0 = performance.now();
+  const timings: NonNullable<AgentTurn["timings"]> = { firstEventMs: null, firstTextMs: null };
   for (let step = 0; step < 6; step++) {
     const splitter = new SentenceSplitter();
     const stream = params.client.messages.stream({
@@ -189,7 +198,11 @@ export async function agentTurnStream(params: {
       tools: AI_SAELGER_TOOLS,
       messages: params.agentMsgs,
     });
+    stream.on("streamEvent", () => {
+      timings.firstEventMs ??= Math.round(performance.now() - t0);
+    });
     stream.on("text", (delta) => {
+      timings.firstTextMs ??= Math.round(performance.now() - t0);
       for (const sentence of splitter.push(delta)) params.onSentence(sentence);
     });
     const res = await stream.finalMessage();
@@ -210,7 +223,7 @@ export async function agentTurnStream(params: {
     params.agentMsgs.push({ role: "user", content: results });
     if (hangup) break;
   }
-  return { spoken: spokenParts.join(" ").replace(/\s+/g, " ").trim(), tools, hangup, costUsd };
+  return { spoken: spokenParts.join(" ").replace(/\s+/g, " ").trim(), tools, hangup, costUsd, timings };
 }
 
 export async function simulateCall(params: {

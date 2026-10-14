@@ -18,6 +18,8 @@ export async function GET(req: NextRequest) {
   if (!apiKey) return new Response("ELEVENLABS_API_KEY mangler", { status: 500 });
   const voiceKey = req.nextUrl.searchParams.get("voice") ?? "kunde";
   const raw = (req.nextUrl.searchParams.get("text") ?? "").slice(0, 1200).trim();
+  // Teksten lige før (samme replik), så tonen hænger sammen mellem sætninger. v3 understøtter det ikke.
+  const prev = (req.nextUrl.searchParams.get("prev") ?? "").slice(-400).trim();
   if (!raw) return new Response("Mangler tekst", { status: 400 });
 
   const agent = await resolveVoice(voiceKey);
@@ -27,7 +29,12 @@ export async function GET(req: NextRequest) {
   const res = await fetch(`https://api.elevenlabs.io/v1/text-to-speech/${voice.voiceId}/stream?output_format=mp3_44100_64`, {
     method: "POST",
     headers: { "xi-api-key": apiKey, "content-type": "application/json" },
-    body: JSON.stringify({ text, model_id: voice.model, language_code: "da" }),
+    body: JSON.stringify({
+      text,
+      model_id: voice.model,
+      language_code: "da",
+      ...(prev && !voice.model.startsWith("eleven_v3") ? { previous_text: agent ? forSpeech(prev, agent) : prev } : {}),
+    }),
   });
   if (!res.ok || !res.body) {
     const detail = await res.text().catch(() => "");
