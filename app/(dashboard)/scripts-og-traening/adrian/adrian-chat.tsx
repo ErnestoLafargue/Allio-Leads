@@ -45,6 +45,8 @@ export function AdrianChat({ playbooks, models, voices }: { playbooks: Option[];
   const pending = useRef<{ text: string; at: number } | null>(null);
   const speaking = useRef(false);
   const ending = useRef(false);
+  const [paused, setPaused] = useState(false);
+  const pausedRef = useRef(false);
 
   useEffect(() => {
     try {
@@ -122,7 +124,7 @@ export function AdrianChat({ playbooks, models, voices }: { playbooks: Option[];
   };
 
   const onUtterance = (text: string) => {
-    if (ending.current) return;
+    if (ending.current || pausedRef.current) return;
     const at = performance.now();
     if (busy.current) {
       pending.current = { text: pending.current ? `${pending.current.text} ${text}` : text, at };
@@ -155,6 +157,7 @@ export function AdrianChat({ playbooks, models, voices }: { playbooks: Option[];
           const done = transcript.apply(tokens);
           const now = transcript.utterance;
           setLive(now);
+          if (pausedRef.current) return;
           // Du taler ind over Adrian (mere end et «mm»): han stopper.
           if (speaking.current && now.split(/\s+/).filter(Boolean).length >= 2) {
             stopSpeaking();
@@ -181,6 +184,17 @@ export function AdrianChat({ playbooks, models, voices }: { playbooks: Option[];
     stream.current = null;
     stopSpeaking();
     speaking.current = false;
+  }
+
+  function setPause(on: boolean) {
+    pausedRef.current = on;
+    setPaused(on);
+    if (on) {
+      stopSpeaking();
+      speaking.current = false;
+      setLive("");
+      setStatus("Pause: Adrian lytter ikke. Giv 👍/👎 og skriv bedre svar, og fortsæt.");
+    } else setStatus("Din tur");
   }
 
   function endCall() {
@@ -225,9 +239,14 @@ export function AdrianChat({ playbooks, models, voices }: { playbooks: Option[];
             {voices.map((v) => <option key={v.key} value={v.key}>Stemme: {v.label}</option>)}
           </select>
           {inCall ? (
-            <button type="button" onClick={endCall} className="ml-auto rounded-full bg-rose-600 px-4 py-2 text-sm font-medium text-white">
-              Læg på
-            </button>
+            <>
+              <button type="button" onClick={() => setPause(!paused)} className="ml-auto rounded-full px-4 py-2 text-sm font-medium text-stone-700 ring-1 ring-stone-300 hover:bg-stone-50">
+                {paused ? "▶ Fortsæt" : "⏸ Pause"}
+              </button>
+              <button type="button" onClick={endCall} className="rounded-full bg-rose-600 px-4 py-2 text-sm font-medium text-white">
+                Læg på
+              </button>
+            </>
           ) : (
             <button type="button" onClick={call} className="ml-auto rounded-full bg-emerald-700 px-4 py-2 text-sm font-medium text-white">
               📞 {phase === "slut" ? "Ring op igen" : "Ring op"}
@@ -267,6 +286,16 @@ export function AdrianChat({ playbooks, models, voices }: { playbooks: Option[];
                     ? `Svar efter ${sec(e.totalMs)} fra du holdt op · Claude ${sec(e.adrianMs)} · stemme ${sec(e.voiceMs ?? 0)}`
                     : `Claude ${sec(e.adrianMs)}`}
                 </p>
+                {e.text ? (
+                  <Feedback
+                    customerLine={(() => {
+                      const prev = entries[i - 1];
+                      return prev?.who === "kunde" ? prev.text : "";
+                    })()}
+                    answer={e.text}
+                    onOpen={() => inCall && !paused && setPause(true)}
+                  />
+                ) : null}
               </div>
             ),
           )}
@@ -287,6 +316,68 @@ export function AdrianChat({ playbooks, models, voices }: { playbooks: Option[];
         Svartiden måles fra Soniox melder, at du er færdig (ca. 0,5 s efter din sidste lyd), til Adrians første lyd. Han svarer endnu med hele replikken på én
         gang; næste skridt er at streame første sætning til stemmen, mens resten skrives.
       </p>
+    </div>
+  );
+}
+
+/** 👍 gemmer Adrians svar som et godt eksempel; 👎 åbner et felt til et bedre svar (Adrian lærer af begge med det samme). */
+function Feedback({ customerLine, answer, onOpen }: { customerLine: string; answer: string; onOpen: () => void }) {
+  const [mode, setMode] = useState<"none" | "skriv" | "op" | "gemt">("none");
+  const [draft, setDraft] = useState("");
+  const [err, setErr] = useState<string | null>(null);
+
+  const save = async (body: { answer: string; avoidAnswer?: string }, done: "op" | "gemt") => {
+    setErr(null);
+    const res = await fetch("/api/ai-saelger/traening/lektion", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ situation: "fra_samtale", customerLine: customerLine || "(Adrian åbner samtalen)", ...body }),
+    });
+    if (res.ok) setMode(done);
+    else setErr("Kunne ikke gemme");
+  };
+
+  if (mode === "op") return <p className="mt-1 text-[11px] text-emerald-700">👍 Gemt som godt svar</p>;
+  if (mode === "gemt") return <p className="mt-1 text-[11px] text-emerald-700">✓ Dit svar er gemt; Adrian bruger det fra næste replik</p>;
+  if (mode === "skriv")
+    return (
+      <div className="mt-1 w-full max-w-[85%] space-y-1">
+        <textarea
+          value={draft}
+          onChange={(ev) => setDraft(ev.target.value)}
+          rows={3}
+          autoFocus
+          placeholder="Sådan skulle han have svaret …"
+          className="w-full rounded-xl border border-stone-200 p-2 text-sm focus:border-emerald-600 focus:outline-none"
+        />
+        <div className="flex gap-2">
+          <button type="button" disabled={!draft.trim()} onClick={() => void save({ answer: draft.trim(), avoidAnswer: answer }, "gemt")} className="rounded-lg bg-emerald-700 px-3 py-1 text-xs text-white disabled:opacity-40">
+            Gem bedre svar
+          </button>
+          <button type="button" onClick={() => setMode("none")} className="rounded-lg px-3 py-1 text-xs text-stone-600 hover:bg-stone-100">
+            Annullér
+          </button>
+          {err ? <span className="text-xs text-rose-700">{err}</span> : null}
+        </div>
+      </div>
+    );
+  return (
+    <div className="mt-1 flex gap-1 text-sm">
+      <button type="button" title="Godt svar" onClick={() => void save({ answer }, "op")} className="rounded px-1.5 hover:bg-stone-100">
+        👍
+      </button>
+      <button
+        type="button"
+        title="Dårligt svar: skriv et bedre"
+        onClick={() => {
+          onOpen();
+          setMode("skriv");
+        }}
+        className="rounded px-1.5 hover:bg-stone-100"
+      >
+        👎
+      </button>
+      {err ? <span className="text-xs text-rose-700">{err}</span> : null}
     </div>
   );
 }
