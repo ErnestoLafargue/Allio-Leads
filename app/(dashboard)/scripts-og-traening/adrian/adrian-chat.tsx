@@ -10,6 +10,8 @@
 import { useEffect, useRef, useState } from "react";
 import { startSonioxStream, SpeakerTranscript, type SonioxStream } from "@/lib/live-coach/soniox-stream";
 import { speak, stopSpeaking } from "@/lib/tts/speak-client";
+import { useRouter } from "next/navigation";
+import { VoiceRecorder } from "./voice-recorder";
 
 type Option = { key: string; label: string };
 type Lead = { kliniknavn: string; by: string; beslutningstager: string; bookingsystem: string; branche: string };
@@ -26,6 +28,7 @@ const pct = (x: number) => `${Math.round(x * 100)} %`;
 const sec = (ms: number) => `${(ms / 1000).toFixed(1).replace(".", ",")} s`;
 
 export function AdrianChat({ playbooks, models, voices }: { playbooks: Option[]; models: Option[]; voices: Option[] }) {
+  const router = useRouter();
   const [approach, setApproach] = useState(playbooks[0]?.key ?? "lavt_pres");
   const [model, setModel] = useState(models[0]?.key ?? "claude-haiku-5-5");
   const [voice, setVoice] = useState(voices.find((v) => v.key === "christian-v3c")?.key ?? voices[0]?.key ?? "christian-v3c");
@@ -254,6 +257,8 @@ export function AdrianChat({ playbooks, models, voices }: { playbooks: Option[];
           )}
         </div>
       </section>
+
+      {!inCall ? <VoiceRecorder hasVoice={voices.some((v) => v.key === "ernesto-v3c")} onCreated={() => router.refresh()} /> : null}
 
       {inCall || entries.length ? (
         <section className="space-y-3 rounded-2xl bg-white p-4 shadow-sm ring-1 ring-stone-200">

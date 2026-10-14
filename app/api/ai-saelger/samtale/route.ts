@@ -1,6 +1,7 @@
 import type Anthropic from "@anthropic-ai/sdk";
 import { NextResponse } from "next/server";
 import { APPROACHES, VOICES, type ApproachKey } from "@/lib/ai-saelger/agents";
+import { resolveVoice } from "@/lib/ai-saelger/custom-voices";
 import { PERSONAS } from "@/lib/ai-saelger/practice/personas";
 import { AGENT_MODELS, agentTurn, leadMessage, type AgentModel, type ToolState } from "@/lib/ai-saelger/practice/simulate";
 import { withRouterHint } from "@/lib/ai-saelger/router";
@@ -64,7 +65,7 @@ export async function POST(req: Request) {
   const model = (b?.model && b.model in AGENT_MODELS ? b.model : "claude-haiku-5-5") as AgentModel;
   if (!kunde || !APPROACHES[approach]?.file) return NextResponse.json({ error: "Mangler kundens replik eller playbook" }, { status: 400 });
 
-  const voice = VOICES.find((v) => v.key === b?.voiceKey) ?? VOICES.find((v) => v.key === "christian-v3c")!;
+  const voice = (await resolveVoice(b?.voiceKey)) ?? VOICES.find((v) => v.key === "christian-v3c")!;
   const variant = { key: `${approach}/${voice.key}`, approach, voice };
   const playbook = readPlaybook(approach);
   const training = await adrianTraining();
