@@ -69,7 +69,7 @@ function runTool(name: string, input: Record<string, unknown>, state: ToolState)
 
 export function leadMessage(p: Persona): string {
   const l = p.lead;
-  return `## Leadet
+  return `## Leadet: klinikken, du ringer TIL (du er selv fra Allio)
 Klinik: ${l.kliniknavn} (${l.branche}), ${l.by}
 Beslutningstager: ${l.beslutningstager}
 Bookingsystem: ${l.bookingsystem}
@@ -123,6 +123,88 @@ export async function agentTurn(params: {
       if (u.name === "afslut_samtale") hangup = true;
       const input = u.input as Record<string, unknown>;
       tools.push({ name: u.name, input });
+      return { type: "tool_result", tool_use_id: u.id, content: runTool(u.name, input, params.state) };
+    });
+    params.agentMsgs.push({ role: "user", content: results });
+    if (hangup) break;
+  }
+  return { spoken: spokenParts.join(" ").replace(/\s+/g, " ").trim(), tools, hangup, costUsd };
+}
+
+/** Deler streamet tekst i sætninger, så stemmen kan starte på første sætning, mens resten skrives. */
+export class SentenceSplitter {
+  private buf = "";
+  /** Tilføjer tekst; returnerer færdige sætninger. */
+  push(delta: string): string[] {
+    this.buf += delta;
+    const out: string[] = [];
+    // Slut på . ! ? efterfulgt af mellemrum; korte stumper («Ja.») slås sammen med næste sætning.
+    let m: RegExpExecArray | null;
+    const re = /[.!?…]+["»”]?\s+/g;
+    let start = 0;
+    while ((m = re.exec(this.buf))) {
+      const end = m.index + m[0].length;
+      const sentence = this.buf.slice(start, end).trim();
+      if (sentence.length >= 12) {
+        out.push(sentence);
+        start = end;
+      }
+    }
+    this.buf = this.buf.slice(start);
+    return out;
+  }
+  /** Resten, når svaret er færdigt. */
+  flush(): string | null {
+    const rest = this.buf.trim();
+    this.buf = "";
+    return rest || null;
+  }
+}
+
+/**
+ * Som agentTurn, men streamer: `onSentence` kaldes for hver færdig sætning (til stemmen med det samme),
+ * `onTool` for hvert værktøjskald.
+ */
+export async function agentTurnStream(params: {
+  client: Anthropic;
+  system: string;
+  agentMsgs: Anthropic.MessageParam[];
+  state: ToolState;
+  model?: AgentModel;
+  onSentence: (text: string) => void;
+  onTool?: (tool: { name: string; input: Record<string, unknown> }) => void;
+}): Promise<AgentTurn> {
+  const model = params.model ?? AGENT_MODEL;
+  const spokenParts: string[] = [];
+  const tools: AgentTurn["tools"] = [];
+  let hangup = false;
+  let costUsd = 0;
+  for (let step = 0; step < 6; step++) {
+    const splitter = new SentenceSplitter();
+    const stream = params.client.messages.stream({
+      ...(AGENT_MODELS[model].params as Partial<Anthropic.MessageCreateParamsNonStreaming>),
+      max_tokens: AGENT_MODELS[model].params.max_tokens,
+      model,
+      system: [{ type: "text", text: params.system, cache_control: { type: "ephemeral" } }],
+      tools: AI_SAELGER_TOOLS,
+      messages: params.agentMsgs,
+    });
+    stream.on("text", (delta) => {
+      for (const sentence of splitter.push(delta)) params.onSentence(sentence);
+    });
+    const res = await stream.finalMessage();
+    const rest = splitter.flush();
+    if (rest) params.onSentence(rest);
+    costUsd += usageCostUsd(res.usage, model);
+    params.agentMsgs.push({ role: "assistant", content: res.content });
+    spokenParts.push(...res.content.flatMap((b) => (b.type === "text" ? [b.text] : [])));
+    const uses = res.content.filter((b): b is Anthropic.ToolUseBlock => b.type === "tool_use");
+    if (uses.length === 0) break;
+    const results: Anthropic.ToolResultBlockParam[] = uses.map((u) => {
+      if (u.name === "afslut_samtale") hangup = true;
+      const input = u.input as Record<string, unknown>;
+      tools.push({ name: u.name, input });
+      params.onTool?.({ name: u.name, input });
       return { type: "tool_result", tool_use_id: u.id, content: runTool(u.name, input, params.state) };
     });
     params.agentMsgs.push({ role: "user", content: results });
