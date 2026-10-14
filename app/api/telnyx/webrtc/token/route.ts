@@ -272,6 +272,34 @@ export async function POST(req: Request) {
   if (power && !power.ok) {
     console.error("[telnyx:webrtc-token] Power Dialer-klargøring fejlede", { message: power.message });
   }
+  // #region agent log
+  if (power) {
+    fetch("http://localhost:7723/ingest/7a50d2a1-e6f0-436c-8453-6828c3db5e26", {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "X-Debug-Session-Id": "c1392e" },
+      body: JSON.stringify({
+        sessionId: "c1392e",
+        runId: "pre-fix",
+        hypothesisId: "B",
+        location: "app/api/telnyx/webrtc/token/route.ts:power",
+        message: "power klargoring",
+        data: {
+          ok: power.ok,
+          sipUriCallingEnabled: power.sipUriCallingEnabled,
+          hasSipUsername: Boolean(power.sipUsername),
+          powerMessage: power.message ?? null,
+        },
+        timestamp: Date.now(),
+      }),
+    }).catch(() => {});
+    console.warn("[dbg-c1392e] power-klargoring", {
+      ok: power.ok,
+      sipUriCallingEnabled: power.sipUriCallingEnabled,
+      hasSipUsername: Boolean(power.sipUsername),
+      powerMessage: power.message ?? null,
+    });
+  }
+  // #endregion
 
   if (token.ok && !sharedFallback && sessionUserId && telephonyCredentialId && !isPowerSession) {
     void ensureTelnyxCredentialConnectionIdCached({

@@ -4,6 +4,7 @@ import {
   isAdminRole,
   isAssignableDialerRole,
   isDialPoolMode,
+  isPowerPoolMode,
   orderDialPoolRoundRobin,
 } from "./campaign-access";
 
@@ -93,6 +94,16 @@ describe("isDialPoolMode", () => {
     expect(isDialPoolMode("PREDICTIVE")).toBe(true);
     expect(isDialPoolMode("POWER_DIALER")).toBe(false);
     expect(isDialPoolMode("NO_DIAL")).toBe(false);
+  });
+});
+
+describe("isPowerPoolMode", () => {
+  it("kun Power Dialer", () => {
+    expect(isPowerPoolMode("POWER_DIALER")).toBe(true);
+    expect(isPowerPoolMode("powerdialer")).toBe(true);
+    expect(isPowerPoolMode("CLICK_TO_CALL")).toBe(false);
+    expect(isPowerPoolMode("PREDICTIVE")).toBe(false);
+    expect(isPowerPoolMode("NO_DIAL")).toBe(false);
   });
 });
 

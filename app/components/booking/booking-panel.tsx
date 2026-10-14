@@ -10,6 +10,13 @@ import {
   type CopenhagenBookingSlotWithAvailability,
 } from "@/lib/booking/availability";
 import { startOfLocalDay, toCopenhagenDateKey } from "@/lib/booking/mock-availability";
+import {
+  MEETING_TYPE_ONLINE,
+  MEETING_TYPE_PHYSICAL,
+  type MeetingType,
+  meetingTypeLabel,
+  normalizeMeetingType,
+} from "@/lib/meeting-type";
 
 export type BookingConfirmPayload = {
   dateKey: string;
@@ -18,6 +25,7 @@ export type BookingConfirmPayload = {
   time: string;
   campaignId?: string;
   leadId?: string;
+  meetingType: MeetingType;
   /**
    * Kun administrator: spring overlap-tjek over (mødeblok-minutter før/efter). Det nye møde får stadig sin egen blok i systemet.
    */
@@ -30,6 +38,8 @@ export type BookingPanelProps = {
   /** Mødeansvarlig hvis kalender — styrer manuelle blokeringer i tilgængelighed. */
   calendarUserId?: string;
   initialMeetingLocal?: string;
+  meetingType?: MeetingType | string;
+  onMeetingTypeChange?: (type: MeetingType) => void;
   onConfirmBooking?: (detail: BookingConfirmPayload) => void | Promise<void>;
   isSubmitting?: boolean;
   allowMeetingConfirm?: boolean;
@@ -43,6 +53,8 @@ export function BookingPanel({
   leadId,
   calendarUserId: calendarUserIdProp,
   initialMeetingLocal,
+  meetingType: meetingTypeProp,
+  onMeetingTypeChange,
   onConfirmBooking,
   isSubmitting = false,
   allowMeetingConfirm = true,
@@ -62,6 +74,16 @@ export function BookingPanel({
   const [resolvedCalendarUserId, setResolvedCalendarUserId] = useState<string | undefined>(
     calendarUserIdProp,
   );
+  const [internalMeetingType, setInternalMeetingType] = useState<MeetingType>(() =>
+    normalizeMeetingType(meetingTypeProp),
+  );
+  const meetingType =
+    meetingTypeProp !== undefined ? normalizeMeetingType(meetingTypeProp) : internalMeetingType;
+
+  function setMeetingType(next: MeetingType) {
+    if (meetingTypeProp === undefined) setInternalMeetingType(next);
+    onMeetingTypeChange?.(next);
+  }
 
   useEffect(() => {
     if (calendarUserIdProp) {
@@ -116,7 +138,11 @@ export function BookingPanel({
     let cancelled = false;
     setSlotsLoading(true);
     void (async () => {
-      const qs = new URLSearchParams({ date: dayKey, userId: calendarUserId });
+      const qs = new URLSearchParams({
+        date: dayKey,
+        userId: calendarUserId,
+        meetingType,
+      });
       if (leadId) qs.set("excludeLeadId", leadId);
       const res = await fetch(`/api/booking/availability?${qs}`);
       let occupied: ReturnType<typeof parseOccupiedBlocksFromApi> = [];
@@ -149,6 +175,7 @@ export function BookingPanel({
     resolvedCalendarUserId,
     allowAdminAvailabilityOverride,
     adminAvailabilityOverride,
+    meetingType,
   ]);
 
   useEffect(() => {
@@ -231,6 +258,7 @@ export function BookingPanel({
       localDateTimeISO: new Date(selectedSlot.utcMs).toISOString(),
       campaignId,
       leadId,
+      meetingType,
       ...(adminSkipBookingOverlap ? { adminSkipBookingOverlap: true } : {}),
     };
 
@@ -311,29 +339,68 @@ export function BookingPanel({
         />
       </div>
 
-      <div className="mt-6 flex flex-col items-stretch gap-2 border-t border-slate-100 pt-4 sm:flex-row sm:items-center sm:justify-end">
-        {!allowMeetingConfirm ? (
-          <p className="order-2 text-center text-xs text-slate-500 sm:order-1 sm:mr-auto sm:text-left">
-            Vælg udfaldet <strong>Møde booket</strong> for at gemme tidspunktet på leadet.
+      <div className="mt-6 space-y-4 border-t border-slate-100 pt-4">
+        <div>
+          <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-slate-500">
+            Mødetype
           </p>
-        ) : null}
-        <div className="order-1 flex w-full flex-col gap-2 sm:order-2 sm:w-auto sm:flex-row sm:gap-3">
-          <a
-            href="https://calendly.com/victor-allio/onboarding"
-            target="_blank"
-            rel="noopener noreferrer"
-            className="inline-flex items-center justify-center rounded-xl border border-slate-200 bg-white px-5 py-2.5 text-center text-sm font-semibold text-slate-800 shadow-sm transition hover:bg-slate-50"
-          >
-            Calendly
-          </a>
-          <button
-            type="button"
-            disabled={!canConfirm}
-            onClick={() => void handleConfirm()}
-            className="rounded-xl bg-blue-600 px-5 py-2.5 text-sm font-semibold text-white shadow-md transition hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-50"
-          >
-            {isSubmitting ? "Gemmer…" : "Bekræft booking"}
-          </button>
+          <div className="flex flex-col gap-2 sm:flex-row">
+            {(
+              [
+                [MEETING_TYPE_ONLINE, meetingTypeLabel(MEETING_TYPE_ONLINE)],
+                [MEETING_TYPE_PHYSICAL, meetingTypeLabel(MEETING_TYPE_PHYSICAL)],
+              ] as const
+            ).map(([value, label]) => {
+              const active = meetingType === value;
+              return (
+                <button
+                  key={value}
+                  type="button"
+                  aria-pressed={active}
+                  onClick={() => setMeetingType(value)}
+                  className={[
+                    "flex-1 rounded-xl border px-4 py-3 text-sm font-semibold shadow-sm transition",
+                    active
+                      ? "border-blue-600 bg-blue-600 text-white ring-2 ring-blue-300/70"
+                      : "border-slate-200 bg-white text-slate-800 hover:border-slate-300 hover:bg-slate-50",
+                  ].join(" ")}
+                >
+                  {label}
+                </button>
+              );
+            })}
+          </div>
+          <p className="mt-1.5 text-xs text-slate-500">
+            {meetingType === MEETING_TYPE_PHYSICAL
+              ? "Fysisk møde — udfyld mødeadresse i det grønne felt. Ledige tider følger fysisk buffer."
+              : "Onlinemøde — Cal.eu sender mødelink. Ledige tider følger online-buffer."}
+          </p>
+        </div>
+
+        <div className="flex flex-col items-stretch gap-2 sm:flex-row sm:items-center sm:justify-end">
+          {!allowMeetingConfirm ? (
+            <p className="order-2 text-center text-xs text-slate-500 sm:order-1 sm:mr-auto sm:text-left">
+              Vælg udfaldet <strong>Møde booket</strong> for at gemme tidspunktet på leadet.
+            </p>
+          ) : null}
+          <div className="order-1 flex w-full flex-col gap-2 sm:order-2 sm:w-auto sm:flex-row sm:gap-3">
+            <a
+              href="https://calendly.com/victor-allio/onboarding"
+              target="_blank"
+              rel="noopener noreferrer"
+              className="inline-flex items-center justify-center rounded-xl border border-slate-200 bg-white px-5 py-2.5 text-center text-sm font-semibold text-slate-800 shadow-sm transition hover:bg-slate-50"
+            >
+              Calendly
+            </a>
+            <button
+              type="button"
+              disabled={!canConfirm}
+              onClick={() => void handleConfirm()}
+              className="rounded-xl bg-blue-600 px-5 py-2.5 text-sm font-semibold text-white shadow-md transition hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-50"
+            >
+              {isSubmitting ? "Gemmer…" : "Bekræft booking"}
+            </button>
+          </div>
         </div>
       </div>
     </section>

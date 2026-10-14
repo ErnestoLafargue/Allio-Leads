@@ -7,12 +7,15 @@ import {
   formatClockTime,
   formatClockedDuration,
   formatClockedLive,
+  notifyTimeClockChanged,
   shiftDayKey,
   withLiveOverviewSeconds,
+  type TimeClockEntryDto,
   type TimeClockOverview,
 } from "@/lib/time-clock";
 import { useDesktopComputer } from "@/lib/use-desktop-computer";
 import { useTimeClock } from "@/lib/use-time-clock";
+import { TimeClockAdminEditForm } from "./time-clock-admin-edit";
 
 export function TimeClockPage() {
   const { data: session } = useSession();
@@ -22,6 +25,8 @@ export function TimeClockPage() {
   const [overviewError, setOverviewError] = useState<string | null>(null);
   const [selectedDayKey, setSelectedDayKey] = useState("");
   const [expandedUserId, setExpandedUserId] = useState<string | null>(null);
+  const [edit, setEdit] = useState<{ userId: string; entryId: string | "new" } | null>(null);
+  const [deleteBusyId, setDeleteBusyId] = useState<string | null>(null);
 
   const loadOverview = useCallback(async (dayKey: string) => {
     const qs = new URLSearchParams();
@@ -142,6 +147,12 @@ export function TimeClockPage() {
         {isAdmin && liveOverview && viewingToday ? (
           <p className="text-sm text-stone-600">
             {liveOverview.clockedInCount} stemplet ind nu
+            <span className="text-stone-400"> · </span>
+            Åbn en sælger for at rette ind/ud, hvis der er sket en fejl.
+          </p>
+        ) : isAdmin ? (
+          <p className="text-sm text-stone-500">
+            Åbn en sælger for at rette ind/ud, hvis der er sket en fejl.
           </p>
         ) : null}
 
@@ -171,6 +182,7 @@ export function TimeClockPage() {
                   <th className="px-3 py-2.5 font-medium">Ind</th>
                   <th className="px-3 py-2.5 font-medium">Ud</th>
                   <th className="px-3 py-2.5 text-right font-medium tabular-nums">Timer</th>
+                  {isAdmin ? <th className="px-3 py-2.5 text-right font-medium">Ret</th> : null}
                 </tr>
               </thead>
               <tbody>
@@ -189,6 +201,7 @@ export function TimeClockPage() {
                   return (
                     <UserRows
                       key={row.userId}
+                      userId={row.userId}
                       isAdmin={isAdmin}
                       name={row.name}
                       username={row.username}
@@ -202,11 +215,61 @@ export function TimeClockPage() {
                       expanded={expanded}
                       onToggle={
                         isAdmin
-                          ? () => setExpandedUserId((id) => (id === row.userId ? null : row.userId))
+                          ? () => {
+                              if (expanded) {
+                                setExpandedUserId(null);
+                                setEdit((e) => (e?.userId === row.userId ? null : e));
+                              } else {
+                                setExpandedUserId(row.userId);
+                              }
+                            }
                           : undefined
                       }
                       entries={row.entries}
                       showDetails={isAdmin ? expanded : many}
+                      editEntryId={
+                        isAdmin && edit?.userId === row.userId ? edit.entryId : null
+                      }
+                      onStartEdit={
+                        isAdmin
+                          ? (entryId) => {
+                              setExpandedUserId(row.userId);
+                              setEdit({ userId: row.userId, entryId });
+                            }
+                          : undefined
+                      }
+                      onCancelEdit={() => setEdit(null)}
+                      onSaved={() => {
+                        setEdit(null);
+                        void loadOverview(selectedDayKey);
+                      }}
+                      onDeleteEntry={
+                        isAdmin
+                          ? async (entryId) => {
+                              if (!window.confirm("Slet denne stempling?")) return;
+                              setDeleteBusyId(entryId);
+                              try {
+                                const res = await fetch(
+                                  `/api/time-clock/entries/${encodeURIComponent(entryId)}`,
+                                  { method: "DELETE" },
+                                );
+                                if (!res.ok) {
+                                  const j = (await res.json().catch(() => null)) as {
+                                    error?: string;
+                                  } | null;
+                                  window.alert(j?.error ?? "Kunne ikke slette.");
+                                  return;
+                                }
+                                notifyTimeClockChanged();
+                                if (edit?.entryId === entryId) setEdit(null);
+                                void loadOverview(selectedDayKey);
+                              } finally {
+                                setDeleteBusyId(null);
+                              }
+                            }
+                          : undefined
+                      }
+                      deleteBusyId={deleteBusyId}
                     />
                   );
                 })}
@@ -220,6 +283,7 @@ export function TimeClockPage() {
 }
 
 function UserRows({
+  userId,
   isAdmin,
   name,
   username,
@@ -234,7 +298,14 @@ function UserRows({
   onToggle,
   entries,
   showDetails,
+  editEntryId,
+  onStartEdit,
+  onCancelEdit,
+  onSaved,
+  onDeleteEntry,
+  deleteBusyId,
 }: {
+  userId: string;
   isAdmin: boolean;
   name: string;
   username: string;
@@ -249,6 +320,12 @@ function UserRows({
   onToggle?: () => void;
   entries: TimeClockOverview["rows"][number]["entries"];
   showDetails: boolean;
+  editEntryId: string | "new" | null;
+  onStartEdit?: (entryId: string | "new") => void;
+  onCancelEdit?: () => void;
+  onSaved?: () => void;
+  onDeleteEntry?: (entryId: string) => void;
+  deleteBusyId: string | null;
 }) {
   return (
     <>
@@ -303,34 +380,150 @@ function UserRows({
         <td className="px-3 py-2.5 text-right font-medium tabular-nums text-stone-900">
           {totalSeconds > 0 ? formatClockedDuration(totalSeconds) : "—"}
         </td>
+        {isAdmin ? (
+          <td className="px-3 py-2.5 text-right">
+            {onStartEdit ? (
+              <button
+                type="button"
+                onClick={() => onStartEdit(entries[0]?.id ?? "new")}
+                className="text-xs font-medium text-emerald-800 hover:underline"
+              >
+                {emptyDay ? "Tilføj" : "Ret"}
+              </button>
+            ) : null}
+          </td>
+        ) : null}
       </tr>
       {showDetails
-        ? entries.map((e) => (
-            <tr key={e.id} className="border-b border-stone-50 bg-stone-50/60 last:border-0">
-              {isAdmin ? <td /> : null}
-              {isAdmin ? <td className="px-3 py-2 text-xs text-stone-500">Tid</td> : null}
-              <td className="px-3 py-2 text-xs text-stone-500">{e.open ? "Åben" : "Lukket"}</td>
-              <td className="px-3 py-2 text-xs tabular-nums text-stone-700">
-                {formatClockStamp(e.punchedInAt, viewDayKey)}
-              </td>
-              <td className="px-3 py-2 text-xs tabular-nums text-stone-700">
-                {e.open ? "—" : formatClockStamp(e.punchedOutAt ?? e.punchedInAt, viewDayKey)}
-              </td>
-              <td className="px-3 py-2 text-right text-xs tabular-nums text-stone-700">
-                {formatClockedDuration(e.seconds)}
-              </td>
-            </tr>
-          ))
+        ? entries.map((e) =>
+            editEntryId === e.id ? (
+              <AdminEditRow
+                key={`${e.id}-edit`}
+                userId={userId}
+                viewDayKey={viewDayKey}
+                entry={e}
+                onCancel={onCancelEdit}
+                onSaved={onSaved}
+              />
+            ) : (
+              <tr key={e.id} className="border-b border-stone-50 bg-stone-50/60 last:border-0">
+                {isAdmin ? <td /> : null}
+                {isAdmin ? <td className="px-3 py-2 text-xs text-stone-500">Tid</td> : null}
+                <td className="px-3 py-2 text-xs text-stone-500">{e.open ? "Åben" : "Lukket"}</td>
+                <td className="px-3 py-2 text-xs tabular-nums text-stone-700">
+                  {formatClockStamp(e.punchedInAt, viewDayKey)}
+                </td>
+                <td className="px-3 py-2 text-xs tabular-nums text-stone-700">
+                  {e.open ? "—" : formatClockStamp(e.punchedOutAt ?? e.punchedInAt, viewDayKey)}
+                </td>
+                <td className="px-3 py-2 text-right text-xs tabular-nums text-stone-700">
+                  {formatClockedDuration(e.seconds)}
+                </td>
+                {isAdmin ? (
+                  <td className="px-3 py-2 text-right">
+                    <div className="flex justify-end gap-2">
+                      {onStartEdit ? (
+                        <button
+                          type="button"
+                          onClick={() => onStartEdit(e.id)}
+                          className="text-xs font-medium text-emerald-800 hover:underline"
+                        >
+                          Ret
+                        </button>
+                      ) : null}
+                      {onDeleteEntry ? (
+                        <button
+                          type="button"
+                          disabled={deleteBusyId === e.id}
+                          onClick={() => onDeleteEntry(e.id)}
+                          className="text-xs font-medium text-rose-700 hover:underline disabled:opacity-60"
+                        >
+                          Slet
+                        </button>
+                      ) : null}
+                    </div>
+                  </td>
+                ) : null}
+              </tr>
+            ),
+          )
         : null}
-      {showDetails && isAdmin && entries.length === 0 ? (
+      {showDetails && isAdmin && editEntryId === "new" ? (
+        <AdminEditRow
+          userId={userId}
+          viewDayKey={viewDayKey}
+          entry={null}
+          onCancel={onCancelEdit}
+          onSaved={onSaved}
+        />
+      ) : null}
+      {showDetails && isAdmin && entries.length === 0 && editEntryId !== "new" ? (
         <tr className="border-b border-stone-50 bg-stone-50/60">
           <td />
           <td />
           <td className="px-3 py-2 text-xs text-stone-400" colSpan={3}>
             Ingen stempling denne dag
           </td>
+          <td className="px-3 py-2 text-right">
+            {onStartEdit ? (
+              <button
+                type="button"
+                onClick={() => onStartEdit("new")}
+                className="text-xs font-medium text-emerald-800 hover:underline"
+              >
+                Tilføj
+              </button>
+            ) : null}
+          </td>
+        </tr>
+      ) : null}
+      {showDetails && isAdmin && entries.length > 0 && editEntryId !== "new" ? (
+        <tr className="border-b border-stone-50 bg-stone-50/40">
+          <td colSpan={6} />
+          <td className="px-3 py-2 text-right">
+            {onStartEdit ? (
+              <button
+                type="button"
+                onClick={() => onStartEdit("new")}
+                className="text-xs font-medium text-stone-600 hover:underline"
+              >
+                Tilføj tid
+              </button>
+            ) : null}
+          </td>
         </tr>
       ) : null}
     </>
+  );
+}
+
+function AdminEditRow({
+  userId,
+  viewDayKey,
+  entry,
+  onCancel,
+  onSaved,
+}: {
+  userId: string;
+  viewDayKey: string;
+  entry: TimeClockEntryDto | null;
+  onCancel?: () => void;
+  onSaved?: () => void;
+}) {
+  return (
+    <tr className="border-b border-stone-100 bg-emerald-50/40">
+      <td className="px-3 py-3" colSpan={7}>
+        <p className="mb-2 text-xs font-medium text-stone-700">
+          {entry ? "Ret stempling" : "Tilføj stempling"}
+        </p>
+        <TimeClockAdminEditForm
+          userId={userId}
+          viewDayKey={viewDayKey}
+          entry={entry}
+          onCancel={() => onCancel?.()}
+          onSaved={() => onSaved?.()}
+        />
+      </td>
+    </tr>
   );
 }

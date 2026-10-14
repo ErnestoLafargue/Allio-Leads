@@ -104,6 +104,20 @@ export function buildPoolArbejdHref(opts: {
   return `/kampagner/pool/arbejd${qs ? `?${qs}` : ""}`;
 }
 
+/** «Power: alle tildelte» — Power-pulje workspace (anker = ældste tildelte Power-kampagne). */
+export function buildPowerPoolArbejdHref(opts: {
+  openedFrom: LeadOpenedFrom;
+  voipSession?: boolean;
+}): string {
+  const params = new URLSearchParams();
+  params.set("from", sanitizeReturnPath(opts.openedFrom.path));
+  if (opts.openedFrom.source?.trim()) params.set("source", opts.openedFrom.source.trim());
+  if (opts.openedFrom.label?.trim()) params.set("fromLabel", opts.openedFrom.label.trim());
+  if (opts.voipSession) params.set("voipSession", "1");
+  const qs = params.toString();
+  return `/kampagner/power-pool/arbejd${qs ? `?${qs}` : ""}`;
+}
+
 export type ParsedLeadNavigation = {
   openedFrom: LeadOpenedFrom;
   isQueueMode: boolean;

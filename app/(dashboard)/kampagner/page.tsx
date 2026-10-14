@@ -10,7 +10,12 @@ import {
 } from "@/lib/dial-mode";
 import { VoipAudioSettingsButton } from "@/app/components/voip-audio-settings-button";
 import { DashboardTabs } from "@/app/components/dashboard-tabs";
-import { buildCampaignArbejdHref, buildPoolArbejdHref, KNOWN_LEAD_SOURCES } from "@/lib/lead-navigation";
+import {
+  buildCampaignArbejdHref,
+  buildPoolArbejdHref,
+  buildPowerPoolArbejdHref,
+  KNOWN_LEAD_SOURCES,
+} from "@/lib/lead-navigation";
 import { DIALER_PAUSE_FLASH_KEY } from "@/lib/dialer-pause-exit";
 
 type Campaign = {
@@ -138,20 +143,31 @@ export default function StartPage() {
     return null;
   });
   const [dialPoolCount, setDialPoolCount] = useState<number | null>(null);
+  const [powerPoolCount, setPowerPoolCount] = useState<number | null>(null);
 
   const isAdmin = session?.user.role === "ADMIN";
 
   const loadDialPool = useCallback(async () => {
     try {
-      const res = await fetch("/api/dialer/pool");
-      if (!res.ok) {
+      const [dialRes, powerRes] = await Promise.all([
+        fetch("/api/dialer/pool"),
+        fetch("/api/dialer/power-pool"),
+      ]);
+      if (dialRes.ok) {
+        const j = (await dialRes.json()) as { count?: number };
+        setDialPoolCount(typeof j.count === "number" ? j.count : 0);
+      } else {
         setDialPoolCount(0);
-        return;
       }
-      const j = (await res.json()) as { count?: number };
-      setDialPoolCount(typeof j.count === "number" ? j.count : 0);
+      if (powerRes.ok) {
+        const j = (await powerRes.json()) as { count?: number };
+        setPowerPoolCount(typeof j.count === "number" ? j.count : 0);
+      } else {
+        setPowerPoolCount(0);
+      }
     } catch {
       setDialPoolCount(0);
+      setPowerPoolCount(0);
     }
   }, []);
 
@@ -311,6 +327,35 @@ export default function StartPage() {
             >
               <PhonePlayIcon className="size-4" />
               Ring alle tildelte
+            </button>
+          )}
+          {powerPoolCount !== null && powerPoolCount > 0 ? (
+            <Link
+              href={buildPowerPoolArbejdHref({
+                openedFrom: { ...KNOWN_LEAD_SOURCES.kampagner, source: "dialer" },
+                voipSession: true,
+              })}
+              className="inline-flex items-center gap-1.5 rounded-lg border border-indigo-600 bg-indigo-600 px-3 py-2 text-sm font-medium text-white shadow-sm hover:bg-indigo-700"
+            >
+              <PhonePlayIcon className="size-4" />
+              Power: alle tildelte
+              <span className="rounded-md bg-indigo-800/40 px-1.5 py-0.5 text-[11px] tabular-nums">
+                {powerPoolCount}
+              </span>
+            </Link>
+          ) : (
+            <button
+              type="button"
+              disabled
+              title={
+                powerPoolCount === 0
+                  ? "Ingen tildelte Power Dialer-kampagner"
+                  : "Indlæser Power-pulje…"
+              }
+              className="inline-flex items-center gap-1.5 rounded-lg border border-stone-200 bg-stone-100 px-3 py-2 text-sm font-medium text-stone-400"
+            >
+              <PhonePlayIcon className="size-4" />
+              Power: alle tildelte
             </button>
           )}
           <input

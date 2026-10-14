@@ -21,8 +21,12 @@ import {
   parseTelnyxOutboundChannelLimitFromEnv,
 } from "@/lib/dialer-dispatch-math";
 import { claimDispatchLeadBatch } from "@/lib/power-dialer-batch";
-import { userCanAccessCampaign } from "@/lib/campaign-access";
-import { loadPowerCampaign, runPowerDispatch } from "@/lib/power-dialer-engine";
+import { powerPoolCampaignIdsForUser, userCanAccessCampaign } from "@/lib/campaign-access";
+import {
+  loadPowerCampaign,
+  runPowerDispatch,
+  runPowerPoolDispatch,
+} from "@/lib/power-dialer-engine";
 
 /**
  * Server-side parallel dialer.
@@ -47,6 +51,7 @@ export async function POST(req: Request) {
 
   const body = await req.json().catch(() => null);
   const campaignId = typeof body?.campaignId === "string" ? body.campaignId.trim() : "";
+  const powerPool = body?.powerPool === true;
 
   if (!campaignId) {
     return NextResponse.json({ error: "campaignId er påkrævet" }, { status: 400 });
@@ -73,7 +78,13 @@ export async function POST(req: Request) {
     if (!campaign) {
       return NextResponse.json({ error: "Kampagne findes ikke" }, { status: 404 });
     }
-    const result = await runPowerDispatch({ campaign, callerUserId: session!.user.id });
+    const result = powerPool
+      ? await runPowerPoolDispatch({
+          anchorCampaign: campaign,
+          poolCampaignIds: await powerPoolCampaignIdsForUser(session!.user.id),
+          callerUserId: session!.user.id,
+        })
+      : await runPowerDispatch({ campaign, callerUserId: session!.user.id });
     if (result.code === "TELNYX_NOT_CONFIGURED") {
       return NextResponse.json(
         { ...result, error: "TELNYX_API_KEY eller TELNYX_CONNECTION_ID mangler." },

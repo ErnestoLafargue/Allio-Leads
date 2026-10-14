@@ -44,10 +44,18 @@ export type TimeClockOverview = {
   rows: TimeClockUserRow[];
 };
 
+export type TimeClockErrorCode =
+  | "already_in"
+  | "not_in"
+  | "invalid_times"
+  | "overlap"
+  | "already_open"
+  | "not_found";
+
 export class TimeClockError extends Error {
   constructor(
     message: string,
-    readonly code: "already_in" | "not_in",
+    readonly code: TimeClockErrorCode,
   ) {
     super(message);
     this.name = "TimeClockError";
@@ -71,6 +79,95 @@ export type TimeClockUserLike = {
 
 export function isValidDayKey(raw: string | null | undefined): raw is string {
   return typeof raw === "string" && DAY_KEY_RE.test(raw);
+}
+
+const DATETIME_LOCAL_RE = /^(\d{4}-\d{2}-\d{2})T(\d{2}):(\d{2})(?::\d{2})?$/;
+const FUTURE_SKEW_MS = 2 * 60 * 1000;
+
+/** `datetime-local` værdi (YYYY-MM-DDTHH:mm) i Europe/Copenhagen. */
+export function formatCopenhagenDateTimeLocal(at: Date | string): string {
+  const d = typeof at === "string" ? new Date(at) : at;
+  const parts = new Intl.DateTimeFormat("en-CA", {
+    timeZone: TZ,
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+    hour12: false,
+  }).formatToParts(d);
+  const get = (type: Intl.DateTimeFormatPartTypes) => parts.find((p) => p.type === type)?.value ?? "";
+  const hourRaw = get("hour");
+  const hour = hourRaw === "24" ? "00" : hourRaw;
+  return `${get("year")}-${get("month")}-${get("day")}T${hour}:${get("minute")}`;
+}
+
+/** Fortolker `datetime-local` som vægur i Europe/Copenhagen. */
+export function parseCopenhagenDateTimeLocal(raw: string): Date | null {
+  const m = DATETIME_LOCAL_RE.exec(raw.trim());
+  if (!m) return null;
+  const dayKey = m[1]!;
+  const hour = Number(m[2]);
+  const minute = Number(m[3]);
+  if (!isValidDayKey(dayKey) || hour > 23 || minute > 59) return null;
+  try {
+    const { start } = copenhagenDayBoundsUtcFromDayKey(dayKey);
+    return new Date(start.getTime() + hour * 3_600_000 + minute * 60_000);
+  } catch {
+    return null;
+  }
+}
+
+export function punchIntervalsOverlap(
+  a: { punchedInAt: Date; punchedOutAt: Date | null },
+  b: { punchedInAt: Date; punchedOutAt: Date | null },
+  now: Date,
+): boolean {
+  if (a.punchedOutAt == null && b.punchedOutAt == null) return true;
+  const aEnd = a.punchedOutAt ?? now;
+  const bEnd = b.punchedOutAt ?? now;
+  return a.punchedInAt.getTime() < bEnd.getTime() && b.punchedInAt.getTime() < aEnd.getTime();
+}
+
+export function validateAdminPunchTimes(args: {
+  punchedInAt: Date;
+  punchedOutAt: Date | null;
+  now: Date;
+  others: Array<{ punchedInAt: Date; punchedOutAt: Date | null }>;
+}): { ok: true } | { ok: false; message: string; code: TimeClockErrorCode } {
+  const { punchedInAt, punchedOutAt, now, others } = args;
+  if (!Number.isFinite(punchedInAt.getTime())) {
+    return { ok: false, code: "invalid_times", message: "Ugyldigt ind-tidspunkt." };
+  }
+  if (punchedOutAt && !Number.isFinite(punchedOutAt.getTime())) {
+    return { ok: false, code: "invalid_times", message: "Ugyldigt ud-tidspunkt." };
+  }
+  if (punchedInAt.getTime() > now.getTime() + FUTURE_SKEW_MS) {
+    return { ok: false, code: "invalid_times", message: "Ind-tidspunktet kan ikke ligge i fremtiden." };
+  }
+  if (punchedOutAt && punchedOutAt.getTime() > now.getTime() + FUTURE_SKEW_MS) {
+    return { ok: false, code: "invalid_times", message: "Ud-tidspunktet kan ikke ligge i fremtiden." };
+  }
+  if (punchedOutAt && punchedOutAt.getTime() <= punchedInAt.getTime()) {
+    return { ok: false, code: "invalid_times", message: "Ud skal være efter ind." };
+  }
+  if (punchedOutAt == null && others.some((e) => e.punchedOutAt == null)) {
+    return {
+      ok: false,
+      code: "already_open",
+      message: "Personen er allerede stemplet ind. Ret den åbne tid i stedet.",
+    };
+  }
+  for (const other of others) {
+    if (punchIntervalsOverlap({ punchedInAt, punchedOutAt }, other, now)) {
+      return {
+        ok: false,
+        code: "overlap",
+        message: "Tiden overlapper en anden stempling for samme person.",
+      };
+    }
+  }
+  return { ok: true };
 }
 
 export function clockedSeconds(

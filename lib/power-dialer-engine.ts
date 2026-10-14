@@ -18,6 +18,8 @@ import {
   pickTelnyxFromNumber,
   appRecordingEnabled,
   startTelnyxRecording,
+  startTelnyxCallTranscription,
+  stopTelnyxCallTranscription,
 } from "@/lib/telnyx-call-control";
 import {
   computeDropBrake,
@@ -36,6 +38,8 @@ import {
   POWER_AGENT_MAX_ATTEMPTS,
   POWER_AMD_TOTAL_ANALYSIS_MS,
   POWER_COOLDOWN_RESET_INTERVAL_MS,
+  POWER_GREETING_MACHINE_GRACE_MS,
+  POWER_GREETING_UNKNOWN_GRACE_MS,
   POWER_DROP_BRAKE_MIN_SAMPLE,
   POWER_DROP_BRAKE_WINDOW_MS,
   POWER_MAINTENANCE_INTERVAL_MS,
@@ -46,16 +50,38 @@ import {
 } from "@/lib/power-dialer-constants";
 import {
   classifyPowerLeadHangup,
-  decidePowerAmdAction,
   POWER_DROP_RESOLUTIONS,
   type PowerResolution,
 } from "@/lib/power-dialer-outcomes";
 import type { AmdInternalResult } from "@/lib/telnyx-amd-result";
 import { applyPowerLeadResolution } from "@/lib/power-dialer-lead-outcome";
+import {
+  classifyPowerGreeting,
+  mergeGreetingHint,
+  type GreetingHint,
+} from "@/lib/power-greeting-classify";
+import { decidePowerGreetingAction } from "@/lib/power-greeting-decision";
+import {
+  isPowerSonioxListeningHint,
+  notePowerSonioxStartResult,
+  POWER_GREETING_SONIOX_LISTEN,
+  POWER_SONIOX_START_TIMEOUT_MS,
+  shouldAttemptPowerSoniox,
+} from "@/lib/power-greeting-soniox";
 import { claimPowerDialerLeads, listPowerDialerCandidates } from "@/lib/power-dialer-batch";
 import { countPowerChannelsInUse, resolvePowerChannelLimit } from "@/lib/power-dialer-channels";
+import {
+  groupCandidatesByCampaign,
+  pickPowerPoolDialRatio,
+  planPowerPoolClaims,
+  sortPowerPoolCandidates,
+} from "@/lib/power-dialer-pool";
 import { applyLeadCooldownResets } from "@/lib/lead-cooldown";
-import { powerAgentSipUri } from "@/lib/telnyx-power-agent";
+import {
+  ensurePowerDialerAgentTelnyx,
+  powerAgentSipUri,
+  resolvePowerAgentOutboundConnectionId,
+} from "@/lib/telnyx-power-agent";
 import { normalizeCampaignDialMode } from "@/lib/dial-mode";
 import {
   normalizeDialPhonePriority,
@@ -103,19 +129,99 @@ function freshCutoff(now: Date): Date {
   return new Date(now.getTime() - PRESENCE_FRESH_WINDOW_MS);
 }
 
-/** Sælgere dispatch må ringe op for: klar, WebRTC klar, frisk heartbeat, ikke i efterbehandling. */
+/**
+ * Klar / WebRTC / frisk heartbeat / ikke i efterbehandling.
+ * Returnerer AND-dele så kaldere kan lægge ekstra OR/AND uden at overskrive wrapUp-filteret.
+ */
+function dialableAgentReadyAnd(now: Date): Prisma.AgentSessionWhereInput[] {
+  return [
+    { status: "ready" },
+    { webrtcReady: true },
+    { lastHeartbeat: { gte: freshCutoff(now) } },
+    { OR: [{ wrapUpUntil: null }, { wrapUpUntil: { lte: now } }] },
+  ];
+}
+
+/** Sælgere dispatch må ringe op for på én kampagne (ikke Power-pulje-session). */
 export function dialableAgentWhere(campaignId: string, now: Date): Prisma.AgentSessionWhereInput {
   return {
     campaignId,
-    status: "ready",
-    webrtcReady: true,
-    lastHeartbeat: { gte: freshCutoff(now) },
-    OR: [{ wrapUpUntil: null }, { wrapUpUntil: { lte: now } }],
+    powerPool: false,
+    AND: dialableAgentReadyAnd(now),
+  };
+}
+
+/** Klar Power-pulje-session på anker-kampagnen. */
+export function dialablePowerPoolAgentWhere(
+  anchorCampaignId: string,
+  now: Date,
+): Prisma.AgentSessionWhereInput {
+  return {
+    campaignId: anchorCampaignId,
+    powerPool: true,
+    AND: dialableAgentReadyAnd(now),
   };
 }
 
 export async function countDialableAgents(db: Db, campaignId: string, now: Date): Promise<number> {
   return db.agentSession.count({ where: dialableAgentWhere(campaignId, now) });
+}
+
+/**
+ * Sælgere der kan tage et svar på denne kampagne: enkeltkampagne-session ELLER
+ * Power-pulje-session hvor brugeren er tildelt kampagnen.
+ *
+ * Bruges til overskuds-afbrydelse. Uden pulje-agenter her blev «Power: alle tildelte»
+ * opkald lagt på med det samme (ready=0 pr. ikke-anker-kampagne → CANCELLED_OVERDIAL).
+ */
+export function dialableAgentsForCampaignCapacityWhere(
+  campaignId: string,
+  now: Date,
+): Prisma.AgentSessionWhereInput {
+  return {
+    AND: [
+      ...dialableAgentReadyAnd(now),
+      {
+        OR: [
+          { campaignId, powerPool: false },
+          {
+            powerPool: true,
+            user: { campaignAssignments: { some: { campaignId } } },
+          },
+        ],
+      },
+    ],
+  };
+}
+
+export async function countDialableAgentsForCampaignCapacity(
+  db: Db,
+  campaignId: string,
+  now: Date,
+): Promise<number> {
+  return db.agentSession.count({ where: dialableAgentsForCampaignCapacityWhere(campaignId, now) });
+}
+
+/** Klar sælgere til Power-pulje: pulje-anker + enkeltkampagne-sessioner på puljens kampagner. */
+export async function countDialablePoolAgents(
+  db: Db,
+  params: { anchorCampaignId: string; poolCampaignIds: string[]; now: Date },
+): Promise<number> {
+  const { anchorCampaignId, poolCampaignIds, now } = params;
+  if (poolCampaignIds.length === 0) return 0;
+  return db.agentSession.count({
+    where: {
+      AND: [
+        ...dialableAgentReadyAnd(now),
+        {
+          OR: [
+            { campaignId: anchorCampaignId, powerPool: true },
+            { campaignId: { in: poolCampaignIds }, powerPool: false },
+          ],
+        },
+      ],
+    },
+  });
 }
 
 export async function getPowerDropStats(
@@ -339,27 +445,40 @@ export async function reservePowerAgent(params: {
   now: Date;
 }): Promise<ReservedPowerAgent | null> {
   const { campaignId, now } = params;
+  const readyOrDraining: Prisma.AgentSessionWhereInput[] = [
+    { status: "ready", OR: [{ wrapUpUntil: null }, { wrapUpUntil: { lte: now } }] },
+    { status: "draining", drainUntil: { gt: now } },
+  ];
   const candidates = await prisma.agentSession.findMany({
     where: {
-      campaignId,
       webrtcReady: true,
       lastHeartbeat: { gte: freshCutoff(now) },
       ...(params.excludeUserIds.length > 0 ? { userId: { notIn: params.excludeUserIds } } : {}),
       OR: [
-        { status: "ready", OR: [{ wrapUpUntil: null }, { wrapUpUntil: { lte: now } }] },
-        { status: "draining", drainUntil: { gt: now } },
+        { campaignId, powerPool: false, OR: readyOrDraining },
+        { powerPool: true, OR: readyOrDraining },
       ],
     },
     orderBy: [{ readySince: { sort: "asc", nulls: "last" } }, { lastHeartbeat: "asc" }],
-    take: 10,
+    take: 20,
     select: {
       id: true,
       userId: true,
       status: true,
+      powerPool: true,
+      campaignId: true,
       user: { select: { telnyxCredentialSipUsername: true, telnyxSipUsername: true } },
     },
   });
   for (const s of candidates) {
+    if (s.powerPool) {
+      // Pulje-session: kun hvis sælgeren er tildelt leadets kampagne.
+      const assigned = await prisma.campaignAssignment.findUnique({
+        where: { userId_campaignId: { userId: s.userId, campaignId } },
+        select: { id: true },
+      });
+      if (!assigned) continue;
+    }
     const sipUri = powerAgentSipUri(s.user);
     if (!sipUri) continue;
     const upd = await prisma.agentSession.updateMany({
@@ -428,7 +547,6 @@ export async function connectPowerLeadToAgent(params: {
   retry?: { expectedAttempts: number; excludeUserIds: string[] };
 }): Promise<PowerConnectOutcome> {
   const apiKey = telnyxApiKey();
-  const connectionId = getTelnyxConnectionId();
   const now = new Date();
   const leg = await prisma.dialerCallLog.findUnique({
     where: { callControlId: params.leadCallControlId },
@@ -481,7 +599,7 @@ export async function connectPowerLeadToAgent(params: {
   }
 
   const campaign = await loadPowerCampaign(leg.campaignId);
-  if (!campaign || !apiKey || !connectionId) {
+  if (!campaign || !apiKey) {
     await resolvePowerLeadLeg({
       callControlId: params.leadCallControlId,
       resolution: "DROP_NO_AGENT",
@@ -510,8 +628,32 @@ export async function connectPowerLeadToAgent(params: {
   }
 
   const attempt = leg.agentAttempts + 1;
+  await ensurePowerDialerAgentTelnyx({ userId: agent.userId, apiKey }).catch(() => null);
+  const connectionId = await resolvePowerAgentOutboundConnectionId({
+    apiKey,
+    agentUserId: agent.userId,
+  });
+  if (!connectionId) {
+    await releasePowerAgentReservation({ sessionId: agent.sessionId });
+    await resolvePowerLeadLeg({
+      callControlId: params.leadCallControlId,
+      resolution: "DROP_NO_AGENT",
+      hangup: true,
+      campaign,
+    });
+    return "dropped";
+  }
   const fromNumber =
     leg.fromNumber?.trim() || pickTelnyxFromNumber(leg.leadId, { userId: agent.userId }) || "";
+  const agentTelnyx = await prisma.user.findUnique({
+    where: { id: agent.userId },
+    select: {
+      telnyxCredentialConnectionId: true,
+      telnyxSipUriCallingEnabledAt: true,
+      telnyxCredentialSipUsername: true,
+    },
+  });
+  const credConn = agentTelnyx?.telnyxCredentialConnectionId?.trim() || null;
   const dial = await dialTelnyxOutbound({
     connectionId,
     apiKey,
@@ -534,6 +676,37 @@ export async function connectPowerLeadToAgent(params: {
     timeoutSecs: POWER_AGENT_LEG_TIMEOUT_SECS,
     commandId: `power-agent-${params.leadCallControlId}-${attempt}`,
   });
+  // #region agent log
+  fetch("http://localhost:7723/ingest/7a50d2a1-e6f0-436c-8453-6828c3db5e26", {
+    method: "POST",
+    headers: { "Content-Type": "application/json", "X-Debug-Session-Id": "c1392e" },
+    body: JSON.stringify({
+      sessionId: "c1392e",
+      runId: "pre-fix",
+      hypothesisId: "A",
+      location: "lib/power-dialer-engine.ts:connectPowerLeadToAgent",
+      message: "agent dial",
+      data: {
+        dialOk: dial.ok,
+        dialStatus: dial.ok ? 200 : dial.status,
+        usedConnTail: connectionId.slice(-8),
+        credConnTail: credConn ? credConn.slice(-8) : null,
+        sameConn: Boolean(credConn) && credConn === connectionId,
+        sipUriOn: Boolean(agentTelnyx?.telnyxSipUriCallingEnabledAt),
+        sipIsGencred: Boolean(agentTelnyx?.telnyxCredentialSipUsername),
+        sipLooksGencred: agent.sipUri.toLowerCase().includes("gencred"),
+        attempt,
+      },
+      timestamp: Date.now(),
+    }),
+  }).catch(() => {});
+  console.warn("[dbg-c1392e] agent-dial", {
+    dialOk: dial.ok,
+    sameConn: Boolean(credConn) && credConn === connectionId,
+    sipUriOn: Boolean(agentTelnyx?.telnyxSipUriCallingEnabledAt),
+    sipLooksGencred: agent.sipUri.toLowerCase().includes("gencred"),
+  });
+  // #endregion
 
   if (!dial.ok) {
     console.error("[power-dialer] agent-ben kunne ikke ringes op", {
@@ -615,6 +788,8 @@ export async function connectPowerLeadToAgent(params: {
 /**
  * Er der flere ringende opkald end de klare sælgere kan tage, lægges de ældste ringende på —
  * før nogen svarer — i stedet for at risikere et menneske uden sælger.
+ *
+ * Tæller også Power-pulje-sælgere tildelt kampagnen (ellers blev pulje-opkald lagt på med det samme).
  */
 export async function enforcePowerCapacity(
   campaignId: string,
@@ -624,7 +799,7 @@ export async function enforcePowerCapacity(
   if (!c) return 0;
   const now = new Date();
   const [ready, inFlight, brake] = await Promise.all([
-    countDialableAgents(prisma, campaignId, now),
+    countDialableAgentsForCampaignCapacity(prisma, campaignId, now),
     loadUnassignedInFlight(prisma, campaignId, now),
     getPowerDropBrake(prisma, campaignId, c.settings, now),
   ]);
@@ -652,6 +827,64 @@ export async function enforcePowerCapacity(
   return cancelled;
 }
 
+/**
+ * Pulje-dækkende overskudsregel: ét fælles mål (klare pulje-sælgere × højeste ratio),
+ * afbryd de ældste ringende på tværs af pulje-kampagnerne.
+ */
+export async function enforcePowerPoolCapacity(params: {
+  anchorCampaignId: string;
+  poolCampaigns: PowerCampaign[];
+}): Promise<number> {
+  const { anchorCampaignId, poolCampaigns } = params;
+  if (poolCampaigns.length === 0) return 0;
+  const now = new Date();
+  const byId = new Map(poolCampaigns.map((c) => [c.id, c]));
+  const dialRatio = pickPowerPoolDialRatio(poolCampaigns.map((c) => c.settings));
+  const sumMaxInFlight = poolCampaigns.reduce((n, c) => n + c.settings.maxInFlight, 0);
+
+  const [ready, brakeList, ...inFlights] = await Promise.all([
+    countDialablePoolAgents(prisma, {
+      anchorCampaignId,
+      poolCampaignIds: poolCampaigns.map((c) => c.id),
+      now,
+    }),
+    Promise.all(poolCampaigns.map((c) => getPowerDropBrake(prisma, c.id, c.settings, now))),
+    ...poolCampaigns.map((c) => loadUnassignedInFlight(prisma, c.id, now)),
+  ]);
+  const brakeActive = brakeList.some((b) => b.active);
+  const unassigned = inFlights.reduce((n, x) => n + x.unassigned, 0);
+  const ringing = inFlights.flatMap((x, i) =>
+    x.ringing.map((leg) => ({
+      ...leg,
+      campaignId: poolCampaigns[i]!.id,
+    })),
+  );
+  const plan = computePowerDispatchPlan({
+    readyAgents: ready,
+    ratio: dialRatio,
+    brakeActive,
+    maxInFlight: sumMaxInFlight,
+    unassignedInFlight: unassigned,
+    ringingUnanswered: ringing.length,
+    channelLimit: null,
+    channelsInUse: 0,
+  });
+  const toCancel = pickRingingLegsToCancel(ringing, plan.cancelRinging);
+  let cancelled = 0;
+  for (const leg of toCancel) {
+    const camp = byId.get(leg.campaignId);
+    if (!camp) continue;
+    const done = await resolvePowerLeadLeg({
+      callControlId: leg.callControlId,
+      resolution: "CANCELLED_OVERDIAL",
+      hangup: true,
+      campaign: camp,
+    });
+    if (done) cancelled += 1;
+  }
+  return cancelled;
+}
+
 // ---------------------------------------------------------------------------
 // Webhook-hændelser (kaldes fra call-events via after())
 // ---------------------------------------------------------------------------
@@ -668,8 +901,166 @@ export async function handlePowerLeadAnswered(leadCallControlId: string): Promis
   });
   if (!leg) return;
   const campaign = await loadPowerCampaign(leg.campaignId);
-  if (campaign && !campaign.settings.amdEnabled) {
+  if (!campaign) return;
+  if (!campaign.settings.amdEnabled) {
     await connectPowerLeadToAgent({ leadCallControlId });
+    return;
+  }
+  const apiKey = telnyxApiKey();
+  let sonioxListening = false;
+  try {
+    if (apiKey && shouldAttemptPowerSoniox()) {
+      const started = await startTelnyxCallTranscription({
+        apiKey,
+        callControlId: leadCallControlId,
+        commandId: `power-soniox-${leadCallControlId}`,
+        timeoutMs: POWER_SONIOX_START_TIMEOUT_MS,
+      });
+      notePowerSonioxStartResult(
+        started.ok,
+        started.ok ? 200 : started.status,
+        started.ok ? "" : started.message,
+      );
+      if (started.ok) {
+        await prisma.dialerCallLog.updateMany({
+          where: { callControlId: leadCallControlId, greetingHint: null },
+          data: { greetingHint: POWER_GREETING_SONIOX_LISTEN },
+        });
+        sonioxListening = true;
+      } else {
+        console.warn(
+          "[power-dialer] Soniox-transskription kunne ikke startes — AMD kører alene:",
+          started.message.slice(0, 180),
+        );
+      }
+    }
+  } catch (err) {
+    notePowerSonioxStartResult(false, 0, err instanceof Error ? err.message : "Soniox-start fejlede");
+    console.warn("[power-dialer] Soniox-start kastede — AMD kører alene:", err);
+  }
+  await new Promise((r) =>
+    setTimeout(
+      r,
+      sonioxListening
+        ? POWER_AMD_TOTAL_ANALYSIS_MS + POWER_GREETING_MACHINE_GRACE_MS
+        : POWER_AMD_TOTAL_ANALYSIS_MS,
+    ),
+  );
+  await settlePowerGreeting(leadCallControlId, { timedOut: true });
+}
+
+function parseGreetingHint(raw: string | null | undefined): GreetingHint | null {
+  if (raw === "human" || raw === "voicemail") return raw;
+  return null;
+}
+
+async function settlePowerGreeting(
+  leadCallControlId: string,
+  opts: { timedOut: boolean },
+): Promise<void> {
+  const leg = await prisma.dialerCallLog.findUnique({
+    where: { callControlId: leadCallControlId },
+    select: {
+      campaignId: true,
+      amdResult: true,
+      greetingHint: true,
+      bridgeRequestedAt: true,
+      bridgedAt: true,
+      resolvedAt: true,
+      endedAt: true,
+    },
+  });
+  if (!leg || leg.resolvedAt || leg.bridgedAt || leg.bridgeRequestedAt || leg.endedAt) return;
+
+  const amd = (leg.amdResult as AmdInternalResult | null) ?? null;
+  const greeting = parseGreetingHint(leg.greetingHint);
+  const action = decidePowerGreetingAction({
+    amd: amd === "human" || amd === "machine" || amd === "fax" || amd === "unknown" ? amd : null,
+    greeting,
+    timedOut: opts.timedOut,
+    sonioxListening: isPowerSonioxListeningHint(leg.greetingHint),
+  });
+  // #region agent log
+  fetch("http://localhost:7723/ingest/7a50d2a1-e6f0-436c-8453-6828c3db5e26", {
+    method: "POST",
+    headers: { "Content-Type": "application/json", "X-Debug-Session-Id": "c1392e" },
+    body: JSON.stringify({
+      sessionId: "c1392e",
+      runId: "pre-fix",
+      hypothesisId: "D",
+      location: "lib/power-dialer-engine.ts:settlePowerGreeting",
+      message: "greeting settle",
+      data: {
+        action,
+        amd: leg.amdResult,
+        greetingHint: leg.greetingHint,
+        timedOut: opts.timedOut,
+        sonioxListening: isPowerSonioxListeningHint(leg.greetingHint),
+      },
+      timestamp: Date.now(),
+    }),
+  }).catch(() => {});
+  console.warn("[dbg-c1392e] settle", action, leg.amdResult, leg.greetingHint);
+  // #endregion
+  if (action === "WAIT") return;
+
+  const campaign = await loadPowerCampaign(leg.campaignId);
+  if (!campaign) return;
+  if (isPowerSonioxListeningHint(leg.greetingHint) || greeting) {
+    await stopPowerGreetingTranscription(leadCallControlId);
+  }
+  if (action === "CONNECT") {
+    await connectPowerLeadToAgent({ leadCallControlId });
+    return;
+  }
+  await resolvePowerLeadLeg({
+    callControlId: leadCallControlId,
+    resolution: "VOICEMAIL",
+    hangup: true,
+    campaign,
+  });
+}
+
+async function stopPowerGreetingTranscription(leadCallControlId: string): Promise<void> {
+  const apiKey = telnyxApiKey();
+  if (!apiKey) return;
+  try {
+    const stopped = await stopTelnyxCallTranscription({
+      apiKey,
+      callControlId: leadCallControlId,
+      commandId: `power-soniox-stop-${leadCallControlId}`,
+      timeoutMs: 1500,
+    });
+    if (!stopped.ok) {
+      console.warn("[power-dialer] Soniox-stop fejlede:", stopped.message.slice(0, 180));
+    }
+  } catch (err) {
+    console.warn("[power-dialer] Soniox-stop kastede:", err);
+  }
+}
+
+export async function handlePowerLeadTranscription(
+  leadCallControlId: string,
+  transcript: string,
+  confidence?: number | null,
+): Promise<void> {
+  const hint = classifyPowerGreeting(transcript, confidence);
+  if (!transcript.trim()) return;
+  const leg = await prisma.dialerCallLog.findUnique({
+    where: { callControlId: leadCallControlId },
+    select: { greetingHint: true, resolvedAt: true, bridgedAt: true, endedAt: true, bridgeRequestedAt: true },
+  });
+  if (!leg || leg.resolvedAt || leg.bridgedAt || leg.endedAt || leg.bridgeRequestedAt) return;
+  const merged = mergeGreetingHint(parseGreetingHint(leg.greetingHint), hint);
+  await prisma.dialerCallLog.updateMany({
+    where: { callControlId: leadCallControlId, resolvedAt: null, bridgedAt: null, endedAt: null },
+    data: {
+      greetingHint: merged === "uncertain" ? leg.greetingHint : merged,
+      greetingText: transcript.slice(0, 500),
+    },
+  });
+  if (merged === "human" || merged === "voicemail") {
+    await settlePowerGreeting(leadCallControlId, { timedOut: false });
   }
 }
 
@@ -687,28 +1078,31 @@ export async function handlePowerLeadAmd(
     select: { campaignId: true, bridgeRequestedAt: true, bridgedAt: true, resolvedAt: true, endedAt: true },
   });
   if (!leg || leg.resolvedAt || leg.bridgedAt) return;
-  const campaign = await loadPowerCampaign(leg.campaignId);
-  if (!campaign) return;
+  if (leg.bridgeRequestedAt) return;
 
-  if (kind === "greeting") {
-    // Beep efter en afgørelse ignoreres — det må aldrig lægge en igangværende samtale på.
-    if (leg.bridgeRequestedAt || amd !== "machine") return;
-    await resolvePowerLeadLeg({ callControlId: leadCallControlId, resolution: "VOICEMAIL", hangup: true, campaign });
-    return;
-  }
+  if (kind === "greeting" && amd !== "machine") return;
 
-  const action = decidePowerAmdAction(amd, campaign.settings.amdUncertainAction);
-  if (action === "CONNECT") {
-    if (leg.endedAt) return;
-    await connectPowerLeadToAgent({ leadCallControlId });
-    return;
-  }
-  await resolvePowerLeadLeg({
-    callControlId: leadCallControlId,
-    resolution: action === "VOICEMAIL" ? "VOICEMAIL" : "AMD_UNCERTAIN_REQUEUE",
-    hangup: true,
-    campaign,
+  await settlePowerGreeting(leadCallControlId, { timedOut: false });
+  const again = await prisma.dialerCallLog.findUnique({
+    where: { callControlId: leadCallControlId },
+    select: { bridgeRequestedAt: true, resolvedAt: true, endedAt: true, bridgedAt: true, greetingHint: true },
   });
+  if (!again || again.resolvedAt || again.bridgedAt || again.bridgeRequestedAt || again.endedAt) return;
+
+  const sonioxListening = isPowerSonioxListeningHint(again.greetingHint);
+  const waitMs = !sonioxListening
+    ? 0
+    : amd === "human"
+      ? 0
+      : amd === "machine" || amd === "fax"
+        ? POWER_GREETING_MACHINE_GRACE_MS
+        : POWER_GREETING_UNKNOWN_GRACE_MS;
+  if (waitMs <= 0) {
+    await settlePowerGreeting(leadCallControlId, { timedOut: true });
+    return;
+  }
+  await new Promise((r) => setTimeout(r, waitMs));
+  await settlePowerGreeting(leadCallControlId, { timedOut: true });
 }
 
 export async function handlePowerLegBridged(callControlId: string, direction: "lead" | "agent"): Promise<void> {
@@ -860,6 +1254,22 @@ export async function handlePowerAgentEnded(params: {
   hangupCause: string | null;
   hangupSource: string | null;
 }): Promise<void> {
+  // #region agent log
+  fetch("http://localhost:7723/ingest/7a50d2a1-e6f0-436c-8453-6828c3db5e26", {
+    method: "POST",
+    headers: { "Content-Type": "application/json", "X-Debug-Session-Id": "c1392e" },
+    body: JSON.stringify({
+      sessionId: "c1392e",
+      runId: "pre-fix",
+      hypothesisId: "A",
+      location: "lib/power-dialer-engine.ts:handlePowerAgentEnded",
+      message: "agent hangup",
+      data: { hangupCause: params.hangupCause, hangupSource: params.hangupSource },
+      timestamp: Date.now(),
+    }),
+  }).catch(() => {});
+  console.warn("[dbg-c1392e] agent-hangup", params.hangupCause, params.hangupSource);
+  // #endregion
   const now = new Date();
   await prisma.dialerCallLog.updateMany({
     where: { callControlId: params.agentCallControlId, endedAt: null },
@@ -1339,6 +1749,308 @@ export async function runPowerDispatch(params: {
   };
 }
 
+/**
+ * Power-pulje: én dispatch-runde på tværs af sælgerens tildelte Power-kampagner.
+ * Anker-kampagnen holder AgentSession; leads claims/dials bruger leadets egen kampagne.
+ */
+export async function runPowerPoolDispatch(params: {
+  anchorCampaign: PowerCampaign;
+  poolCampaignIds: string[];
+  callerUserId: string;
+}): Promise<PowerDispatchResult> {
+  const { anchorCampaign, callerUserId } = params;
+  const poolIds = [...new Set(params.poolCampaignIds.map((id) => id.trim()).filter(Boolean))];
+  const now = new Date();
+  const apiKey = telnyxApiKey();
+  const connectionId = getTelnyxConnectionId();
+
+  const ratio = pickPowerPoolDialRatio([anchorCampaign.settings]);
+  const base: PowerDispatchResult = {
+    ok: true,
+    code: "AT_CAPACITY",
+    dispatched: 0,
+    failed: 0,
+    ready: 0,
+    inFlight: 0,
+    target: 0,
+    effectiveRatio: ratio,
+    limitedBy: "none",
+    channelLimit: null,
+    channelsInUse: 0,
+    brakeActive: false,
+    dropRate: null,
+    cancelled: 0,
+    nextEligibleAt: null,
+  };
+
+  if (poolIds.length === 0) return { ...base, code: "QUEUE_EMPTY" };
+  if (!apiKey || !connectionId) return { ...base, code: "TELNYX_NOT_CONFIGURED" };
+
+  const caller = await prisma.agentSession.findFirst({
+    where: { ...dialablePowerPoolAgentWhere(anchorCampaign.id, now), userId: callerUserId },
+    select: { id: true },
+  });
+  if (!caller) return { ...base, code: "CALLER_NOT_READY" };
+
+  const campaigns = await prisma.campaign.findMany({
+    where: { id: { in: poolIds }, dialMode: "POWER_DIALER" },
+    select: POWER_CAMPAIGN_SELECT,
+  });
+  const powerCampaigns: PowerCampaign[] = campaigns.map((c) => ({
+    ...c,
+    settings: powerDialerSettingsFromCampaign(c),
+  }));
+  if (powerCampaigns.length === 0) return { ...base, code: "QUEUE_EMPTY" };
+
+  const byId = new Map(powerCampaigns.map((c) => [c.id, c]));
+  const dialRatio = pickPowerPoolDialRatio(powerCampaigns.map((c) => c.settings));
+  const sumMaxInFlight = powerCampaigns.reduce((n, c) => n + c.settings.maxInFlight, 0);
+
+  await Promise.all(powerCampaigns.map((c) => runPowerMaintenance(c)));
+
+  const channel = await resolvePowerChannelLimit();
+  const brakes = await Promise.all(
+    powerCampaigns.map((c) => getPowerDropBrake(prisma, c.id, c.settings, now)),
+  );
+  const brakeActive = brakes.some((b) => b.active);
+  const dropRate =
+    brakes.reduce((best, b) => {
+      if (b.dropRate === null) return best;
+      if (best === null || b.dropRate > best) return b.dropRate;
+      return best;
+    }, null as number | null);
+
+  const [preReady, preChannels, ...preInFlights] = await Promise.all([
+    countDialablePoolAgents(prisma, {
+      anchorCampaignId: anchorCampaign.id,
+      poolCampaignIds: powerCampaigns.map((c) => c.id),
+      now,
+    }),
+    countPowerChannelsInUse(prisma, now),
+    ...powerCampaigns.map((c) => loadUnassignedInFlight(prisma, c.id, now)),
+  ]);
+  const preUnassigned = preInFlights.reduce((n, x) => n + x.unassigned, 0);
+  const preRinging = preInFlights.reduce((n, x) => n + x.ringing.length, 0);
+  const prePlan = computePowerDispatchPlan({
+    readyAgents: preReady,
+    ratio: dialRatio,
+    brakeActive,
+    maxInFlight: sumMaxInFlight,
+    unassignedInFlight: preUnassigned,
+    ringingUnanswered: preRinging,
+    channelLimit: channel.effective,
+    channelsInUse: preChannels,
+  });
+
+  const candidateLists =
+    prePlan.newCalls > 0
+      ? await Promise.all(
+          powerCampaigns.map((c) =>
+            listPowerDialerCandidates(prisma, {
+              campaign: c,
+              limit: prePlan.newCalls * 3 + 5,
+              now,
+            }),
+          ),
+        )
+      : [];
+  const mergedCandidates = sortPowerPoolCandidates(candidateLists.flat());
+
+  const sortedLockIds = [...powerCampaigns.map((c) => c.id)].sort((a, b) => a.localeCompare(b));
+
+  const locked = await prisma.$transaction(
+    async (tx) => {
+      for (const id of sortedLockIds) {
+        const lockRows = await tx.$queryRaw<{ locked: boolean }[]>`
+          SELECT pg_try_advisory_xact_lock(hashtext(${advisoryKey(id)})) AS "locked"`;
+        if (!lockRows[0]?.locked) return null;
+      }
+      const [ready, channelsInUse, ...inFlights] = await Promise.all([
+        countDialablePoolAgents(tx, {
+          anchorCampaignId: anchorCampaign.id,
+          poolCampaignIds: powerCampaigns.map((c) => c.id),
+          now,
+        }),
+        countPowerChannelsInUse(tx, now),
+        ...powerCampaigns.map((c) => loadUnassignedInFlight(tx, c.id, now)),
+      ]);
+      const unassigned = inFlights.reduce((n, x) => n + x.unassigned, 0);
+      const ringingCount = inFlights.reduce((n, x) => n + x.ringing.length, 0);
+      const plan = computePowerDispatchPlan({
+        readyAgents: ready,
+        ratio: dialRatio,
+        brakeActive,
+        maxInFlight: sumMaxInFlight,
+        unassignedInFlight: unassigned,
+        ringingUnanswered: ringingCount,
+        channelLimit: channel.effective,
+        channelsInUse,
+      });
+      const roomByCampaign = new Map<string, number>();
+      powerCampaigns.forEach((c, i) => {
+        const inflight = inFlights[i]!;
+        roomByCampaign.set(
+          c.id,
+          Math.max(0, c.settings.maxInFlight - inflight.unassigned),
+        );
+      });
+      const planned = planPowerPoolClaims(mergedCandidates, roomByCampaign, plan.newCalls);
+      const claimed: Awaited<ReturnType<typeof claimPowerDialerLeads>> = [];
+      for (const [campaignId, group] of groupCandidatesByCampaign(planned)) {
+        const camp = byId.get(campaignId);
+        if (!camp) continue;
+        const part = await claimPowerDialerLeads(tx, {
+          campaignId,
+          candidates: group,
+          count: group.length,
+          now,
+          expiresAt: new Date(
+            now.getTime() + powerQueueReservationTtlMs(camp.settings.ringTimeoutSecs),
+          ),
+        });
+        claimed.push(...part);
+      }
+      return {
+        ready,
+        unassigned,
+        channelsInUse,
+        plan,
+        claimed,
+      };
+    },
+    { maxWait: 5_000, timeout: 30_000 },
+  );
+
+  if (!locked) {
+    return { ...base, code: "BUSY", effectiveRatio: dialRatio, brakeActive, dropRate };
+  }
+
+  const { plan, claimed } = locked;
+  const batchId = `pp_${now.getTime()}_${callerUserId.slice(-4)}`;
+  const webhookUrl = process.env.TELNYX_CALL_WEBHOOK_URL?.trim() || undefined;
+  const errors: { leadId: string; error: string }[] = [];
+  let dispatched = 0;
+
+  await Promise.all(
+    claimed.map(async (c) => {
+      const camp = byId.get(c.campaignId);
+      if (!camp) {
+        errors.push({ leadId: c.leadId, error: "Kampagne mangler" });
+        await prisma.dialerQueueItem.deleteMany({ where: { id: c.queueItemId } });
+        return;
+      }
+      const settings = camp.settings;
+      const restore = async (error: string) => {
+        errors.push({ leadId: c.leadId, error });
+        await prisma.dialerQueueItem.deleteMany({ where: { id: c.queueItemId } });
+        await prisma.lead.updateMany({
+          where: { id: c.leadId, lastDialAttemptAt: now },
+          data: { lastDialAttemptAt: c.lastDialAttemptAt },
+        });
+      };
+      const from = pickTelnyxFromNumber(c.leadId, { userId: callerUserId, extraSalt: batchId });
+      if (!from) {
+        await restore("TELNYX_FROM_NUMBER mangler");
+        return;
+      }
+      const dial = await dialTelnyxOutbound({
+        connectionId,
+        apiKey,
+        from,
+        to: c.e164,
+        clientState: encodeDialerClientState({
+          v: 2,
+          kind: "lead",
+          campaignId: camp.id,
+          leadId: c.leadId,
+          queueItemId: c.queueItemId,
+          batchId,
+          dialMode: "POWER_DIALER",
+          phoneE164: c.e164,
+        }),
+        webhookUrl,
+        amd: settings.amdEnabled
+          ? { mode: "premium", totalAnalysisTimeMs: POWER_AMD_TOTAL_ANALYSIS_MS }
+          : undefined,
+        timeoutSecs: settings.ringTimeoutSecs,
+        retryOnTimeout: false,
+        commandId: `power-dial-${c.queueItemId}`,
+      });
+      if (!dial.ok) {
+        await restore(dial.message);
+        return;
+      }
+      dispatched += 1;
+      await prisma.dialerCallLog.createMany({
+        data: [
+          {
+            campaignId: camp.id,
+            leadId: c.leadId,
+            callControlId: dial.callControlId,
+            callSessionId: dial.callSessionId ?? null,
+            direction: "outbound-lead",
+            state: "initiated",
+            fromNumber: from,
+            toNumber: c.e164,
+          },
+        ],
+        skipDuplicates: true,
+      });
+      await prisma.dialerCallLog.updateMany({
+        where: { callControlId: dial.callControlId },
+        data: { leadId: c.leadId, fromNumber: from, toNumber: c.e164 },
+      });
+      await prisma.dialerQueueItem.updateMany({
+        where: { id: c.queueItemId },
+        data: { activeCallControlId: dial.callControlId, attempts: { increment: 1 } },
+      });
+      const leg = await prisma.dialerCallLog.findUnique({
+        where: { callControlId: dial.callControlId },
+        select: { resolvedAt: true, endedAt: true, bridgedAt: true },
+      });
+      if (leg && !leg.bridgedAt && (leg.resolvedAt || leg.endedAt)) {
+        await prisma.dialerQueueItem.deleteMany({ where: { id: c.queueItemId, connectedAt: null } });
+      }
+    }),
+  );
+
+  const cancelled = await enforcePowerPoolCapacity({
+    anchorCampaignId: anchorCampaign.id,
+    poolCampaigns: powerCampaigns,
+  });
+
+  const inFlightAfter = locked.unassigned + dispatched;
+  let code: PowerDispatchCode = dispatched > 0 ? "DIALED" : "AT_CAPACITY";
+  if (dispatched === 0) {
+    if (locked.ready === 0) code = "NO_READY_AGENTS";
+    else if (plan.limitedBy === "channel_limit") code = "CHANNEL_LIMIT";
+    else if (plan.newCalls > 0 && claimed.length === 0) code = "QUEUE_EMPTY";
+  }
+  const nextEligibleAt =
+    code === "QUEUE_EMPTY"
+      ? ((await nextPowerEligibleAt(anchorCampaign, now))?.toISOString() ?? null)
+      : null;
+
+  return {
+    ok: true,
+    code,
+    dispatched,
+    failed: errors.length,
+    ready: locked.ready,
+    inFlight: inFlightAfter,
+    target: plan.target,
+    effectiveRatio: plan.effectiveRatio,
+    limitedBy: plan.limitedBy,
+    channelLimit: channel.effective,
+    channelsInUse: locked.channelsInUse + dispatched,
+    brakeActive,
+    dropRate,
+    cancelled,
+    nextEligibleAt,
+    ...(errors.length > 0 ? { errors } : {}),
+  };
+}
+
 // ---------------------------------------------------------------------------
 // Status til presence / admin
 // ---------------------------------------------------------------------------
@@ -1360,6 +2072,35 @@ export type PowerCampaignStats = {
   target: number;
 };
 
+function summarizePowerSessions(
+  sessions: { status: string; webrtcReady: boolean; wrapUpUntil: Date | null }[],
+  now: Date,
+): {
+  dialable: number;
+  readyNotConnected: number;
+  ringing: number;
+  talking: number;
+  wrapUp: number;
+  paused: number;
+} {
+  const dialable = sessions.filter(
+    (s) =>
+      s.status === "ready" && s.webrtcReady && (!s.wrapUpUntil || s.wrapUpUntil.getTime() <= now.getTime()),
+  ).length;
+  return {
+    dialable,
+    readyNotConnected: sessions.filter((s) => s.status === "ready" && !s.webrtcReady).length,
+    ringing: sessions.filter((s) => s.status === "ringing").length,
+    talking: sessions.filter((s) => s.status === "talking").length,
+    wrapUp:
+      sessions.filter((s) => s.status === "wrap_up").length +
+      sessions.filter(
+        (s) => s.status === "ready" && s.wrapUpUntil !== null && s.wrapUpUntil.getTime() > now.getTime(),
+      ).length,
+    paused: sessions.filter((s) => s.status === "paused" || s.status === "draining").length,
+  };
+}
+
 export async function getPowerCampaignStats(campaign: PowerCampaign): Promise<PowerCampaignStats> {
   const now = new Date();
   const cutoff = freshCutoff(now);
@@ -1373,12 +2114,9 @@ export async function getPowerCampaignStats(campaign: PowerCampaign): Promise<Po
     resolvePowerChannelLimit(),
     getPowerDropBrake(prisma, campaign.id, campaign.settings, now),
   ]);
-  const dialable = sessions.filter(
-    (s) =>
-      s.status === "ready" && s.webrtcReady && (!s.wrapUpUntil || s.wrapUpUntil.getTime() <= now.getTime()),
-  ).length;
+  const sums = summarizePowerSessions(sessions, now);
   const plan = computePowerDispatchPlan({
-    readyAgents: dialable,
+    readyAgents: sums.dialable,
     ratio: campaign.settings.dialRatio,
     brakeActive: brake.active,
     maxInFlight: campaign.settings.maxInFlight,
@@ -1388,16 +2126,12 @@ export async function getPowerCampaignStats(campaign: PowerCampaign): Promise<Po
     channelsInUse,
   });
   return {
-    ready: dialable,
-    readyNotConnected: sessions.filter((s) => s.status === "ready" && !s.webrtcReady).length,
-    ringing: sessions.filter((s) => s.status === "ringing").length,
-    talking: sessions.filter((s) => s.status === "talking").length,
-    wrapUp:
-      sessions.filter((s) => s.status === "wrap_up").length +
-      sessions.filter(
-        (s) => s.status === "ready" && s.wrapUpUntil !== null && s.wrapUpUntil.getTime() > now.getTime(),
-      ).length,
-    paused: sessions.filter((s) => s.status === "paused" || s.status === "draining").length,
+    ready: sums.dialable,
+    readyNotConnected: sums.readyNotConnected,
+    ringing: sums.ringing,
+    talking: sums.talking,
+    wrapUp: sums.wrapUp,
+    paused: sums.paused,
     inFlight: inFlight.unassigned,
     ringingLeads: inFlight.ringing.length,
     channelsInUse,
@@ -1405,6 +2139,73 @@ export async function getPowerCampaignStats(campaign: PowerCampaign): Promise<Po
     brakeActive: brake.active,
     dropRate: brake.dropRate,
     dropSample: brake.sample,
+    target: plan.target,
+  };
+}
+
+/** Aggregerede Power-stats for «Power: alle tildelte». */
+export async function getPowerPoolStats(params: {
+  anchorCampaign: PowerCampaign;
+  poolCampaigns: PowerCampaign[];
+}): Promise<PowerCampaignStats> {
+  const { anchorCampaign, poolCampaigns } = params;
+  const now = new Date();
+  const cutoff = freshCutoff(now);
+  const poolIds = poolCampaigns.map((c) => c.id);
+  const dialRatio = pickPowerPoolDialRatio(poolCampaigns.map((c) => c.settings));
+  const sumMaxInFlight = poolCampaigns.reduce((n, c) => n + c.settings.maxInFlight, 0);
+
+  const [sessions, channelsInUse, channel, inFlights, brakes] = await Promise.all([
+    prisma.agentSession.findMany({
+      where: {
+        lastHeartbeat: { gte: cutoff },
+        OR: [
+          { campaignId: anchorCampaign.id, powerPool: true },
+          { campaignId: { in: poolIds }, powerPool: false },
+        ],
+      },
+      select: { status: true, webrtcReady: true, wrapUpUntil: true },
+    }),
+    countPowerChannelsInUse(prisma, now),
+    resolvePowerChannelLimit(),
+    Promise.all(poolCampaigns.map((c) => loadUnassignedInFlight(prisma, c.id, now))),
+    Promise.all(poolCampaigns.map((c) => getPowerDropBrake(prisma, c.id, c.settings, now))),
+  ]);
+
+  const unassigned = inFlights.reduce((n, x) => n + x.unassigned, 0);
+  const ringingLeads = inFlights.reduce((n, x) => n + x.ringing.length, 0);
+  const brakeActive = brakes.some((b) => b.active);
+  const dropRate = brakes.reduce((best, b) => {
+    if (b.dropRate === null) return best;
+    if (best === null || b.dropRate > best) return b.dropRate;
+    return best;
+  }, null as number | null);
+  const dropSample = brakes.reduce((n, b) => Math.max(n, b.sample), 0);
+  const sums = summarizePowerSessions(sessions, now);
+  const plan = computePowerDispatchPlan({
+    readyAgents: sums.dialable,
+    ratio: dialRatio,
+    brakeActive,
+    maxInFlight: sumMaxInFlight,
+    unassignedInFlight: unassigned,
+    ringingUnanswered: ringingLeads,
+    channelLimit: channel.effective,
+    channelsInUse,
+  });
+  return {
+    ready: sums.dialable,
+    readyNotConnected: sums.readyNotConnected,
+    ringing: sums.ringing,
+    talking: sums.talking,
+    wrapUp: sums.wrapUp,
+    paused: sums.paused,
+    inFlight: unassigned,
+    ringingLeads,
+    channelsInUse,
+    channelLimit: channel.effective,
+    brakeActive,
+    dropRate,
+    dropSample,
     target: plan.target,
   };
 }

@@ -2,6 +2,7 @@ import {
   normalizePhoneToE164ForDial,
   stripDialFormatting,
 } from "@/lib/phone-e164";
+import { isPowerSonioxUnavailableError } from "@/lib/power-greeting-soniox";
 
 function resolveOutboundCallFromField(from: string): string {
   const t = from.trim();
@@ -109,6 +110,13 @@ export function pickTelnyxFromNumber(
   return pool[Math.abs(h) % pool.length] ?? null;
 }
 
+/** Telnyx sender ofte connection_id som tal i JSON — det skal stadig kunne caches som tekst. */
+export function telnyxIdField(v: unknown): string | null {
+  if (typeof v === "string" && v.trim()) return v.trim();
+  if (typeof v === "number" && Number.isFinite(v)) return String(v);
+  return null;
+}
+
 function formatTelnyxError(json: unknown): string | null {
   if (!json || typeof json !== "object") return null;
   const errors = (json as { errors?: unknown }).errors;
@@ -120,6 +128,21 @@ function formatTelnyxError(json: unknown): string | null {
     (x): x is string => typeof x === "string" && x.trim().length > 0,
   );
   return parts.length ? parts.join(" — ") : null;
+}
+
+async function fetchWithTimeout(url: string, init: RequestInit, timeoutMs: number): Promise<Response> {
+  const ac = new AbortController();
+  const timer = setTimeout(() => ac.abort(), timeoutMs);
+  try {
+    return await fetch(url, { ...init, signal: ac.signal });
+  } catch (err) {
+    if (err instanceof Error && err.name === "AbortError") {
+      throw new Error(`Timeout efter ${timeoutMs} ms`);
+    }
+    throw err;
+  } finally {
+    clearTimeout(timer);
+  }
 }
 
 /**
@@ -171,7 +194,7 @@ export type TelnyxCredentialSummary = {
 function normalizeCredentialRecord(d: Record<string, unknown>): TelnyxCredentialSummary | null {
   const toStr = (v: unknown): string | null =>
     typeof v === "string" && v.length > 0 ? v : null;
-  const id = toStr(d.id);
+  const id = telnyxIdField(d.id) ?? toStr(d.id);
   if (!id) return null;
   const status = toStr(d.status);
   const expired =
@@ -186,7 +209,7 @@ function normalizeCredentialRecord(d: Record<string, unknown>): TelnyxCredential
     status,
     expired,
     expiresAt: toStr(d.expires_at),
-    connectionId: toStr(d.connection_id),
+    connectionId: telnyxIdField(d.connection_id),
     tag: toStr(d.tag),
     createdAt: toStr(d.created_at),
     sipUsername: toStr(d.sip_username),
@@ -734,7 +757,7 @@ export async function getTelnyxCredentialInfo(params: {
             ? d.status.toLowerCase() === "expired"
             : undefined,
       expiresAt: toStr(d.expires_at),
-      connectionId: toStr(d.connection_id),
+      connectionId: telnyxIdField(d.connection_id),
       sipUsername: toStr(d.sip_username),
       createdAt: toStr(d.created_at),
       updatedAt: toStr(d.updated_at),
@@ -1189,6 +1212,113 @@ export async function startTelnyxRecording(params: {
       ok: false,
       status: 0,
       message: err instanceof Error ? err.message : "Ukendt fejl ved start af recording.",
+    };
+  }
+}
+
+/**
+ * Start realtids-transskription på et besvaret ben. Telnyx sender `call.transcription`
+ * (Soniox stt-rt via Telnyx — ingen inbound WebSocket på Vercel).
+ */
+export async function startTelnyxCallTranscription(params: {
+  apiKey: string;
+  callControlId: string;
+  commandId?: string;
+  timeoutMs?: number;
+}): Promise<ActionResult> {
+  const body: Record<string, unknown> = {
+    transcription_engine: "Soniox",
+    transcription_tracks: "inbound",
+    transcription_engine_config: {
+      transcription_engine: "Soniox",
+      transcription_model: "soniox/stt-rt-v4",
+      language: "da",
+      interim_results: true,
+      enable_endpoint_detection: true,
+      max_endpoint_delay_ms: 500,
+    },
+  };
+  if (params.commandId) body.command_id = params.commandId;
+
+  try {
+    const res = await fetchWithTimeout(
+      `${TELNYX_API_BASE}/calls/${encodeURIComponent(params.callControlId)}/actions/transcription_start`,
+      {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${params.apiKey}`,
+          "Content-Type": "application/json",
+          Accept: "application/json",
+        },
+        body: JSON.stringify(body),
+      },
+      params.timeoutMs ?? 2500,
+    );
+    const json: unknown = await res.json().catch(() => null);
+    if (res.status === 422) {
+      const message = formatTelnyxError(json) || "";
+      if (isPowerSonioxUnavailableError(422, message)) {
+        return { ok: false, status: 422, message, telnyx: json };
+      }
+      return { ok: true, raw: json };
+    }
+    if (!res.ok) {
+      return {
+        ok: false,
+        status: res.status,
+        message: formatTelnyxError(json) || `Telnyx HTTP ${res.status}`,
+        telnyx: json,
+      };
+    }
+    return { ok: true, raw: json };
+  } catch (err) {
+    return {
+      ok: false,
+      status: 0,
+      message: err instanceof Error ? err.message : "Ukendt fejl ved start af transskription.",
+    };
+  }
+}
+
+/** Stop realtids-transskription (422 = allerede stoppet / aldrig startet). */
+export async function stopTelnyxCallTranscription(params: {
+  apiKey: string;
+  callControlId: string;
+  commandId?: string;
+  timeoutMs?: number;
+}): Promise<ActionResult> {
+  const body: Record<string, unknown> = {};
+  if (params.commandId) body.command_id = params.commandId;
+  try {
+    const res = await fetchWithTimeout(
+      `${TELNYX_API_BASE}/calls/${encodeURIComponent(params.callControlId)}/actions/transcription_stop`,
+      {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${params.apiKey}`,
+          "Content-Type": "application/json",
+          Accept: "application/json",
+        },
+        body: JSON.stringify(body),
+      },
+      params.timeoutMs ?? 1500,
+    );
+    if (res.status === 422) return { ok: true, raw: null };
+    const json: unknown = await res.json().catch(() => null);
+    if (!res.ok) {
+      return {
+        ok: false,
+        status: res.status,
+        message: formatTelnyxError(json) || `Telnyx HTTP ${res.status}`,
+        telnyx: json,
+      };
+    }
+    return { ok: true, raw: json };
+  } catch (err) {
+    return {
+      ok: false,
+      status: 0,
+      message: err instanceof Error ? err.message : "Ukendt fejl ved stop af transskription.",
     };
   }
 }

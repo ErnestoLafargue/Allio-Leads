@@ -7,7 +7,8 @@ import { LIVE_COACH_PROMPT_VERSION, liveCoachMonthlyBudgetUsd, liveCoachSpentThi
 import { customerContext } from "@/lib/live-coach/customer-context";
 import { feedbackBank } from "@/lib/live-coach/feedback";
 import { activeScriptResponses, objectionBank } from "@/lib/live-coach/script-responses";
-import { liveCoachSystemPrompt, liveCoachUserMessage, streamSuggestion, type CoachLine, type CoachMood } from "@/lib/live-coach/suggest";
+import { playbookTemplatesText } from "@/lib/objection-playbook/read";
+import { liveCoachSystemPrompt, liveCoachUserMessage, streamSuggestion, type CoachLine, type CoachMood, type ShownCard } from "@/lib/live-coach/suggest";
 import { getViewer } from "@/lib/scripts-traening/queries";
 
 /**
@@ -24,6 +25,7 @@ export async function POST(req: Request) {
     trigger?: string | null;
     leadId?: string | null;
     mood?: CoachMood | null;
+    shown?: { category?: unknown; line?: unknown } | null;
   } | null;
   const lines = (body?.lines ?? [])
     .filter((l) => (l.speaker === "agent" || l.speaker === "customer") && typeof l.text === "string")
@@ -42,8 +44,16 @@ export async function POST(req: Request) {
     ? {
         signals: (Array.isArray(body.mood.signals) ? body.mood.signals : []).filter((x) => typeof x === "string").slice(-6),
         phase: typeof body.mood.phase === "string" ? body.mood.phase : null,
+        seconds: typeof body.mood.seconds === "number" && Number.isFinite(body.mood.seconds) ? body.mood.seconds : null,
+        objections: (Array.isArray(body.mood.objections) ? body.mood.objections : [])
+          .filter((x): x is string => typeof x === "string")
+          .slice(-6),
       }
     : null;
+  const shown: ShownCard | null =
+    body?.shown && typeof body.shown.line === "string" && body.shown.line
+      ? { category: typeof body.shown.category === "string" ? body.shown.category : null, line: body.shown.line.slice(0, 300) }
+      : null;
 
   const event = await prisma.liveCoachEvent.create({
     data: { userId: viewer.userId, source: "ai", category: trigger, promptVersion: LIVE_COACH_PROMPT_VERSION },
@@ -51,12 +61,12 @@ export async function POST(req: Request) {
   });
   const stream = streamSuggestion({
     client: createAnthropicClient(),
-    system: liveCoachSystemPrompt(await activeScriptResponses(), await objectionBank(), await feedbackBank()),
-    userMessage: liveCoachUserMessage(lines, trigger, customer, mood),
+    system: liveCoachSystemPrompt(await activeScriptResponses(), await objectionBank(), await feedbackBank(), await playbookTemplatesText()),
+    userMessage: liveCoachUserMessage(lines, trigger, customer, mood, shown),
     onDone: ({ costUsd, text }) => {
       const card = parseCoachText(text);
       void prisma.liveCoachEvent
-        .update({ where: { id: event.id }, data: { costUsd, signal: card.silent ? "ingen" : card.signal, line: card.line || null } })
+        .update({ where: { id: event.id }, data: { costUsd, signal: card.silent ? "ingen" : card.signal, line: card.silent ? null : card.line || null, category: trigger ?? card.objection } })
         .catch((err: unknown) => console.warn("[live-coach] kunne ikke logge kortet", err));
     },
   });

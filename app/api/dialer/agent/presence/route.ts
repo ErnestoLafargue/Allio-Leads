@@ -2,23 +2,35 @@ import { NextResponse } from "next/server";
 import { requireSession } from "@/lib/api-auth";
 import { prisma } from "@/lib/prisma";
 import { PRESENCE_FRESH_WINDOW_MS } from "@/lib/dialer-shared";
-import { userCanAccessCampaign } from "@/lib/campaign-access";
+import {
+  powerPoolCampaignIdsForUser,
+  userCanAccessCampaign,
+} from "@/lib/campaign-access";
 import {
   enforcePowerCapacity,
   getPowerCampaignStats,
+  getPowerPoolStats,
   isPowerCampaign,
   loadPowerCampaign,
+  POWER_CAMPAIGN_SELECT,
   runPowerMaintenance,
   type PowerCampaign,
 } from "@/lib/power-dialer-engine";
+import { powerDialerSettingsFromCampaign } from "@/lib/power-dialer-settings";
 import { reducePowerPresence, type PowerAgentServerState } from "@/lib/power-dialer-presence";
 import { POWER_RESERVATION_STALE_MS } from "@/lib/power-dialer-constants";
+import {
+  creditDialerLineOccupancy,
+  linePhaseFromAgentStatus,
+} from "@/lib/dialer-line-occupancy";
+import { pickPowerPoolDialRatio } from "@/lib/power-dialer-pool";
 
 /**
  * Heartbeat / presence fra agent-workspaces (hver 5. sek).
  *
- * Power Dialer: `{ campaignId, power: { clientInstanceId, intent, leadOpen, lineLive, webrtcReady,
- * takeover?, skipWrapUp? } }` — serveren bestemmer status (se `lib/power-dialer-presence.ts`).
+ * Power Dialer: `{ campaignId, powerPool?, power: { clientInstanceId, intent, leadOpen, lineLive,
+ * webrtcReady, takeover?, skipWrapUp? } }` — serveren bestemmer status
+ * (se `lib/power-dialer-presence.ts`). `powerPool: true` = anker-session for «Power: alle tildelte».
  *
  * Øvrige modes (predictive): `{ campaignId, status }` som før.
  */
@@ -45,7 +57,9 @@ export async function POST(req: Request) {
   }
 
   if (body?.power && typeof body.power === "object") {
-    return powerPresence(userId, campaignId, body.power as Record<string, unknown>);
+    return powerPresence(userId, campaignId, body.power as Record<string, unknown>, {
+      powerPool: body.powerPool === true,
+    });
   }
 
   const status = typeof body?.status === "string" ? body.status.trim() : "";
@@ -61,6 +75,7 @@ export async function POST(req: Request) {
     await prisma.agentSession.deleteMany({
       where: { userId, campaignId },
     });
+    await creditDialerLineOccupancy({ userId, campaignId, phase: null }).catch(() => undefined);
     return NextResponse.json({ ok: true, status: "offline" });
   }
 
@@ -88,6 +103,11 @@ export async function POST(req: Request) {
       data: { userId, campaignId, status, lastHeartbeat: heartbeatAt },
     });
   }
+  await creditDialerLineOccupancy({
+    userId,
+    campaignId,
+    phase: linePhaseFromAgentStatus(status),
+  }).catch(() => undefined);
 
   // Returnér antal aktive ready agenter + in-flight opkald så klienten kan vise pacing-info
   const cutoff = new Date(Date.now() - PRESENCE_FRESH_WINDOW_MS);
@@ -154,17 +174,20 @@ async function loadAssignedLead(
     currentLeadCallControlId: string | null;
     currentAgentCallControlId: string | null;
   } | null,
+  opts?: { powerPool?: boolean },
 ) {
   if (!s || (s.status !== "ringing" && s.status !== "talking") || !s.currentLeadId) return null;
   const lead = await prisma.lead.findUnique({
     where: { id: s.currentLeadId },
     select: { id: true, companyName: true, phone: true, campaignId: true },
   });
-  if (!lead || lead.campaignId !== campaignId) return null;
+  if (!lead) return null;
+  if (!opts?.powerPool && lead.campaignId !== campaignId) return null;
   return {
     id: lead.id,
     companyName: lead.companyName,
     phone: lead.phone,
+    campaignId: lead.campaignId,
     leadCallControlId: s.currentLeadCallControlId,
     agentCallControlId: s.currentAgentCallControlId,
   };
@@ -174,7 +197,12 @@ function bool(v: unknown): boolean {
   return v === true;
 }
 
-async function powerPresence(userId: string, campaignId: string, power: Record<string, unknown>) {
+async function powerPresence(
+  userId: string,
+  campaignId: string,
+  power: Record<string, unknown>,
+  opts: { powerPool: boolean },
+) {
   const clientInstanceId =
     typeof power.clientInstanceId === "string" ? power.clientInstanceId.trim().slice(0, 64) : "";
   if (!clientInstanceId) {
@@ -189,6 +217,20 @@ async function powerPresence(userId: string, campaignId: string, power: Record<s
     );
   }
 
+  let poolCampaignIds: string[] = [];
+  if (opts.powerPool) {
+    poolCampaignIds = await powerPoolCampaignIdsForUser(userId);
+    if (poolCampaignIds.length === 0 || poolCampaignIds[0] !== campaignId) {
+      return NextResponse.json(
+        {
+          error:
+            "Power-puljen er tom eller anker-kampagnen matcher ikke. Genindlæs Start og prøv igen.",
+        },
+        { status: 409 },
+      );
+    }
+  }
+
   const intentRaw = typeof power.intent === "string" ? power.intent : "ready";
   if (intentRaw === "offline") {
     const removed = await prisma.agentSession.deleteMany({
@@ -199,12 +241,13 @@ async function powerPresence(userId: string, campaignId: string, power: Record<s
       },
     });
     if (removed.count > 0) await enforcePowerCapacity(campaignId, campaign);
+    await creditDialerLineOccupancy({ userId, campaignId, phase: null }).catch(() => undefined);
     return NextResponse.json({ ok: true, status: "offline" });
   }
 
   const takeover = bool(power.takeover);
   if (takeover) {
-    // Power Dialer er én kampagne ad gangen: sælgerens Power-sessioner i andre kampagner lukkes.
+    // Én Power-session pr. sælger globalt (enkeltkampagne eller pulje).
     await prisma.agentSession.deleteMany({
       where: { userId, campaignId: { not: campaignId }, campaign: { dialMode: "POWER_DIALER" } },
     });
@@ -224,8 +267,10 @@ async function powerPresence(userId: string, campaignId: string, power: Record<s
     skipWrapUp: bool(power.skipWrapUp),
   };
 
-  let result = await applyPowerPresence(userId, campaign, report);
-  if (result === "conflict") result = await applyPowerPresence(userId, campaign, report);
+  let result = await applyPowerPresence(userId, campaign, report, { powerPool: opts.powerPool });
+  if (result === "conflict") {
+    result = await applyPowerPresence(userId, campaign, report, { powerPool: opts.powerPool });
+  }
   if (result === "conflict") {
     return NextResponse.json({ ok: false, error: "Status blev ændret samtidig — prøv igen." }, { status: 409 });
   }
@@ -245,14 +290,62 @@ async function powerPresence(userId: string, campaignId: string, power: Record<s
       wrapUpUntil: true,
       drainUntil: true,
       webrtcReady: true,
+      powerPool: true,
       currentLeadId: true,
       currentLeadCallControlId: true,
       currentAgentCallControlId: true,
     },
   });
-  const [stats, assignedLead, user] = await Promise.all([
-    getPowerCampaignStats(campaign),
-    loadAssignedLead(campaignId, mine),
+
+  let stats;
+  let settingsPayload: {
+    dialRatio: number;
+    ringTimeoutSecs: number;
+    wrapUpSeconds: number;
+    pauseMode: "DRAIN" | "HANGUP_RINGING";
+    amdEnabled: boolean;
+  };
+  if (opts.powerPool) {
+    const poolRows = await prisma.campaign.findMany({
+      where: { id: { in: poolCampaignIds } },
+      select: POWER_CAMPAIGN_SELECT,
+    });
+    const poolCampaigns: PowerCampaign[] = poolRows.map((c) => ({
+      ...c,
+      settings: powerDialerSettingsFromCampaign(c),
+    }));
+    stats = await getPowerPoolStats({ anchorCampaign: campaign, poolCampaigns });
+    const wrapUpSeconds =
+      poolCampaigns.length > 0
+        ? Math.max(0, ...poolCampaigns.map((c) => c.settings.wrapUpSeconds))
+        : campaign.settings.wrapUpSeconds;
+    const ringTimeoutSecs =
+      poolCampaigns.length > 0
+        ? Math.max(...poolCampaigns.map((c) => c.settings.ringTimeoutSecs))
+        : campaign.settings.ringTimeoutSecs;
+    settingsPayload = {
+      dialRatio: pickPowerPoolDialRatio(poolCampaigns.map((c) => c.settings)),
+      ringTimeoutSecs,
+      wrapUpSeconds,
+      pauseMode: campaign.settings.pauseMode,
+      amdEnabled:
+        poolCampaigns.length > 0
+          ? poolCampaigns.some((c) => c.settings.amdEnabled)
+          : campaign.settings.amdEnabled,
+    };
+  } else {
+    stats = await getPowerCampaignStats(campaign);
+    settingsPayload = {
+      dialRatio: campaign.settings.dialRatio,
+      ringTimeoutSecs: campaign.settings.ringTimeoutSecs,
+      wrapUpSeconds: campaign.settings.wrapUpSeconds,
+      pauseMode: campaign.settings.pauseMode,
+      amdEnabled: campaign.settings.amdEnabled,
+    };
+  }
+
+  const [assignedLead, user] = await Promise.all([
+    loadAssignedLead(campaignId, mine, { powerPool: opts.powerPool }),
     prisma.user.findUnique({
       where: { id: userId },
       select: { telnyxSipUsername: true, telnyxCredentialId: true },
@@ -266,16 +359,11 @@ async function powerPresence(userId: string, campaignId: string, power: Record<s
     wrapUpUntil: mine?.wrapUpUntil?.toISOString() ?? null,
     drainUntil: mine?.drainUntil?.toISOString() ?? null,
     webrtcReady: mine?.webrtcReady ?? false,
+    powerPool: mine?.powerPool ?? false,
     sipReady: Boolean(user?.telnyxSipUsername && user?.telnyxCredentialId),
     assignedLead,
     stats,
-    settings: {
-      dialRatio: campaign.settings.dialRatio,
-      ringTimeoutSecs: campaign.settings.ringTimeoutSecs,
-      wrapUpSeconds: campaign.settings.wrapUpSeconds,
-      pauseMode: campaign.settings.pauseMode,
-      amdEnabled: campaign.settings.amdEnabled,
-    },
+    settings: settingsPayload,
   });
 }
 
@@ -285,6 +373,7 @@ async function applyPowerPresence(
   userId: string,
   campaign: PowerCampaign,
   report: PowerReport,
+  opts: { powerPool: boolean } = { powerPool: false },
 ): Promise<"conflict" | { superseded: boolean; status: string }> {
   const now = new Date();
   const prev = await prisma.agentSession.findUnique({
@@ -299,6 +388,7 @@ async function applyPowerPresence(
       drainUntil: true,
       clientInstanceId: true,
       lastHeartbeat: true,
+      powerPool: true,
     },
   });
   const prevState: PowerAgentServerState | null = prev
@@ -329,6 +419,7 @@ async function applyPowerPresence(
     webrtcReady: next.webrtcReady,
     clientInstanceId: next.clientInstanceId,
     lastHeartbeat: now,
+    powerPool: opts.powerPool,
     ...(busy
       ? {}
       : { currentLeadId: null, currentLeadCallControlId: null, currentAgentCallControlId: null }),
@@ -353,6 +444,11 @@ async function applyPowerPresence(
     (prev?.webrtcReady === true && !next.webrtcReady) ||
     decision.releasedReservation;
   if (lostCapacity) await enforcePowerCapacity(campaign.id, campaign);
+  await creditDialerLineOccupancy({
+    userId,
+    campaignId: campaign.id,
+    phase: linePhaseFromAgentStatus(next.status),
+  }).catch(() => undefined);
   return { superseded: false, status: next.status };
 }
 

@@ -21,9 +21,9 @@ describe("decidePowerAmdAction", () => {
     expect(decidePowerAmdAction(mapTelnyxAmdResult("beep_detected"), "CONNECT")).toBe("VOICEMAIL");
   });
 
-  it("usikkert AMD følger kampagnens indstilling", () => {
+  it("usikkert AMD går altid til sælger", () => {
     expect(decidePowerAmdAction(mapTelnyxAmdResult("not_sure"), "CONNECT")).toBe("CONNECT");
-    expect(decidePowerAmdAction(mapTelnyxAmdResult("silence"), "REQUEUE")).toBe("REQUEUE_UNCERTAIN");
+    expect(decidePowerAmdAction(mapTelnyxAmdResult("silence"), "REQUEUE")).toBe("CONNECT");
   });
 });
 

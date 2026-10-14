@@ -70,6 +70,8 @@ type Props = {
   onUnansweredTimeout?: () => void;
   /** Predictive-mode: auto-udfald når Telnyx-lukårsag tydeligt peger på voicemail/no answer. */
   onPredictiveAutoOutcome?: (outcome: Exclude<PredictiveAutoOutcome, null>) => void;
+  /** Tilbagekald: voicemail/ubesvaret må ikke auto-gå til næste kunde. */
+  isCallbackLead?: boolean;
   /** Gem nyt telefonnummer på selve leadet (source of truth). */
   onUpdateLeadPhone?: (nextPhone: string) => Promise<{ ok: boolean; message?: string }> | { ok: boolean; message?: string };
   /** Antal millisekunder før Predictive-modus giver op og kalder `onUnansweredTimeout`. */
@@ -266,6 +268,7 @@ export function CampaignVoipStrip({
   autoStartCall,
   onUnansweredTimeout,
   onPredictiveAutoOutcome,
+  isCallbackLead = false,
   onUpdateLeadPhone,
   unansweredTimeoutMs = 25_000,
   onLineStatusChange,
@@ -425,6 +428,8 @@ export function CampaignVoipStrip({
   dialModeRef.current = effectiveDialMode;
   const onPredictiveAutoOutcomeRef = useRef(onPredictiveAutoOutcome);
   onPredictiveAutoOutcomeRef.current = onPredictiveAutoOutcome;
+  const isCallbackLeadRef = useRef(isCallbackLead);
+  isCallbackLeadRef.current = isCallbackLead;
   const micIdRef = useRef("");
   const audioSetupReadyRef = useRef(false);
 
@@ -761,6 +766,7 @@ export function CampaignVoipStrip({
       hadLive,
       autoOutcome,
       canFailover,
+      isCallbackLead: isCallbackLeadRef.current,
     });
     if (decision.type === "stay") {
       suppressAutoStartForLeadIdRef.current = leadId;
@@ -1758,6 +1764,7 @@ export function CampaignVoipStrip({
     const timer = window.setTimeout(() => {
       void hangUp();
       if (tryPredictivePhoneFailover()) return;
+      suppressAutoStartForLeadIdRef.current = leadId;
       onUnansweredTimeout();
     }, unansweredTimeoutMs);
     return () => window.clearTimeout(timer);

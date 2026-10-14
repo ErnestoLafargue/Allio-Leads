@@ -12,6 +12,7 @@ import {
   shouldMarkVoicemail,
 } from "@/lib/telnyx-amd-result";
 import { appendDialerEventOnce } from "@/lib/dialer-webhook-ingest";
+import { extractTelnyxTranscriptText } from "@/lib/power-greeting-classify";
 import {
   POWER_EVENT_TYPES,
   processPowerDialerEvent,
@@ -125,7 +126,10 @@ export async function POST(req: Request) {
       type: eventType,
       id: eventId,
       at: occurredAt,
-      payload,
+      payload:
+        eventType === "call.transcription"
+          ? { transcript: extractTelnyxTranscriptText(payload).slice(0, 200) }
+          : payload,
     });
     if (!fresh) {
       return NextResponse.json({ ok: true, skipped: "duplicate" });

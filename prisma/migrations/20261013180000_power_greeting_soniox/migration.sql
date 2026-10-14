@@ -1,0 +1,2 @@
+ALTER TABLE "DialerCallLog" ADD COLUMN IF NOT EXISTS "greetingHint" TEXT;
+ALTER TABLE "DialerCallLog" ADD COLUMN IF NOT EXISTS "greetingText" TEXT;

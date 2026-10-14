@@ -76,11 +76,16 @@ export function predictiveActionAfterRemoteEnd(input: {
   hadLive: boolean;
   autoOutcome: PredictiveAutoOutcome;
   canFailover: boolean;
+  /** Tilbagekald: aldrig videre til næste kunde — sælgeren skal kunne sætte tiden igen. */
+  isCallbackLead?: boolean;
 }): PredictiveRemoteEndAction {
   const detectedMiss =
     input.autoOutcome === "VOICEMAIL" || (!input.hadLive && input.autoOutcome != null);
   if (detectedMiss && input.canFailover) {
     return { type: "failover" };
+  }
+  if (input.isCallbackLead && detectedMiss) {
+    return { type: "stay" };
   }
   if (input.hadLive && input.autoOutcome !== "VOICEMAIL") {
     return { type: "stay" };

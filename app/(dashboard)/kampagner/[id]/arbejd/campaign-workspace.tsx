@@ -43,7 +43,13 @@ import { useActivityRecordingPoll } from "@/lib/use-activity-recording-poll";
 import { scrollWorkspaceToTop } from "@/lib/scroll-workspace-to-top";
 import { KNOWN_LEAD_SOURCES, parseLeadNavigation } from "@/lib/lead-navigation";
 import { canScheduleCallbackFromLead } from "@/lib/lead-callback-schedule";
+import { isCallbackWorkLead } from "@/lib/lead-callback-access";
 import { DIALER_AUTO_PAUSED_KEY, DIALER_START_PATH, markDialerPauseExit } from "@/lib/dialer-pause-exit";
+import {
+  MEETING_TYPE_ONLINE,
+  type MeetingType,
+  normalizeMeetingType,
+} from "@/lib/meeting-type";
 import {
   dialNumberMenu,
   normalizeDialPhonePriority,
@@ -76,6 +82,8 @@ type Lead = {
   meetingContactEmail?: string;
   meetingContactPhonePrivate?: string;
   meetingCompanyName?: string;
+  meetingType?: string;
+  meetingAddress?: string;
   lockedByUserId?: string | null;
   lockedAt?: string | null;
   lockExpiresAt?: string | null;
@@ -93,6 +101,8 @@ type Props = {
   voipSession?: boolean;
   /** «Ring alle tildelte»: reserve via pool-API, skift kampagne-kontekst pr. lead. */
   poolMode?: boolean;
+  /** «Power: alle tildelte»: Power-session på anker-kampagne, leads fra alle tildelte Power-kampagner. */
+  powerPoolMode?: boolean;
 };
 
 const LOCK_HEARTBEAT_MS = 25_000;
@@ -240,6 +250,7 @@ export function CampaignWorkspace({
   preferredLeadId,
   voipSession = false,
   poolMode = false,
+  powerPoolMode = false,
 }: Props) {
   const searchParams = useSearchParams();
   const [campaignId, setCampaignId] = useState(initialCampaignId);
@@ -258,7 +269,9 @@ export function CampaignWorkspace({
   const { data: session } = useSession();
   const sessionUserId = session?.user?.id ?? "";
   const isAdmin = session?.user?.role === "ADMIN";
-  const [campaignName, setCampaignName] = useState(poolMode ? "Alle tildelte" : "");
+  const [campaignName, setCampaignName] = useState(
+    powerPoolMode ? "Alle tildelte · Power" : poolMode ? "Alle tildelte" : "",
+  );
   const [campaignDialMode, setCampaignDialMode] = useState<CampaignDialMode>("NO_DIAL");
   const [dialPhonePriority, setDialPhonePriority] = useState<DialPhonePriority>("PRIVATE_FIRST");
   const [campaignSystemType, setCampaignSystemType] = useState<string | null>(null);
@@ -301,6 +314,7 @@ export function CampaignWorkspace({
   /** Fejl ved baggrundsgem af forrige lead (blokér ikke næste lead). */
   const [backgroundSyncError, setBackgroundSyncError] = useState<string | null>(null);
   const [integrationsSyncHint, setIntegrationsSyncHint] = useState(false);
+  const [callbackMissHint, setCallbackMissHint] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [done, setDone] = useState(false);
   /** Lås på leads der stadig gemmes i baggrunden — heartbeat som aktivt lead. */
@@ -329,10 +343,13 @@ export function CampaignWorkspace({
     if (!cRes.ok) return;
     const c = await cRes.json();
     setCampaignId(nextCampaignId);
+    const baseName = typeof c.name === "string" ? c.name : "Kampagne";
     setCampaignName(
-      poolMode
-        ? `${typeof c.name === "string" ? c.name : "Kampagne"} · Alle tildelte`
-        : (c.name ?? ""),
+      powerPoolMode
+        ? `${baseName} · Alle tildelte · Power`
+        : poolMode
+          ? `${baseName} · Alle tildelte`
+          : (c.name ?? ""),
     );
     setCampaignDialMode(normalizeCampaignDialMode(c.dialMode));
     setDialPhonePriority(normalizeDialPhonePriority(c.dialPhonePriority));
@@ -343,7 +360,7 @@ export function CampaignWorkspace({
     );
     setFieldConfigJson(c.fieldConfig ?? "{}");
     setCampaignLeadCount(typeof c._count?.leads === "number" ? c._count.leads : null);
-  }, [poolMode]);
+  }, [poolMode, powerPoolMode]);
 
   const [companyName, setCompanyName] = useState("");
   const [phone, setPhone] = useState("");
@@ -364,6 +381,8 @@ export function CampaignWorkspace({
   const [meetingContactEmail, setMeetingContactEmail] = useState("");
   const [meetingContactPhonePrivate, setMeetingContactPhonePrivate] = useState("");
   const [meetingCompanyName, setMeetingCompanyName] = useState("");
+  const [meetingType, setMeetingType] = useState<MeetingType>(MEETING_TYPE_ONLINE);
+  const [meetingAddress, setMeetingAddress] = useState("");
   const [meetingContactErrors, setMeetingContactErrors] = useState<MeetingContactFieldErrors>({});
   const [meetingNotesRequiredOpen, setMeetingNotesRequiredOpen] = useState(false);
   const [callbackDialogOpen, setCallbackDialogOpen] = useState(false);
@@ -395,6 +414,10 @@ export function CampaignWorkspace({
   useEffect(() => {
     activeLeadRef.current = activeLead;
   }, [activeLead]);
+
+  useEffect(() => {
+    setCallbackMissHint(false);
+  }, [activeLead?.id]);
 
   useEffect(() => {
     prefetchedLeadRef.current = prefetchedLead;
@@ -493,6 +516,8 @@ export function CampaignWorkspace({
     setMeetingContactEmail(l.meetingContactEmail ?? "");
     setMeetingContactPhonePrivate(l.meetingContactPhonePrivate ?? "");
     setMeetingCompanyName(l.meetingCompanyName ?? "");
+    setMeetingType(normalizeMeetingType(l.meetingType));
+    setMeetingAddress(l.meetingAddress ?? "");
   }, [campaignSystemType]);
 
   // Nummer og kundebillede skifter i samme render. Ellers kan auto-opkald nå at bruge forrige leads nummer.
@@ -528,9 +553,12 @@ export function CampaignWorkspace({
   /**
    * Power-session: låst ved sidens start og ændres ikke af URL'en bagefter (tildelte leads vises uden
    * at skrive leadId i URL'en, så arbejdsfladen aldrig falder tilbage til manuel kø).
+   * powerPoolMode = «Power: alle tildelte» (anker + leads på tværs af tildelte Power-kampagner).
    */
   const isPowerAutoDialSession =
-    !poolMode && campaignDialMode === "POWER_DIALER" && voipSession && !initialPreferredLeadId;
+    Boolean(voipSession) &&
+    !initialPreferredLeadId &&
+    (powerPoolMode || (!poolMode && campaignDialMode === "POWER_DIALER"));
   /** Pause er slået til: næste gem lukker kampagnen og sender sælgeren til Start. */
   const leaveAfterSave = isPowerAutoDialSession
     ? powerIntent === "pause"
@@ -599,7 +627,9 @@ export function CampaignWorkspace({
       // Power-session («Start» uden leadId): ingen manuel reservation — heller ikke fra en gammel
       // prefer-nøgle i sessionStorage, som ellers ville åbne et almindeligt lead i stedet.
       const skipReserveForPowerAuto =
-        dialMode === "POWER_DIALER" && Boolean(voipSession) && !initialPreferredLeadId;
+        (powerPoolMode || dialMode === "POWER_DIALER") &&
+        Boolean(voipSession) &&
+        !initialPreferredLeadId;
       const preferRaw =
         typeof window !== "undefined" && !skipReserveForPowerAuto
           ? sessionStorage.getItem(preferKeyFor(campaignId))
@@ -607,8 +637,11 @@ export function CampaignWorkspace({
       const explicitLeadId = preferredLeadId?.trim() || undefined;
       const preferLeadId = explicitLeadId ? undefined : preferRaw?.trim() || undefined;
 
-      setCampaignName(c.name ?? "");
-      setCampaignDialMode(dialMode);
+      const loadedName = typeof c.name === "string" ? c.name : "Kampagne";
+      setCampaignName(
+        powerPoolMode ? `${loadedName} · Alle tildelte · Power` : (c.name ?? ""),
+      );
+      setCampaignDialMode(powerPoolMode ? "POWER_DIALER" : dialMode);
       setDialPhonePriority(normalizeDialPhonePriority(c.dialPhonePriority));
       setCampaignSystemType(
         typeof c.systemCampaignType === "string" && c.systemCampaignType.trim()
@@ -666,10 +699,10 @@ export function CampaignWorkspace({
     return () => {
       cancelled = true;
     };
-    // Pool: genindlæs ikke når campaignId skifter midt i sessionen
+    // Pool / Power-pulje: genindlæs ikke når campaignId skifter midt i sessionen
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [
-    poolMode ? "pool" : campaignId,
+    powerPoolMode ? "power-pool" : poolMode ? "pool" : campaignId,
     preferredLeadId,
     voipSession,
     resetFormForPowerWaiting,
@@ -687,6 +720,7 @@ export function CampaignWorkspace({
     // Power: næste lead kommer fra dispatcheren — ingen manuel forhåndsreservation.
     // Historik: gem lukker leadet, så næste i køen må ikke reserveres.
     if (isPowerAutoDialSession || closeAfterSave) return;
+    if (isCallbackWorkLead(activeLead)) return;
     if (prefetchedLeadRef.current?.id) return;
     void prefetchNextLead(activeLead.id);
     // prefetch kun ved lead-skift; cache håndteres via ref
@@ -812,7 +846,10 @@ export function CampaignWorkspace({
     async (lead: AssignedLead) => {
       if (typeof window === "undefined") return;
       await flushPendingLeadPatches();
-      if (campaignDialMode === "POWER_DIALER") {
+      if (isCallbackWorkLead(activeLeadRef.current) && activeLeadRef.current?.id !== lead.id) {
+        return;
+      }
+      if (campaignDialMode === "POWER_DIALER" || powerPoolMode) {
         setError(null);
         setPowerDialerConnecting(true);
         try {
@@ -823,10 +860,18 @@ export function CampaignWorkspace({
             return;
           }
           const full = (await res.json()) as Lead & { campaignId?: string };
-          if (full.campaignId && full.campaignId !== campaignId) {
-            setPowerDialerConnecting(false);
-            setError("Lead tilhører en anden kampagne.");
-            return;
+          const leadCampaignId =
+            (typeof full.campaignId === "string" && full.campaignId.trim()) ||
+            (typeof lead.campaignId === "string" && lead.campaignId.trim()) ||
+            "";
+          if (leadCampaignId && leadCampaignId !== campaignId) {
+            if (powerPoolMode) {
+              await applyCampaignMeta(leadCampaignId);
+            } else {
+              setPowerDialerConnecting(false);
+              setError("Lead tilhører en anden kampagne.");
+              return;
+            }
           }
           const lockRes = await fetch(`/api/leads/${encodeURIComponent(lead.id)}/lock`, {
             method: "POST",
@@ -859,8 +904,15 @@ export function CampaignWorkspace({
         window.location.assign(targetUrl);
       }
     },
-    [campaignId, campaignDialMode, flushPendingLeadPatches],
+    [campaignId, campaignDialMode, powerPoolMode, applyCampaignMeta, flushPendingLeadPatches],
   );
+
+  /** Power-pulje: presence/dispatch bruger altid anker-kampagnen (ikke leadets kampagne). */
+  const powerPresenceCampaignId = powerPoolMode
+    ? initialCampaignId || null
+    : isPowerAutoDialSession && campaignId
+      ? campaignId
+      : null;
 
   const {
     server: powerServer,
@@ -869,7 +921,8 @@ export function CampaignWorkspace({
     skipWrapUp,
     takeOver,
   } = usePowerDialerPresence({
-    campaignId: isPowerAutoDialSession && campaignId ? campaignId : null,
+    campaignId: powerPresenceCampaignId,
+    powerPool: powerPoolMode,
     intent: powerIntent,
     leadOpen: Boolean(activeLead),
     lineLive: powerPhone.lineStatus === "live",
@@ -923,6 +976,8 @@ export function CampaignWorkspace({
       meetingContactEmail,
       meetingContactPhonePrivate,
       meetingCompanyName,
+      meetingType,
+      meetingAddress,
     };
   }
   const getFormSnapshotRef = useRef(getFormSnapshot);
@@ -959,6 +1014,8 @@ export function CampaignWorkspace({
     setMeetingContactEmail(updated.meetingContactEmail ?? "");
     setMeetingContactPhonePrivate(updated.meetingContactPhonePrivate ?? "");
     setMeetingCompanyName(updated.meetingCompanyName ?? "");
+    setMeetingType(normalizeMeetingType(updated.meetingType));
+    setMeetingAddress(updated.meetingAddress ?? "");
     setError(null);
     return { next: [], updated };
   }
@@ -1090,6 +1147,15 @@ export function CampaignWorkspace({
     predictiveOutcome?: LeadStatus,
   ) {
     if (!activeLead) return;
+    const autoMissOnCallback =
+      isCallbackWorkLead(activeLead) &&
+      (predictiveOutcome === "VOICEMAIL" || predictiveOutcome === "NOT_HOME");
+    if (autoMissOnCallback) {
+      requestCallHangupBeforeAdvance();
+      setStatus(predictiveOutcome);
+      setCallbackMissHint(true);
+      return;
+    }
     requestCallHangupBeforeAdvance();
 
     /** Mødebooking: overlap-validering synkront; Cal.eu/Podio sync kører i baggrunden på serveren. */
@@ -1102,6 +1168,7 @@ export function CampaignWorkspace({
         meetingContactEmail,
         meetingContactPhonePrivate,
         meetingCompanyName,
+        { meetingType, meetingAddress },
       );
       if (contactErr) setMeetingContactErrors(contactErr);
       else setMeetingContactErrors({});
@@ -1693,20 +1760,38 @@ export function CampaignWorkspace({
     );
   }
 
+  const powerLeadOpen = isPowerAutoDialSession && Boolean(current);
+
   return (
     <div
       ref={workspaceRootRef}
-      className="relative flex min-h-[calc(100dvh-5.5rem)] flex-col gap-4 pb-4"
+      className={
+        powerLeadOpen
+          ? "relative grid min-h-[calc(100dvh-5.5rem)] grid-cols-1 gap-4 pb-4 [grid-template-areas:'header'_'phone'_'rest']"
+          : "relative flex min-h-[calc(100dvh-5.5rem)] flex-col gap-4 pb-4"
+      }
     >
       {isPowerAutoDialSession ? (
-        <PowerDialerPhone
-          campaignId={campaignId}
-          enabled={!powerServer?.superseded}
-          leadLabel={current?.companyName ?? null}
-          reportLeadId={current?.id ?? null}
-          hangupSignal={voipHangupSignal}
-          onStateChange={setPowerPhone}
-        />
+        <div className={powerLeadOpen ? "min-w-0 [grid-area:phone]" : undefined}>
+          <PowerDialerPhone
+            campaignId={powerPoolMode ? initialCampaignId : campaignId}
+            enabled={!powerServer?.superseded}
+            leadLabel={current?.companyName ?? null}
+            reportLeadId={current?.id ?? null}
+            leadDial={
+              current
+                ? {
+                    leadId: current.id,
+                    leadPhone: dialPhoneForOpenLead({ phone, privatePhone }, dialPhonePriority),
+                    dialMenu: dialNumberMenu(phone, privatePhone, dialPhonePriority),
+                    onUpdateLeadPhone: handleUpdateLeadPhoneFromVoip,
+                  }
+                : null
+            }
+            hangupSignal={voipHangupSignal}
+            onStateChange={setPowerPhone}
+          />
+        </div>
       ) : null}
 
       {isPowerAutoDialSession && powerServer?.superseded ? (
@@ -1832,6 +1917,7 @@ export function CampaignWorkspace({
 
       {current ? (
       <>
+      <div className={powerLeadOpen ? "flex min-w-0 flex-col gap-4 [grid-area:header]" : "contents"}>
       <div className="shrink-0">
         <Link href={returnPath} className="text-sm text-stone-500 hover:text-stone-800">
           ← Kampagner
@@ -1870,8 +1956,12 @@ export function CampaignWorkspace({
               />
               {isPowerAutoDialSession
                 ? powerIntent === "pause"
-                  ? "Power Dialer på pause"
-                  : "Power Dialer aktiv"
+                  ? powerPoolMode
+                    ? "Power-pulje på pause"
+                    : "Power Dialer på pause"
+                  : powerPoolMode
+                    ? "Power-pulje aktiv"
+                    : "Power Dialer aktiv"
                 : autoDialPaused
                   ? "Auto-opkald sat på pause"
                   : campaignDialMode === "PREDICTIVE"
@@ -2023,6 +2113,9 @@ export function CampaignWorkspace({
             {closeAfterSave
               ? " — «Gem og luk» registrerer udfaldet og lukker leadet."
               : " — eller «Gem og næste» med «Ny» for at lægge leadet tilbage som nyt i køen."}
+            {callbackMissHint
+              ? " Telefonsvarer eller intet svar — sæt tilbagekaldet igen, hvis I skal ringe senere. Der gås ikke videre automatisk."
+              : null}
           </div>
         )}
         {showOriginalCancelledMeetingInfo && (
@@ -2093,6 +2186,7 @@ export function CampaignWorkspace({
           </>
         }
       />
+      </div>
 
       {showVoipStrip && (
         <CampaignVoipStrip
@@ -2104,12 +2198,21 @@ export function CampaignWorkspace({
           dialMenu={dialNumberMenu(phone, privatePhone, dialPhonePriority)}
           dialMode={campaignDialMode}
           autoStartCall={voipAutoStart}
+          isCallbackLead={isCallbackWorkLead(current)}
           onUnansweredTimeout={() => {
             setStatus("VOICEMAIL");
+            if (isCallbackWorkLead(activeLeadRef.current)) {
+              setCallbackMissHint(true);
+              return;
+            }
             queueMicrotask(() => void onNextRef.current(undefined, undefined, "VOICEMAIL"));
           }}
           onPredictiveAutoOutcome={(outcome) => {
             setStatus(outcome);
+            if (isCallbackWorkLead(activeLeadRef.current)) {
+              setCallbackMissHint(true);
+              return;
+            }
             queueMicrotask(() => void onNextRef.current(undefined, undefined, outcome));
           }}
           onUpdateLeadPhone={handleUpdateLeadPhoneFromVoip}
@@ -2121,6 +2224,7 @@ export function CampaignWorkspace({
         />
       )}
 
+      <div className={powerLeadOpen ? "flex min-w-0 flex-col gap-4 [grid-area:rest]" : "contents"}>
       {showBackgroundSaveHint && (
         <p className="shrink-0 text-xs text-stone-500" aria-live="polite">
           Gemmer forrige lead i baggrunden…
@@ -2193,6 +2297,8 @@ export function CampaignWorkspace({
           meetingContactEmail,
           meetingContactPhonePrivate,
           meetingCompanyName,
+          meetingType,
+          meetingAddress,
           onMeetingContactName: (v) => {
             setMeetingContactName(v);
             setMeetingContactErrors((prev) => ({ ...prev, name: undefined }));
@@ -2209,6 +2315,10 @@ export function CampaignWorkspace({
             setMeetingCompanyName(v);
             setMeetingContactErrors((prev) => ({ ...prev, meetingCompany: undefined }));
           },
+          onMeetingAddress: (v) => {
+            setMeetingAddress(v);
+            setMeetingContactErrors((prev) => ({ ...prev, address: undefined }));
+          },
           contactRequired: status === "MEETING_BOOKED",
           meetingContactErrors: status === "MEETING_BOOKED" ? meetingContactErrors : undefined,
         }}
@@ -2217,6 +2327,8 @@ export function CampaignWorkspace({
           leadId: current.id,
           calendarUserId: current.assignedUserId ?? defaultMeetingAssigneeId,
           initialMeetingLocal: status === "MEETING_BOOKED" ? meetingScheduledFor || undefined : undefined,
+          meetingType,
+          onMeetingTypeChange: setMeetingType,
           isSubmitting: saving,
           allowMeetingConfirm: status === "MEETING_BOOKED",
           allowAdminAvailabilityOverride: isAdmin,
@@ -2229,6 +2341,7 @@ export function CampaignWorkspace({
         virkNoDataToken={virkNoDataToken}
         bottomBar={renderNextButton()}
       />
+      </div>
       </>
       ) : null}
 

@@ -5,12 +5,16 @@ import {
   compareOverviewRows,
   formatClockedDuration,
   formatClockedLive,
+  formatCopenhagenDateTimeLocal,
   isValidDayKey,
   liveOpenSeconds,
   liveTodaySeconds,
+  parseCopenhagenDateTimeLocal,
+  punchIntervalsOverlap,
   serializeEntry,
   shiftDayKey,
   sumClockedSeconds,
+  validateAdminPunchTimes,
   type TimeClockEntryLike,
 } from "./time-clock";
 
@@ -210,5 +214,81 @@ describe("buildOverviewRows", () => {
     expect(rows[0]?.entries).toHaveLength(1);
     expect(rows[0]?.clockedIn).toBe(true);
     expect(rows[0]?.totalSeconds).toBe(14 * 3600);
+  });
+});
+
+describe("Copenhagen datetime-local", () => {
+  it("parser vinter- og sommertid som Europe/Copenhagen", () => {
+    expect(parseCopenhagenDateTimeLocal("2026-01-15T08:00")?.toISOString()).toBe(
+      "2026-01-15T07:00:00.000Z",
+    );
+    expect(parseCopenhagenDateTimeLocal("2026-07-15T08:00")?.toISOString()).toBe(
+      "2026-07-15T06:00:00.000Z",
+    );
+  });
+
+  it("formaterer tilbage til datetime-local", () => {
+    expect(formatCopenhagenDateTimeLocal(new Date("2026-07-15T06:00:00.000Z"))).toBe(
+      "2026-07-15T08:00",
+    );
+  });
+});
+
+describe("validateAdminPunchTimes", () => {
+  it("afviser ud før ind og overlap", () => {
+    const closed = {
+      punchedInAt: new Date("2026-10-12T07:00:00.000Z"),
+      punchedOutAt: new Date("2026-10-12T11:00:00.000Z"),
+    };
+    expect(
+      validateAdminPunchTimes({
+        punchedInAt: new Date("2026-10-12T10:00:00.000Z"),
+        punchedOutAt: new Date("2026-10-12T09:00:00.000Z"),
+        now: NOW,
+        others: [],
+      }).ok,
+    ).toBe(false);
+    expect(
+      punchIntervalsOverlap(
+        {
+          punchedInAt: new Date("2026-10-12T08:00:00.000Z"),
+          punchedOutAt: new Date("2026-10-12T10:00:00.000Z"),
+        },
+        closed,
+        NOW,
+      ),
+    ).toBe(true);
+    expect(
+      validateAdminPunchTimes({
+        punchedInAt: new Date("2026-10-12T08:00:00.000Z"),
+        punchedOutAt: new Date("2026-10-12T10:00:00.000Z"),
+        now: NOW,
+        others: [closed],
+      }).ok,
+    ).toBe(false);
+  });
+
+  it("godkender tilstødende tider og afviser anden åben stempling", () => {
+    expect(
+      validateAdminPunchTimes({
+        punchedInAt: new Date("2026-10-12T11:00:00.000Z"),
+        punchedOutAt: new Date("2026-10-12T12:00:00.000Z"),
+        now: NOW,
+        others: [
+          {
+            punchedInAt: new Date("2026-10-12T07:00:00.000Z"),
+            punchedOutAt: new Date("2026-10-12T11:00:00.000Z"),
+          },
+        ],
+      }).ok,
+    ).toBe(true);
+    const open = validateAdminPunchTimes({
+      punchedInAt: new Date("2026-10-12T08:00:00.000Z"),
+      punchedOutAt: null,
+      now: NOW,
+      others: [{ punchedInAt: new Date("2026-10-12T06:00:00.000Z"), punchedOutAt: null }],
+    });
+    expect(open.ok).toBe(false);
+    if (!open.ok) expect(open.code).toBe("already_open");
   });
 });

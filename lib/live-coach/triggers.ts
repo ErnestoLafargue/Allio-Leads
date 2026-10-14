@@ -177,3 +177,61 @@ export function triggerCard(
   if (!line) return null;
   return { source: "trigger", category: trigger.category, signal: trigger.signal, why: trigger.why, line };
 }
+
+/**
+ * Telefonsvarere og omstillinger: coachen skal ikke reagere på en maskine. Mønstrene er bygget ud fra
+ * de rigtige telefonsvarere i jeres optagelser («efter tonen», «du har ringet til», «læg en besked»,
+ * «tryk 1», «vent venligst» …).
+ *  - voicemail: telefonsvarer — coachen er tavs resten af opkaldet.
+ *  - ivr: omstilling, kø eller menu — coachen holder pause, til en person svarer.
+ */
+export type MachineKind = "voicemail" | "ivr";
+
+const VOICEMAIL_PATTERNS: RegExp[] = [
+  /\btelefonsvar(er|eren)?\b|\bmobilsvar(er|et)?\b|\bvoice ?mail\b|\bsvarservice\b/,
+  /\bindtal(e|er)?\b|\blæg (gerne )?(en |din |venligst en )?(besked|meddelelse)\b|\b(efterlad|efterlade) (en )?besked\b/,
+  /\befter (tonen|bippet|biplyden|klartonen|signalet)\b/,
+  /\b(personen|den person|nummeret),? du (forsøger|prøver) at (kontakte|ringe til|få fat i)\b/,
+  /\b(er|kan) ikke (tilgængelig|træffes)\b|\bkan ikke tage (telefonen|dit opkald|imod)\b/,
+  /\buden for (vores )?(normale )?åbningstid\b|\bvores åbningstid(er)? er\b/,
+  /\bthe (person|number) you (are|have) (calling|called|trying)\b|\bleave (a|your) message\b|\bafter the (tone|beep)\b|\bnot available\b/,
+];
+
+const IVR_PATTERNS: RegExp[] = [
+  /\b(tryk|tast|press) (\d|en|et|to|tre|fire|fem|nul|zero|one|two)\b/,
+  /\bvent venligst\b|\bplease hold\b|\bvenligst vent\b|\btak fordi du venter\b/,
+  /\b(viderestil\w*|stilles? (nu )?(om|videre)|stillet (om|videre)|omstil\w*)\b/,
+  /\bdu er (nu )?(nummer \w+|placeret) i køen\b|\bi køen\b/,
+  /\bfølgende (valg)?muligheder\b/,
+  /\bdu har ringet til\b|\btak fordi du ringer\b|\btak for dit opkald\b/,
+  /^(hej,? |goddag,? )?(og )?velkommen (til|hos)\b/,
+];
+
+/** Lyder kundens kanal som en maskine? Telefonsvarer vinder over omstilling. */
+export function detectMachine(customerText: string): MachineKind | null {
+  const text = normalizeSpeech(customerText);
+  if (!text) return null;
+  if (VOICEMAIL_PATTERNS.some((p) => p.test(text))) return "voicemail";
+  if (IVR_PATTERNS.some((p) => p.test(text))) return "ivr";
+  return null;
+}
+
+/**
+ * Nysgerrighed og købssignaler: kunden spørger, hvordan/hvornår det foregår, eller siger, det lyder
+ * interessant. Giver intet straks-kort — men får AI til at vurdere med det samme (forklar eller luk).
+ */
+const BUYING_PATTERNS: RegExp[] = [
+  /\bhvordan (foregår|fungerer|virker) (det|sådan|møde)/,
+  /\bhvornår (kan|kunne|skulle|vil) (i|vi|han|hun|den)\b/,
+  /\blyder (da |faktisk |egentlig |jo )*(rigtig |meget )?(spændende|interessant|godt|fint|smart|fornuftigt)\b/,
+  /\b(det|det kunne være|det er) (da )?(rigtig )?(interessant|spændende)\b/,
+  /\bhvad (skal|kræver|gør) (jeg|vi)\b/,
+  /\bhvad sker der (så|nu)\b/,
+  /\b(ja|jo),? (lad os|det kan vi godt|gerne|send)\b/,
+  /\bhvor (lang|langt|lang tid)\b.{0,20}\b(tager|varer)\b/,
+];
+
+export function detectBuyingSignal(customerText: string): boolean {
+  const text = normalizeSpeech(customerText);
+  return Boolean(text) && BUYING_PATTERNS.some((p) => p.test(text));
+}
