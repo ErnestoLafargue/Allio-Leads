@@ -25,7 +25,7 @@ export const VOICES: readonly Voice[] = [
 export type ApproachKey = "lavt_pres" | "playbook_2" | "playbook_3";
 
 /**
- * De 3 playbooks (docs/ai-saelger/playbooks/). Playbook 1 og 2 er skrevet; 3 skrives sammen med Ernesto.
+ * De 3 playbooks (docs/ai-saelger/playbooks/). Playbook 3 er Claudes forslag til Ernestos godkendelse.
  */
 export const APPROACHES: Readonly<Record<ApproachKey, { label: string; summary: string; file: string | null }>> = {
   lavt_pres: {
@@ -35,10 +35,14 @@ export const APPROACHES: Readonly<Record<ApproachKey, { label: string; summary: 
   },
   playbook_2: {
     label: "Antagelsen",
-    summary: "Navne-krogen, «fanget ubelejligt» og en sand, konkret iagttagelse om klinikken (telefontest eller data) som færdigt tilbud.",
+    summary: "Navne-krogen, «fanget ubelejligt» og konkrete tal om klinikken ud fra dens egne data som færdigt tilbud.",
     file: "docs/ai-saelger/playbooks/2-antagelsen.md",
   },
-  playbook_3: { label: "Playbook 3", summary: "Skrives sammen med Ernesto.", file: null },
+  playbook_3: {
+    label: "Relationen",
+    summary: "Humor og ærlighed i åbningen, spejling og nej-spørgsmål; kunden slapper af og åbner selv op.",
+    file: "docs/ai-saelger/playbooks/3-relationen.md",
+  },
 };
 
 export type Variant = { key: string; approach: ApproachKey; voice: Voice };
