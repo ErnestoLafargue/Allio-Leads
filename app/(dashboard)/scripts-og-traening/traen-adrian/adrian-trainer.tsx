@@ -10,7 +10,7 @@ import { useEffect, useRef, useState } from "react";
 import { startSonioxStream, SpeakerTranscript, type SonioxStream } from "@/lib/live-coach/soniox-stream";
 
 type Option = { key: string; label: string };
-type Card = { situation: string; label: string; customerLine: string; strong: string[] };
+type Card = { situation: string; label: string; customerLine: string; agentBefore: string | null; strong: string[] };
 type Lesson = { id: string; situation: string; label: string; customerLine: string; answer: string };
 
 function speak(text: string) {
@@ -76,7 +76,7 @@ export function AdrianTrainer({ situations }: { situations: Option[] }) {
       const res = await fetch("/api/ai-saelger/traening/adrian", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ customerLine: card.customerLine }),
+        body: JSON.stringify({ customerLine: card.customerLine, agentBefore: card.agentBefore }),
       });
       const d = (await res.json()) as { reply?: string; error?: string };
       if (!res.ok || d.reply === undefined) throw new Error(d.error);
@@ -174,6 +174,7 @@ export function AdrianTrainer({ situations }: { situations: Option[] }) {
           <div className="mt-4 space-y-4">
             <div>
               <p className="text-[11px] font-semibold uppercase tracking-wider text-stone-400">{card.label}</p>
+              {card.agentBefore ? <p className="mt-1 text-sm leading-relaxed text-stone-500">Sælgeren: «{card.agentBefore}»</p> : null}
               <p className="mt-1 text-lg leading-relaxed text-stone-900">Kunden: «{card.customerLine}»</p>
               <button type="button" onClick={() => speak(card.customerLine)} className="text-xs text-stone-500 hover:text-stone-800">
                 🔊 Hør igen

@@ -10,6 +10,7 @@ import { preferredAnswersText } from "./preferred-answers";
 import { structuredCall } from "@/lib/anthropic-client";
 import type { ObjectionCategory } from "@/lib/call-analysis/schema";
 import { prisma } from "@/lib/prisma";
+import { loadQuoteBank, pickQuote } from "@/lib/scripts-traening/quote-bank";
 import type { ObjectionBank } from "./script-responses";
 
 export const PRACTICE_MODEL = "claude-haiku-5-5";
@@ -36,7 +37,13 @@ export function pickWeighted<T>(items: readonly [T, number][], random = Math.ran
   return items[items.length - 1]![0];
 }
 
-export async function nextPracticeObjection(userId: string): Promise<{ category: ObjectionCategory; customerLine: string } | null> {
+/**
+ * Næste øvekort: kategorien vægtes efter sælgerens svage kategorier; citatet tages fra den rensede
+ * citatbank (tydelige indvendinger med sælgerens replik før), ellers råt fra analyserne.
+ */
+export async function nextPracticeObjection(
+  userId: string,
+): Promise<{ category: ObjectionCategory; customerLine: string; agentBefore: string | null } | null> {
   const rows = await prisma.callAnalysis.findMany({ select: { result: true, callRecording: { select: { agentUserId: true } } } });
   const all: Objection[] = [];
   const own: Objection[] = [];
@@ -52,8 +59,10 @@ export async function nextPracticeObjection(userId: string): Promise<{ category:
   const categories = [...new Set(all.map((o) => o.category))].map((c) => [c, weights.get(c) ?? 1] as [ObjectionCategory, number]);
   const category = pickWeighted(categories);
   if (!category) return null;
+  const banked = pickQuote(await loadQuoteBank(), category);
+  if (banked) return { category, customerLine: banked.customerLine, agentBefore: banked.agentBefore };
   const quotes = all.filter((o) => o.category === category);
-  return { category, customerLine: quotes[Math.floor(Math.random() * quotes.length)]!.customer.quote };
+  return { category, customerLine: quotes[Math.floor(Math.random() * quotes.length)]!.customer.quote, agentBefore: null };
 }
 
 export const PracticeFeedbackSchema = z.object({
@@ -100,13 +109,15 @@ export async function gradePracticeAnswer(params: {
   system: string;
   category: ObjectionCategory;
   customerLine: string;
+  /** Sælgerens replik lige før kunden (sammenhængen). */
+  agentBefore?: string | null;
   answer: string;
 }): Promise<{ feedback: PracticeFeedback; costUsd: number }> {
   const { output, costUsd } = await structuredCall({
     client: params.client,
     model: PRACTICE_MODEL,
     system: params.system,
-    userMessage: `Indvending (${params.category}): «${params.customerLine}»\nSælgerens svar: «${params.answer.slice(0, 800)}»\n\nGiv feedback nu.`,
+    userMessage: `${params.agentBefore ? `Sælgeren sagde lige før: «${params.agentBefore.slice(0, 300)}»\n` : ""}Indvending (${params.category}): «${params.customerLine}»\nSælgerens svar: «${params.answer.slice(0, 800)}»\n\nGiv feedback nu.`,
     schema: PracticeFeedbackSchema,
     maxTokens: 2000,
   });

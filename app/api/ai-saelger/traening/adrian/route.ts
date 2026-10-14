@@ -13,7 +13,8 @@ export const maxDuration = 30;
 export async function POST(req: Request) {
   const viewer = await getViewer();
   if (!viewer?.isAdmin) return NextResponse.json({ error: "Kun for admin" }, { status: 403 });
-  const b = (await req.json().catch(() => null)) as { customerLine?: string } | null;
+  const b = (await req.json().catch(() => null)) as { customerLine?: string; agentBefore?: string | null } | null;
+  const before = b?.agentBefore?.trim().slice(0, 300);
   const line = b?.customerLine?.trim().slice(0, 600);
   if (!line) return NextResponse.json({ error: "Mangler kundens replik" }, { status: 400 });
   const variant = { key: "lavt_pres/christian-v3c", approach: "lavt_pres" as const, voice: VOICES.find((v) => v.key === "christian-v3c")! };
@@ -23,7 +24,7 @@ export async function POST(req: Request) {
       ...AGENT_MODELS[AGENT_MODEL].params,
       model: AGENT_MODEL,
       system: aiSaelgerSystemPrompt(variant, playbook, await adrianTrainingSection()),
-      messages: [{ role: "user", content: `(Øvelse, midt i en samtale med en klinikejer.) Kunden siger: «${line}»\nSvar kun med det, du siger højt.` }],
+      messages: [{ role: "user", content: `(Øvelse, midt i en samtale med en klinikejer.)${before ? ` Du har lige sagt: «${before}»` : ""} Kunden siger: «${line}»\nSvar kun med det, du siger højt.` }],
     });
     return NextResponse.json({ reply: res.content.flatMap((c) => (c.type === "text" ? [c.text] : [])).join(" ").trim() });
   } catch (e) {

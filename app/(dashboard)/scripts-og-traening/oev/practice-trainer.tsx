@@ -9,7 +9,7 @@ import { startSonioxStream, SpeakerTranscript, type SonioxStream } from "@/lib/l
 import type { PracticeFeedback } from "@/lib/live-coach/practice";
 import { OBJECTION_LABELS } from "@/lib/scripts-traening/labels";
 
-type Round = { category: string; customerLine: string };
+type Round = { category: string; customerLine: string; agentBefore?: string | null };
 
 function speak(text: string) {
   try {
@@ -125,6 +125,7 @@ export function PracticeTrainer() {
             <p className="text-[11px] font-semibold uppercase tracking-wider text-stone-400">
               {OBJECTION_LABELS[round.category as keyof typeof OBJECTION_LABELS] ?? round.category}
             </p>
+            {round.agentBefore ? <p className="mt-2 text-sm leading-relaxed text-stone-500">Sælgeren: «{round.agentBefore}»</p> : null}
             <p className="mt-2 text-lg leading-relaxed text-stone-900">Kunden: “{round.customerLine}”</p>
             <button type="button" onClick={() => speak(round.customerLine)} className="mt-1 text-xs text-stone-500 hover:text-stone-800">
               🔊 Hør igen

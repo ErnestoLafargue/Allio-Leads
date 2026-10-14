@@ -14,6 +14,6 @@ export async function POST(req: Request) {
   if (!viewer?.isAdmin) return NextResponse.json({ error: "Kun for admin" }, { status: 403 });
   const b = (await req.json().catch(() => null)) as { situation?: string } | null;
   const situation = b?.situation && isSituation(b.situation) ? b.situation : ALL_SITUATIONS[Math.floor(Math.random() * ALL_SITUATIONS.length)]!;
-  const [customerLine, bank] = await Promise.all([customerLineFor(situation), objectionBank()]);
-  return NextResponse.json({ situation, label: situationLabel(situation), customerLine, strong: bank[situation as ObjectionCategory] ?? [] });
+  const [line, bank] = await Promise.all([customerLineFor(situation), objectionBank()]);
+  return NextResponse.json({ situation, label: situationLabel(situation), ...line, strong: bank[situation as ObjectionCategory] ?? [] });
 }

@@ -6,15 +6,19 @@
  *
  *   NODE_USE_ENV_PROXY=1 npx tsx --tsconfig tsconfig.json scripts/rens-indvendinger.ts <arbejdsmappe> [--gem]
  *
- * Uden --gem skrives kun til arbejdsmappen; med --gem gemmes banken i AppSetting (DATABASE_URL).
+ * Uden --gem skrives kun til arbejdsmappen; med --gem skrives fingeraftryk + kategori for de godkendte
+ * citater til lib/scripts-traening/quote-bank-keep.json (ingen kundetekst), som appen bygger banken fra.
+ * Findes <arbejdsmappe>/raa.json, bruges den i stedet for at læse databasen (format: [{id, category,
+ * customerLine, agentBefore}]).
  */
+import { createHash } from "node:crypto";
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import * as z from "zod/v4";
 import { createAnthropicClient, structuredCall } from "@/lib/anthropic-client";
 import { OBJECTION_CATEGORIES, type ObjectionCategory } from "@/lib/call-analysis/schema";
 import { prisma } from "@/lib/prisma";
-import { QUOTE_BANK_SETTING_KEY, type BankQuote } from "@/lib/scripts-traening/quote-bank";
+import { QUOTE_HASH_LENGTH, type BankQuote } from "@/lib/scripts-traening/quote-bank";
 
 const MODEL = "claude-haiku-5-5";
 const BATCH = 25;
@@ -109,8 +113,10 @@ async function main() {
   const per = CATS.map((c) => `${c}: ${bank.filter((q) => q.category === c).length}`).join(" · ");
   console.log(`Banken: ${bank.length} af ${raw.length} citater (${per}) · pris denne kørsel $${cost.toFixed(4)}`);
   if (process.argv.includes("--gem")) {
-    await prisma.appSetting.upsert({ where: { key: QUOTE_BANK_SETTING_KEY }, create: { key: QUOTE_BANK_SETTING_KEY, value: JSON.stringify(bank) }, update: { value: JSON.stringify(bank) } });
-    console.log(`Gemt i AppSetting «${QUOTE_BANK_SETTING_KEY}».`);
+    const hash = (q: string) => createHash("md5").update(q.toLowerCase()).digest("hex").slice(0, QUOTE_HASH_LENGTH);
+    const keep = [...new Map(bank.map((q) => [hash(q.customerLine), q.category])).entries()].sort();
+    writeFileSync(join(process.cwd(), "lib/scripts-traening/quote-bank-keep.json"), JSON.stringify(keep));
+    console.log(`Skrevet ${keep.length} fingeraftryk til lib/scripts-traening/quote-bank-keep.json.`);
   }
   await prisma.$disconnect();
 }
