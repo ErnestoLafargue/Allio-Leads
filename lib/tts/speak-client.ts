@@ -54,7 +54,9 @@ export function speak(
     handlers.onEnded?.();
     if (handlers.onError)
       void fetch(url)
-        .then(async (r) => handlers.onError?.(`${r.status}: ${(await r.text()).slice(0, 200)}`))
+        .then(async (r) => {
+          if (!r.ok) handlers.onError?.(`${r.status}: ${(await r.text()).slice(0, 200)}`);
+        })
         .catch(() => handlers.onError?.("ingen forbindelse"));
   };
   void audio.play().catch(() => {
@@ -66,12 +68,16 @@ export function speak(
 let activeQueue: SpeechQueue | null = null;
 
 /**
- * Afspiller sætninger i rækkefølge, efterhånden som de kommer (streamet fra Claude). Hver sætning hentes
- * fra /api/tts, så snart den kommer, så næste er klar, når den forrige slutter. Fejler ElevenLabs for en
- * sætning, læses den op med browserens stemme, og onError får årsagen (én gang).
+ * Afspiller sætninger i rækkefølge, efterhånden som de kommer (streamet fra Claude). Hver bid hentes fra
+ * /api/tts, så snart den er klar, så næste er klar, når den forrige slutter.
+ * - `stitching` (Flash o.l.): hver sætning sendes med teksten før (previous_text), så tonen hænger sammen.
+ * - Uden (v3): første sætning sendes straks, resten samles til én bid, så tonen højst skifter én gang.
+ * Fejler ElevenLabs, læses bidden op med browserens stemme, og onError får årsagen (én gang).
  */
 export class SpeechQueue {
   private queue: { text: string; audio: HTMLAudioElement }[] = [];
+  private said: string[] = [];
+  private buffer: string[] = [];
   private playing: HTMLAudioElement | null = null;
   private finished = false;
   private stopped = false;
@@ -81,6 +87,7 @@ export class SpeechQueue {
   constructor(
     private voice: string,
     private handlers: { onFirstPlaying?: () => void; onIdle?: () => void; onError?: (reason: string) => void } = {},
+    private stitching = true,
   ) {
     stopSpeaking();
     // eslint-disable-next-line @typescript-eslint/no-this-alias -- den aktive kø skal kunne stoppes fra stopSpeaking()
@@ -89,14 +96,38 @@ export class SpeechQueue {
 
   add(text: string) {
     if (this.stopped || !text.trim()) return;
-    const url = `/api/tts?voice=${encodeURIComponent(this.voice)}&text=${encodeURIComponent(text)}`;
+    // v3: første sætning straks, resten samles (sendes, når den forrige bid er spillet, eller til sidst).
+    if (!this.stitching && this.said.length > 0) {
+      this.buffer.push(text);
+      if (!this.playing && !this.queue.length) this.flushBuffer();
+      return;
+    }
+    this.load(text);
+  }
+
+  private flushBuffer() {
+    if (!this.buffer.length) return;
+    const text = this.buffer.join(" ");
+    this.buffer = [];
+    this.load(text);
+  }
+
+  private load(text: string) {
+    const prev = this.stitching ? this.said.join(" ").slice(-400) : "";
+    this.said.push(text);
+    const url = `/api/tts?voice=${encodeURIComponent(this.voice)}&text=${encodeURIComponent(text)}${prev ? `&prev=${encodeURIComponent(prev)}` : ""}`;
     const audio = new Audio(url);
     audio.preload = "auto";
     audio.onerror = () => {
+      // Stoppet med vilje (afbrudt eller lagt på): ingen fejl.
+      if (this.stopped) return;
       if (!this.reportedError && this.handlers.onError) {
         this.reportedError = true;
         void fetch(url)
-          .then(async (r) => this.handlers.onError?.(`${r.status}: ${(await r.text()).slice(0, 200)}`))
+          .then(async (r) => {
+            // Kun en rigtig fejl fra serveren/ElevenLabs vises (ikke selve lyden).
+            if (!r.ok) this.handlers.onError?.(`${r.status}: ${(await r.text()).slice(0, 200)}`);
+          })
           .catch(() => this.handlers.onError?.("ingen forbindelse"));
       }
       if (this.playing === audio) {
@@ -112,15 +143,23 @@ export class SpeechQueue {
   /** Der kommer ikke flere sætninger. */
   finish() {
     this.finished = true;
-    if (!this.playing && !this.queue.length) this.idle();
+    if (!this.playing && !this.queue.length) {
+      if (this.buffer.length) this.flushBuffer();
+      else this.idle();
+    }
   }
 
   stop() {
     this.stopped = true;
     this.playing?.pause();
     this.playing = null;
-    for (const q of this.queue) q.audio.src = "";
+    for (const q of this.queue) {
+      q.audio.onerror = null;
+      q.audio.removeAttribute("src");
+      q.audio.load();
+    }
     this.queue = [];
+    this.buffer = [];
   }
 
   private idle() {
@@ -130,6 +169,7 @@ export class SpeechQueue {
 
   private next() {
     if (this.stopped) return;
+    if (!this.queue.length && this.buffer.length) this.flushBuffer();
     const item = this.queue.shift();
     if (!item) {
       this.playing = null;

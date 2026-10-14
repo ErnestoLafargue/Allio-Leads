@@ -12,23 +12,48 @@ import { startSonioxStream, SpeakerTranscript, type SonioxStream } from "@/lib/l
 import { SpeechQueue, stopSpeaking } from "@/lib/tts/speak-client";
 
 type Option = { key: string; label: string };
+type VoiceOption = Option & { stitching?: boolean };
 type Lead = { kliniknavn: string; by: string; beslutningstager: string; bookingsystem: string; branche: string };
 type Route = { label: string; confidence: number; bargeIn: number; ms: number };
 type Turn = { spoken: string; tools: { name: string; input: Record<string, unknown> }[]; hangup: boolean; costUsd: number };
 type State = { booked: { dag: string; tid: string; adresse: string } | null; outcome: string | null; notes: string[] };
 type Entry =
   | { who: "kunde"; text: string; route: Route | null; jevError: string | null }
-  | { who: "adrian"; text: string; tools: Turn["tools"]; adrianMs: number; voiceMs: number | null; totalMs: number | null; costUsd: number; interrupted?: boolean };
+  | {
+      who: "adrian";
+      /** Entydigt id pr. tur (sætningerne streames ind i samme boble). */
+      id: string;
+      text: string;
+      tools: Turn["tools"];
+      adrianMs: number;
+      voiceMs: number | null;
+      totalMs: number | null;
+      costUsd: number;
+      interrupted?: boolean;
+      /** Serverens tider: forberedelse (Jev + træning), Jev, Claudes første tekst. */
+      server?: { prepMs: number; jevMs: number | null; firstTextMs: number | null };
+    };
+
+/** Andel af ordene i `a`, der også findes i `b` (til at genkende Adrians eget ekko i mikrofonen). */
+function overlap(a: string, b: string): number {
+  const words = (t: string) => t.toLowerCase().replace(/[^a-zæøå0-9 ]/g, " ").split(/\s+/).filter((w) => w.length > 1);
+  const wa = words(a);
+  if (!wa.length) return 0;
+  const wb = new Set(words(b));
+  return wa.filter((w) => wb.has(w)).length / wa.length;
+}
 
 const DEFAULT_LEAD: Lead = { kliniknavn: "Klinik Lafargue", by: "København", beslutningstager: "Ernesto", bookingsystem: "GeckoBooking", branche: "hudpleje" };
 const LEAD_KEY = "tal-med-adrian-lead";
 const pct = (x: number) => `${Math.round(x * 100)} %`;
 const sec = (ms: number) => `${(ms / 1000).toFixed(1).replace(".", ",")} s`;
 
-export function AdrianChat({ playbooks, models, voices }: { playbooks: Option[]; models: Option[]; voices: Option[] }) {
+export function AdrianChat({ playbooks, models, voices }: { playbooks: Option[]; models: Option[]; voices: VoiceOption[] }) {
   const [approach, setApproach] = useState(playbooks[0]?.key ?? "lavt_pres");
   const [model, setModel] = useState(models[0]?.key ?? "claude-haiku-5-5");
-  const [voice, setVoice] = useState(voices.find((v) => v.key === "christian-v3c")?.key ?? voices[0]?.key ?? "christian-v3c");
+  const [voice, setVoice] = useState(voices.find((v) => v.key === "christian-flash")?.key ?? voices[0]?.key ?? "christian-flash");
+  /** Det, Adrian siger lige nu (til at kende hans eget ekko fra din tale). */
+  const speakingText = useRef("");
   const [lead, setLead] = useState<Lead>(DEFAULT_LEAD);
   const [phase, setPhase] = useState<"klar" | "opkald" | "slut">("klar");
   const [entries, setEntries] = useState<Entry[]>([]);
@@ -78,18 +103,18 @@ export function AdrianChat({ playbooks, models, voices }: { playbooks: Option[];
     busy.current = true;
     setStatus("Adrian tænker …");
     setEntries((es) => [...es, { who: "kunde", text: kunde, route: null, jevError: null }]);
-    const idx = { n: -1 };
+    const turnId = `${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
+    let created = false;
     let hangup = false;
     let queue: SpeechQueue | null = null;
+    speakingText.current = "";
     const ensureEntry = () => {
-      if (idx.n >= 0) return;
-      setEntries((es) => {
-        idx.n = es.length;
-        return [...es, { who: "adrian", text: "", tools: [], adrianMs: 0, voiceMs: null, totalMs: null, costUsd: 0 }];
-      });
+      if (created) return;
+      created = true;
+      setEntries((es) => [...es, { who: "adrian", id: turnId, text: "", tools: [], adrianMs: 0, voiceMs: null, totalMs: null, costUsd: 0 }]);
     };
     const patch = (f: (e: Extract<Entry, { who: "adrian" }>) => Extract<Entry, { who: "adrian" }>) =>
-      setEntries((es) => es.map((e, i) => (i === idx.n && e.who === "adrian" ? f(e) : e)));
+      setEntries((es) => es.map((e) => (e.who === "adrian" && e.id === turnId ? f(e) : e)));
     try {
       const res = await fetch("/api/ai-saelger/samtale", {
         method: "POST",
@@ -114,7 +139,14 @@ export function AdrianChat({ playbooks, models, voices }: { playbooks: Option[];
             | { type: "route"; route: Route | null; jevError: string | null }
             | { type: "sentence"; text: string; ms: number }
             | { type: "tool"; name: string; input: Record<string, unknown> }
-            | { type: "done"; turn: Turn; adrianMs: number; agentMsgs: unknown[]; state: State }
+            | {
+                type: "done";
+                turn: Turn;
+                adrianMs: number;
+                agentMsgs: unknown[];
+                state: State;
+                timings?: { prepMs: number; jevMs: number | null; firstTextMs: number | null };
+              }
             | { type: "error"; error: string };
           if (ev.type === "route") {
             setEntries((es) => {
@@ -142,9 +174,10 @@ export function AdrianChat({ playbooks, models, voices }: { playbooks: Option[];
                     setStatus(hangup ? "" : "Din tur");
                     if (hangup) endCall();
                   },
-                });
+                }, voices.find((v) => v.key === voice)?.stitching ?? false);
                 queue = q;
               }
+              speakingText.current = `${speakingText.current} ${ev.text}`;
               queue.add(ev.text);
             }
           } else if (ev.type === "tool") {
@@ -157,7 +190,12 @@ export function AdrianChat({ playbooks, models, voices }: { playbooks: Option[];
             lastAgent.current = ev.turn.spoken;
             hangup = ev.turn.hangup;
             ensureEntry();
-            patch((e) => ({ ...e, text: ev.turn.spoken, costUsd: ev.turn.costUsd }));
+            patch((e) => ({
+              ...e,
+              text: ev.turn.spoken,
+              costUsd: ev.turn.costUsd,
+              server: ev.timings ? { prepMs: ev.timings.prepMs, jevMs: ev.timings.jevMs, firstTextMs: ev.timings.firstTextMs } : undefined,
+            }));
           } else if (ev.type === "error") {
             throw new Error(ev.error);
           }
@@ -184,6 +222,8 @@ export function AdrianChat({ playbooks, models, voices }: { playbooks: Option[];
     const norm = (t: string) => t.toLowerCase().replace(/[^a-zæøå0-9 ]/g, "").trim();
     const prev = lastUtterance.current;
     if (prev && at - prev.at < 4000 && (norm(text) === norm(prev.text) || norm(text).startsWith(norm(prev.text)))) return;
+    // Adrians eget ekko (højttaler → mikrofon): send det ikke som kundens replik.
+    if (overlap(text, `${speakingText.current} ${lastAgent.current ?? ""}`) >= 0.6) return;
     lastUtterance.current = { text, at };
     if (busy.current) {
       pending.current = { text: pending.current ? `${pending.current.text} ${text}` : text, at };
@@ -223,7 +263,8 @@ export function AdrianChat({ playbooks, models, voices }: { playbooks: Option[];
           setLive(now);
           if (pausedRef.current) return;
           // Du taler ind over Adrian (mere end et «mm»): han stopper.
-          if (speaking.current && now.split(/\s+/).filter(Boolean).length >= 2) {
+          // Kun rigtig tale fra dig (mindst 3 ord, og ikke Adrians egen stemme, der kommer tilbage i mikrofonen).
+          if (speaking.current && now.split(/\s+/).filter(Boolean).length >= 3 && overlap(now, speakingText.current) < 0.5) {
             stopSpeaking();
             speaking.current = false;
             setEntries((es) => es.map((e, i) => (i === es.length - 1 && e.who === "adrian" ? { ...e, interrupted: true } : e)));
@@ -353,6 +394,9 @@ export function AdrianChat({ playbooks, models, voices }: { playbooks: Option[];
                     : e.adrianMs
                       ? `Første sætning fra Claude ${sec(e.adrianMs)}`
                       : ""}
+                  {e.server
+                    ? ` · server: Jev + træning ${sec(e.server.prepMs)}${e.server.firstTextMs !== null ? `, Claudes første ord ${sec(e.server.firstTextMs)}` : ""}`
+                    : ""}
                 </p>
                 {e.text ? (
                   <Feedback

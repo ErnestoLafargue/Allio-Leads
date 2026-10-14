@@ -1,6 +1,6 @@
 import { redirect } from "next/navigation";
 import { APPROACHES, VOICES, type ApproachKey } from "@/lib/ai-saelger/agents";
-import { ernestoVoice } from "@/lib/ai-saelger/custom-voices";
+import { ernestoVoice, FLASH_VOICE_KEYS } from "@/lib/ai-saelger/custom-voices";
 import { AGENT_MODELS } from "@/lib/ai-saelger/practice/simulate";
 import { getViewer } from "@/lib/scripts-traening/queries";
 import { AdrianChat } from "./adrian-chat";
@@ -23,7 +23,11 @@ export default async function AdrianPage() {
       models={Object.entries(AGENT_MODELS)
         .map(([key, m]) => ({ key, label: m.label }))
         .sort((x, y) => Number(y.key === "claude-sonnet-5-5") - Number(x.key === "claude-sonnet-5-5"))}
-      voices={[...VOICES, ...(ernesto ? [ernesto] : [])].map((v) => ({ key: v.key, label: VOICE_LABELS[v.key] ?? v.key }))}
+      voices={[
+        { key: FLASH_VOICE_KEYS.christian, label: "Adrian (Christian, Flash – hurtig, ens tone)", stitching: true },
+        ...(ernesto ? [{ key: FLASH_VOICE_KEYS.ernesto, label: "Ernesto (din stemme, Flash – hurtig, ens tone)", stitching: true }] : []),
+        ...[...VOICES, ...(ernesto ? [ernesto] : [])].map((v) => ({ key: v.key, label: VOICE_LABELS[v.key] ?? v.key, stitching: !v.model.startsWith("eleven_v3") })),
+      ]}
     />
   );
 }
