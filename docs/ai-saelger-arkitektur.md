@@ -150,14 +150,27 @@ alternativer (`ok`) er sat i hånden.
   (`taler_for_meget`), som først kan genkendes på længden.
 - Jev svarer ikke helt ens fra kørsel til kørsel (±2 citater), og ét kald ud af ca. 1.000 gik over
   timeouten på 3 sek. Routeren skal derfor altid have en reserve (Haiku eller «ingen beslutning»).
-- **Haiku (`claude-haiku-5-5`) er ikke målt endnu:** `ANTHROPIC_API_KEY` når ikke Claude Code-cloudmiljøet
-  (navnet er reserveret), så nøglen skal ligge som `ALLIO_ANTHROPIC_API_KEY`; klienten læser begge.
-- **Anbefaling:** Jev som router, altid med Adrians sidste replik (Choice + Noul i ét kald, ca. 130 ms).
-  Mens kunden taler (hver 6. ord): **bryd ind, når Noul ≥ 0,3 OG Choice er `forkert_antagelse` eller
-  `taler_for_meget`**; et falsk indbrud er det dyreste, Adrian kan gøre. `taler_for_meget` afgøres
-  desuden på længde (fx over ca. 60 ord uden spørgsmål), ikke kun af modellen. Ved turslut bruges Choice
-  til at vælge svaret. Haiku er reserve ved timeout/fejl; den endelige sammenligning laves, når Haiku er
-  målt på de samme 116 citater.
+- **Jev mod Claude Haiku (`claude-haiku-5-5`), samme 116 citater, med Adrians sidste replik:**
+
+  | | præcis label | forsvarlig label | korte svar, forsvarlig | svartid p50 / p90 / maks | bryd ind (kun label) |
+  |---|---|---|---|---|---|
+  | Jev | **71 %** | **95 %** | 100 % | **130 / 148 / 187 ms** | 12/17, 2 % falske |
+  | Haiku | 61 % | 91 % | 100 % | 682 / 824 / 9.356 ms | 6/17, 7 % falske |
+  | Haiku uden replik | 59 % | 88 % | 91 % | 700 / 924 / 2.986 ms | – |
+
+  Haiku er også dårligere pr. label, hvor det tæller (forkert antagelse 69 % mod 85 % præcis, nyt nummer
+  71 % mod 86 % forsvarlig), og den har ingen Noul, så den kan ikke sige «snart» om at bryde ind.
+  **Kaskade** (Jev først, Haiku når Jevs confidence er lav): ingen gevinst. Ved 0,6 sendes 22/116 til
+  Haiku, og forsvarlig label er uændret 95 %, mens p90 stiger fra 148 til 805 ms; ved 0,8–0,9 bliver
+  den dårligere. Bemærk: Claude Haiku 5.5 tænker som standard og skal kaldes med thinking slået fra og
+  effort `low` (`HAIKU_ROUTER_PARAMS` i `router.ts`). Ellers bruger den alle tokens på at tænke og svarer
+  tomt. Den første Haiku-måling (30–48 %) var derfor forkert.
+- **Anbefaling (14/10):** **Jev alene som router**, altid med Adrians sidste replik
+  (Choice + Noul i ét kald, ca. 130 ms). Mens kunden taler (hver 6. ord): **bryd ind, når Noul ≥ 0,3 OG
+  Choice er `forkert_antagelse` eller `taler_for_meget`** (live 11–12/16 fanget, 4–6 % falske indbrud).
+  Et falsk indbrud er det dyreste, Adrian kan gøre. `taler_for_meget` afgøres desuden på længde (fx over
+  ca. 60 ord uden spørgsmål). Haiku bruges kun, når Jev fejler eller går over timeouten (3 sek.); ingen
+  kaskade på confidence.
 
 ## 4d. Læring
 - **Opstart på sælgerdata (én gang):** kun lange samtaler med interesse og `CallAnalysis.overallScore`
