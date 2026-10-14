@@ -30,6 +30,8 @@ type Entry =
       totalMs: number | null;
       costUsd: number;
       interrupted?: boolean;
+      /** Det, mikrofonen hørte, da Adrian blev afbrudt (til at se, om det var hans eget ekko). */
+      interruptedBy?: string;
       /** Serverens tider: forberedelse (Jev + træning), Jev, Claudes første tekst. */
       server?: { prepMs: number; jevMs: number | null; firstTextMs: number | null };
     };
@@ -73,6 +75,9 @@ export function AdrianChat({ playbooks, models, voices }: { playbooks: Option[];
   const starting = useRef(false);
   const lastUtterance = useRef<{ text: string; at: number } | null>(null);
   const [paused, setPaused] = useState(false);
+  /** Må kunden afbryde Adrian? Slå fra uden headset, hvis han hører sig selv. */
+  const [allowBargeIn, setAllowBargeIn] = useState(true);
+  const allowBargeInRef = useRef(true);
   const pausedRef = useRef(false);
 
   useEffect(() => {
@@ -264,10 +269,15 @@ export function AdrianChat({ playbooks, models, voices }: { playbooks: Option[];
           if (pausedRef.current) return;
           // Du taler ind over Adrian (mere end et «mm»): han stopper.
           // Kun rigtig tale fra dig (mindst 3 ord, og ikke Adrians egen stemme, der kommer tilbage i mikrofonen).
-          if (speaking.current && now.split(/\s+/).filter(Boolean).length >= 3 && overlap(now, speakingText.current) < 0.5) {
+          if (
+            allowBargeInRef.current &&
+            speaking.current &&
+            now.split(/\s+/).filter(Boolean).length >= 4 &&
+            overlap(now, speakingText.current) < 0.35
+          ) {
             stopSpeaking();
             speaking.current = false;
-            setEntries((es) => es.map((e, i) => (i === es.length - 1 && e.who === "adrian" ? { ...e, interrupted: true } : e)));
+            setEntries((es) => es.map((e, i) => (i === es.length - 1 && e.who === "adrian" ? { ...e, interrupted: true, interruptedBy: now } : e)));
           }
           if (done) {
             setLive("");
@@ -350,6 +360,17 @@ export function AdrianChat({ playbooks, models, voices }: { playbooks: Option[];
               <button type="button" onClick={() => setPause(!paused)} className="ml-auto rounded-full px-4 py-2 text-sm font-medium text-stone-700 ring-1 ring-stone-300 hover:bg-stone-50">
                 {paused ? "▶ Fortsæt" : "⏸ Pause"}
               </button>
+              <button
+                type="button"
+                onClick={() => {
+                  allowBargeInRef.current = !allowBargeIn;
+                  setAllowBargeIn(!allowBargeIn);
+                }}
+                title="Slå fra, hvis Adrian afbryder sig selv (fx uden headset)"
+                className="rounded-full px-3 py-2 text-xs text-stone-600 ring-1 ring-stone-300 hover:bg-stone-50"
+              >
+                {allowBargeIn ? "Må afbrydes: til" : "Må afbrydes: fra"}
+              </button>
               <button type="button" onClick={endCall} className="rounded-full bg-rose-600 px-4 py-2 text-sm font-medium text-white">
                 Læg på
               </button>
@@ -386,7 +407,9 @@ export function AdrianChat({ playbooks, models, voices }: { playbooks: Option[];
                 ) : null}
                 <p className="max-w-[85%] rounded-2xl rounded-bl-sm bg-emerald-50 px-3 py-2 text-[15px] text-stone-900 ring-1 ring-emerald-100">
                   {e.text || <i className="text-stone-400">(siger ingenting)</i>}
-                  {e.interrupted ? <span className="ml-1 text-xs text-rose-600">(afbrudt)</span> : null}
+                  {e.interrupted ? (
+                    <span className="ml-1 text-xs text-rose-600">(afbrudt{e.interruptedBy ? ` af: «${e.interruptedBy}»` : ""})</span>
+                  ) : null}
                 </p>
                 <p className="mt-1 text-[11px] text-stone-500">
                   {e.totalMs !== null
