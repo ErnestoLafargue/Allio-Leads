@@ -1,8 +1,7 @@
-import { readFileSync } from "node:fs";
-import { join } from "node:path";
 import { NextResponse } from "next/server";
-import { APPROACHES, VOICES } from "@/lib/ai-saelger/agents";
+import { VOICES } from "@/lib/ai-saelger/agents";
 import { AGENT_MODEL, AGENT_MODELS } from "@/lib/ai-saelger/practice/simulate";
+import { readPlaybook } from "@/lib/ai-saelger/playbooks";
 import { aiSaelgerSystemPrompt } from "@/lib/ai-saelger/system-prompt";
 import { adrianTrainingSection } from "@/lib/ai-saelger/training-db";
 import { createAnthropicClient } from "@/lib/anthropic-client";
@@ -18,7 +17,7 @@ export async function POST(req: Request) {
   const line = b?.customerLine?.trim().slice(0, 600);
   if (!line) return NextResponse.json({ error: "Mangler kundens replik" }, { status: 400 });
   const variant = { key: "lavt_pres/christian-v3c", approach: "lavt_pres" as const, voice: VOICES.find((v) => v.key === "christian-v3c")! };
-  const playbook = readFileSync(join(process.cwd(), APPROACHES.lavt_pres.file!), "utf8");
+  const playbook = readPlaybook("lavt_pres");
   try {
     const res = await createAnthropicClient().messages.create({
       ...AGENT_MODELS[AGENT_MODEL].params,

@@ -1,5 +1,3 @@
-import { readFileSync } from "node:fs";
-import { join } from "node:path";
 import type Anthropic from "@anthropic-ai/sdk";
 import { NextResponse } from "next/server";
 import { APPROACHES, VOICES, type ApproachKey } from "@/lib/ai-saelger/agents";
@@ -7,6 +5,7 @@ import { PERSONAS } from "@/lib/ai-saelger/practice/personas";
 import { AGENT_MODELS, agentTurn, leadMessage, type AgentModel, type ToolState } from "@/lib/ai-saelger/practice/simulate";
 import { withRouterHint } from "@/lib/ai-saelger/router";
 import { createJevClient, routeWithJev, type JevRoute } from "@/lib/ai-saelger/router-jev";
+import { readPlaybook } from "@/lib/ai-saelger/playbooks";
 import { aiSaelgerSystemPrompt } from "@/lib/ai-saelger/system-prompt";
 import { adrianTrainingSection } from "@/lib/ai-saelger/training-db";
 import { createAnthropicClient } from "@/lib/anthropic-client";
@@ -46,7 +45,7 @@ export async function POST(req: Request) {
   if (!kunde || !APPROACHES[approach]?.file) return NextResponse.json({ error: "Mangler kundens replik eller playbook" }, { status: 400 });
 
   const variant = { key: `${approach}/christian-v3c`, approach, voice: VOICES.find((v) => v.key === "christian-v3c")! };
-  const playbook = readFileSync(join(process.cwd(), APPROACHES[approach].file!), "utf8");
+  const playbook = readPlaybook(approach);
   const system = aiSaelgerSystemPrompt(variant, playbook, await adrianTrainingSection());
   const state: ToolState = { booked: b?.state?.booked ?? null, outcome: b?.state?.outcome ?? null, notes: b?.state?.notes ?? [], todayKey: new Date().toISOString().slice(0, 10) };
 
