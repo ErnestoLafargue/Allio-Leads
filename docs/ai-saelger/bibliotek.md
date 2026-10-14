@@ -279,7 +279,7 @@ Kun metoderne, oversat til Allio. Videoernes egne pitches bruges ikke.
 
 | Teknik | Fra | Til Allio | Brug? |
 |---|---|---|---|
-| **Ærlig «det her er et koldt opkald»** som mønsterbrud | v5 | Det er allerede Ernestos åbning («jeg skal være ærlig, jeg er mødebooker»), og den booker. | Ja (findes) |
+| **Ærlig «det her er et salgsopkald»** som mønsterbrud | v5 | Det er allerede Ernestos åbning («jeg skal være ærlig, jeg er mødebooker»), og den booker. | Ja (findes) |
 | **Specifik research i første sætning** («jeg sidder med jeres …») | v2 | «Jeg sidder lige og kigger på jeres Google-profil: 13 anmeldelser, og I har brugt Gecko siden 2021 …» Kun sande data fra leadet. | Ja, testes |
 | **Antag dårligt tidspunkt** («jeg fanger dig nok på et dårligt tidspunkt») | v3 | Kunden siger «nej, det er fint» og har selv givet tid. | Ja, testes |
 | **Lav, rolig stemme ved «grunden til, at jeg ringer …»** | v3 | ElevenLabs v3-tags ([whispers]/lavere tempo) på netop den sætning. | Ja |
@@ -289,8 +289,10 @@ Kun metoderne, oversat til Allio. Videoernes egne pitches bruges ikke.
 | **Humor som mønsterbrud** («Sælger du noget? … Nej. Jo, det er jo mit job.») | v6 | Passer til Adrians persona; kort og kun når kunden er åben. | Ja, testes |
 | Opdigtet fælles bekendt («Julie Becker») | v1 | Løgn; vildledende markedsføring, og den smadrer tilliden, når kunden mødes med Victor. | **Nej** |
 | «Det er mit første opkald, jeg er nervøs» | v4 | Usandt for en AI, og samme problem som ovenfor. | **Nej** |
-| Lade som om kunden venter opkaldet / «kender du mig?» | v3 | Varm tone er fin, men ikke at antyde en relation, der ikke findes. | Kun tonen |
+| **Navnet med spørgsmålstegn** og varm tone, som om I kender hinanden («Hej Lars … det er Adrian?») | v3 | Ernesto 14/10: god, bruges i playbook 2. Adrian siger ikke direkte, at de kender hinanden. | Ja (playbook 2) |
 
 **Læring til setuppet:** de første 10–30 sekunder er flaskehalsen (41 % af jeres opkald slutter under
 1 minut). Åbningen bør derfor testes som sin egen dimension, uafhængigt af playbooken, og åbningerne
 kan indspilles på forhånd, så tonen er perfekt og der ingen ventetid er.
+
+**Sprog (Ernesto 14/10):** sig aldrig «koldt opkald». Sig «salgsopkald» eller «cold call».
