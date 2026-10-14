@@ -22,22 +22,19 @@ export const VOICES: readonly Voice[] = [
   { key: "christian-v3c", agentName: "Adrian", provider: "elevenlabs", voiceId: "6SjhOkgKPuHxm8q0eIyp", model: "eleven_v3_conversational", audioTags: true },
 ];
 
-export type ApproachKey = "aerlig" | "direkte" | "spoergende";
+export type ApproachKey = "lavt_pres" | "playbook_2" | "playbook_3";
 
-/** De 3 tilgange. Indholdet (playbooks) skrives sammen med Ernesto. */
-export const APPROACHES: Readonly<Record<ApproachKey, { label: string; summary: string }>> = {
-  aerlig: {
-    label: "Den ærlige mødebooker",
-    summary: "Ernestos åbning: «Jeg skal være ærlig med dig, jeg er mødebooker …», derefter pitchen og et spørgsmål.",
+/**
+ * De 3 playbooks (docs/ai-saelger/playbooks/). Playbook 1 er skrevet; 2 og 3 skrives sammen med Ernesto.
+ */
+export const APPROACHES: Readonly<Record<ApproachKey, { label: string; summary: string; file: string | null }>> = {
+  lavt_pres: {
+    label: "Lavt pres (NEPQ)",
+    summary: "Kunden finder selv problemet med de inaktive kunder og sætter selv tal på det. Ét spørgsmål ad gangen, næsten ingen pitch.",
+    file: "docs/ai-saelger/playbooks/1-lavt-pres.md",
   },
-  direkte: {
-    label: "Kort og direkte",
-    summary: "Går straks til kundens eget problem (inaktive kunder) og beder om mødet tidligt.",
-  },
-  spoergende: {
-    label: "Spørgsmålsdrevet",
-    summary: "Kunden taler mest. Adrian stiller spørgsmål, til kunden selv siger, hvad de mangler, og knytter mødet til det.",
-  },
+  playbook_2: { label: "Playbook 2", summary: "Skrives sammen med Ernesto.", file: null },
+  playbook_3: { label: "Playbook 3", summary: "Skrives sammen med Ernesto.", file: null },
 };
 
 export type Variant = { key: string; approach: ApproachKey; voice: Voice };

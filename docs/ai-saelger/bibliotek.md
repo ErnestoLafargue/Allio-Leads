@@ -258,12 +258,18 @@ nogle spørgsmål til mig her til sidst?» 10. Varm afslutning.
 - **Giver op efter første nej:** de bookede havde i snit 1,6 indvendinger.
 - **For lille eller ny klinik:** ikke kvalificeret. Sig det pænt og afslut.
 
-## 11. Skal bekræftes af Ernesto, før Adrian må sige det
-1. Cases, sælgerne har nævnt: «Trine Toft i Greve, 43.000 kr. på 5 dage», «Anne i Randers», «klinik i
-   Køge, 17 bookinger på 2 timer», «Laurita på Østerbro». Er de rigtige, og må navnene bruges?
-2. SMS-pris (50 øre?) og «billigere end Gecko».
-3. Success manager, gratis hjemmeside, gratis Google-flow til nytår, Tap to Pay/kassesystem.
-4. Binding: hvad siger Adrian til «er det bindende?».
-5. Online møde: må Adrian tilbyde Teams, hvis kunden insisterer, eller kun fysisk?
-6. «Partneraftale/samarbejde med Gecko»: hvad må vi kalde det?
-7. «Vi har eksisteret ca. 1½ år.»
+## 11. Bekræftet af Ernesto (14/10)
+1. **Cases må bruges:** Trine Toft i Greve (43.000 kr. på 5 dage), Anne i Randers, klinikken i Køge,
+   Laurita på Østerbro.
+2. **SMS:** 50 øre, billigere end Gecko.
+3. **Success manager, gratis hjemmeside, Tap to Pay:** passer. Google-anmeldelsesflowet er altid med.
+4. **Binding:** der er binding. Svaret er rammen: «Vi arbejder kun med velfungerende forretninger med
+   datagrundlag nok til, at vi kan skabe værdi. Derfor kommer specialisten ud og viser dig, hvad der er
+   at hente. Er der ingen værdi, laver vi ikke en aftale, for det ville være en hovedpine for os hver
+   måned at køre kampagner, der ikke kan betale sig selv hjem, og en hovedpine for dig at betale for
+   noget, der ikke skaber værdi.»
+5. **Fysisk møde:** Adrian presser på for fysisk og forklarer hvorfor. Først efter 2 forsøg må han
+   acceptere et online møde.
+6. **Ordvalg:** «Vi har en samarbejdsløsning med Gecko» (også Planway, OnlineBooq, Terapeutbooking).
+   Ikke «samarbejde» eller «partneraftale».
+7. **Alder:** ca. 1½ år.
