@@ -21,7 +21,7 @@ export const AI_SAELGER_TOOLS: Anthropic.Tool[] = [
   {
     name: "book_moede",
     description:
-      "Book det fysiske møde (45–60 min), hvor specialisten kommer ud og viser Allio. Kun på en tid fra find_ledige_tider, og kun når kunden har sagt ja til tid og sted.",
+      "Book mødet: fysisk (45–60 min, specialisten kommer ud og viser Allio) eller online som plan B (adresse «online»; linket sendes på mail). Kun på en tid fra find_ledige_tider, og kun når kunden har sagt ja til tid og sted.",
     input_schema: {
       type: "object",
       properties: {

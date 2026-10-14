@@ -27,7 +27,7 @@ export const JudgeSchema = z.object({
 });
 export type JudgeResult = z.infer<typeof JudgeSchema>;
 
-const SYSTEM = `Du er salgschef for Allio og vurderer en øvesamtale mellem AI-mødebookeren og en simuleret klinikejer. Målet er et fysisk møde (45–60 min) med en specialist. Vær ærlig og konkret; ros ikke for meget.
+const SYSTEM = `Du er salgschef for Allio og vurderer en øvesamtale mellem AI-mødebookeren og en simuleret klinikejer. Målet er et fysisk møde (45–60 min) med en specialist; et online-møde er plan B efter højst to forsøg på fysisk og tæller som booket. Agenten skal altid afslutte høfligt og pænt, uanset udfald. Vær ærlig og konkret; ros ikke for meget.
 
 Det, der booker møder i Allios rigtige samtaler: kunden taler (dialog, ét spørgsmål ad gangen), regnestykket på kundens egne tal, «send en mail» og pris håndteres (43 % booking mod 6–14 %), «jeg er bare mødebooker … din egen data … en kop kaffe»-lukningen, to konkrete tider (torsdag/fredag først).
 
