@@ -42,14 +42,46 @@ export function isSituation(s: string): s is Situation {
 
 export const ALL_SITUATIONS: readonly Situation[] = [...(Object.keys(FIXED_SITUATIONS) as FixedSituation[]), ...TRAINING_CATEGORIES];
 
-export type Lesson = { situation: string; customerLine: string; answer: string; avoidAnswer?: string | null };
+export type Lesson = {
+  situation: string;
+  customerLine: string;
+  answer: string;
+  avoidAnswer?: string | null;
+  /** +1 (👍) / -1 (👎) fra «Tal med Adrian»; null for øvekort. */
+  rating?: number | null;
+  reason?: string | null;
+  context?: string | null;
+  routerLabel?: string | null;
+};
+
+/** Én lektion som tekst til Adrian (med Ernestos begrundelse). */
+export function formatLesson(l: Lesson): string {
+  const why = l.reason ? `\n  Hvorfor: ${l.reason}` : "";
+  if (l.rating === 1) return `- Kunden: «${l.customerLine}»\n  Godt svar (gør det igen): «${l.answer}»${why}`;
+  return `- Kunden: «${l.customerLine}»${l.avoidAnswer ? `\n  Ikke sådan: «${l.avoidAnswer}»` : ""}\n  Ernesto: «${l.answer}»${why}`;
+}
+
+/**
+ * Lag 2 (relevans): op til `n` lektioner fra samtaler med samme Jev-label som kundens replik lige nu,
+ * nyeste først. Lægges i turens besked (ikke systemprompten), så prompt-cachen ikke brydes.
+ */
+export function relevantLessonsHint(lessons: readonly Lesson[], routerLabel: string | null | undefined, n = 3): string {
+  if (!routerLabel) return "";
+  const hits = lessons.filter((l) => l.situation === FROM_CALL_SITUATION && l.routerLabel === routerLabel).slice(0, n);
+  return hits.length ? `[Ernesto har rettet dig i lignende situationer:\n${hits.map(formatLesson).join("\n")}]` : "";
+}
 
 /**
  * Sektionen til Adrians systemprompt. Ernestos lektioner først (højst `perSituation` nyeste pr. situation),
  * derefter svarbanken fra sælgernes samtaler. Tom streng, hvis der intet er.
  */
-export function lessonsPromptSection(lessons: readonly Lesson[], bank: Partial<Record<ObjectionCategory, string[]>> = {}, perSituation = 4): string {
-  const limit = (s: string) => (s === FROM_CALL_SITUATION ? 12 : perSituation);
+export function lessonsPromptSection(
+  lessons: readonly Lesson[],
+  bank: Partial<Record<ObjectionCategory, string[]>> = {},
+  perSituation = 4,
+  principles = "",
+): string {
+  const limit = (s: string) => (s === FROM_CALL_SITUATION ? 8 : perSituation);
   const bySituation = new Map<string, Lesson[]>();
   for (const l of lessons) {
     const list = bySituation.get(l.situation) ?? [];
@@ -57,13 +89,16 @@ export function lessonsPromptSection(lessons: readonly Lesson[], bank: Partial<R
     bySituation.set(l.situation, list);
   }
   const ernesto = [...bySituation.entries()].map(
-    ([s, list]) => `### ${situationLabel(s)}\n${list.map((l) => `- Kunden: «${l.customerLine}»${l.avoidAnswer ? `\n  Ikke sådan (dit svar, som Ernesto afviste): «${l.avoidAnswer}»` : ""}\n  Ernesto: «${l.answer}»`).join("\n")}`,
+    ([s, list]) => `### ${situationLabel(s)}\n${list.map(formatLesson).join("\n")}`,
   );
   const banked = Object.entries(bank)
     .filter(([, list]) => list?.length)
     .map(([c, list]) => `- ${situationLabel(c)}: ${list!.map((t) => `«${t}»`).join(" / ")}`);
-  if (!ernesto.length && !banked.length) return "";
+  if (!ernesto.length && !banked.length && !principles.trim()) return "";
   return [
+    principles.trim()
+      ? `## Adrians principper (lært af Ernestos feedback, godkendt af ham)\nFølg dem altid; de går forud for playbookens formuleringer.\n${principles.trim()}`
+      : "",
     ernesto.length
       ? `## Sådan svarer Ernesto (din træner)\nDet er sådan, Ernesto selv ville svare. Brug hans ord, rækkefølge og logik, når situationen ligner; tilpas til samtalen, og gentag ikke ordret, hvis det ikke passer. Hans svar går forud for alt andet her og for playbookens formuleringer.\n\n${ernesto.join("\n\n")}`
       : "",
