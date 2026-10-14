@@ -10,6 +10,8 @@
 import { useEffect, useRef, useState } from "react";
 import { startSonioxStream, SpeakerTranscript, type SonioxStream } from "@/lib/live-coach/soniox-stream";
 import { speak, stopSpeaking } from "@/lib/tts/speak-client";
+import { useRouter } from "next/navigation";
+import { VoiceRecorder } from "./voice-recorder";
 
 type Option = { key: string; label: string };
 type Lead = { kliniknavn: string; by: string; beslutningstager: string; bookingsystem: string; branche: string };
@@ -26,6 +28,7 @@ const pct = (x: number) => `${Math.round(x * 100)} %`;
 const sec = (ms: number) => `${(ms / 1000).toFixed(1).replace(".", ",")} s`;
 
 export function AdrianChat({ playbooks, models, voices }: { playbooks: Option[]; models: Option[]; voices: Option[] }) {
+  const router = useRouter();
   const [approach, setApproach] = useState(playbooks[0]?.key ?? "lavt_pres");
   const [model, setModel] = useState(models[0]?.key ?? "claude-haiku-5-5");
   const [voice, setVoice] = useState(voices.find((v) => v.key === "christian-v3c")?.key ?? voices[0]?.key ?? "christian-v3c");
@@ -45,6 +48,8 @@ export function AdrianChat({ playbooks, models, voices }: { playbooks: Option[];
   const pending = useRef<{ text: string; at: number } | null>(null);
   const speaking = useRef(false);
   const ending = useRef(false);
+  const starting = useRef(false);
+  const lastUtterance = useRef<{ text: string; at: number } | null>(null);
   const [paused, setPaused] = useState(false);
   const pausedRef = useRef(false);
 
@@ -126,6 +131,11 @@ export function AdrianChat({ playbooks, models, voices }: { playbooks: Option[];
   const onUtterance = (text: string) => {
     if (ending.current || pausedRef.current) return;
     const at = performance.now();
+    // Samme replik to gange lige efter hinanden (fx et ekstra «<end>» fra Soniox): send den ikke igen.
+    const norm = (t: string) => t.toLowerCase().replace(/[^a-zæøå0-9 ]/g, "").trim();
+    const prev = lastUtterance.current;
+    if (prev && at - prev.at < 4000 && (norm(text) === norm(prev.text) || norm(text).startsWith(norm(prev.text)))) return;
+    lastUtterance.current = { text, at };
     if (busy.current) {
       pending.current = { text: pending.current ? `${pending.current.text} ${text}` : text, at };
       return;
@@ -134,6 +144,11 @@ export function AdrianChat({ playbooks, models, voices }: { playbooks: Option[];
   };
 
   const call = async () => {
+    // Kun én forbindelse ad gangen (et dobbeltklik mens browseren spørger om mikrofonen gav to).
+    if (starting.current) return;
+    starting.current = true;
+    hangUp();
+    lastUtterance.current = null;
     setError(null);
     setEntries([]);
     setState({ booked: null, outcome: null, notes: [] });
@@ -171,9 +186,11 @@ export function AdrianChat({ playbooks, models, voices }: { playbooks: Option[];
         },
       });
       stream.current = { soniox, mic };
+      starting.current = false;
       setPhase("opkald");
       setStatus("Det ringer … tag telefonen og sig hej");
     } catch (e) {
+      starting.current = false;
       setError(e instanceof Error ? e.message : "Kunne ikke starte mikrofonen");
     }
   };
@@ -254,6 +271,8 @@ export function AdrianChat({ playbooks, models, voices }: { playbooks: Option[];
           )}
         </div>
       </section>
+
+      {!inCall ? <VoiceRecorder hasVoice={voices.some((v) => v.key === "ernesto-v3c")} onCreated={() => router.refresh()} /> : null}
 
       {inCall || entries.length ? (
         <section className="space-y-3 rounded-2xl bg-white p-4 shadow-sm ring-1 ring-stone-200">

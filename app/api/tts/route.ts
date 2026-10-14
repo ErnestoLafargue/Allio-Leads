@@ -1,12 +1,13 @@
 import type { NextRequest } from "next/server";
-import { forSpeech, VOICES } from "@/lib/ai-saelger/agents";
+import { forSpeech } from "@/lib/ai-saelger/agents";
+import { resolveVoice } from "@/lib/ai-saelger/custom-voices";
 import { getViewer } from "@/lib/scripts-traening/queries";
 
 /** Kundens stemme på øvesiderne: dansk ElevenLabs-stemme (Camilla) på den billige, hurtige Flash-model. */
 const CUSTOMER_VOICE = { voiceId: "4RklGmuxoAskAbGXplXN", model: "eleven_flash_v2_5" };
 
 /**
- * GET /api/tts?voice=<christian-v3c|isabella-v3c|isabella-v4t|kunde>&text=…
+ * GET /api/tts?voice=<christian-v3c|isabella-v3c|isabella-v4t|ernesto-v3c|kunde>&text=…
  * Streamer ElevenLabs-lyd (mp3) direkte videre, så <audio> kan begynde at spille, før hele sætningen er
  * genereret. Agentstemmerne er præcis dem, AI-mødebookeren bruger i telefonen (samme stemme og model).
  */
@@ -19,7 +20,7 @@ export async function GET(req: NextRequest) {
   const raw = (req.nextUrl.searchParams.get("text") ?? "").slice(0, 1200).trim();
   if (!raw) return new Response("Mangler tekst", { status: 400 });
 
-  const agent = VOICES.find((v) => v.key === voiceKey);
+  const agent = await resolveVoice(voiceKey);
   const voice = agent ? { voiceId: agent.voiceId, model: agent.model } : CUSTOMER_VOICE;
   const text = agent ? forSpeech(raw, agent) : raw.replace(/\s*\[[^\]]*\]\s*/g, " ").trim();
 
