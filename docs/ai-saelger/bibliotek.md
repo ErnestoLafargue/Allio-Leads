@@ -273,3 +273,24 @@ nogle spørgsmål til mig her til sidst?» 10. Varm afslutning.
 6. **Ordvalg:** «Vi har en samarbejdsløsning med Gecko» (også Planway, OnlineBooq, Terapeutbooking).
    Ikke «samarbejde» eller «partneraftale».
 7. **Alder:** ca. 1½ år.
+
+## 12. Teknikker fra 6 videoer (Ernesto, 14/10)
+Kun metoderne, oversat til Allio. Videoernes egne pitches bruges ikke.
+
+| Teknik | Fra | Til Allio | Brug? |
+|---|---|---|---|
+| **Ærlig «det her er et koldt opkald»** som mønsterbrud | v5 | Det er allerede Ernestos åbning («jeg skal være ærlig, jeg er mødebooker»), og den booker. | Ja (findes) |
+| **Specifik research i første sætning** («jeg sidder med jeres …») | v2 | «Jeg sidder lige og kigger på jeres Google-profil: 13 anmeldelser, og I har brugt Gecko siden 2021 …» Kun sande data fra leadet. | Ja, testes |
+| **Antag dårligt tidspunkt** («jeg fanger dig nok på et dårligt tidspunkt») | v3 | Kunden siger «nej, det er fint» og har selv givet tid. | Ja, testes |
+| **Lav, rolig stemme ved «grunden til, at jeg ringer …»** | v3 | ElevenLabs v3-tags ([whispers]/lavere tempo) på netop den sætning. | Ja |
+| **«Men I ligner faktisk et rigtig godt match. Må jeg fortælle hvorfor?»** i undrende tone | v5 | Efter kvalificeringen. Kunden giver selv lov til pitchen. | Ja, testes |
+| **Betinget tilbagekald** («jeg ringer kl. 13, men kun hvis I …») | v5 | «Jeg ringer kl. 13, men det giver kun mening, hvis I har over et par hundrede kunder i Gecko. Har I det?» Kvalificerer og forpligter. | Ja |
+| **«Hvornår har en mail sidst været bedre end en samtale?»** | v4 | Svar på «send en mail», før mødet foreslås. | Ja |
+| **Humor som mønsterbrud** («Sælger du noget? … Nej. Jo, det er jo mit job.») | v6 | Passer til Adrians persona; kort og kun når kunden er åben. | Ja, testes |
+| Opdigtet fælles bekendt («Julie Becker») | v1 | Løgn; vildledende markedsføring, og den smadrer tilliden, når kunden mødes med Victor. | **Nej** |
+| «Det er mit første opkald, jeg er nervøs» | v4 | Usandt for en AI, og samme problem som ovenfor. | **Nej** |
+| Lade som om kunden venter opkaldet / «kender du mig?» | v3 | Varm tone er fin, men ikke at antyde en relation, der ikke findes. | Kun tonen |
+
+**Læring til setuppet:** de første 10–30 sekunder er flaskehalsen (41 % af jeres opkald slutter under
+1 minut). Åbningen bør derfor testes som sin egen dimension, uafhængigt af playbooken, og åbningerne
+kan indspilles på forhånd, så tonen er perfekt og der ingen ventetid er.
