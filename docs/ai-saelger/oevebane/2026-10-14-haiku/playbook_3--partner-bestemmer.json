@@ -1,0 +1,124 @@
+{
+  "sim": {
+    "persona": "partner-bestemmer",
+    "variant": "playbook_3/christian-v3c",
+    "lines": [
+      {
+        "speaker": "kunde",
+        "text": "Wellness Sydhavn, det er Lone."
+      },
+      {
+        "speaker": "agent",
+        "text": "Lone, det er Adrian fra Allio. [laughs] Jeg skal være ærlig med dig: det her er et salgsopkald, så du må gerne lægge på. Men giv mig lige 30 sekunder først. Er det en fair handel?"
+      },
+      {
+        "speaker": "kunde",
+        "text": "Øh, ja hej... Allio, siger du? Altså, jeg står faktisk midt i noget her, jeg har en kunde om lidt. Men okay, du får dine 30 sekunder. Hvad drejer det sig om?"
+      },
+      {
+        "speaker": "agent",
+        "text": "Fair nok, og jeg skal være hurtig. Jeg ringer til klinikker, der allerede kører godt, fordi de fleste har en masse gamle kunder liggende i Gecko, som aldrig er blevet inviteret tilbage. Men jeg er faktisk ikke sikker på, at det passer på jer. Det gør det ikke for alle. Hvordan ser det ud hos jer?"
+      },
+      {
+        "speaker": "kunde",
+        "text": "Hmm... altså, ja, vi har Gecko. Det har vi haft i... seks år, tror jeg. Så der ligger da en del kunder derinde, ja. Over tusind i hvert fald.\n\nMen øh, hvad mener du med, at de ikke er blevet inviteret tilbage? Vi sender da påmindelser og sådan noget. Hvad er det, I gør, som er anderledes?"
+      },
+      {
+        "speaker": "agent",
+        "text": "Over tusind, og seks år i Gecko. [pause] Sender I påmindelser, ja, men er det de samme til alle, eller er det noget, der bliver fulgt op personligt? Det er lidt der, det handler om. Systemet sidder oven på Gecko, finder de kunder, der er ved at falde fra, og skriver til dem personligt. Og det svarer nye kunder, mens I står i behandling, så du ikke selv skal gøre noget. Men jeg vil hellere høre fra dig: hvem hos jer har tid til at kigge på de kunder, der ikke er kommet igen?"
+      },
+      {
+        "speaker": "kunde",
+        "text": "Øh... altså, ærligt talt? Ingen. Peter, min mand, han kigger på tallene engang imellem, men... nej, det er der ikke rigtig nogen, der når. Vi har jo travlt nok med dem, der *kommer*.\n\nMen vent lige, når du siger, at det skriver personligt... er det så en robot, der skriver til mine kunder, eller hvad? For det kan jeg altså ikke lide. Vores kunder kender os, de skal ikke have sådan noget... computersprog.\n\nOg øh, det lyder da spændende nok, men det er altså Peter, der bestemmer den slags. Økonomi og aftaler og alt det der, det er hans afdeling."
+      },
+      {
+        "speaker": "agent",
+        "text": "Ja, det er systemet, der skriver, så du har ret i, at det er en robot. Men det ændrer jo ikke på, at det er jeres kunder, der får en besked. [pause] Vi kan altid tage en gennemgang af, hvordan teksterne lyder, før noget går ud, så det ikke bliver computersprog. Og Peter bestemmer det med økonomien, forstår jeg. Så hvis jeg forstår dig rigtigt: I har over tusind kunder, du gør det meste selv, og der er ikke tid til at følge op på dem, der ikke kommer igen. Er det rigtigt?"
+      },
+      {
+        "speaker": "kunde",
+        "text": "Øh, ja... altså, ikke helt. Det er ikke bare mig, vi er jo to, Peter og mig. Han har styr på økonomien og det hele, jeg tager mig af kunderne og behandlingerne. Men ja, det med at følge op, det er der ikke nogen af os, der når. Det har du ret i.\n\nMen hør, jeg er stadig ikke vild med det der med en robot. Vores kunder betaler 900 kroner for en behandling, de forventer altså noget... personligt. Hvis de finder ud af, at det er en maskine, der skriver til dem, så... ja, det kan jo også gå den anden vej, ikke?\n\nOg øh, jeg har altså en kunde om et par minutter. Hvad er det helt konkret, du vil have, jeg skal gøre?"
+      },
+      {
+        "speaker": "agent",
+        "text": "Det er rimeligt, og du har ret i, at de betaler for det personlige. Så lad mig være helt konkret og kort. [pause] Ville det være helt skørt, hvis en af vores specialister kiggede forbi på torsdag og viste dig, hvad der ligger i jeres egne data? Så behøver du ikke forestille dig noget, du kan se det på dine egne tal. Og så kan du selv vurdere, om robotten skal være med eller ej. [laughs] Hvornår passer det dig bedst at tage imod ham, torsdag eller fredag?"
+      },
+      {
+        "speaker": "kunde",
+        "text": "Hov, hov, vent lige lidt. Jeg har jo lige sagt, at det er Peter, der bestemmer den slags. Det giver altså ikke nogen mening, at jeres specialist kommer og viser *mig* noget, hvis Peter ikke er der. Så skal jeg bare forklare det hele igen bagefter, og det gider jeg ærlig talt ikke.\n\nOg øh, jeg har altså ikke tid om formiddagen, der har jeg kunder fra morgenstunden.\n\nAltså... hvis det skal være, så skal det være en eftermiddag, hvor Peter også kan være med. Men det kan jeg ikke love dig noget om lige nu, jeg kender ikke hans kalender.\n\nOg hvad sker der egentlig med vores data, hvis I skal kigge i det? Det er jo vores kunders oplysninger, det er ikke bare noget, man lige deler."
+      },
+      {
+        "speaker": "agent",
+        "text": "Det har du helt ret i, Lone, og det er en fair pointe: Peter skal være med, så I begge er på samme side fra start. Er det en dårlig idé, at I begge er med, når specialisten kommer forbi? Så slipper du for at forklare det hele bagefter. Eftermiddag er heller ikke noget problem. Og på dine kundedata: det er jeres, og vi kigger kun på det, I selv vælger at give adgang til. Jeg kan ikke gå i detaljer om hvordan lige nu, men det er specialistens opgave at forklare, inden noget sker. Så lad mig spørge: Ville det være helt forkert at sige, at det mindst er en kop kaffe værd at finde ud af, med Peter til stede? Hvilken eftermiddag passer jer bedst?"
+      },
+      {
+        "speaker": "kunde",
+        "text": "Øh... jo, altså, en kop kaffe kan man vel godt tage. Men det der med data, at du ikke kan gå i detaljer, det kan jeg altså ikke rigtig lide. Det skal Peter have et ordentligt svar på, han spørger helt sikkert ind til det.\n\nOg jeg kan ikke booke noget på Peters vegne, han bliver sur, hvis jeg roder i hans kalender. Hvis det skal være, så er det torsdag eller fredag eftermiddag, de andre dage kan vi ikke.\n\nVed du hvad, ring til Peter selv. Han hedder Peter, og nummeret er 22 33 44 55. Men først efter klokken fire, før det tager han den ikke. Så kan I finde ud af det sammen.\n\nNå, nu kommer min kunde ind ad døren, så jeg bliver nødt til at smutte."
+      },
+      {
+        "speaker": "værktøj",
+        "text": "nyt_nummer {\"nummer\":\"22 33 44 55\",\"navn\":\"Peter\",\"henvisning\":\"Lone fra Wellness Sydhavn har bedt mig ringe til Peter (hendes mand, som har styr på økonomien) efter klokken fire. Hun har fortalt, at de har over tusind kunder i GeckoBooking, at der ikke er tid til at følge op på dem, der ikke kommer igen, og at torsdag eller fredag eftermiddag passer dem bedst, med Peter til stede.\"}"
+      },
+      {
+        "speaker": "værktøj",
+        "text": "skriv_note {}"
+      },
+      {
+        "speaker": "værktøj",
+        "text": "skriv_note {\"note\":\"Wellness Sydhavn (massage og spa, København SV). Beslutningstager: Lone Berg, men Peter (hendes mand) bestemmer økonomi og aftaler og skal være med til møde. Bookingsystem: GeckoBooking, seks års brug. Over 1.000 kunder i kartoteket. Ingen i dag har tid til at følge op på inaktive kunder. Prisen 900 kr. pr. behandling nævnt af Lone; prisen på Allio ikke nævnt. Lone er skeptisk over for at kunderne får automatiske, \\\"robot\\\"-skrevne beskeder, og over for at data deles. Vil kun have eftermiddagsmøde torsdag eller fredag, Peter skal være med. Peter kan kontaktes efter klokken 16 på 22 33 44 55. Lone ønsker ikke at booke på Peters vegne. Vi har ikke givet et fuldt svar om databehandling endnu; Peter skal have det.\"}"
+      },
+      {
+        "speaker": "værktøj",
+        "text": "aftal_tilbagekald {\"tidspunkt\":\"2026-10-14T16:15:00\",\"hvem\":\"Peter\",\"grund\":\"Peter (Lone Bergs mand, økonomiansvarlig) på Wellness Sydhavn bad om at blive ringet op efter klokken 16. Præsentere Allio, svare på databehandling og booke et eftermiddagsmøde torsdag eller fredag med Peter og Lone til stede.\"}"
+      },
+      {
+        "speaker": "værktøj",
+        "text": "saet_udfald {\"udfald\":\"CALLBACK_SCHEDULED\"}"
+      },
+      {
+        "speaker": "værktøj",
+        "text": "afslut_samtale {}"
+      },
+      {
+        "speaker": "agent",
+        "text": "Lone, det er helt fair, og Peter skal have et ordentligt svar, det er ikke mere end rimeligt. Tak for hjælpen, og held og lykke med kunden. Jeg noterer Peters nummer, og så ringer jeg tilbage efter klokken fire. Ved at skrive noten, mangler jeg at angive indholdet. Lad mig rette det. Tak, Lone. Hav en god dag, og god kunde."
+      }
+    ],
+    "booked": null,
+    "outcome": "CALLBACK_SCHEDULED",
+    "notes": [
+      "undefined",
+      "Wellness Sydhavn (massage og spa, København SV). Beslutningstager: Lone Berg, men Peter (hendes mand) bestemmer økonomi og aftaler og skal være med til møde. Bookingsystem: GeckoBooking, seks års brug. Over 1.000 kunder i kartoteket. Ingen i dag har tid til at følge op på inaktive kunder. Prisen 900 kr. pr. behandling nævnt af Lone; prisen på Allio ikke nævnt. Lone er skeptisk over for at kunderne får automatiske, \"robot\"-skrevne beskeder, og over for at data deles. Vil kun have eftermiddagsmøde torsdag eller fredag, Peter skal være med. Peter kan kontaktes efter klokken 16 på 22 33 44 55. Lone ønsker ikke at booke på Peters vegne. Vi har ikke givet et fuldt svar om databehandling endnu; Peter skal have det."
+    ],
+    "endedBy": "agent",
+    "costUsd": 0.06529209999999999
+  },
+  "judge": {
+    "moede_booket": false,
+    "karakterer": {
+      "aabning": 4,
+      "fulgte_playbooken": 3,
+      "dialog_ikke_monolog": 2,
+      "indvendinger": 2,
+      "lukning": 2,
+      "menneskelig": 2
+    },
+    "regelbrud": [
+      "Lækkede intern tekst højt til kunden: «Ved at skrive noten, mangler jeg at angive indholdet. Lad mig rette det.» Det afslører maskinen uden at kunden har spurgt og ødelægger slutindtrykket.",
+      "Tomt skriv_note-kald før den rigtige note (værktøjsfejl).",
+      "Flere spørgsmål i samme replik: i tredje replik både Gecko-pitch og spørgsmål, og i femte replik tre spørgsmål i træk («Er det en dårlig idé …», «Ville det være helt forkert …», «Hvilken eftermiddag …»). Det bryder reglen om ét spørgsmål ad gangen.",
+      "Trin 3 blev sprunget for hurtigt over: produktpitchen kom, før kunden havde åbnet op, og opsummeringen («du gør det meste selv») ignorerede, at Lone lige havde nævnt Peter. Agenten fik aldrig et «præcis».",
+      "Ingen konkrete tider (fx torsdag kl. 15 / fredag kl. 15), selvom kunden selv gav vinduet torsdag/fredag eftermiddag.",
+      "Tog humoren med ind i en indvending, hvor kunden var bekymret («om robotten skal være med eller ej [laughs]»). Playbooken siger, at Adrian skal være kort og direkte, når kunden er travl eller skeptisk."
+    ],
+    "bedste_replik": "«Over tusind, og seks år i Gecko. [pause] Sender I påmindelser, ja, men er det de samme til alle, eller er det noget, der bliver fulgt op personligt?» God spejling og en skarp skelnen, som rammer præcis det, Allio løser.",
+    "svageste_replik": "«Ja, det er systemet, der skriver, så du har ret i, at det er en robot.» Agenten overtog kundens negative ramme «robot» og forstærkede den, i stedet for at sætte ord på bekymringen og vende den mod, at teksterne lyder som klinikken selv og godkendes af dem.",
+    "hvorfor_udfaldet": "Lone er ikke beslutningstager, og hun var travl, skeptisk over for «robot»-beskeder og utryg ved data. Agenten bekræftede robotrammen og havde intet konkret svar om data, så Lone sendte opgaven videre til Peter i stedet for at sige ja til en foreløbig tid. Et tilbagekald til beslutningstageren med varm henvisning er et acceptabelt, men ikke maksimalt udfald.",
+    "forbedringer": [
+      "Robot-indvendingen: «Det lyder som om, I er bange for, at det ikke lyder som jer. Det forstår jeg godt, når kunderne betaler 900 kr. Beskederne skrives i jeres tone, og I ser og godkender dem, før noget går ud. Er det ikke netop det, specialisten skal vise jer på jeres egne data?» Brug aldrig selv ordet «robot».",
+      "Data-indvendingen med en fast kort replik fra biblioteket i stedet for «jeg kan ikke gå i detaljer», fx: «Godt spørgsmål. Data bliver i jeres Gecko, og vi arbejder efter GDPR med en databehandleraftale. Specialisten tager hele gennemgangen med Peter.» Verificér formuleringen mod bibliotek.md, så intet opdigtes.",
+      "Partner-indvendingen: book foreløbigt i stedet for at aflevere opgaven: «Skal jeg sætte torsdag kl. 15 af med blyant til jer begge, og så bekræfter jeg den med Peter efter klokken fire? Så er tiden ikke væk, hvis han siger ja.» Ét spørgsmål, to konkrete tider, og intet roderi i Peters kalender."
+    ]
+  },
+  "judgeCost": 0.06952180000000001
+}

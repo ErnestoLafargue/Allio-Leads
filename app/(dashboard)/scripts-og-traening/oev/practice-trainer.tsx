@@ -5,22 +5,13 @@
  * svarer højt (Soniox skriver med) eller skriver, og får feedback med score og en bedre replik.
  */
 import { useRef, useState } from "react";
+import { speak } from "@/lib/tts/speak-client";
 import { startSonioxStream, SpeakerTranscript, type SonioxStream } from "@/lib/live-coach/soniox-stream";
 import type { PracticeFeedback } from "@/lib/live-coach/practice";
 import { OBJECTION_LABELS } from "@/lib/scripts-traening/labels";
 
-type Round = { category: string; customerLine: string };
+type Round = { category: string; customerLine: string; agentBefore?: string | null };
 
-function speak(text: string) {
-  try {
-    window.speechSynthesis.cancel();
-    const u = new SpeechSynthesisUtterance(text);
-    u.lang = "da-DK";
-    window.speechSynthesis.speak(u);
-  } catch {
-    /* ingen oplæsning i denne browser */
-  }
-}
 
 const scoreTone = (s: number) => (s >= 80 ? "text-emerald-700" : s >= 50 ? "text-amber-700" : "text-rose-700");
 
@@ -45,7 +36,7 @@ export function PracticeTrainer() {
       if (!res.ok) throw new Error();
       const r = (await res.json()) as Round;
       setRound(r);
-      speak(r.customerLine);
+      speak(r.customerLine, "kunde");
     } catch {
       setError("Kunne ikke hente en indvending.");
     } finally {
@@ -125,8 +116,9 @@ export function PracticeTrainer() {
             <p className="text-[11px] font-semibold uppercase tracking-wider text-stone-400">
               {OBJECTION_LABELS[round.category as keyof typeof OBJECTION_LABELS] ?? round.category}
             </p>
+            {round.agentBefore ? <p className="mt-2 text-sm leading-relaxed text-stone-500">Sælgeren: «{round.agentBefore}»</p> : null}
             <p className="mt-2 text-lg leading-relaxed text-stone-900">Kunden: “{round.customerLine}”</p>
-            <button type="button" onClick={() => speak(round.customerLine)} className="mt-1 text-xs text-stone-500 hover:text-stone-800">
+            <button type="button" onClick={() => speak(round.customerLine, "kunde")} className="mt-1 text-xs text-stone-500 hover:text-stone-800">
               🔊 Hør igen
             </button>
 
@@ -186,7 +178,7 @@ export function PracticeTrainer() {
           <div>
             <p className="text-xs font-semibold uppercase tracking-wide text-stone-500">Prøv i stedet</p>
             <p className="mt-1 border-l-2 border-emerald-600 pl-3 text-[15px] leading-relaxed text-stone-900">{feedback.betterLine}</p>
-            <button type="button" onClick={() => speak(feedback.betterLine)} className="mt-1 text-xs text-stone-500 hover:text-stone-800">
+            <button type="button" onClick={() => speak(feedback.betterLine, "christian-v3c")} className="mt-1 text-xs text-stone-500 hover:text-stone-800">
               🔊 Hør den
             </button>
           </div>

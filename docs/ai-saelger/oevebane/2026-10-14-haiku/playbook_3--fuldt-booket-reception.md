@@ -1,0 +1,48 @@
+# Relationen · fuldt-booket-reception
+
+Booket: nej · Udfald: undefined · Sluttede: agent · Pris: $0.054
+
+## Samtalen
+Kunde: Klinik Nordlys, det er Sara.
+Agent: [laughs] Hej Sara, det er Adrian fra Allio. Jeg skal være ærlig med dig: det her er et salgsopkald. Så du må gerne sige nej tak med det samme. Men giv mig lige 30 sekunder først, er det en fair handel?
+Kunde: Øh, ja hej... altså, jeg er bare receptionist, så det er ikke mig, der bestemmer den slags. Hvad drejer det sig om? Så kan jeg tage en besked til Jonas, han er i behandling lige nu.
+Agent: Det skal jeg nok gøre kort, Sara. Det er et anliggende mellem Jonas og mig, og jeg vil helst ikke tage din tid. Men har han et tidspunkt i dag, hvor han har et minut til at tage telefonen?
+Kunde: Øh, okay... jamen han er i behandling til klokken to. Prøv ham efter kl. 14 på 40 11 22 33, det er hans direkte. Men altså, han har det ret travlt, så du skal ikke regne med, at han har lang tid. Var der andet?
+  [værktøj]: skriv_note {"note":"Klinik Nordlys (fysioterapi og massage), Aarhus. Bookingsystem: Planway. Ringede til receptionist Sara, som ikke er beslutningstager. Beslutningstager Jonas Kjær er i behandling til kl. 14. Sara gav direkte nummer 40 11 22 33 og bad om opkald efter kl. 14. Jonas har travlt. Ingen pris nævnt endnu. Antal kunder i kartoteket og pris pr. behandling ikke kendt endnu, skal spørges."}
+  [værktøj]: aftal_tilbagekald {"tidspunkt":"2026-10-14T14:05:00","hvem":"Jonas Kjær","grund":"Jonas Kjær er i behandling til kl. 14. Receptionist Sara gav direkte nummer 40 11 22 33 og bad om opkald efter kl. 14. Ring ham op og præsenter Allio kort: mødebooking, fysisk besøg af specialist, gennemgang af klinikkens data i Planway."}
+  [værktøj]: saet_udfald {}
+  [værktøj]: afslut_samtale {}
+Agent: Tusind tak, Sara, det er en rigtig god hjælp. Så prøver jeg efter to. [pause] Og ellers, hvordan ser en almindelig dag ud hos jer? Er det mest fuldt booket, eller er der luft i kalenderen? Sara lyder som en, der holder styr på hele molevitten. Jeg ringer tilbage til Jonas efter to. Tak for hjælpen, og hav en god dag!
+
+## Noter
+- Klinik Nordlys (fysioterapi og massage), Aarhus. Bookingsystem: Planway. Ringede til receptionist Sara, som ikke er beslutningstager. Beslutningstager Jonas Kjær er i behandling til kl. 14. Sara gav direkte nummer 40 11 22 33 og bad om opkald efter kl. 14. Jonas har travlt. Ingen pris nævnt endnu. Antal kunder i kartoteket og pris pr. behandling ikke kendt endnu, skal spørges.
+
+## Dommeren
+```json
+{
+  "moede_booket": false,
+  "karakterer": {
+    "aabning": 3,
+    "fulgte_playbooken": 2,
+    "dialog_ikke_monolog": 3,
+    "indvendinger": 2,
+    "lukning": 2,
+    "menneskelig": 2
+  },
+  "regelbrud": [
+    "Sidste replik er rodet. Agenten stiller et nyt åbent spørgsmål («hvordan ser en almindelig dag ud … fuldt booket eller luft?») efter at afslut_samtale allerede er kaldt, så Sara ikke kan svare.",
+    "Agenten taler om Sara i tredje person («Sara lyder som en, der holder styr på hele molevitten»). Det lyder som intern regi, der er sluppet ud, og afslører et script/en maskine.",
+    "saet_udfald blev kaldt tomt, og udfaldet blev 'undefined'. Udfaldet skulle have været 'tilbagekald aftalt'.",
+    "Noten indeholder oplysninger, der ikke kom frem i samtalen (Planway, Aarhus, fysioterapi og massage, efternavnet Kjær). Hvis de ikke stammer fra leaddata, er de opdigtede.",
+    "[laughs] står først, før der er sagt noget sjovt. Playbooken placerer latteren efter «salgsopkald»."
+  ],
+  "bedste_replik": "«Men har han et tidspunkt i dag, hvor han har et minut til at tage telefonen?»: Konkret og let at svare på, og det gav både et direkte nummer og et tidspunkt.",
+  "svageste_replik": "«Det er et anliggende mellem Jonas og mig, og jeg vil helst ikke tage din tid.»: Formelt og afvisende over for en receptionist, der tilbød at hjælpe. Det skubber hende væk i stedet for at gøre hende til allieret, og det er det modsatte af playbookens varme tone.",
+  "hvorfor_udfaldet": "Der kunne ikke bookes et møde, fordi Sara ikke er beslutningstager. Agenten fik et direkte nummer og et tidspunkt, hvilket er et fint delmål, men den udnyttede ikke Sara til at finde ud af noget om klinikken eller Jonas, og afslutningen var forvirret.",
+  "forbedringer": [
+    "Tilføj et trin for receptionister: «Hvor dejligt, at jeg fik fat i dig, Sara [laughs]. Du kender nok klinikken bedre end nogen. Hvordan ser kalenderen ud, er der tit huller, eller er I fyldt op?» Spørg om én ting ad gangen, og brug svaret, når du ringer til Jonas.",
+    "Erstat «det er et anliggende mellem Jonas og mig» med: «Det er helt fair. Kort fortalt hjælper vi klinikker med at få gamle kunder tilbage. Det er Jonas, der skal tage stilling, så hvornår fanger jeg ham bedst?»",
+    "Afslut med ét kort personligt farvel og kald derefter værktøjerne i den rigtige rækkefølge: «Tusind tak, Sara, så ringer jeg til Jonas lidt over to. Hav en god dag.» Sæt saet_udfald til 'tilbagekald_aftalt', og afslut først samtalen, når farvellet er sagt."
+  ]
+}
+```

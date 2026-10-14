@@ -1,0 +1,82 @@
+# Relationen · positiv-ny-klinik
+
+Booket: 2026-10-16 kl. 09:00 · Udfald: – · Sluttede: kunde · Pris: $0.219
+
+## Samtalen
+Kunde: Klinik Aura, det er Sofie.
+Agent: Hej Sofie, det er Adrian fra Allio. Jeg skal være ærlig: det her er et salgsopkald, [laughs] så du må gerne lægge på. Men giv mig lige tredive sekunder først, så må du bagefter bestemme, om jeg må fortsætte. Er det en fair handel?
+Kunde: Haha, okay, altså det er da i det mindste ærligt, det må man give dig. Øh, ja, fint nok, du får dine tredive sekunder. Jeg har faktisk lige en kunde om et kvarters tid, så... men ja, skyd løs. Hvad var det, Allio var for noget?
+Agent: Tak, det sætter jeg pris på, og jeg skal nok holde tiden. Jeg ringer til klinikker, der allerede kører godt, fordi de fleste har en masse gamle kunder liggende i bookingsystemet, som aldrig er blevet inviteret tilbage. Ikke fordi de var utilfredse, men fordi hverdagen tog over. Allio sørger for at invitere dem tilbage ud fra de data, I allerede har. Men jeg er faktisk ikke sikker på, at det passer på jer. Hvordan ser det ud hos dig, Sofie?
+Kunde: Øh, altså, ja, hm... jeg har jo kun haft klinikken i to år, så jeg ved ikke, om jeg har så mange gamle kunder. Altså, der ligger vel en fire hundrede og halvtreds stykker inde i OnlineBooq, tror jeg. Og nogle af dem har jeg da ikke set længe, det er rigtigt nok. Men jeg synes egentlig, jeg er ret god til at følge op? Altså, de fleste kommer jo igen af sig selv.
+
+Undskyld, Bobby, nej! Det er min hund, han tror, han skal med til telefonen hver gang, haha.
+
+Men øh, ja. Mit problem er nok mere, at jeg står med en kunde, og så ringer telefonen, og så kan jeg jo ikke tage den. Og når jeg så er færdig, har jeg glemt det, eller jeg når det ikke. Så jeg ved ikke, om det er gamle kunder, der er problemet. Hvad gør I så egentlig? Er det bare sådan nogle SMS'er, der bliver sendt ud, eller hvad?
+  [værktøj]: beregn_potentiale {"kunder_i_kartotek":450}
+  [værktøj]: skriv_note {"note":"Sofie Holm, Klinik Aura, ejer i to år. OnlineBooq. Ca. 450 kunder i kartoteket. Hun mener selv, hun er god til at følge op, men største smertepunkt: telefonen ringer under behandling, hun når ikke at ringe tilbage og glemmer det. Har hund (Bobby). Har kunde om et kvarter ved opkaldet. Pris ikke nævnt endnu."}
+Agent: [laughs] Bobby vil bare med på noget, det kan jeg forstå. Når telefonen ringer, mens du står i en behandling, og du ikke når det bagefter, så er det jo faktisk et rigtig godt eksempel. Det er også en del af det, vi tager os af. Systemet svarer nye kunder, mens du står i behandling, og skriver personligt til dem, der er ved at falde fra. Du skal ikke selv gøre noget. Lad mig lige få regnet på jeres fire hundrede og halvtreds kunder. Med fire hundrede og halvtreds kunder er det typisk omkring hundrede og firs, der kun har været forbi en eller to gange. Det giver cirka elleve genbookinger om måneden, som i dag ligger og samler støv. Det lyder som om, du har rigeligt at se til i forvejen, så det ville være rart, hvis det ikke var dig, der skulle huske det, ikke? Ville det være helt skørt, hvis en af vores specialister kiggede forbi på torsdag eller fredag og viste dig, hvad der ligger i jeres egne data? Det tager femogfyrre til seksti minutter, og så ved du, om det er noget for dig.
+Kunde: Øh, vent lige, hvordan kan du vide, at det er hundrede og firs? Du har jo ikke set mine tal. Altså, elleve genbookinger om måneden, det lyder lidt som noget, du siger til alle, ikke?
+
+Men okay, det med telefonen, det er jo faktisk der, det gør ondt. I sidste uge havde jeg tre ubesvarede opkald på en formiddag, fordi jeg stod med den nye maskine. Jeg har lige fået sådan en ny laser, og den skal man jo virkelig koncentrere sig om, når man lige er begyndt, så... nå, men det er en helt anden historie, haha.
+
+Øh, femogfyrre til tres minutter, det er altså meget. Jeg har jo kunder hele dagen. Og skal han så komme herud? For torsdag er jeg fuldstændig booket, det kan jeg sige med det samme. Fredag kunne der måske være et hul, men så skal det være tidligt. Hvad tænker du præcis, hvilken tid?
+  [værktøj]: find_ledige_tider {}
+Agent: Det er et fair spørgsmål, Sofie. Det er ikke dine tal, det er et gennemsnit: cirka fyrre procent af dem, der har været forbi en klinik, kommer kun en eller to gange. Det er netop derfor, han skal vise det med jeres egne tal, så du ikke skal tage mit ord for det. Lad mig se, hvad der er ledigt en fredag tidligt. Der er fredag den sekstende klokken ni. Er det tidligt nok til, at du har et hul? Ja, han kommer ud til dig på klinikken, så du skal ikke flytte dig.
+Kunde: Okay, ja, det med gennemsnittet kan jeg godt købe. Så længe han viser mine egne tal og ikke bare kommer med en eller anden powerpoint, altså.
+
+Fredag den sekstende klokken ni... øh, lige et øjeblik, jeg kigger lige i kalenderen. Bobby, flyt dig! Nå, ja, der er faktisk hul. Min første kunde kommer først kvart over ti, så det kunne godt gå. Men så skal han altså også være her klokken ni og ikke fem over, for jeg skal lige nå at gøre klar inden.
+
+Og øh, hvor lang tid tager det? Altså helt ærligt, for du sagde fyrre-fem til tres minutter, men hvis han først skal sætte noget op og sådan noget, så bliver det jo hurtigt mere. Jeg kan ikke have, at han står her, når min kunde kommer ind ad døren.
+Agent: Helt ærligt: femogfyrre til tres minutter er hele mødet, og det er med dine egne tal, ikke en powerpoint. Starter han klokken ni, er han færdig senest ti, og så har du en kvart time til at gøre klar. Han er der klokken ni præcis, og jeg siger til, at han skal holde tiden. Skal jeg skrive dig op til fredag den sekstende klokken ni? Så skal jeg bare have klinikkens adresse og din mail til bekræftelsen.
+Kunde: Ja, okay, så gør vi det. Fredag den sekstende klokken ni. Men altså, ti senest, ikke?
+
+Adressen er Vestergade tolv, første sal. Der er en lille dør ved siden af bageren, man skal lige ringe på, for den er låst om morgenen. Og øh, han skal ikke blive forskrækket, hvis Bobby gør, han er helt harmløs, han vil bare snuse lidt.
+
+Og mailen er sofie snabel-a klinik-sofie punktum dk. Altså klinik, bindestreg, sofie. Skal jeg stave det?
+
+Og øh, en ting mere. Skal jeg have noget klar? Altså, skal jeg logge ind i OnlineBooq eller sådan noget, inden han kommer, så vi ikke spilder tiden på det?
+  [værktøj]: book_moede {"dag":"2026-10-16","tid":"09:00","adresse":"Vestergade 12, 1. sal, Hillerød (dør ved siden af bageren, ring på)","email":"sofie@klinik-sofie.dk","kontaktperson":"Sofie Holm"}
+  [værktøj]: skriv_note {"note":"Møde booket fredag 16/10 kl. 09:00, Vestergade 12, 1. sal, Hillerød. Dør ved siden af bageren, ring på (låst om morgenen). Hund Bobby er harmløs. Skal være færdig senest kl. 10, første kunde kl. 10.15. Sofie vil se HENDES egne tal, ikke en powerpoint. Var skeptisk over for tallene (40 % er gennemsnit, ikke hendes data). Hovedsmertepunkt: ubesvarede opkald under behandling (ny laser). OnlineBooq, ca. 450 kunder. Pris ikke nævnt. Mail skal bekræftes: sofie@klinik-sofie.dk."}
+Agent: Ja, ti senest, det lover jeg. Mailen forstår jeg som sofie snabel-a klinik-sofie punktum dk. Jeg booker det lige. Så er det booket: fredag den sekstende klokken ni, Vestergade tolv, første sal, hos dig, Sofie. Victor kommer, og jeg har skrevet, at han skal ringe på ved bageren og være færdig senest klokken ti. Du får en bekræftelse på SMS og mail inden dagen er omme. Du behøver ikke gøre noget på forhånd. Hvis du har adgang til OnlineBooq, så er det fint, men han klarer resten. Er mailen sofie snabel-a klinik-bindestreg-sofie punktum dk rigtig?
+Kunde: Ja, det er rigtigt, klinik bindestreg sofie, punktum dk. Perfekt.
+
+Og okay, godt, så logger jeg bare ind i OnlineBooq om morgenen, så er det klaret. Victor, ikke? Okay, jeg skriver det lige ned... Victor, fredag klokken ni.
+
+Øh, men altså, bare så det er sagt, jeg har ikke lovet at købe noget, vel? Jeg vil bare se, hvad der ligger i tallene. Hvis det giver mening, så giver det mening, og ellers ikke.
+
+Nå, men nu skal jeg altså løbe, min kunde kommer om lidt, og jeg har ikke engang fået tændt for maskinen endnu. Tak for det, Adrian, og tak fordi du var ærlig fra starten, det var faktisk derfor, jeg ikke lagde på, haha. Hej hej!
+
+## Noter
+- Sofie Holm, Klinik Aura, ejer i to år. OnlineBooq. Ca. 450 kunder i kartoteket. Hun mener selv, hun er god til at følge op, men største smertepunkt: telefonen ringer under behandling, hun når ikke at ringe tilbage og glemmer det. Har hund (Bobby). Har kunde om et kvarter ved opkaldet. Pris ikke nævnt endnu.
+- Møde booket fredag 16/10 kl. 09:00, Vestergade 12, 1. sal, Hillerød. Dør ved siden af bageren, ring på (låst om morgenen). Hund Bobby er harmløs. Skal være færdig senest kl. 10, første kunde kl. 10.15. Sofie vil se HENDES egne tal, ikke en powerpoint. Var skeptisk over for tallene (40 % er gennemsnit, ikke hendes data). Hovedsmertepunkt: ubesvarede opkald under behandling (ny laser). OnlineBooq, ca. 450 kunder. Pris ikke nævnt. Mail skal bekræftes: sofie@klinik-sofie.dk.
+
+## Dommeren
+```json
+{
+  "moede_booket": true,
+  "karakterer": {
+    "aabning": 5,
+    "fulgte_playbooken": 3,
+    "dialog_ikke_monolog": 2,
+    "indvendinger": 4,
+    "lukning": 4,
+    "menneskelig": 4
+  },
+  "regelbrud": [
+    "Monolog i tredje replik: pitch, regnestykke, følelsesord og mødeforslag i én lang tur, selvom playbooken kræver ét spørgsmål ad gangen, og at kunden taler mest.",
+    "Regnestykket blev brugt, før kunden bad om tal (playbook 3, trin 4: kun ved nysgerrighed på tal). 180 og 11 genbookinger blev præsenteret, som om det handlede om hende, og hun opfattede det som 'noget, du siger til alle'.",
+    "Ingen spejling og ingen opsummering, der fik kunden til at sige 'præcis'. Trin 3, som er kernen i playbooken, blev sprunget over.",
+    "'Hillerød' blev tilføjet til adressen i booking og note, selvom kunden aldrig nævnte byen. Det kan være opdigtet; byen skal bekræftes.",
+    "Lovede bekræftelse på SMS uden at bekræfte telefonnummeret. Tjeklisten (afsnit 9) blev ikke gennemgået fuldt, fx om hun er eneste beslutningstager.",
+    "Ingen afsluttende replik: kundens 'jeg har ikke lovet at købe noget' blev ikke besvaret, og der var ingen personlig, høflig afslutning (laseren, Bobby)."
+  ],
+  "bedste_replik": "«Det er et fair spørgsmål, Sofie. Det er ikke dine tal, det er et gennemsnit … Det er netop derfor, han skal vise det med jeres egne tal, så du ikke skal tage mit ord for det.»",
+  "svageste_replik": "«Med fire hundrede og halvtreds kunder er det typisk omkring hundrede og firs … Det giver cirka elleve genbookinger om måneden … Ville det være helt skørt, hvis en af vores specialister kiggede forbi …» Det er en lang monolog, hvor tallene kom for tidligt og skabte mistillid.",
+  "hvorfor_udfaldet": "Den ærlige, humoristiske åbning holdt hende i røret (det sagde hun selv), og hendes eget smertepunkt med ubesvarede opkald under behandling bar samtalen. Bookingen kom i hus, fordi agenten ærligt indrømmede, at tallene var et gennemsnit, og gav hende en præcis tid med et fast sluttidspunkt.",
+  "forbedringer": [
+    "Når kunden nævner sit egentlige problem, så spejl det før pitchen: «Telefonen ringer, mens du står med en kunde?» → pause → opsummér: «Så nye kunder ringer, du kan ikke tage den, og bagefter er det glemt. Er det rigtigt?» Gå først videre ved «præcis».",
+    "Gem regnestykket, til kunden spørger efter tal, og indled det altid med en ramme: «Det er et gennemsnit, ikke dine tal: typisk har cirka 40 % kun været forbi én eller to gange. Det er dét, han viser med dine egne data.»",
+    "Afslut altid, også når kunden har travlt, og tag eventuel tvivl i opløbet: «Helt rigtigt, du har intet lovet. Du ser bare dine egne tal. Held og lykke med den nye laser, og hils Bobby. God dag, Sofie!»"
+  ]
+}
+```

@@ -10,7 +10,7 @@ import { getViewer } from "@/lib/scripts-traening/queries";
 export async function POST(req: Request) {
   const viewer = await getViewer();
   if (!viewer) return NextResponse.json({ error: "Ikke logget ind" }, { status: 401 });
-  const b = (await req.json().catch(() => null)) as { category?: string; customerLine?: string; answer?: string } | null;
+  const b = (await req.json().catch(() => null)) as { category?: string; customerLine?: string; agentBefore?: string | null; answer?: string } | null;
   if (!b?.answer?.trim() || !b.customerLine || !(OBJECTION_CATEGORIES as readonly string[]).includes(b.category ?? "")) {
     return NextResponse.json({ error: "Mangler svar eller indvending" }, { status: 400 });
   }
@@ -20,6 +20,7 @@ export async function POST(req: Request) {
       system: practiceSystemPrompt(await activeScriptResponses(), await objectionBank(), await playbookTemplatesText()),
       category: b.category as ObjectionCategory,
       customerLine: b.customerLine.slice(0, 400),
+      agentBefore: b.agentBefore?.slice(0, 400) ?? null,
       answer: b.answer,
     });
     console.log(`[øv] ${viewer.name}: ${b.category} → ${feedback.score} ($${costUsd.toFixed(4)})`);
