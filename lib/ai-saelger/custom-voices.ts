@@ -1,6 +1,7 @@
 /**
- * Stemmer ud over de faste i VOICES: Ernestos egen stemme (ElevenLabs Instant Voice Clone, optaget i
- * «Tal med Adrian»). Voice-id'et ligger i AppSetting, så den kan optages igen uden deploy.
+ * Stemmer ud over de faste i VOICES: Ernestos egen stemme (ElevenLabs-klon lavet af hans egne salgsopkald).
+ * Voice-id'et ligger i AppSetting «ernesto-voice-id», så stemmen kan skiftes (fx til en Professional Voice
+ * Clone) uden deploy.
  */
 import { prisma } from "@/lib/prisma";
 import { VOICES, type Voice } from "./agents";
