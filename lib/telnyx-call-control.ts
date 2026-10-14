@@ -117,6 +117,22 @@ export function telnyxIdField(v: unknown): string | null {
   return null;
 }
 
+/**
+ * GET /telephony_credentials/{id} har `resource_id: "connection:…"` — ikke `connection_id`.
+ * Uden det kan vi ikke slå SIP URI-opkald til, og Power Dialer rammer aldrig sælgerens WebRTC.
+ */
+export function connectionIdFromTelnyxCredentialData(d: Record<string, unknown>): string | null {
+  const direct = telnyxIdField(d.connection_id);
+  if (direct) return direct;
+  const resource = typeof d.resource_id === "string" ? d.resource_id.trim() : "";
+  const m = /^connection:(.+)$/i.exec(resource);
+  if (m?.[1]?.trim()) return m[1].trim();
+  if (d.connection && typeof d.connection === "object") {
+    return telnyxIdField((d.connection as Record<string, unknown>).id);
+  }
+  return null;
+}
+
 function formatTelnyxError(json: unknown): string | null {
   if (!json || typeof json !== "object") return null;
   const errors = (json as { errors?: unknown }).errors;
@@ -209,7 +225,7 @@ function normalizeCredentialRecord(d: Record<string, unknown>): TelnyxCredential
     status,
     expired,
     expiresAt: toStr(d.expires_at),
-    connectionId: telnyxIdField(d.connection_id),
+    connectionId: connectionIdFromTelnyxCredentialData(d),
     tag: toStr(d.tag),
     createdAt: toStr(d.created_at),
     sipUsername: toStr(d.sip_username),
@@ -747,6 +763,32 @@ export async function getTelnyxCredentialInfo(params: {
 
     const toStr = (v: unknown): string | null =>
       typeof v === "string" && v.length > 0 ? v : null;
+    const connectionId = connectionIdFromTelnyxCredentialData(d);
+    // #region agent log
+    fetch("http://localhost:7723/ingest/7a50d2a1-e6f0-436c-8453-6828c3db5e26", {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "X-Debug-Session-Id": "c1392e" },
+      body: JSON.stringify({
+        sessionId: "c1392e",
+        runId: "post-fix",
+        hypothesisId: "F",
+        location: "lib/telnyx-call-control.ts:getTelnyxCredentialInfo",
+        message: "credential fields",
+        data: {
+          keys: Object.keys(d).filter((k) => k !== "sip_password"),
+          hasResourceId: typeof d.resource_id === "string",
+          resourceIsConnection:
+            typeof d.resource_id === "string" && d.resource_id.startsWith("connection:"),
+          parsedConn: Boolean(connectionId),
+        },
+        timestamp: Date.now(),
+      }),
+    }).catch(() => {});
+    console.warn("[dbg-c1392e] cred-fields", {
+      hasResourceId: typeof d.resource_id === "string",
+      parsedConn: Boolean(connectionId),
+    });
+    // #endregion
     return {
       found: true,
       status: toStr(d.status) ?? undefined,
@@ -757,7 +799,7 @@ export async function getTelnyxCredentialInfo(params: {
             ? d.status.toLowerCase() === "expired"
             : undefined,
       expiresAt: toStr(d.expires_at),
-      connectionId: telnyxIdField(d.connection_id),
+      connectionId,
       sipUsername: toStr(d.sip_username),
       createdAt: toStr(d.created_at),
       updatedAt: toStr(d.updated_at),
