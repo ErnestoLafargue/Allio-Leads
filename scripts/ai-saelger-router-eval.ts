@@ -15,7 +15,7 @@
 import { mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { anthropicApiKey, createAnthropicClient } from "@/lib/anthropic-client";
-import { BARGE_IN_LABELS, parseRouterLabel, ROUTER_LABELS, routerSystemPrompt, type RouterLabel } from "@/lib/ai-saelger/router";
+import { BARGE_IN_LABELS, HAIKU_ROUTER_PARAMS, parseRouterLabel, ROUTER_LABELS, routerSystemPrompt, type RouterLabel } from "@/lib/ai-saelger/router";
 import { bargeInWithJev, createJevClient, JEV_MODEL, routeWithJev } from "@/lib/ai-saelger/router-jev";
 import { expectedBargeIn, loadRouterCases, type RouterCase } from "@/lib/ai-saelger/practice/router-cases";
 
@@ -32,6 +32,8 @@ type Row = {
   label: RouterLabel;
   /** Noul (Jev); for Haiku 1/0 ud fra label. */
   bargeIn: number;
+  /** Jevs confidence for label (Haiku: 1). */
+  confidence: number;
   ms: number;
   error?: string;
 };
@@ -62,9 +64,9 @@ async function runJev(cases: readonly RouterCase[], withPrev: boolean): Promise<
   for (const c of cases) {
     try {
       const r = await routeWithJev(client, c.text, prevOf(c, withPrev));
-      rows.push({ ...base(c), label: r.label, bargeIn: r.bargeIn, ms: r.ms });
+      rows.push({ ...base(c), label: r.label, bargeIn: r.bargeIn, confidence: r.confidence, ms: r.ms });
     } catch (e) {
-      rows.push({ ...base(c), label: "andet", bargeIn: 0, ms: NaN, error: String(e) });
+      rows.push({ ...base(c), label: "andet", bargeIn: 0, confidence: 0, ms: NaN, error: String(e) });
     }
   }
   return rows;
@@ -73,7 +75,7 @@ async function runJev(cases: readonly RouterCase[], withPrev: boolean): Promise<
 async function runHaiku(cases: readonly RouterCase[], model: string, withPrev: boolean): Promise<Row[]> {
   const client = createAnthropicClient();
   const system = routerSystemPrompt();
-  const call = (content: string) => client.messages.create({ model, max_tokens: 12, system, messages: [{ role: "user", content }] });
+  const call = (content: string) => client.messages.create({ ...HAIKU_ROUTER_PARAMS, model, system, messages: [{ role: "user", content }] });
   await call("Okay.").catch(() => undefined);
   const rows: Row[] = [];
   for (const c of cases) {
@@ -85,9 +87,9 @@ async function runHaiku(cases: readonly RouterCase[], model: string, withPrev: b
       const ms = performance.now() - t0;
       const raw = m.content.map((b) => (b.type === "text" ? b.text : "")).join("");
       const label = parseRouterLabel(raw);
-      rows.push({ ...base(c), label, bargeIn: BARGE_IN_LABELS.has(label) ? 1 : 0, ms });
+      rows.push({ ...base(c), label, bargeIn: BARGE_IN_LABELS.has(label) ? 1 : 0, confidence: 1, ms });
     } catch (e) {
-      rows.push({ ...base(c), label: "andet", bargeIn: 0, ms: NaN, error: String(e) });
+      rows.push({ ...base(c), label: "andet", bargeIn: 0, confidence: 0, ms: NaN, error: String(e) });
     }
   }
   return rows;
@@ -147,6 +149,22 @@ function choiceSection(name: string, rows: Row[], other?: Row[]): string {
     const flipsGood = valid.filter((r, i) => okHit(r) && !okHit(other[i]!)).length;
     const flipsBad = valid.filter((r, i) => !okHit(r) && okHit(other[i]!)).length;
     lines.push("", `Mod varianten uden replik: ${flipsGood} rettet, ${flipsBad} gjort forkerte (forsvarlig label).`);
+  }
+  return lines.join("\n");
+}
+
+/** Kombination: Jev først; under tærsklen for Jevs confidence (eller ved fejl) bruges Haikus label. */
+function cascadeSection(jevRows: Row[], haikuRows: Row[], label: string): string {
+  const lines = [`### Kaskade: ${label}`, "", "| Jev-confidence under | sendt til Haiku | præcis | forsvarlig | svartid p50 / p90 |", "|---|---|---|---|---|"];
+  for (const t of [0, 0.5, 0.6, 0.7, 0.8, 0.9]) {
+    const rows = jevRows.map((j, i) => {
+      const h = haikuRows[i]!;
+      const useHaiku = !!j.error || j.confidence < t;
+      return { r: useHaiku ? { ...j, label: h.label } : j, ms: useHaiku ? (Number.isFinite(j.ms) ? j.ms : 3000) + h.ms : j.ms, useHaiku };
+    });
+    const n = rows.length, sent = rows.filter((x) => x.useHaiku).length;
+    const ms = rows.map((x) => x.ms);
+    lines.push(`| ${t === 0 ? "kun Jev" : String(t).replace(".", ",")} | ${sent}/${n} | ${pct(rows.filter((x) => hit(x.r)).length, n)} | ${pct(rows.filter((x) => okHit(x.r)).length, n)} | ${Math.round(quantile(ms, 0.5))} / ${Math.round(quantile(ms, 0.9))} ms |`);
   }
   return lines.join("\n");
 }
@@ -217,6 +235,7 @@ async function main() {
     ...(jevPrev ? ["", choiceSection("Jev med sælgerens sidste replik (sidsteAgentReplik)", jevPrev, jev)] : []),
     ...(haiku ? ["", choiceSection(`Claude Haiku (${haikuModel}), kun kundens tur`, haiku)] : []),
     ...(haikuPrev ? ["", choiceSection(`Claude Haiku (${haikuModel}) med sælgerens sidste replik`, haikuPrev, haiku!)] : []),
+    ...(jevPrev && haikuPrev ? ["", "## Jev + Haiku", cascadeSection(jevPrev, haikuPrev, "med sælgerens sidste replik")] : []),
     "",
     "## Noul: skal Adrian bryde ind? (hele turen)",
     noulTable("Jev, kun kundens tur", jev),

@@ -46,6 +46,16 @@ export function routerSystemPrompt(): string {
   return `Du klassificerer kundens seneste tur i en dansk telefonsamtale, hvor en mødebooker fra Allio ringer til en klinik. Teksten kan være ufærdig. Svar med præcis ét ord fra listen og intet andet.\n\n${menu}`;
 }
 
+/**
+ * Haiku som router (reserve): ét ord, så ingen thinking. Claude Haiku 5.5 tænker som standard og bruger
+ * ellers hele max_tokens på det, så svaret bliver tomt («andet»). `disabled` kræver effort high eller lavere.
+ */
+export const HAIKU_ROUTER_PARAMS = {
+  max_tokens: 12,
+  thinking: { type: "disabled" },
+  output_config: { effort: "low" },
+} as const;
+
 /** Robust parsing af routerens svar (fx «Indvending.» eller «label: koebssignal»). */
 export function parseRouterLabel(raw: string): RouterLabel {
   const text = raw.toLowerCase().replace(/ø/g, "oe").replace(/æ/g, "ae").replace(/å/g, "aa");
