@@ -75,7 +75,8 @@ let activeQueue: SpeechQueue | null = null;
  * Fejler ElevenLabs, læses bidden op med browserens stemme, og onError får årsagen (én gang).
  */
 export class SpeechQueue {
-  private queue: { text: string; audio: HTMLAudioElement }[] = [];
+  /** Bidder, der venter; lyden hentes først, når bidden er den næste (højst én ud over den, der spiller). */
+  private queue: { text: string; url: string; audio: HTMLAudioElement | null }[] = [];
   private said: string[] = [];
   private buffer: string[] = [];
   private playing: HTMLAudioElement | null = null;
@@ -99,54 +100,18 @@ export class SpeechQueue {
     // v3: første sætning straks, resten samles (sendes, når den forrige bid er spillet, eller til sidst).
     if (!this.stitching && this.said.length > 0) {
       this.buffer.push(text);
-      if (!this.playing && !this.queue.length) this.flushBuffer();
+      if (!this.playing && !this.queue.length) this.next();
       return;
     }
-    this.load(text);
-  }
-
-  private flushBuffer() {
-    if (!this.buffer.length) return;
-    const text = this.buffer.join(" ");
-    this.buffer = [];
-    this.load(text);
-  }
-
-  private load(text: string) {
-    const prev = this.stitching ? this.said.join(" ").slice(-400) : "";
-    this.said.push(text);
-    const url = `/api/tts?voice=${encodeURIComponent(this.voice)}&text=${encodeURIComponent(text)}${prev ? `&prev=${encodeURIComponent(prev)}` : ""}`;
-    const audio = new Audio(url);
-    audio.preload = "auto";
-    audio.onerror = () => {
-      // Stoppet med vilje (afbrudt eller lagt på): ingen fejl.
-      if (this.stopped) return;
-      if (!this.reportedError && this.handlers.onError) {
-        this.reportedError = true;
-        void fetch(url)
-          .then(async (r) => {
-            // Kun en rigtig fejl fra serveren/ElevenLabs vises (ikke selve lyden).
-            if (!r.ok) this.handlers.onError?.(`${r.status}: ${(await r.text()).slice(0, 200)}`);
-          })
-          .catch(() => this.handlers.onError?.("ingen forbindelse"));
-      }
-      if (this.playing === audio) {
-        this.playing = null;
-        browserSpeak(text);
-        this.next();
-      }
-    };
-    this.queue.push({ text, audio });
+    this.enqueue(text);
     if (!this.playing) this.next();
+    else this.prefetch();
   }
 
   /** Der kommer ikke flere sætninger. */
   finish() {
     this.finished = true;
-    if (!this.playing && !this.queue.length) {
-      if (this.buffer.length) this.flushBuffer();
-      else this.idle();
-    }
+    if (!this.playing) this.next();
   }
 
   stop() {
@@ -154,12 +119,51 @@ export class SpeechQueue {
     this.playing?.pause();
     this.playing = null;
     for (const q of this.queue) {
+      if (!q.audio) continue;
       q.audio.onerror = null;
       q.audio.removeAttribute("src");
       q.audio.load();
     }
     this.queue = [];
     this.buffer = [];
+  }
+
+  private enqueue(text: string) {
+    const prev = this.stitching ? this.said.join(" ").slice(-400) : "";
+    this.said.push(text);
+    const url = `/api/tts?voice=${encodeURIComponent(this.voice)}&text=${encodeURIComponent(text)}${prev ? `&prev=${encodeURIComponent(prev)}` : ""}`;
+    this.queue.push({ text, url, audio: null });
+  }
+
+  private makeAudio(item: { text: string; url: string; audio: HTMLAudioElement | null }): HTMLAudioElement {
+    if (item.audio) return item.audio;
+    const audio = new Audio(item.url);
+    audio.preload = "auto";
+    audio.onerror = () => {
+      // Stoppet med vilje (afbrudt eller lagt på): ingen fejl.
+      if (this.stopped) return;
+      if (!this.reportedError && this.handlers.onError) {
+        this.reportedError = true;
+        void fetch(item.url)
+          .then(async (r) => {
+            // Kun en rigtig fejl fra serveren/ElevenLabs vises (ikke selve lyden).
+            if (!r.ok) this.handlers.onError?.(`${r.status}: ${(await r.text()).slice(0, 200)}`);
+          })
+          .catch(() => this.handlers.onError?.("ingen forbindelse"));
+      }
+      if (this.playing === audio) {
+        browserSpeak(item.text);
+        this.next();
+      }
+    };
+    item.audio = audio;
+    return audio;
+  }
+
+  /** Hent den næste bid, mens den nuværende spiller (kun én ad gangen, så ElevenLabs' loft for samtidige kald ikke rammes). */
+  private prefetch() {
+    const nextItem = this.queue[0];
+    if (nextItem && !nextItem.audio) this.makeAudio(nextItem);
   }
 
   private idle() {
@@ -169,24 +173,33 @@ export class SpeechQueue {
 
   private next() {
     if (this.stopped) return;
-    if (!this.queue.length && this.buffer.length) this.flushBuffer();
+    this.playing = null;
+    if (!this.queue.length && this.buffer.length) {
+      const text = this.buffer.join(" ");
+      this.buffer = [];
+      this.enqueue(text);
+    }
     const item = this.queue.shift();
     if (!item) {
-      this.playing = null;
       if (this.finished) this.idle();
       return;
     }
-    this.playing = item.audio;
-    item.audio.onplaying = () => {
+    const audio = this.makeAudio(item);
+    this.playing = audio;
+    audio.onplaying = () => {
       if (!this.started) {
         this.started = true;
         this.handlers.onFirstPlaying?.();
       }
     };
-    item.audio.onended = () => this.next();
-    void item.audio.play().catch(() => {
+    audio.onended = () => {
+      if (this.playing === audio) this.next();
+    };
+    void audio.play().catch(() => {
+      if (this.stopped || this.playing !== audio) return;
       browserSpeak(item.text);
       this.next();
     });
+    this.prefetch();
   }
 }
