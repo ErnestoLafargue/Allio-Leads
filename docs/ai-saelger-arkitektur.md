@@ -235,3 +235,15 @@ al genbrugt kode (live-coach, analyse, ugens script, booking) ligger dér.
   `router.ts` (menu + parser), `turn-taking.ts` (backchannel, halv sætning færdig, brud, tavshed 3–5 sek.),
   `slot-order.ts` (fredag/torsdag først inden for 14 dage), `pitch-numbers.ts` (40 % inaktive, 2–12 %,
   10–20 om måneden), `tools.ts` (værktøjerne til Claude).
+
+## 14. Selvforbedring af playbooks (Ernesto, 14/10)
+- **Hver 15. samtale pr. playbook** (pr. variant med samme playbook) laver Adrian en ny version af
+  playbooken ud fra de 15 seneste samtalers analyse: hvad gav møder, hvor faldt samtalerne fra, hvilke
+  indvendinger kom. Versioner og tilbagerulning som ugens script; kun hans egne samtaler bruges.
+- **Udforskning:** i samtalen må Adrian afvige op til ca. 25 % fra playbooken for at prøve nye
+  formuleringer og rækkefølger. Analysen markerer, hvad der var nyt, så det, der virker, kommer med i
+  næste version.
+- Faste regler (systemprompten: pris, binding, AI, Robinson, fysisk møde, tal og cases) ændres ikke af
+  selvforbedringen; kun playbooken.
+- Observability: egen logning i databasen (`AiCallEvent`, `CallAnalysis`) frem for LangSmith, så
+  samtaledata bliver hos os.

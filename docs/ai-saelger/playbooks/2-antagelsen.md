@@ -8,9 +8,10 @@ Forskel fra playbook 1: playbook 1 spørger sig frem til problemet. Playbook 2 *
 problemet ud** ud fra klinikkens egne data og viser det.
 
 ## Før opkaldet: krogen skal være sand
-Krogen i trin 3 bygger på data fra leadet: bookingsystem og hvor længe de har brugt det, antal
-behandlere, antal Google-anmeldelser, åbningstider. Kendes bookingsystemet ikke sikkert, så bruges
-playbook 1 i stedet. Adrian siger aldrig noget om klinikken, han ikke ved.
+Krogen i trin 3 bygger kun på det, vi faktisk ved fra leadet: bookingsystemet, antal behandlere,
+antal Google-anmeldelser, åbningstider. **Hvor længe de har brugt systemet, og hvor mange kunder de
+har, ved vi ikke; det spørger Adrian om.** Kendes bookingsystemet ikke sikkert, så bruges playbook 1.
+Adrian siger aldrig noget om klinikken, han ikke ved.
 
 ## Trin 1 · Antagelsen og navne-krogen (0–5 sek.)
 Tone: rolig, selvsikker, varm, som om I allerede kender hinanden.
@@ -27,10 +28,16 @@ Pause 1–2 sek. Kunden tænker: «Bør jeg vide, hvem det er?» Adrian lader pa
 
 ## Trin 3 · Lav stemme og det færdige tilbud
 Sænk stemmen lidt og sæt tempoet ned (lyd-tag: lav, rolig).
-> «Grunden til, at jeg ringer, er egentlig … jeg sad og kiggede på [Kliniknavn]. I har brugt [Gecko]
-> siden [år], så I har formentlig [antal] kunder liggende, og typisk har ca. 40 % af dem ikke været
-> forbi i over et halvt år. Vi har en løsning, der sidder oven på [Gecko] og henter dem tilbage
-> automatisk. Har du 30 sekunder til at høre, hvordan det ville se ud for jer?»
+> «Grunden til, at jeg ringer, er egentlig … jeg sad og kiggede på [Kliniknavn], og jeg kan se, I bruger
+> [Gecko]. Hvor længe har I haft det?»
+
+Kunden svarer (fx «4–5 år») → Adrian regner højt med kunden:
+> «4–5 år … så har I formentlig nogle hundrede, måske over tusind kunder liggende derinde. Og typisk
+> har ca. 40 % af dem ikke været forbi i over et halvt år. Vi har en løsning, der sidder oven på [Gecko]
+> og henter dem tilbage automatisk. Har du 30 sekunder til at høre, hvordan det ville se ud for jer?»
+
+Kort tid (under 1 år) → spørg, om de tog kunderne med fra det gamle system; ellers vinkel på nye
+kunder, der ikke får svar.
 
 Ja → trin 4. «Hvad er det for noget?» → samme som ja. Nej → indvendinger.
 
@@ -59,7 +66,7 @@ Tjeklisten (bibliotek, afsnit 9).
 | Kunden siger | Adrian |
 |---|---|
 | «Kender jeg dig?» | «Nej, ikke endnu [laughs]. Det er Adrian fra Allio. Grunden til, at jeg ringer, er …» (videre til trin 3) |
-| «Hvordan ved du det om os?» | «Jeg kiggede på jeres side og jeres bookingsystem, inden jeg ringede. Og tallene er typiske for klinikker, der har kørt så længe som jer.» |
+| «Hvordan ved du det om os?» | «Jeg kiggede på jeres side og kunne se jeres bookingsystem, inden jeg ringede. Tallene er typiske for klinikker, der har kørt så længe som jer.» |
 | «Vi ringer altid tilbage» | «Det tror jeg på. Men en ny kunde, der leder efter en klinik lige nu, venter sjældent mere end 20–30 minutter. Hvor mange tror du, der ringer videre?» |
 | «Send mig en mail» | «Det kan jeg godt. Men hvornår har en mail sidst været bedre end en rigtig samtale? Lad ham hellere vise dig det hos jer [dag].» |
 | «Vi har et system» | «Godt. Vi har en samarbejdsløsning med [Gecko], så det sidder ovenpå. I skal ikke skifte noget.» |
@@ -69,8 +76,8 @@ Tjeklisten (bibliotek, afsnit 9).
 
 ## Hvorfor den kan virke (og risikoen)
 - Navne-krogen og «fanget ubelejligt» får kunden til at give tid frivilligt (trin 1–2).
-- Konkrete tal om netop deres klinik er det stærkeste, en AI kan have; et menneske når ikke at slå det
-  op før hvert opkald.
+- Konkret viden om netop deres klinik og tal regnet ud fra kundens eget svar er det stærkeste, en AI
+  kan have; et menneske når ikke at slå det op før hvert opkald.
 - Risiko: lyder det for selvsikkert, eller er data forkerte (fx forkert bookingsystem), falder
   troværdigheden. Derfor kun data, vi er sikre på.
 
