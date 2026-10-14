@@ -9,7 +9,7 @@
  */
 import { useEffect, useRef, useState } from "react";
 import { startSonioxStream, SpeakerTranscript, type SonioxStream } from "@/lib/live-coach/soniox-stream";
-import { speak, stopSpeaking } from "@/lib/tts/speak-client";
+import { SpeechQueue, stopSpeaking } from "@/lib/tts/speak-client";
 
 type Option = { key: string; label: string };
 type Lead = { kliniknavn: string; by: string; beslutningstager: string; bookingsystem: string; branche: string };
@@ -70,51 +70,102 @@ export function AdrianChat({ playbooks, models, voices }: { playbooks: Option[];
     }
   };
 
+  /**
+   * Én tur, streamet: Jevs label kommer først, derefter Adrians sætninger én ad gangen, som afspilles med
+   * det samme (SpeechQueue), mens resten skrives. Til sidst kommer samtalens tilstand.
+   */
   const sendTurn = async (kunde: string, endedAt: number) => {
     busy.current = true;
     setStatus("Adrian tænker …");
     setEntries((es) => [...es, { who: "kunde", text: kunde, route: null, jevError: null }]);
+    const idx = { n: -1 };
+    let hangup = false;
+    let queue: SpeechQueue | null = null;
+    const ensureEntry = () => {
+      if (idx.n >= 0) return;
+      setEntries((es) => {
+        idx.n = es.length;
+        return [...es, { who: "adrian", text: "", tools: [], adrianMs: 0, voiceMs: null, totalMs: null, costUsd: 0 }];
+      });
+    };
+    const patch = (f: (e: Extract<Entry, { who: "adrian" }>) => Extract<Entry, { who: "adrian" }>) =>
+      setEntries((es) => es.map((e, i) => (i === idx.n && e.who === "adrian" ? f(e) : e)));
     try {
       const res = await fetch("/api/ai-saelger/samtale", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ approach, model, voiceKey: voice, lead, kunde, sidsteAgentReplik: lastAgent.current, agentMsgs: agentMsgs.current, state: toolState.current }),
+        body: JSON.stringify({ stream: true, approach, model, voiceKey: voice, lead, kunde, sidsteAgentReplik: lastAgent.current, agentMsgs: agentMsgs.current, state: toolState.current }),
       });
-      const data = (await res.json()) as { route: Route | null; jevError: string | null; turn?: Turn; adrianMs?: number; agentMsgs?: unknown[]; state?: State; error?: string };
-      setEntries((es) => {
-        const copy = [...es];
-        const i = copy.map((e) => e.who).lastIndexOf("kunde");
-        if (i >= 0) copy[i] = { who: "kunde", text: kunde, route: data.route, jevError: data.jevError };
-        return copy;
-      });
-      if (!res.ok || !data.turn) throw new Error(data.error ?? "Adrian kunne ikke svare");
-      agentMsgs.current = data.agentMsgs ?? [];
-      toolState.current = data.state ?? toolState.current;
-      setState(toolState.current);
-      lastAgent.current = data.turn.spoken;
-      const responseAt = performance.now();
-      const idx = { n: -1 };
-      setEntries((es) => {
-        idx.n = es.length;
-        return [...es, { who: "adrian", text: data.turn!.spoken, tools: data.turn!.tools, adrianMs: data.adrianMs ?? 0, voiceMs: null, totalMs: null, costUsd: data.turn!.costUsd }];
-      });
-      const hangup = data.turn.hangup;
-      if (data.turn.spoken) {
-        speaking.current = true;
-        setStatus("Adrian taler …");
-        speak(data.turn.spoken, voice, {
-          onPlaying: () => {
-            const now = performance.now();
-            setEntries((es) => es.map((e, i) => (i === idx.n && e.who === "adrian" ? { ...e, voiceMs: now - responseAt, totalMs: now - endedAt } : e)));
-          },
-          onError: (reason) => setError(`Adrians stemme (ElevenLabs) fejlede, så browserens stemme blev brugt: ${reason}`),
-          onEnded: () => {
-            speaking.current = false;
-            setStatus(hangup ? "" : "Din tur");
-            if (hangup) endCall();
-          },
-        });
-      } else if (hangup) endCall();
+      if (!res.ok || !res.body) throw new Error(((await res.json().catch(() => null)) as { error?: string } | null)?.error ?? "Adrian kunne ikke svare");
+      const reader = res.body.getReader();
+      const dec = new TextDecoder();
+      let buf = "";
+      let firstSentenceAt: number | null = null;
+      for (;;) {
+        const { value, done } = await reader.read();
+        if (done) break;
+        buf += dec.decode(value, { stream: true });
+        let nl: number;
+        while ((nl = buf.indexOf("\n")) >= 0) {
+          const line = buf.slice(0, nl).trim();
+          buf = buf.slice(nl + 1);
+          if (!line) continue;
+          const ev = JSON.parse(line) as
+            | { type: "route"; route: Route | null; jevError: string | null }
+            | { type: "sentence"; text: string; ms: number }
+            | { type: "tool"; name: string; input: Record<string, unknown> }
+            | { type: "done"; turn: Turn; adrianMs: number; agentMsgs: unknown[]; state: State }
+            | { type: "error"; error: string };
+          if (ev.type === "route") {
+            setEntries((es) => {
+              const copy = [...es];
+              const i = copy.map((e) => e.who).lastIndexOf("kunde");
+              if (i >= 0) copy[i] = { who: "kunde", text: kunde, route: ev.route, jevError: ev.jevError };
+              return copy;
+            });
+          } else if (ev.type === "sentence") {
+            ensureEntry();
+            if (firstSentenceAt === null) firstSentenceAt = performance.now();
+            patch((e) => ({ ...e, text: e.text ? `${e.text} ${ev.text}` : ev.text, adrianMs: e.adrianMs || ev.ms }));
+            if (!pausedRef.current) {
+              if (!queue) {
+                speaking.current = true;
+                setStatus("Adrian taler …");
+                const q = new SpeechQueue(voice, {
+                  onFirstPlaying: () => {
+                    const now = performance.now();
+                    patch((e) => ({ ...e, voiceMs: now - (firstSentenceAt ?? now), totalMs: now - endedAt }));
+                  },
+                  onError: (reason) => setError(`Adrians stemme (ElevenLabs) fejlede, så browserens stemme blev brugt: ${reason}`),
+                  onIdle: () => {
+                    speaking.current = false;
+                    setStatus(hangup ? "" : "Din tur");
+                    if (hangup) endCall();
+                  },
+                });
+                queue = q;
+              }
+              queue.add(ev.text);
+            }
+          } else if (ev.type === "tool") {
+            ensureEntry();
+            patch((e) => ({ ...e, tools: [...e.tools, { name: ev.name, input: ev.input }] }));
+          } else if (ev.type === "done") {
+            agentMsgs.current = ev.agentMsgs ?? [];
+            toolState.current = ev.state ?? toolState.current;
+            setState(toolState.current);
+            lastAgent.current = ev.turn.spoken;
+            hangup = ev.turn.hangup;
+            ensureEntry();
+            patch((e) => ({ ...e, text: ev.turn.spoken, costUsd: ev.turn.costUsd }));
+          } else if (ev.type === "error") {
+            throw new Error(ev.error);
+          }
+        }
+      }
+      if (queue) (queue as SpeechQueue).finish();
+      else if (hangup) endCall();
+      else setStatus("Din tur");
     } catch (e) {
       setError(e instanceof Error ? e.message : "Noget gik galt");
       setStatus("Din tur");
@@ -298,8 +349,10 @@ export function AdrianChat({ playbooks, models, voices }: { playbooks: Option[];
                 </p>
                 <p className="mt-1 text-[11px] text-stone-500">
                   {e.totalMs !== null
-                    ? `Svar efter ${sec(e.totalMs)} fra du holdt op · Claude ${sec(e.adrianMs)} · stemme ${sec(e.voiceMs ?? 0)}`
-                    : `Claude ${sec(e.adrianMs)}`}
+                    ? `Første lyd ${sec(e.totalMs)} efter du holdt op · første sætning fra Claude ${sec(e.adrianMs)} · stemme ${sec(e.voiceMs ?? 0)}`
+                    : e.adrianMs
+                      ? `Første sætning fra Claude ${sec(e.adrianMs)}`
+                      : ""}
                 </p>
                 {e.text ? (
                   <Feedback

@@ -20,7 +20,7 @@ export async function ernestoVoice(): Promise<Voice | null> {
   return id ? { key: ERNESTO_VOICE_KEY, agentName: "Adrian", provider: "elevenlabs", voiceId: id, model: "eleven_v3_conversational", audioTags: true } : null;
 }
 
-/** Find en stemme ud fra nøglen (faste stemmer eller Ernestos). */
+/** Find en stemme ud fra nøglen (faste stemmer eller Ernestos). v3 Conversational målt hurtigere end Flash v2.5. */
 export async function resolveVoice(key: string | null | undefined): Promise<Voice | null> {
   if (key === ERNESTO_VOICE_KEY) return ernestoVoice();
   return VOICES.find((v) => v.key === key) ?? null;
