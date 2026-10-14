@@ -292,6 +292,16 @@ export function AdrianChat({ playbooks, models, voices }: { playbooks: Option[];
                       const prev = entries[i - 1];
                       return prev?.who === "kunde" ? prev.text : "";
                     })()}
+                    routerLabel={(() => {
+                      const prev = entries[i - 1];
+                      return prev?.who === "kunde" ? (prev.route?.label ?? null) : null;
+                    })()}
+                    context={entries
+                      .slice(Math.max(0, i - 5), i - 1)
+                      .map((x) => `${x.who === "kunde" ? "Kunden" : "Adrian"}: ${x.text}`)
+                      .join("\n")}
+                    approach={approach}
+                    model={model}
                     answer={e.text}
                     onOpen={() => inCall && !paused && setPause(true)}
                   />
@@ -320,39 +330,74 @@ export function AdrianChat({ playbooks, models, voices }: { playbooks: Option[];
   );
 }
 
-/** 👍 gemmer Adrians svar som et godt eksempel; 👎 åbner et felt til et bedre svar (Adrian lærer af begge med det samme). */
-function Feedback({ customerLine, answer, onOpen }: { customerLine: string; answer: string; onOpen: () => void }) {
-  const [mode, setMode] = useState<"none" | "skriv" | "op" | "gemt">("none");
-  const [draft, setDraft] = useState("");
+/**
+ * Feedback på ét svar. 👍: skriv hvorfor det er godt. 👎: skriv hvorfor det er dårligt og et bedre svar.
+ * Gemmes som lektion med sammenhæng og Jevs label; Adrian bruger den fra næste replik (relevante
+ * lektioner pr. tur), og «Lær af feedback» i «Træn Adrian» gør den til principper.
+ */
+function Feedback(props: {
+  customerLine: string;
+  routerLabel: string | null;
+  context: string;
+  approach: string;
+  model: string;
+  answer: string;
+  onOpen: () => void;
+}) {
+  const [mode, setMode] = useState<"none" | "op" | "ned" | "gemt-op" | "gemt-ned">("none");
+  const [reason, setReason] = useState("");
+  const [better, setBetter] = useState("");
   const [err, setErr] = useState<string | null>(null);
 
-  const save = async (body: { answer: string; avoidAnswer?: string }, done: "op" | "gemt") => {
+  const save = async () => {
     setErr(null);
+    const up = mode === "op";
     const res = await fetch("/api/ai-saelger/traening/lektion", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ situation: "fra_samtale", customerLine: customerLine || "(Adrian åbner samtalen)", ...body }),
+      body: JSON.stringify({
+        situation: "fra_samtale",
+        customerLine: props.customerLine || "(Adrian åbner samtalen)",
+        answer: up ? props.answer : better.trim(),
+        avoidAnswer: up ? undefined : props.answer,
+        rating: up ? 1 : -1,
+        reason: reason.trim(),
+        context: props.context,
+        routerLabel: props.routerLabel,
+        approach: props.approach,
+        model: props.model,
+      }),
     });
-    if (res.ok) setMode(done);
+    if (res.ok) setMode(up ? "gemt-op" : "gemt-ned");
     else setErr("Kunne ikke gemme");
   };
 
-  if (mode === "op") return <p className="mt-1 text-[11px] text-emerald-700">👍 Gemt som godt svar</p>;
-  if (mode === "gemt") return <p className="mt-1 text-[11px] text-emerald-700">✓ Dit svar er gemt; Adrian bruger det fra næste replik</p>;
-  if (mode === "skriv")
+  if (mode === "gemt-op") return <p className="mt-1 text-[11px] text-emerald-700">👍 Gemt med din begrundelse</p>;
+  if (mode === "gemt-ned") return <p className="mt-1 text-[11px] text-emerald-700">✓ Gemt; Adrian bruger det fra næste replik</p>;
+  if (mode === "op" || mode === "ned") {
+    const ready = reason.trim() && (mode === "op" || better.trim());
     return (
       <div className="mt-1 w-full max-w-[85%] space-y-1">
         <textarea
-          value={draft}
-          onChange={(ev) => setDraft(ev.target.value)}
-          rows={3}
+          value={reason}
+          onChange={(ev) => setReason(ev.target.value)}
+          rows={2}
           autoFocus
-          placeholder="Sådan skulle han have svaret …"
+          placeholder={mode === "op" ? "Hvorfor er svaret godt?" : "Hvorfor er svaret dårligt?"}
           className="w-full rounded-xl border border-stone-200 p-2 text-sm focus:border-emerald-600 focus:outline-none"
         />
+        {mode === "ned" ? (
+          <textarea
+            value={better}
+            onChange={(ev) => setBetter(ev.target.value)}
+            rows={3}
+            placeholder="Sådan skulle han have svaret …"
+            className="w-full rounded-xl border border-stone-200 p-2 text-sm focus:border-emerald-600 focus:outline-none"
+          />
+        ) : null}
         <div className="flex gap-2">
-          <button type="button" disabled={!draft.trim()} onClick={() => void save({ answer: draft.trim(), avoidAnswer: answer }, "gemt")} className="rounded-lg bg-emerald-700 px-3 py-1 text-xs text-white disabled:opacity-40">
-            Gem bedre svar
+          <button type="button" disabled={!ready} onClick={() => void save()} className="rounded-lg bg-emerald-700 px-3 py-1 text-xs text-white disabled:opacity-40">
+            Gem
           </button>
           <button type="button" onClick={() => setMode("none")} className="rounded-lg px-3 py-1 text-xs text-stone-600 hover:bg-stone-100">
             Annullér
@@ -361,23 +406,31 @@ function Feedback({ customerLine, answer, onOpen }: { customerLine: string; answ
         </div>
       </div>
     );
+  }
   return (
     <div className="mt-1 flex gap-1 text-sm">
-      <button type="button" title="Godt svar" onClick={() => void save({ answer }, "op")} className="rounded px-1.5 hover:bg-stone-100">
+      <button
+        type="button"
+        title="Godt svar"
+        onClick={() => {
+          props.onOpen();
+          setMode("op");
+        }}
+        className="rounded px-1.5 hover:bg-stone-100"
+      >
         👍
       </button>
       <button
         type="button"
-        title="Dårligt svar: skriv et bedre"
+        title="Dårligt svar"
         onClick={() => {
-          onOpen();
-          setMode("skriv");
+          props.onOpen();
+          setMode("ned");
         }}
         className="rounded px-1.5 hover:bg-stone-100"
       >
         👎
       </button>
-      {err ? <span className="text-xs text-rose-700">{err}</span> : null}
     </div>
   );
 }

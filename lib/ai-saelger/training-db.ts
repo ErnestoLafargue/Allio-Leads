@@ -12,14 +12,24 @@ export async function loadLessons(take = 300): Promise<(Lesson & { id: string; c
   return prisma.aiSaelgerLesson.findMany({
     orderBy: { createdAt: "desc" },
     take,
-    select: { id: true, situation: true, customerLine: true, answer: true, avoidAnswer: true, createdAt: true },
+    select: { id: true, situation: true, customerLine: true, answer: true, avoidAnswer: true, rating: true, reason: true, context: true, routerLabel: true, createdAt: true },
   });
 }
 
-/** Adrians træningssektion: Ernestos lektioner + svarbanken fra sælgernes samtaler. */
+/** Den godkendte version af Adrians principper (tom streng, hvis ingen er godkendt). */
+export async function activePrinciples(): Promise<{ version: number; text: string } | null> {
+  return prisma.aiSaelgerPrinciples.findFirst({ where: { status: "active" }, orderBy: { version: "desc" }, select: { version: true, text: true } });
+}
+
+/** Adrians træning: principper + Ernestos lektioner + svarbanken (systemprompt) og lektionerne til relevans pr. tur. */
+export async function adrianTraining(): Promise<{ section: string; lessons: Lesson[] }> {
+  const [lessons, bank, principles] = await Promise.all([loadLessons(), objectionBank(), activePrinciples()]);
+  return { section: lessonsPromptSection(lessons, bank, 4, principles?.text ?? ""), lessons };
+}
+
+/** Kun systemprompt-sektionen. */
 export async function adrianTrainingSection(): Promise<string> {
-  const [lessons, bank] = await Promise.all([loadLessons(), objectionBank()]);
-  return lessonsPromptSection(lessons, bank);
+  return (await adrianTraining()).section;
 }
 
 type Objection = { category: ObjectionCategory; customer?: { quote?: string } };

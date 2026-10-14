@@ -896,8 +896,40 @@ model AiSaelgerLesson {
   answer       String
   /// Adrians dårlige svar, som svaret erstatter (👎 i «Tal med Adrian»)
   avoidAnswer  String?
+  /// +1 (👍) eller -1 (👎); null for svar fra øvekortene
+  rating       Int?
+  /// Hvorfor svaret er godt eller dårligt (Ernestos begrundelse)
+  reason       String?
+  /// De seneste replikker før (sammenhængen), som tekst
+  context      String?
+  /// Jevs label for kundens replik (bruges til at finde relevante lektioner pr. tur)
+  routerLabel  String?
+  /// Playbook og model, svaret kom fra
+  approach     String?
+  model        String?
   createdById  String?
   createdAt    DateTime @default(now())
 
   @@index([situation, createdAt])
+  @@index([routerLabel, createdAt])
+}
+
+/// Adrians principper: Sonnet destillerer feedbacken (AiSaelgerLesson) til korte regler; Ernesto godkender.
+model AiSaelgerPrinciples {
+  id           String   @id @default(cuid())
+  version      Int      @unique
+  /// Reglerne som tekst (punktliste), som de står i Adrians systemprompt
+  text         String
+  /// draft | active | rejected | retired
+  status       String   @default("draft")
+  /// Hvor mange lektioner forslaget bygger på
+  lessonCount  Int      @default(0)
+  /// Sonnets begrundelse for ændringerne
+  rationale    String?
+  costUsd      Float    @default(0)
+  createdById  String?
+  createdAt    DateTime @default(now())
+  decidedAt    DateTime?
+
+  @@index([status, version])
 }

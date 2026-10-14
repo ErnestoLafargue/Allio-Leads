@@ -8,17 +8,41 @@
  */
 import { useEffect, useRef, useState } from "react";
 import { speak, stopSpeaking } from "@/lib/tts/speak-client";
+import { PrinciplesPanel } from "./principles-panel";
 import { startSonioxStream, SpeakerTranscript, type SonioxStream } from "@/lib/live-coach/soniox-stream";
 
 type Option = { key: string; label: string };
 type Card = { situation: string; label: string; customerLine: string; agentBefore: string | null; strong: string[] };
-type Lesson = { id: string; situation: string; label: string; customerLine: string; answer: string };
+type Lesson = { id: string; situation: string; label: string; customerLine: string; answer: string; avoidAnswer?: string | null; rating?: number | null; reason?: string | null };
+type Lead = { kliniknavn: string; by: string; beslutningstager: string; bookingsystem: string; branche: string };
+/** Samme klinik som i «Tal med Adrian» (gemmes i browseren). */
+const LEAD_KEY = "tal-med-adrian-lead";
+const DEFAULT_LEAD: Lead = { kliniknavn: "Klinik Lafargue", by: "København", beslutningstager: "Ernesto", bookingsystem: "GeckoBooking", branche: "hudpleje" };
 
 
 export function AdrianTrainer({ situations }: { situations: Option[] }) {
   const [situation, setSituation] = useState("");
   const [card, setCard] = useState<Card | null>(null);
   const [answer, setAnswer] = useState("");
+  const [reason, setReason] = useState("");
+  const [lead, setLead] = useState<Lead>(DEFAULT_LEAD);
+  useEffect(() => {
+    try {
+      const saved = localStorage.getItem(LEAD_KEY);
+      if (saved) setLead({ ...DEFAULT_LEAD, ...(JSON.parse(saved) as Partial<Lead>) });
+    } catch {
+      /* ingen lagring */
+    }
+  }, []);
+  const updateLead = (k: keyof Lead, v: string) => {
+    const next = { ...lead, [k]: v };
+    setLead(next);
+    try {
+      localStorage.setItem(LEAD_KEY, JSON.stringify(next));
+    } catch {
+      /* ingen lagring */
+    }
+  };
   const [adrian, setAdrian] = useState<string | null>(null);
   const [lessons, setLessons] = useState<Lesson[]>([]);
   const [busy, setBusy] = useState<null | "kort" | "adrian" | "gem">(null);
@@ -41,6 +65,7 @@ export function AdrianTrainer({ situations }: { situations: Option[] }) {
     setError(null);
     setAdrian(null);
     setAnswer("");
+    setReason("");
     setSaved(false);
     try {
       const res = await fetch("/api/ai-saelger/traening/kort", {
@@ -67,7 +92,7 @@ export function AdrianTrainer({ situations }: { situations: Option[] }) {
       const res = await fetch("/api/ai-saelger/traening/adrian", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ customerLine: card.customerLine, agentBefore: card.agentBefore }),
+        body: JSON.stringify({ customerLine: card.customerLine, agentBefore: card.agentBefore, lead }),
       });
       const d = (await res.json()) as { reply?: string; error?: string };
       if (!res.ok || d.reply === undefined) throw new Error(d.error);
@@ -88,7 +113,7 @@ export function AdrianTrainer({ situations }: { situations: Option[] }) {
       const res = await fetch("/api/ai-saelger/traening/lektion", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ situation: card.situation, customerLine: card.customerLine, answer }),
+        body: JSON.stringify({ situation: card.situation, customerLine: card.customerLine, answer, reason: reason.trim() || undefined, context: card.agentBefore ? `Adrian: ${card.agentBefore}` : undefined }),
       });
       if (!res.ok) throw new Error();
       setSaved(true);
@@ -150,6 +175,25 @@ export function AdrianTrainer({ situations }: { situations: Option[] }) {
         </p>
       </header>
 
+      <section className="space-y-2 rounded-2xl bg-white p-4 shadow-sm ring-1 ring-stone-200">
+        <p className="text-xs font-semibold uppercase tracking-wide text-stone-500">Dig som kunde (det Adrian ved om dig)</p>
+        <div className="grid gap-2 sm:grid-cols-3">
+          {(
+            [
+              ["beslutningstager", "Dit navn"],
+              ["kliniknavn", "Klinikkens navn"],
+              ["by", "By"],
+              ["branche", "Type forretning"],
+              ["bookingsystem", "Bookingsystem"],
+            ] as [keyof Lead, string][]
+          ).map(([k, ph]) => (
+            <input key={k} value={lead[k]} onChange={(e) => updateLead(k, e.target.value)} placeholder={ph} className="rounded-lg border border-stone-200 bg-white px-2 py-1.5 text-sm" />
+          ))}
+        </div>
+      </section>
+
+      <PrinciplesPanel />
+
       <section className="rounded-2xl bg-white p-5 shadow-sm ring-1 ring-stone-200">
         <div className="flex flex-wrap items-center gap-2">
           <select value={situation} onChange={(e) => setSituation(e.target.value)} className="rounded-lg border border-stone-200 bg-white px-2 py-1.5 text-sm">
@@ -182,6 +226,16 @@ export function AdrianTrainer({ situations }: { situations: Option[] }) {
                 rows={4}
                 placeholder="Sådan ville jeg svare …"
                 className="w-full rounded-xl border border-stone-200 p-3 text-[15px] focus:border-emerald-600 focus:outline-none"
+              />
+              <textarea
+                value={reason}
+                onChange={(e) => {
+                  setReason(e.target.value);
+                  setSaved(false);
+                }}
+                rows={2}
+                placeholder="Hvorfor svarer du sådan? (hjælper Adrian med at forstå princippet)"
+                className="mt-2 w-full rounded-xl border border-stone-200 p-3 text-sm focus:border-emerald-600 focus:outline-none"
               />
               <div className="mt-2 flex flex-wrap gap-2">
                 {recording ? (
@@ -233,7 +287,11 @@ export function AdrianTrainer({ situations }: { situations: Option[] }) {
               <li key={l.id} className="py-2 text-sm">
                 {!card ? <p className="text-[11px] uppercase tracking-wide text-stone-400">{l.label}</p> : null}
                 <p className="text-stone-500">Kunden: «{l.customerLine}»</p>
-                <p className="text-stone-900">Du: «{l.answer}»</p>
+                {l.avoidAnswer ? <p className="text-stone-400 line-through">Adrian: «{l.avoidAnswer}»</p> : null}
+                <p className="text-stone-900">
+                  {l.rating === 1 ? "👍 Adrian" : "Du"}: «{l.answer}»
+                </p>
+                {l.reason ? <p className="text-xs text-stone-500">Hvorfor: {l.reason}</p> : null}
                 <button type="button" onClick={() => void remove(l.id)} className="text-xs text-rose-600 hover:text-rose-800">
                   Slet
                 </button>

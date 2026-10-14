@@ -19,11 +19,35 @@ export async function GET() {
 export async function POST(req: Request) {
   const viewer = await getViewer();
   if (!viewer?.isAdmin) return NextResponse.json({ error: "Kun for admin" }, { status: 403 });
-  const b = (await req.json().catch(() => null)) as { situation?: string; customerLine?: string; answer?: string; avoidAnswer?: string } | null;
+  const b = (await req.json().catch(() => null)) as {
+    situation?: string;
+    customerLine?: string;
+    answer?: string;
+    avoidAnswer?: string;
+    rating?: number;
+    reason?: string;
+    context?: string;
+    routerLabel?: string;
+    approach?: string;
+    model?: string;
+  } | null;
+  const txt = (v: unknown, n: number) => (typeof v === "string" && v.trim() ? v.trim().slice(0, n) : null);
   const answer = b?.answer?.trim().slice(0, 2000);
   const customerLine = b?.customerLine?.trim().slice(0, 600);
   if (!b?.situation || !isLessonSituation(b.situation) || !answer || !customerLine) return NextResponse.json({ error: "Mangler situation, replik eller svar" }, { status: 400 });
-  const lesson = await prisma.aiSaelgerLesson.create({ data: { situation: b.situation, customerLine, answer, avoidAnswer: b.avoidAnswer?.trim().slice(0, 2000) || null, createdById: viewer.userId } });
+  const lesson = await prisma.aiSaelgerLesson.create({ data: {
+      situation: b.situation,
+      customerLine,
+      answer,
+      avoidAnswer: txt(b.avoidAnswer, 2000),
+      rating: b.rating === 1 || b.rating === -1 ? b.rating : null,
+      reason: txt(b.reason, 1000),
+      context: txt(b.context, 3000),
+      routerLabel: txt(b.routerLabel, 40),
+      approach: txt(b.approach, 40),
+      model: txt(b.model, 60),
+      createdById: viewer.userId,
+    }, });
   return NextResponse.json(lesson);
 }
 

@@ -17,7 +17,9 @@ export default async function AdrianPage() {
   return (
     <AdrianChat
       playbooks={(Object.keys(APPROACHES) as ApproachKey[]).filter((k) => APPROACHES[k].file).map((k) => ({ key: k, label: APPROACHES[k].label }))}
-      models={Object.entries(AGENT_MODELS).map(([key, m]) => ({ key, label: m.label }))}
+      models={Object.entries(AGENT_MODELS)
+        .map(([key, m]) => ({ key, label: m.label }))
+        .sort((x, y) => Number(y.key === "claude-sonnet-5-5") - Number(x.key === "claude-sonnet-5-5"))}
       voices={VOICES.map((v) => ({ key: v.key, label: VOICE_LABELS[v.key] ?? v.key }))}
     />
   );

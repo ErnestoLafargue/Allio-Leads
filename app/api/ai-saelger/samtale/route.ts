@@ -4,10 +4,11 @@ import { APPROACHES, VOICES, type ApproachKey } from "@/lib/ai-saelger/agents";
 import { PERSONAS } from "@/lib/ai-saelger/practice/personas";
 import { AGENT_MODELS, agentTurn, leadMessage, type AgentModel, type ToolState } from "@/lib/ai-saelger/practice/simulate";
 import { withRouterHint } from "@/lib/ai-saelger/router";
+import { relevantLessonsHint } from "@/lib/ai-saelger/training";
 import { createJevClient, routeWithJev, type JevRoute } from "@/lib/ai-saelger/router-jev";
 import { readPlaybook } from "@/lib/ai-saelger/playbooks";
 import { aiSaelgerSystemPrompt } from "@/lib/ai-saelger/system-prompt";
-import { adrianTrainingSection } from "@/lib/ai-saelger/training-db";
+import { adrianTraining } from "@/lib/ai-saelger/training-db";
 import { createAnthropicClient } from "@/lib/anthropic-client";
 import { getViewer } from "@/lib/scripts-traening/queries";
 
@@ -66,7 +67,8 @@ export async function POST(req: Request) {
   const voice = VOICES.find((v) => v.key === b?.voiceKey) ?? VOICES.find((v) => v.key === "christian-v3c")!;
   const variant = { key: `${approach}/${voice.key}`, approach, voice };
   const playbook = readPlaybook(approach);
-  const system = aiSaelgerSystemPrompt(variant, playbook, await adrianTrainingSection());
+  const training = await adrianTraining();
+  const system = aiSaelgerSystemPrompt(variant, playbook, training.section);
   const state: ToolState = { booked: b?.state?.booked ?? null, outcome: b?.state?.outcome ?? null, notes: b?.state?.notes ?? [], todayKey: new Date().toISOString().slice(0, 10) };
 
   // Jev: label + bryd ind (ca. 130 ms). Fejler Jev, svarer Adrian uden hint.
@@ -79,7 +81,13 @@ export async function POST(req: Request) {
   }
 
   const agentMsgs: Anthropic.MessageParam[] = b?.agentMsgs?.length
-    ? [...b.agentMsgs, { role: "user", content: route ? withRouterHint(kunde, route.label, route.confidence) : kunde }]
+    ? [
+        ...b.agentMsgs,
+        {
+          role: "user",
+          content: [route ? withRouterHint(kunde, route.label, route.confidence) : kunde, relevantLessonsHint(training.lessons, route?.label)].filter(Boolean).join("\n\n"),
+        },
+      ]
     : [{ role: "user", content: leadMessage({ ...persona, answers: kunde }) }];
 
   const t0 = performance.now();

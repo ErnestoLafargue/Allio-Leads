@@ -13,6 +13,7 @@ const nextConfig: NextConfig = {
   outputFileTracingIncludes: {
     "/api/ai-saelger/samtale": ["./docs/ai-saelger/playbooks/**/*"],
     "/api/ai-saelger/traening/adrian": ["./docs/ai-saelger/playbooks/**/*"],
+    "/api/ai-saelger/feedback-test": ["./docs/ai-saelger/playbooks/**/*"],
   },
 };
 
