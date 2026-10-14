@@ -1,5 +1,6 @@
 /**
- * Stemmer ud over de faste i VOICES: Ernestos egen stemme (ElevenLabs-klon lavet af hans egne salgsopkald).
+ * Stemmer ud over de faste i VOICES: Ernestos egen stemme (ElevenLabs Professional Voice Clone, trænet på ca.
+ * 74 min af hans egne salgsopkald; trænet til Turbo v2.5, Flash v2.5 og Multilingual v2).
  * Voice-id'et ligger i AppSetting «ernesto-voice-id», så stemmen kan skiftes (fx til en Professional Voice
  * Clone) uden deploy.
  */
@@ -36,8 +37,9 @@ export function supportsStitching(model: string): boolean {
 export async function resolveVoice(key: string | null | undefined): Promise<Voice | null> {
   if (key === ERNESTO_VOICE_KEY) return ernestoVoice();
   if (key === FLASH_VOICE_KEYS.ernesto) {
+    // Turbo v2.5: målt 0,34 s til første lyd med hans Professional-stemme og bedre kvalitet end Flash.
     const e = await ernestoVoice();
-    return e ? { ...e, key, model: "eleven_flash_v2_5", audioTags: false } : null;
+    return e ? { ...e, key, model: "eleven_turbo_v2_5", audioTags: false } : null;
   }
   if (key === FLASH_VOICE_KEYS.christian) {
     const c = VOICES.find((v) => v.key === "christian-v3c")!;
