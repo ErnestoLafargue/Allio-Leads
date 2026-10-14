@@ -30,7 +30,7 @@ export type ApproachKey = "lavt_pres" | "playbook_2" | "playbook_3";
 export const APPROACHES: Readonly<Record<ApproachKey, { label: string; summary: string; file: string | null }>> = {
   lavt_pres: {
     label: "Lavt pres (NEPQ)",
-    summary: "Kunden finder selv problemet med de inaktive kunder og sætter selv tal på det. Ét spørgsmål ad gangen, næsten ingen pitch.",
+    summary: "Kunden finder selv problemet (inaktive kunder eller ubesvarede henvendelser) og sætter selv tal på det. Ét spørgsmål ad gangen, næsten ingen pitch.",
     file: "docs/ai-saelger/playbooks/1-lavt-pres.md",
   },
   playbook_2: { label: "Playbook 2", summary: "Skrives sammen med Ernesto.", file: null },

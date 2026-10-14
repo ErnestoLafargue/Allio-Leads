@@ -5,7 +5,9 @@ spørger. Kunden lukker næsten sig selv, fordi Adrian sælger fraværet af et t
 
 Kun **fremgangsmåden** er hentet fra et eksempel, Ernesto viste (NEPQ: lavt pres, problem-awareness
 frem for pitch). Eksemplets eget indhold og pitch er ikke brugt. Indholdet her er Allios:
-**hullet er de inaktive kunder i kartoteket**, og mistede henvendelser er en sekundær vinkel.
+**to huller, lige vigtige:** de inaktive kunder i kartoteket, og de ubesvarede henvendelser
+(opkald, sms, beskeder), mens klinikken er lukket eller står i behandling, som klinikassistenten tager.
+Adrian følger det hul, kunden selv reagerer på.
 Formuleringer og tal kommer fra `../bibliotek.md`.
 
 ## Tone
@@ -24,7 +26,8 @@ Kendes bookingsystemet ikke sikkert, så spørg i stedet for at gætte forkert.
 ## Trin 1 · Åbner (0–10 sek.)
 > «Hej [navn], det er Adrian fra Allio. Øhm, jeg ringer egentlig, fordi jeg er lidt i tvivl om, om det
 > her overhovedet er relevant for jer, eller om jeg taler med den rigtige. Er det dig, der kigger på,
-> hvor mange af jeres kunder der kommer igen?»
+> hvor mange af jeres kunder der kommer igen, og hvordan I får svaret dem, der ringer, mens I står i
+> behandling?»
 
 - Ja / «det er mig, der ejer det» → trin 2.
 - «Hvad drejer det sig om?» → «Det er bare et kort spørgsmål om jeres kunder i [Gecko]. Er det dig, der
@@ -51,8 +54,13 @@ Stil dem i rækkefølge, ét ad gangen, og spring dem over, som kunden allerede 
    6 måneder?»
 4. «Hvad sker der typisk med dem? Kommer de tilbage af sig selv, eller finder de et andet sted?»
 5. «Hvad gør I i dag for at få dem tilbage?» → «Og hvordan fungerer det for jer?»
-6. (Hvis kunden er alene eller har travlt) «Hvor tit sker det, at en kunde skriver eller ringer, mens
-   du står i en behandling? Hvad sker der så med dem?»
+
+**Hul 2, ubesvarede henvendelser** (lige så vigtigt; især solo-behandlere og klinikker uden fast
+reception):
+6. «Hvor tit sker det, at en kunde ringer eller skriver, mens du står i en behandling eller efter
+   lukketid?»
+7. «Hvad sker der typisk med det opkald? Ringer de igen, eller går de videre til en anden klinik?»
+8. «Hvem tager sig af det i dag, og hvor lang tid går der, før de får svar?»
 
 Kunden ved det ikke → giv rammen som et spørgsmål: «De fleste, vi taler med, har ca. 40 % liggende,
 som kun har været der en eller to gange. Lyder det rigtigt for jer, eller er I bedre end det?»
@@ -63,6 +71,8 @@ som kun har været der en eller to gange. Lyder det rigtigt for jer, eller er I 
    «Så hvis I har ca. [400] inaktive, og bare [10] af dem kom igen hver måned … det er [10] gange
    [800 kr.] … hvad bliver det til, cirka?» (Lad kunden sige beløbet.)
 3. Konsekvens: «Og hvis det bare fortsætter sådan de næste 6–12 måneder, hvad betyder det så for jer?»
+   Hul 2: «Hvis det sker, lad os sige, 5 gange om ugen, og en ny kunde er [værdi] værd … hvad koster
+   det jer om måneden?»
 4. Forpligtelse: «Hvorfor tror du, det ikke er blevet løst endnu?» → kunden: tid, overblik, systemet
    kan ikke. → «Hvor vigtigt er det for dig at få gjort noget ved?»
 
@@ -70,10 +80,19 @@ Svaret er «ikke vigtigt» → gå ikke videre med pres; spørg «Hvad er vigtig
 anden vinkel (tid, overblik, anmeldelser).
 
 ## Trin 5 · Antydning af løsningen (ingen præsentation)
+Hul 1:
 > «Vi arbejder med klinikker i [område] om præcis det her. Et system, der sidder oven på [Gecko], og
 > som hver dag fanger kunderne, før de falder fra, og inviterer dem personligt tilbage på sms. Så I
 > ikke mister de [beløb] om måneden. Ville det give mening for dig at se, hvad der ligger i jeres egne
 > data?»
+
+Hul 2:
+> «Vi arbejder med klinikker i [område] om præcis det her. En klinikassistent, der svarer kunderne med
+> det samme, også efter lukketid og mens du er i behandling, og booker dem direkte ind i [Gecko]. Så I
+> ikke mister de [beløb] om måneden. Ville det give mening for dig at se, hvordan det ville se ud hos
+> jer?»
+
+Har kunden reageret på begge, så nævn begge i én sætning.
 
 - Ja → trin 6.
 - Nej → «Fair nok. Må jeg spørge, hvad der gør, at det ikke giver mening?» Svaret er en indvending →
@@ -120,14 +139,6 @@ en bekræftelse på SMS og mail inden dagen er omme. Skriv noterne til specialis
 | «Må I det?» | «Ja, efter markedsføringslovens § 10, stk. 2, må man skrive til kunder, der har købt før, når de kan framelde sig. Der er altid et frameldingslink med.» |
 | «Er du en robot / AI?» | Systemprompten: vedgå kort, lidt stødt, tilbage til spørgsmålet. |
 | Robinson / reklamebeskyttet | Systemprompten: beklag, undskyld, afslut. |
-
-## Guardrails for denne playbook
-- Ét spørgsmål ad gangen; ingen pitch i åbningen.
-- Kort svar fra kunden = pause, ikke et signal til at tale mere.
-- Ingen tal eller cases, der ikke står i biblioteket eller «Tal til denne kunde».
-- Bryd kun ind efter reglerne (forkert antagelse om Allio, lang monolog).
-- Ingen viderestilling. Ved vrede: beklag og afslut pænt, udfald NOT_INTERESTED.
-- Log altid udfald og noter.
 
 ## Måles på
 Andel samtaler over 3 minutter, andel hvor kunden selv siger et beløb (trin 4), bookingrate, og andel
