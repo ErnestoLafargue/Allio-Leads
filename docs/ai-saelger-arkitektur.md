@@ -169,7 +169,7 @@ al genbrugt kode (live-coach, analyse, ugens script, booking) ligger dér.
 5. ~~Viderestilling~~ **Besluttet 13/10: ingen viderestilling.**
 
 ## 10. Systemprompten: Ernestos svar (runde 1, 13/10)
-- **Persona:** 26 år, mødebooker. Mandestemme = **Adrian**, kvindestemme = **Cathrine**.
+- **Persona:** 26 år, mødebooker. Mandestemme = **Adrian**, kvindestemme = **Katrine** (udtales på dansk).
 - **Åbning (Ernestos egen):** «Hej [navn], det er [Adrian] – har du lige to minutter?» → «Jeg skal være
   ærlig med dig: Jeg er mødebooker, og jeg ringer fordi I bruger [bookingsystem]. Men det her er ikke et
   salgsopkald – jeg skal ikke sælge dig noget i telefonen …» → Allio-pitchen (kundernes livstidsværdi,
@@ -222,3 +222,16 @@ al genbrugt kode (live-coach, analyse, ugens script, booking) ligger dér.
   vælges én tilgang og én stemme, som så kører 8 ad gangen.
 - Kapacitet: 8–9 samtidige samtaler = 8–9 Soniox-strømme, 8–9 TTS-strømme og Claude-kald parallelt.
   Telnyx-linjer og Soniox/ElevenLabs-samtidighedsgrænser skal tjekkes mod abonnementerne.
+
+## 13. Beslutninger 14/10 og kernen i koden
+- **Stemmer:** 2× Isabella (Katrine; v3 Conversational og v4 Turbo) og 1× Christian (Adrian; v3
+  Conversational). Ernestos stemmeklon venter til næste måned. **9 agenter ad gangen** (3 tilgange × 3 stemmer).
+- **Booking:** første ledige specialist (næsten altid Victor).
+- **Tilbagekald:** til agenten selv; den husker sidste samtale via noterne.
+- **Udfald:** de samme som sælgerne (`lib/lead-status.ts`).
+- **Mail/SMS:** mail kan sendes gennem Allio Leads i dag; SMS skal bygges, før agenten kan sende den.
+  Gecko-skabelonen findes ikke og skal laves.
+- **Kode (`lib/ai-saelger/`, med tests):** `agents.ts` (stemmer, tilgange, 9 varianter), `system-prompt.ts`,
+  `router.ts` (menu + parser), `turn-taking.ts` (backchannel, halv sætning færdig, brud, tavshed 3–5 sek.),
+  `slot-order.ts` (fredag/torsdag først inden for 14 dage), `pitch-numbers.ts` (40 % inaktive, 2–12 %,
+  10–20 om måneden), `tools.ts` (værktøjerne til Claude).
