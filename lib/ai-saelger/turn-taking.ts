@@ -21,13 +21,31 @@ export const MAX_OVERLAP_MS = 1500;
 export type InterruptDecision =
   | { action: "keep_talking" }
   /** Sig færdig til næste naturlige pause (komma/punktum), dog højst `maxMs`, og stop så. */
-  | { action: "finish_phrase_then_yield"; maxMs: number };
+  | { action: "finish_phrase_then_yield"; maxMs: number }
+  /** Træk det sidste ord ud og stop («det jeg mente vaaaar …»). */
+  | { action: "trail_off" }
+  /** Stop brat midt i ordet (kunden siger noget vigtigt). */
+  | { action: "stop_now" };
 
-/** Kunden taler, mens agenten taler. */
-export function onCustomerSpeechWhileAgentSpeaks(customerText: string): InterruptDecision {
+/** Labels, hvor kunden siger noget vigtigt, og agenten skal stoppe brat. */
+const STOP_NOW_LABELS: ReadonlySet<RouterLabel> = new Set(["indvending", "spoergsmaal", "koebssignal", "spoerger_om_ai", "robinson", "afvisning"]);
+
+/**
+ * Kunden taler, mens agenten taler. Varieret som et menneske: backchannel → tal videre; noget vigtigt →
+ * stop brat; ellers enten sig sætningen færdig eller træk det sidste ord ud.
+ */
+export function onCustomerSpeechWhileAgentSpeaks(
+  customerText: string,
+  label: RouterLabel | null = null,
+  random: () => number = Math.random,
+): InterruptDecision {
   if (isBackchannel(customerText)) return { action: "keep_talking" };
-  return { action: "finish_phrase_then_yield", maxMs: MAX_OVERLAP_MS };
+  if (label && STOP_NOW_LABELS.has(label)) return { action: "stop_now" };
+  return random() < 0.6 ? { action: "finish_phrase_then_yield", maxMs: MAX_OVERLAP_MS } : { action: "trail_off" };
 }
+
+/** Routeren vurderer kundens foreløbige tekst for hvert så mange nye ord (billig og hurtig). */
+export const ROUTER_EVERY_WORDS = 6;
 
 /** Ord, kunden har sagt i træk, før agenten må bryde ind for at styre samtalen tilbage. */
 export const MONOLOGUE_WORDS = 70;

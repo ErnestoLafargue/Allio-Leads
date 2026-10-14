@@ -17,18 +17,18 @@ tilbagekald eller afslutter pænt.
 | Behov | Findes i dag | Fil |
 |---|---|---|
 | Ringe ud server-side med telefonsvarer-genkendelse (AMD) | Power/predictive dialer via Telnyx Call Control | `app/api/dialer/dispatch/route.ts`, `lib/dialer-bridge.ts` (`handleAmdHuman`, `handleAmdMachine`) |
-| Viderestille til en ledig sælger | Bridge til sælgerens WebRTC-leg | `lib/dialer-bridge.ts` (`reserveReadyAgent`, `originateBridgeToAgent`), `AgentSession` |
 | Kø og kampagner | Dialerkø sorteret efter kontaktforsøg | `DialerQueueItem`, `Campaign`, `Lead` |
-| Tale til tekst i realtid | Soniox realtime, målt ca. 0,56 sek. | `lib/live-coach/soniox-stream.ts` |
-| Hvad skal der siges | Ugens script, svarbank pr. indvending, kundekontekst | `lib/live-coach/script-responses.ts`, `customer-context.ts`, `triggers.ts`, `SalesScriptVersion` |
-| Hurtigt svar fra Claude | Haiku med cachet systemprompt, målt ca. 1,1 sek. | `lib/live-coach/suggest.ts` |
+| Tale til tekst i realtid | Soniox realtime, målt ca. 0,56 sek. (teknikken genbruges, ikke coachen) | `lib/live-coach/soniox-stream.ts` |
+| Hvad skal der siges | Adrians egne playbooks og salgsbibliotek, egen systemprompt, kundekontekst | `docs/ai-saelger/`, `lib/ai-saelger/` |
+| Delt med de menneskelige sælgere | Kun dataanalysen (`CallAnalysis`) og de gode indvendingssvar fra den | `scripts/worker.ts`, `CallAnalysis` |
 | Ledige tider og booking | Mødetider, overlap-tjek, Cal.eu og Podio | `lib/booking/meeting-slots.ts`, `app/api/meetings/book/route.ts`, `lib/booking/post-booking-sync.ts` |
 | Udfald | Udfaldslog (fx MEETING_BOOKED) | `LeadOutcomeLog` |
-| Optagelse og efteranalyse | Telnyx-optagelse → transskription → analyse → ugens script | `scripts/worker.ts`, `CallRecording`, `CallTranscript`, `CallAnalysis` |
+| Optagelse og efteranalyse | Telnyx-optagelse → transskription → analyse (Adrians egne samtaler → hans playbooks) | `scripts/worker.ts`, `CallRecording`, `CallTranscript`, `CallAnalysis` |
 | Log af AI-forbrug og latens | Pr. kort | `LiveCoachEvent`, `lib/live-coach/events.ts` |
 
-Live-coachen er altså halvdelen af en AI-sælger. Den lytter, forstår og foreslår repliken. Det, der
-mangler, er at **sige** repliken selv (tekst til tale), styre selve opkaldet og handle (booke, viderestille).
+**Adskillelse (Ernesto, 14/10):** live-coachen og ugens script er kun til menneskelige sælgere. Adrian
+har sin egen systemprompt, egne playbooks og egne data. Det eneste, de deler, er dataanalysen og de gode
+indvendingssvar. Adrian kan ikke viderestille.
 
 ## 3. Arkitektur (forslag)
 ```
@@ -77,20 +77,27 @@ Log: AiCallEvent (latens, pris, værktøjskald, udfald) + administrationsvisning
 En naturlig telefonsamtale tåler ca. 1 sekunds pause. Målt i dag (live-coach, fase 0):
 Soniox ca. 0,56 sek. + Claude Haiku ca. 1,1 sek. Med tekst til tale (anslået 0,2–0,4 sek.) bliver det ca.
 **1,9–2 sek. pr. tur**. Det er for langsomt. Forslag:
-1. Start Claude på foreløbig tekst, før kunden er helt færdig (coachens lag 1 gør det allerede).
-2. Forudindspil faste replikker: åbning, svarene på de kendte indvendinger, bekræftelse. Lag 1 kan
-   afspille dem straks uden Claude.
+1. **Routeren (hurtig model, ca. 70 ms) skal bygges ind** (Ernesto, 14/10). Den vurderer kundens
+   foreløbige tekst løbende, så Claude kan starte, før kunden er helt færdig. Det er Adrians egen
+   router, ikke live-coachens lag 1.
+2. Forudindspil faste replikker: åbning, fyldlyde, svarene på de kendte indvendinger, bekræftelse.
+   Routeren kan afspille dem straks uden Claude.
 3. Stream hele vejen: Claudes første sætning går til tekst til tale, mens resten skrives.
-4. Mindre lydpakker til Soniox (40 ms i stedet for 100 ms), som foreslået i live-coach-rapporten.
-5. Alternativt: en færdig stemmeplatform (fx Telnyx' egne AI-assistenter eller en tale-til-tale-model)
-   med vores værktøjer koblet på. Det er hurtigere at bygge, men giver mindre kontrol. Begge veje
-   bør prøves af i fase 0.
+4. Mindre lydpakker til Soniox (40 ms i stedet for 100 ms). Testes i fase 0; det kan spare op til ca.
+   60 ms pr. tur.
+5. **Fire veje testes i fase 0:** (a) vores egen kæde (Soniox → router → Claude → ElevenLabs),
+   (b) samme kæde med Cartesia, (c) en tale-til-tale-model, (d) **Telnyx' egne AI-assistenter** med
+   vores værktøjer koblet på. Den, der lyder mest menneskelig under ca. 1 sek., vinder.
 
 ## 4b. Turtagning: lyde som et menneske
-- **Afbrydes Adrian**, stopper han ikke med det samme. Er det et lille «mm/ja» (backchannel), taler han
-  videre. Er det en rigtig sætning, afslutter han sit ord/sin halve sætning (højst 1–2 sek.) og stopper så.
+- **Afbrydes Adrian**, reagerer han som et menneske, varieret:
+  - lille «mm/ja» (backchannel) → taler videre;
+  - rigtig sætning → siger sit ord/sin halve sætning færdig (højst 1–2 sek.) og stopper;
+  - eller **trækker det sidste ord ud** og stopper («det jeg mente vaaaar …»);
+  - eller **stopper brat** midt i ordet, når kunden siger noget vigtigt (indvending, spørgsmål).
 - **Adrian må bryde ind**, når kunden er midt i en sætning, hvis routeren vurderer, at der er en vigtig
   pointe (fx en forkert antagelse om Allio, eller et købssignal, der skal gribes). Sjældent og kort.
+  Routeren vurderer løbende, ca. **hver 6. ord** kunden siger, fordi den er hurtig og billig.
 - **Fyld og tænkelyde** («mm», «ja-ja», «øhm, lad mig lige se…») er forudindspillet i Adrians stemme og
   afspilles straks, mens svaret skrives. Claude må skrive «øh», «altså» og tags som `[sighs]`, `[laughs]`.
 
@@ -253,3 +260,7 @@ al genbrugt kode (live-coach, analyse, ugens script, booking) ligger dér.
   selvforbedringen; kun playbooken.
 - Observability: egen logning i databasen (`AiCallEvent`, `CallAnalysis`) frem for LangSmith, så
   samtaledata bliver hos os.
+
+## 15. Drift (Ernesto, 14/10)
+- Når Adrian virker, tildeles han **bestemte kampagner** og **et tidsrum**, hvor han må ringe på dem.
+- Han **booker direkte** i kalenderen uden bekræftelse fra en sælger.

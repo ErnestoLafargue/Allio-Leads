@@ -72,7 +72,9 @@ describe("router og turtagning", () => {
     expect(isBackchannel("ja ja")).toBe(true);
     expect(isBackchannel("ja men vi har altså et system")).toBe(false);
     expect(onCustomerSpeechWhileAgentSpeaks("mhm").action).toBe("keep_talking");
-    expect(onCustomerSpeechWhileAgentSpeaks("vent lige, hvad koster det").action).toBe("finish_phrase_then_yield");
+    expect(onCustomerSpeechWhileAgentSpeaks("vent lige, hvad koster det", "indvending").action).toBe("stop_now");
+    expect(onCustomerSpeechWhileAgentSpeaks("ja men altså", "andet", () => 0.1).action).toBe("finish_phrase_then_yield");
+    expect(onCustomerSpeechWhileAgentSpeaks("ja men altså", "andet", () => 0.9).action).toBe("trail_off");
   });
   it("bryder ind ved forkert antagelse og lange monologer, men højst to gange", () => {
     expect(shouldBargeIn({ label: "forkert_antagelse", customerWordsThisTurn: 8, bargeInsSoFar: 0 })).toBe(true);
