@@ -106,8 +106,17 @@ En lille, hurtig model vælger fra en fast menu på kundens foreløbige tekst, m
 `vil_hoere_mere`, `indvending:<kategori>`, `ny_indvending`, `koebssignal`, `spoergsmaal`,
 `tilbagekald`, `afvisning_endelig`, `backchannel`, `bryd_ind`. Claude får valget med og ved så, om
 den skal uddybe, håndtere indvendingen eller gå i lukning med det samme. Kendte indvendinger kan
-afspille et forudindspillet svar uden Claude. Først Claude Haiku med ét ords svar. Er det for langsomt:
-en hurtigere udbyder (Groq/Cerebras) eller en lille klassifikator trænet på vores egne analyserede samtaler.
+afspille et forudindspillet svar uden Claude.
+
+**Routeren er Jev (TypeSafe AI), besluttet af Ernesto 14/10.** Jev er en «System One»-beslutningsmodel:
+den skriver ikke tekst, men returnerer typede beslutninger på ca. 70–500 ms til ca. $0,042 pr. million
+input-tokens (output gratis). Det passer præcist til routeren:
+- **Choice:** kundens tur → én label fra menuen ovenfor (`ROUTER_LABELS` i `lib/ai-saelger/router.ts`).
+- **Noul (ja/nej med sandsynlighed):** «skal Adrian bryde ind nu?», kaldt ca. hver 6. ord.
+- **Score:** kundens interesse (0–1) til at vælge mellem uddyb og lukning.
+Forbehold: Jev er i early access (september 2026), kontekst 32K, kun tekst. Endpoint og SDK
+(`@typesafe-ai/sdk`, `api.typesafe.ai`) bekræftes mod TypeSafes egne docs, og dansk testes på rigtige
+kundecitater fra jeres samtaler, før den bruges live. Claude Haiku er reserve.
 
 ## 4d. Læring
 - **Opstart på sælgerdata (én gang):** kun lange samtaler med interesse og `CallAnalysis.overallScore`

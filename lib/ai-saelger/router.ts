@@ -1,7 +1,8 @@
 /**
- * Routeren: en lille, hurtig model vælger ét punkt fra en fast menu ud fra kundens (måske ufærdige)
- * tur, før Claude skriver svaret. Valget styrer, om agenten uddyber, håndterer en indvending, bryder
- * ind eller går i lukning. Svaret er ét ord, så det kan komme på ca. 100–300 ms.
+ * Routeren: Jev (TypeSafe AI, «System One»-beslutningsmodel, ca. 70 ms) vælger ét punkt fra en fast
+ * menu ud fra kundens (måske ufærdige) tur, før Claude skriver svaret, og vurderer løbende, om agenten
+ * skal bryde ind. Valget styrer, om agenten uddyber, håndterer en indvending, bryder ind eller går i
+ * lukning. Claude Haiku med ét ords svar (routerSystemPrompt) er reserve.
  */
 
 export const ROUTER_LABELS = [
