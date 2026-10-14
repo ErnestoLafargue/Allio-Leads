@@ -327,3 +327,19 @@ al genbrugt kode (live-coach, analyse, ugens script, booking) ligger dér.
 ## 15. Drift (Ernesto, 14/10)
 - Når Adrian virker, tildeles han **bestemte kampagner** og **et tidsrum**, hvor han må ringe på dem.
 - Han **booker direkte** i kalenderen uden bekræftelse fra en sælger.
+
+## 16. Sådan lærer Adrian af Ernestos feedback (14/10)
+Feedback gives to steder: **Tal med Adrian** (⏸ pause, 👍/👎 på hvert svar med *hvorfor*, og ved 👎 et bedre
+svar) og **Træn Adrian** (øvekort med rigtige, rensede kundecitater; dit svar og hvorfor). Alt gemmes i
+`AiSaelgerLesson` med sammenhængen (de seneste replikker), Jevs label, playbook og model. Fire lag:
+1. **Lektioner med det samme:** Ernestos svar fra øvekortene (højst 4 pr. situation) og de nyeste svar fra
+   samtaler står i Adrians systemprompt som «Sådan svarer Ernesto», med begrundelse og «ikke sådan»-svar.
+2. **Relevans pr. tur:** når Jev har sat label på kundens replik, får Adrian de 3 nyeste rettelser med samme
+   label med i netop den tur (ikke i systemprompten, så prompt-cachen holder).
+3. **Principper:** «Lær af feedback» lader Sonnet 5.5 destillere al feedback og begrundelserne til højst 15
+   regler (`AiSaelgerPrinciples`, versioneret). Ernesto godkender eller afviser; kun den aktive version står i
+   systemprompten, og ældre versioner kan genaktiveres. Faste regler (pris, AI, Robinson …) ændres ikke.
+4. **Regressionstest:** «Test Adrian på dine 👎» spiller de 20 nyeste 👎 igen med samme sammenhæng og lader
+   en dommer (Haiku) vurdere, om Adrian nu svarer i ånden af Ernestos bedre svar. Andelen viser, om han
+   faktisk bliver bedre, og testen køres efter hver ny version af principperne.
+Kode: `lib/ai-saelger/training.ts`, `training-db.ts`, `principles.ts`; API `app/api/ai-saelger/{traening,principper,feedback-test}`.
