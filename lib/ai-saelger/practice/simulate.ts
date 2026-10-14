@@ -138,6 +138,8 @@ export async function simulateCall(params: {
   persona: Persona;
   todayKey: string;
   maxAgentTurns?: number;
+  /** Adrians model (standard Haiku). */
+  model?: AgentModel;
 }): Promise<SimResult> {
   const { client, variant, persona } = params;
   const result: SimResult = { persona: persona.key, variant: variant.key, lines: [{ speaker: "kunde", text: persona.answers }], booked: null, outcome: null, notes: [], endedBy: "max_ture", costUsd: 0 };
@@ -150,7 +152,7 @@ export async function simulateCall(params: {
 
   for (let turn = 0; turn < (params.maxAgentTurns ?? 24); turn++) {
     // Agentens tur (inkl. værktøjskald, til den har noget at sige).
-    const t = await agentTurn({ client, system, agentMsgs, state });
+    const t = await agentTurn({ client, system, agentMsgs, state, model: params.model });
     result.costUsd += t.costUsd;
     for (const u of t.tools) result.lines.push({ speaker: "værktøj", text: `${u.name} ${JSON.stringify(u.input)}` });
     result.booked = state.booked;

@@ -1,7 +1,7 @@
 /**
  * Øvebanen for AI-mødebookeren: hver playbook mod de simulerede kunder, med dommer.
  *
- *   npx tsx --tsconfig tsconfig.json scripts/ai-saelger-oevebane.ts <ud-mappe> [--playbooks lavt_pres,playbook_2] [--personas a,b] [--voice christian-v3c]
+ *   npx tsx --tsconfig tsconfig.json scripts/ai-saelger-oevebane.ts <ud-mappe> [--playbooks lavt_pres,playbook_2] [--personas a,b] [--voice christian-v3c] [--model claude-sonnet-5-5]
  *
  * Hver samtale gemmes også som <navn>.json; findes den allerede i ud-mappen, genbruges den (så en afbrudt
  * kørsel kan fortsættes uden at betale igen). En samtale, der fejler (fx API-kredit), stopper ikke resten.
@@ -15,7 +15,7 @@ import { createAnthropicClient } from "@/lib/anthropic-client";
 import { APPROACHES, VOICES, type ApproachKey } from "@/lib/ai-saelger/agents";
 import { judgeCall, type JudgeResult } from "@/lib/ai-saelger/practice/judge";
 import { PERSONAS } from "@/lib/ai-saelger/practice/personas";
-import { simulateCall, transcriptText, type SimResult } from "@/lib/ai-saelger/practice/simulate";
+import { AGENT_MODEL, AGENT_MODELS, simulateCall, transcriptText, type AgentModel, type SimResult } from "@/lib/ai-saelger/practice/simulate";
 
 function arg(name: string): string | undefined {
   const i = process.argv.indexOf(`--${name}`);
@@ -44,6 +44,8 @@ async function main() {
   const personas = arg("personas") ? PERSONAS.filter((p) => arg("personas")!.split(",").includes(p.key)) : PERSONAS;
   const voice = VOICES.find((v) => v.key === (arg("voice") ?? "christian-v3c"))!;
   const todayKey = new Date().toISOString().slice(0, 10);
+  const model = (arg("model") ?? AGENT_MODEL) as AgentModel;
+  if (!(model in AGENT_MODELS)) throw new Error(`Ukendt model: ${model} (${Object.keys(AGENT_MODELS).join(", ")})`);
   const client = createAnthropicClient();
 
   type Row = { sim: SimResult; judge: JudgeResult | null; judgeCost: number; error?: string };
@@ -61,7 +63,7 @@ async function main() {
       }
       let sim: SimResult;
       try {
-        sim = await simulateCall({ client, variant, playbook, persona, todayKey });
+        sim = await simulateCall({ client, variant, playbook, persona, todayKey, model });
       } catch (e) {
         console.log(`${name}: FEJL (${String(e).slice(0, 160)})`);
         return null;
@@ -99,7 +101,7 @@ async function main() {
   });
   writeFileSync(
     join(outDir, "oversigt.md"),
-    `# Øvebanen ${todayKey}\n\nStemme: ${voice.key} · Samtaler: ${rows.length}${failed ? ` (${failed} fejlede; kør igen for at fortsætte)` : ""} · Pris i alt: $${total.toFixed(2)}\n\n| Playbook | Booket | Åbning | Dialog | Indvendinger | Lukning | Menneskelig | Regelbrud |\n|---|---|---|---|---|---|---|---|\n${byPb.join("\n")}\n\n## Pr. samtale\n${rows.map((r) => `- **${r.sim.variant.split("/")[0]} · ${r.sim.persona}:** ${r.sim.booked ? "booket" : "ikke booket"}. ${r.judge?.hvorfor_udfaldet ?? r.error ?? ""}`).join("\n")}\n`,
+    `# Øvebanen ${todayKey}\n\nAdrian: ${model} · Stemme: ${voice.key} · Samtaler: ${rows.length}${failed ? ` (${failed} fejlede; kør igen for at fortsætte)` : ""} · Pris i alt: $${total.toFixed(2)}\n\n| Playbook | Booket | Åbning | Dialog | Indvendinger | Lukning | Menneskelig | Regelbrud |\n|---|---|---|---|---|---|---|---|\n${byPb.join("\n")}\n\n## Pr. samtale\n${rows.map((r) => `- **${r.sim.variant.split("/")[0]} · ${r.sim.persona}:** ${r.sim.booked ? "booket" : "ikke booket"}. ${r.judge?.hvorfor_udfaldet ?? r.error ?? ""}`).join("\n")}\n`,
   );
   console.log(`I alt $${total.toFixed(2)}`);
 }
