@@ -9,6 +9,10 @@ const nextConfig: NextConfig = {
   turbopack: {
     root: appRoot,
   },
+  // Playbooks læses fra disk, når man taler med AI-sælgeren.
+  outputFileTracingIncludes: {
+    "/api/ai-saelger/samtale": ["./docs/ai-saelger/playbooks/**/*"],
+  },
 };
 
 export default nextConfig;

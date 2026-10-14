@@ -64,3 +64,11 @@ export function parseRouterLabel(raw: string): RouterLabel {
 
 /** Labels, hvor agenten må bryde ind, selv om kunden ikke er færdig. */
 export const BARGE_IN_LABELS: ReadonlySet<RouterLabel> = new Set(["forkert_antagelse", "taler_for_meget"]);
+
+/**
+ * Routerens valg til Claude (lægges efter kundens tur), så Adrian ved, om han skal uddybe, tage en
+ * indvending, rette en forkert antagelse eller gå i lukning med det samme.
+ */
+export function withRouterHint(kundensTur: string, label: RouterLabel, interest?: number): string {
+  return `${kundensTur}\n\n[Router: ${label} – ${ROUTER_MENU[label]}${interest !== undefined ? `; sikkerhed ${Math.round(interest * 100)} %` : ""}]`;
+}
