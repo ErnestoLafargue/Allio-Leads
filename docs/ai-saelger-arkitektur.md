@@ -137,10 +137,10 @@ alternativer (`ok`) er sat i hånden.
 | kun kundens tur | 70–72 % | 91–92 % | 91 % | 128–151 / 148–177 ms |
 | med Adrians sidste replik (`sidsteAgentReplik`) | 71–72 % | **94–95 %** | **100 %** | 129–155 / 156–184 ms |
 
-- **Sidste replik med (a):** hjælper og koster ca. 1–4 ms. Købssignal 82 → 91 % forsvarlig («Mandag
-  klokken 13:30.» efter «Så på mandag klokken 13:30?» rammes nu), korte svar 91 → 100 %; ingen replik
-  blev forkert af det. Spørgsmål er 100 % forsvarlig i begge; «vil høre mere» kaldes næsten altid
-  `spoergsmaal` (forsvarligt). Tilbage: «jeg vil tænke over det» → `tilbagekald` (bør være indvending).
+- **Sidste replik med (a):** hjælper og koster ca. 1–4 ms. Købssignal 73–82 → 91 % forsvarlig («Mandag
+  klokken 13:30.» efter «Så på mandag klokken 13:30?» rammes nu), korte svar 91 → 100 %. Spørgsmål
+  ligger på 93–100 % forsvarlig med og uden; «vil høre mere» kaldes næsten altid `spoergsmaal`
+  (forsvarligt). Tilbage: «jeg vil tænke over det» → `tilbagekald` (bør være indvending).
 - **Noul ved turslut (b)** (17 med facit ja, 99 nej; med sidste replik): 0,5 fanger 7–8/17 med 1 % falske;
   **0,3 fanger 15–16/17 med 8–10 % falske**; 0,3 ELLER Choice giver det samme; **0,3 OG Choice fanger
   12–13/17 med 2 % falske**. AUC 0,96.
