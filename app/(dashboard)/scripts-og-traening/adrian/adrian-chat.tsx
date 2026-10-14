@@ -48,6 +48,8 @@ export function AdrianChat({ playbooks, models, voices }: { playbooks: Option[];
   const pending = useRef<{ text: string; at: number } | null>(null);
   const speaking = useRef(false);
   const ending = useRef(false);
+  const starting = useRef(false);
+  const lastUtterance = useRef<{ text: string; at: number } | null>(null);
   const [paused, setPaused] = useState(false);
   const pausedRef = useRef(false);
 
@@ -129,6 +131,11 @@ export function AdrianChat({ playbooks, models, voices }: { playbooks: Option[];
   const onUtterance = (text: string) => {
     if (ending.current || pausedRef.current) return;
     const at = performance.now();
+    // Samme replik to gange lige efter hinanden (fx et ekstra «<end>» fra Soniox): send den ikke igen.
+    const norm = (t: string) => t.toLowerCase().replace(/[^a-zæøå0-9 ]/g, "").trim();
+    const prev = lastUtterance.current;
+    if (prev && at - prev.at < 4000 && (norm(text) === norm(prev.text) || norm(text).startsWith(norm(prev.text)))) return;
+    lastUtterance.current = { text, at };
     if (busy.current) {
       pending.current = { text: pending.current ? `${pending.current.text} ${text}` : text, at };
       return;
@@ -137,6 +144,11 @@ export function AdrianChat({ playbooks, models, voices }: { playbooks: Option[];
   };
 
   const call = async () => {
+    // Kun én forbindelse ad gangen (et dobbeltklik mens browseren spørger om mikrofonen gav to).
+    if (starting.current) return;
+    starting.current = true;
+    hangUp();
+    lastUtterance.current = null;
     setError(null);
     setEntries([]);
     setState({ booked: null, outcome: null, notes: [] });
@@ -174,9 +186,11 @@ export function AdrianChat({ playbooks, models, voices }: { playbooks: Option[];
         },
       });
       stream.current = { soniox, mic };
+      starting.current = false;
       setPhase("opkald");
       setStatus("Det ringer … tag telefonen og sig hej");
     } catch (e) {
+      starting.current = false;
       setError(e instanceof Error ? e.message : "Kunne ikke starte mikrofonen");
     }
   };
