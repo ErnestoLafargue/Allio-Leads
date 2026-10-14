@@ -25,9 +25,20 @@ const PRICES: Record<string, Price> = {
 /** Modeller med server-side refusal-fallback ("default"-formen) på Claude API'et. */
 const FALLBACK_MODELS: ReadonlySet<string> = new Set(["claude-opus-5", "claude-opus-5-5", "claude-sonnet-5-5"]);
 
+/**
+ * Nøglen: ANTHROPIC_API_KEY, ellers ALLIO_ANTHROPIC_API_KEY (Claude Code-cloudmiljøer reserverer
+ * ANTHROPIC_API_KEY til Claude Code selv, så den når ikke scripts, der køres derfra).
+ */
+export function anthropicApiKey(): string | undefined {
+  return process.env.ANTHROPIC_API_KEY?.trim() || process.env.ALLIO_ANTHROPIC_API_KEY?.trim() || undefined;
+}
+
 export function createAnthropicClient(): Anthropic {
   const workspaceId = process.env.ANTHROPIC_WORKSPACE_ID?.trim();
-  return new Anthropic(workspaceId ? { defaultHeaders: { "anthropic-workspace-id": workspaceId } } : {});
+  return new Anthropic({
+    apiKey: anthropicApiKey(),
+    ...(workspaceId ? { defaultHeaders: { "anthropic-workspace-id": workspaceId } } : {}),
+  });
 }
 
 export type Usage = {

@@ -3,7 +3,7 @@
  *
  *   npx tsx --tsconfig tsconfig.json scripts/ai-saelger-oevebane.ts <ud-mappe> [--playbooks lavt_pres,playbook_2] [--personas a,b] [--voice christian-v3c]
  *
- * Kræver ANTHROPIC_API_KEY (og ANTHROPIC_WORKSPACE_ID). Skriver én .md pr. samtale, resultater.json og
+ * Kræver ANTHROPIC_API_KEY eller ALLIO_ANTHROPIC_API_KEY (og ANTHROPIC_WORKSPACE_ID). Skriver én .md pr. samtale, resultater.json og
  * oversigt.md i ud-mappen. Rører ikke databasen.
  */
 import { mkdirSync, readFileSync, writeFileSync } from "node:fs";

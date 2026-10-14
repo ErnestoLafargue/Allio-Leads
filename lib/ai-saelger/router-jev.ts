@@ -61,10 +61,14 @@ export async function routeWithJev(client: TypeSafeClient, kundensTur: string, s
 }
 
 /** Kun Noul (det billige kald ca. hver 6. ord, mens kunden taler). */
-export async function bargeInWithJev(client: TypeSafeClient, foreloebigTekst: string): Promise<{ p: number; ms: number }> {
+export async function bargeInWithJev(
+  client: TypeSafeClient,
+  foreloebigTekst: string,
+  sidsteAgentReplik?: string,
+): Promise<{ p: number; ms: number }> {
   const t0 = performance.now();
   const r = await client.systemOne({
-    state: { kontekst: KONTEKST, kundens_tur: foreloebigTekst },
+    state: { kontekst: KONTEKST, ...(sidsteAgentReplik ? { moedebookeren_sagde: sidsteAgentReplik } : {}), kundens_tur: foreloebigTekst },
     questions: { bryd_ind: BARGE_IN_NOUL },
   });
   return { p: r.answers.bryd_ind.noul, ms: performance.now() - t0 };

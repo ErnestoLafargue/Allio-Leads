@@ -1,13 +1,14 @@
 /**
  * Testsæt til routeren. Selve citaterne (rigtige kundereplikker) ligger IKKE i repoet; de indlæses fra en
- * JSON-fil (`[{ text, label, ok?, bryd? }]`), som scripts/ai-saelger-router-eval.ts får med `--cases`.
+ * JSON-fil (`[{ text, label, ok?, bryd?, sidsteAgentReplik? }]`), som scripts/ai-saelger-router-eval.ts får med `--cases`.
  * `label` er det bedste punkt på menuen; `ok` er andre forsvarlige punkter, fordi menuen overlapper.
+ * `sidsteAgentReplik` er sælgerens replik lige før (fx «Passer torsdag eller fredag bedst?»).
  * Facit for Noul («bryd ind?»): ja, når label er i BARGE_IN_LABELS, medmindre `bryd` er sat.
  */
 import { readFileSync } from "node:fs";
 import { BARGE_IN_LABELS, ROUTER_LABELS, type RouterLabel } from "../router";
 
-export type RouterCase = { text: string; label: RouterLabel; ok?: RouterLabel[]; bryd?: boolean };
+export type RouterCase = { text: string; label: RouterLabel; ok?: RouterLabel[]; bryd?: boolean; sidsteAgentReplik?: string | null };
 
 export function loadRouterCases(path: string): RouterCase[] {
   const raw = JSON.parse(readFileSync(path, "utf8")) as RouterCase[];

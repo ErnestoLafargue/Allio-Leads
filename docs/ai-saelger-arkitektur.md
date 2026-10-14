@@ -103,8 +103,9 @@ Soniox ca. 0,56 sek. + Claude Haiku ca. 1,1 sek. Med tekst til tale (anslået 0,
 
 ## 4c. Router før Claude (ca. 70–300 ms)
 En lille, hurtig model vælger fra en fast menu på kundens foreløbige tekst, mens kunden taler:
-`vil_hoere_mere`, `indvending:<kategori>`, `ny_indvending`, `koebssignal`, `spoergsmaal`,
-`tilbagekald`, `afvisning_endelig`, `backchannel`, `bryd_ind`. Claude får valget med og ved så, om
+`vil_hoere_mere`, `indvending`, `forkert_antagelse`, `koebssignal`, `spoergsmaal`, `tilbagekald`,
+`nyt_nummer`, `robinson`, `spoerger_om_ai`, `afvisning`, `backchannel`, `taler_for_meget`, `andet`
+(`ROUTER_LABELS`). Claude får valget med og ved så, om
 den skal uddybe, håndtere indvendingen eller gå i lukning med det samme. Kendte indvendinger kan
 afspille et forudindspillet svar uden Claude.
 
@@ -123,8 +124,40 @@ kundecitater fra jeres samtaler, før den bruges live. Claude Haiku er reserve.
 `{ model, state, questions }`. Spørgsmål: `choice` (`criteria`: label → beskrivelse; svar `choice`,
 `confidence`, `probabilities`), `noul` (`criteria.true/false`; svar `noul` = sandsynlighed for ja) og `score`;
 flere i samme kald. Modeller: `jev-latest` (standard) og `jev-preview`. Kode: `lib/ai-saelger/router-jev.ts`.
-Måling mod Haiku: `scripts/ai-saelger-router-eval.ts --cases <citater.json>`; citaterne ligger ikke i repoet,
-og der er endnu ikke målt (afventer Ernestos ja til at sende kundecitater til TypeSafe, og ANTHROPIC_API_KEY).
+Måling mod Haiku: `scripts/ai-saelger-router-eval.ts --cases <citater.json>`; citaterne ligger ikke i repoet.
+
+**Måling 14/10 (116 rigtige kundecitater, uden navne, Ernestos ja til TypeSafe):** citaterne er fra
+produktionsdatabasen: kundens citat pr. indvendingskategori i `CallAnalysis.result->objections` og
+kundesegmenter i `CallTranscript.segments` (tidsforslag, spørgsmål, korte svar, tilbagekald, Robinson,
+forkerte antagelser, lange monologer), hver med sælgerens replik lige før. Label + forsvarlige
+alternativer (`ok`) er sat i hånden.
+
+| Jev (`jev-latest`), to kørsler | præcis label | forsvarlig label | korte svar (≤ 3 ord), forsvarlig | p50 / p90 |
+|---|---|---|---|---|
+| kun kundens tur | 70–72 % | 91–92 % | 91 % | 128–151 / 148–177 ms |
+| med Adrians sidste replik (`sidsteAgentReplik`) | 71–72 % | **94–95 %** | **100 %** | 129–155 / 156–184 ms |
+
+- **Sidste replik med (a):** hjælper og koster ca. 1–4 ms. Købssignal 82 → 91 % forsvarlig («Mandag
+  klokken 13:30.» efter «Så på mandag klokken 13:30?» rammes nu), korte svar 91 → 100 %; ingen replik
+  blev forkert af det. Spørgsmål er 100 % forsvarlig i begge; «vil høre mere» kaldes næsten altid
+  `spoergsmaal` (forsvarligt). Tilbage: «jeg vil tænke over det» → `tilbagekald` (bør være indvending).
+- **Noul ved turslut (b)** (17 med facit ja, 99 nej; med sidste replik): 0,5 fanger 7–8/17 med 1 % falske;
+  **0,3 fanger 15–16/17 med 8–10 % falske**; 0,3 ELLER Choice giver det samme; **0,3 OG Choice fanger
+  12–13/17 med 2 % falske**. AUC 0,96.
+- **Live, hver 6. ord** (86 replikker, 347 trin, Choice + Noul i ét kald, p50 128 ms): Noul ≥ 0,3 alene fanger
+  15/16, men bryder falsk ind i 20 % af replikkerne undervejs (0,3 ELLER Choice: 24 %). **Noul ≥ 0,3 OG
+  Choice fanger 12/16, typisk efter 6–12 ord, med 4 % falske.** De fire, den misser, er lange monologer
+  (`taler_for_meget`), som først kan genkendes på længden.
+- Jev svarer ikke helt ens fra kørsel til kørsel (±2 citater), og ét kald ud af ca. 1.000 gik over
+  timeouten på 3 sek. Routeren skal derfor altid have en reserve (Haiku eller «ingen beslutning»).
+- **Haiku (`claude-haiku-5-5`) er ikke målt endnu:** `ANTHROPIC_API_KEY` når ikke Claude Code-cloudmiljøet
+  (navnet er reserveret), så nøglen skal ligge som `ALLIO_ANTHROPIC_API_KEY`; klienten læser begge.
+- **Anbefaling:** Jev som router, altid med Adrians sidste replik (Choice + Noul i ét kald, ca. 130 ms).
+  Mens kunden taler (hver 6. ord): **bryd ind, når Noul ≥ 0,3 OG Choice er `forkert_antagelse` eller
+  `taler_for_meget`**; et falsk indbrud er det dyreste, Adrian kan gøre. `taler_for_meget` afgøres
+  desuden på længde (fx over ca. 60 ord uden spørgsmål), ikke kun af modellen. Ved turslut bruges Choice
+  til at vælge svaret. Haiku er reserve ved timeout/fejl; den endelige sammenligning laves, når Haiku er
+  målt på de samme 116 citater.
 
 ## 4d. Læring
 - **Opstart på sælgerdata (én gang):** kun lange samtaler med interesse og `CallAnalysis.overallScore`
