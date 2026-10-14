@@ -237,9 +237,15 @@ al genbrugt kode (live-coach, analyse, ugens script, booking) ligger dér.
   10–20 om måneden), `tools.ts` (værktøjerne til Claude).
 
 ## 14. Selvforbedring af playbooks (Ernesto, 14/10)
-- **Hver 15. samtale pr. playbook** (pr. variant med samme playbook) laver Adrian en ny version af
-  playbooken ud fra de 15 seneste samtalers analyse: hvad gav møder, hvor faldt samtalerne fra, hvilke
-  indvendinger kom. Versioner og tilbagerulning som ugens script; kun hans egne samtaler bruges.
+- **Hver 15. samtale pr. playbook: en gennemgang, ikke en tvungen ændring.** Adrian analyserer de 15
+  seneste samtaler (hvad virkede, hvad virkede mindre godt, hvor faldt samtalerne fra, hvilke
+  indvendinger kom) og vælger én af tre konklusioner:
+  1. **Ændr nu:** tydelig evidens → ny version af playbooken (versioner og tilbagerulning).
+  2. **Mere data først:** et mønster, men for få samtaler → noteres som hypotese og testes bevidst
+     (inden for de 25 %) i de næste samtaler.
+  3. **Kør videre uændret:** det virker godt nok.
+  Gennemgangen gemmes med begrundelse, så Ernesto kan se, hvorfor der blev ændret eller ej. Kun hans
+  egne samtaler bruges.
 - **Udforskning:** i samtalen må Adrian afvige op til ca. 25 % fra playbooken for at prøve nye
   formuleringer og rækkefølger. Analysen markerer, hvad der var nyt, så det, der virker, kommer med i
   næste version.
