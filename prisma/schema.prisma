@@ -876,3 +876,18 @@ model LiveCoachEvent {
   @@index([createdAt])
   @@index([userId, createdAt])
 }
+
+/// «Træn Adrian»: Ernestos (eller en admins) svar på en kundereplik, som AI-mødebookeren lærer af.
+model AiSaelgerLesson {
+  id           String   @id @default(cuid())
+  /// Situation: en indvendingskategori (fx send_email) eller en fast situation (fx saelger, aabning)
+  situation    String
+  /// Det, kunden sagde (ofte et rigtigt citat fra jeres samtaler)
+  customerLine String
+  /// Svaret, Adrian skal lære af
+  answer       String
+  createdById  String?
+  createdAt    DateTime @default(now())
+
+  @@index([situation, createdAt])
+}

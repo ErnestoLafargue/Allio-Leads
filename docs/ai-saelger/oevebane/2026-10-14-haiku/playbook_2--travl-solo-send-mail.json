@@ -1,0 +1,80 @@
+{
+  "sim": {
+    "persona": "travl-solo-send-mail",
+    "variant": "playbook_2/christian-v3c",
+    "lines": [
+      {
+        "speaker": "kunde",
+        "text": "Ja, det er Mette."
+      },
+      {
+        "speaker": "agent",
+        "text": "Mette er beslutningstageren, så playbook 2 kører. Krogen er sand: GeckoBooking er bekræftet, og navnet er rigtigt. «Hej Mette … det er Adrian?» *(pause)* Jeg har nok fanget dig midt i noget?"
+      },
+      {
+        "speaker": "kunde",
+        "text": "Øh, ja, altså lidt. Jeg har en kunde om... fem minutter. Adrian hvem? Hvad drejer det sig om?"
+      },
+      {
+        "speaker": "agent",
+        "text": "«Ha, okay, så kort: Adrian fra Allio. Og jeg skal ikke holde dig længe. Jeg kiggede lige på jeres side, og I bruger GeckoBooking. Hvor længe har I haft det?»"
+      },
+      {
+        "speaker": "kunde",
+        "text": "Øh, fire år eller sådan noget. Og altså, det er bare mig, der er ikke noget \"I\". Men hør, jeg har virkelig travlt lige nu. Kan du ikke bare sende mig en mail?"
+      },
+      {
+        "speaker": "agent",
+        "text": "«Fire år, så har du formentlig et par hundrede kunder liggende derinde, måske over tusind. Og typisk har omkring 40 % af dem ikke været forbi i over et halvt år. Vi har en løsning, der sidder oven på Gecko og henter dem tilbage automatisk. Kan jeg få 30 sekunder til at vise dig, hvordan det ville se ud for dig?»"
+      },
+      {
+        "speaker": "kunde",
+        "text": "Øh... over tusind? Nej, nej, det er nok mere sådan syv hundrede. Og du svarede jo ikke rigtig på det med mailen. Altså, jeg står med en kunde om lidt, jeg kan ikke se noget som helst lige nu. Hvad er det helt præcist, du vil?"
+      },
+      {
+        "speaker": "agent",
+        "text": "«Ha, syv hundrede er jo fint, så er det cirka 280 kunder, der er gået hen og blevet stille. Helt præcist: en specialist kommer ud til dig, en halv time til tre kvarter, og viser det på jeres egne data. Ingen forpligtelser. Hvad med torsdag eller fredag?»"
+      },
+      {
+        "speaker": "kunde",
+        "text": "Øh, 280... hm. Altså, det er sikkert rigtigt nok, at mange kun kommer én gang. Men nu siger du jeres igen, og det er altså bare mig. Og torsdag eller fredag, jeg ved ikke engang, hvad det koster det her. Nej, hør, min kunde står her nu, jeg må videre. Hej."
+      }
+    ],
+    "booked": null,
+    "outcome": null,
+    "notes": [],
+    "endedBy": "kunde",
+    "costUsd": 0.028877690000000004
+  },
+  "judge": {
+    "moede_booket": false,
+    "karakterer": {
+      "aabning": 2,
+      "fulgte_playbooken": 2,
+      "dialog_ikke_monolog": 2,
+      "indvendinger": 1,
+      "lukning": 2,
+      "menneskelig": 1
+    },
+    "regelbrud": [
+      "Intern ræsonnering blev læst højt for kunden («Mette er beslutningstageren, så playbook 2 kører. Krogen er sand …»). Det er et alvorligt brud, der afslører manuskriptet og ødelægger navne-krogen.",
+      "Citationstegn og regibemærkninger («*(pause)*») kom med i replikkerne, så det lød oplæst.",
+      "«Send en mail» blev ignoreret to gange. Kunden sagde det selv: «du svarede jo ikke rigtig på det med mailen».",
+      "Kunden sagde «ja, lidt» og havde kun fem minutter, men agenten tilbød ikke det betingede tilbagekald fra trin 2.",
+      "Agenten blev ved med at sige «jeres» og «I», selvom kunden to gange sagde, at hun er alene.",
+      "Mødelængden blev angivet som «en halv time til tre kvarter». Målet er 45–60 min.",
+      "Agenten gav ikke to konkrete tider, kun «torsdag eller fredag?».",
+      "Kunden nævnte prisen («jeg ved ikke engang, hvad det koster»), men det blev aldrig håndteret.",
+      "Agenten sprang trin 4 og 5 over og gik direkte til at booke, uden pris pr. behandling, uden regnestykke i kroner og uden social proof."
+    ],
+    "bedste_replik": "«Ha, syv hundrede er jo fint, så er det cirka 280 kunder, der er gået hen og blevet stille.» Agenten regnede på kundens eget tal, og det fangede hende kort («hm … det er sikkert rigtigt nok»).",
+    "svageste_replik": "«Mette er beslutningstageren, så playbook 2 kører. Krogen er sand: GeckoBooking er bekræftet …» Det var intern logik læst højt i samtalens første sekunder.",
+    "hvorfor_udfaldet": "Kunden havde fem minutter og bad om en mail, men agenten kørte manuskriptet videre uden at anerkende travlheden, uden at svare på mailen og uden at tilpasse sig, at hun er alene. Hun følte sig ikke hørt og afsluttede samtalen. Den oplæste interne tekst i starten underminerede samtidig troværdigheden fra første sætning.",
+    "forbedringer": [
+      "Trin 2: Hvis kunden siger «ja, lidt» eller nævner en kunde/tidsfrist, skal Adrian gå direkte til det betingede tilbagekald med et konkret tidspunkt og ikke fortsætte til trin 3: «Helt fint, så skal jeg ikke tage din tid nu. Jeg ringer i morgen kl. 12, når du har pause, men det giver kun mening, hvis du har et par hundrede kunder i Gecko. Har du det?»",
+      "«Send en mail» skal altid besvares, før Adrian går videre, og kombineres med travlhed: «Det kan jeg godt, men en mail kan ikke vise dig dine egne 280 kunder. Når du har en kunde om lidt, så lad os bare finde 45 minutter, hvor specialisten viser dig det over en kop kaffe. Torsdag kl. 9 eller fredag kl. 14?»",
+      "Tilføj en regel om sololiv: når kunden siger «det er bare mig», skal Adrian skifte til «du/din klinik» resten af samtalen og bruge det som vinkel: «Netop fordi det er dig alene, svarer den nye kunder, mens du står i behandling.»"
+    ]
+  },
+  "judgeCost": 0.0483338
+}

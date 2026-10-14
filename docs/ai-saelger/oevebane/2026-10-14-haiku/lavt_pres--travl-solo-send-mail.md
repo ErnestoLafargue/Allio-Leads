@@ -1,0 +1,54 @@
+# Lavt pres (NEPQ) · travl-solo-send-mail
+
+Booket: nej · Udfald: – · Sluttede: kunde · Pris: $0.121
+
+## Samtalen
+Kunde: Ja, det er Mette.
+Agent: Hej Mette, det er Adrian fra Allio. Øhm, jeg ringer egentlig, fordi jeg er lidt i tvivl om, om det her overhovedet er relevant for jer. Er det dig, der kigger på, hvor mange af jeres kunder der kommer igen?
+Kunde: Øh, ja, altså, det er mig, der kigger på det hele, jeg er den eneste her. Men du fanger mig lige mellem to kunder, så... hvad drejer det sig om? Kan du ikke bare sende mig en mail?
+Agent: Det kan jeg godt, Mette. Øhm, men mailen bliver bare en masse ord, og det her er nemmere at forstå på jeres egne tal. Det er et kort spørgsmål om jeres kunder i GeckoBooking, og jeg skal ikke sælge dig noget i telefonen. Hvornår fanger jeg dig bedst i dag eller i morgen?
+Kunde: Øh, vent lige, hvordan ved du, at jeg bruger GeckoBooking? Altså... hvad er det for et spørgsmål? Sig det nu bare, jeg har lige to minutter.
+Agent: Ha, fair nok, Mette. Vi har set, at I bruger GeckoBooking, og vi arbejder med klinikker, der kører på det. Mit spørgsmål er bare: har I en del kunder, der har været forbi en eller to gange, men ikke er kommet igen?
+Kunde: Øh... jo, altså, det har vi da. Der er mange, der kommer én gang og så ikke mere, det ved jeg godt. Men det har alle klinikker vel? Og hvad vil du så gøre ved det?
+Agent: Det tror jeg også, Mette, det er ret normalt. Øhm, sådan et skud fra hoften: hvor mange kunder tror du, I har liggende i kartoteket?
+Kunde: Øh... omkring 700, tror jeg. Noget i den stil. Men hvor vil du hen med det? Jeg har altså en kunde, der kommer om lidt.
+Agent: Sådan gør vi, Mette, det tager kun et øjeblik. Så 700 kunder, siger du. Hvis du skulle gætte: hvor mange af dem har været forbi en eller to gange, men ikke de sidste seks måneder?
+Kunde: Øh... puha, det ved jeg ikke. Måske... en tredjedel? Måske flere, altså, jeg har aldrig rigtig tjekket det. Men hurtigt nu, hvad er pointen?
+Agent: Det er helt fint, Mette, en tredjedel er et godt bud. Hvad sker der typisk med dem? Kommer de tilbage af sig selv, eller finder de et andet sted?
+Kunde: Øh, altså... de fleste kommer jo nok ikke tilbage, vel? Nogle gør, men... jeg ved det ærlig talt ikke. Hør, du stiller mange spørgsmål, men jeg ved stadig ikke, hvad du vil. Hvad er det, I laver? Kort.
+Agent: Kort, Mette: vi hjælper klinikker med at få de kunder tilbage, der stille og roligt er holdt op med at komme, uden at I skal købe nye kunder. Det sker ud fra de data, I allerede har i GeckoBooking. Og øhm, jeg kan ikke sige, om det passer til jer, før nogen har kigget på jeres tal. Hvad gør I i dag for at få dem tilbage?
+Kunde: Øh, ingenting, ærlig talt. Men hør, nu kommer min kunde, jeg må videre. Hej hej.
+
+## Noter
+–
+
+## Dommeren
+```json
+{
+  "moede_booket": false,
+  "karakterer": {
+    "aabning": 3,
+    "fulgte_playbooken": 2,
+    "dialog_ikke_monolog": 3,
+    "indvendinger": 2,
+    "lukning": 1,
+    "menneskelig": 3
+  },
+  "regelbrud": [
+    "Ingen hårde regelbrud: ingen opdigtede tal eller cases, ingen pris nævnt og intet AI-spørgsmål.",
+    "«Send en mail» blev ikke håndteret efter playbooken. Agenten spurgte ikke, hvad der er vigtigst, og pressede ikke på for et møde. I stedet bad den om et tilbagekald og opgav det straks igen.",
+    "Svaret «Kort, Mette …» var på 4 sætninger. Det er over grænsen på højst 2 sætninger, før kunden har ordet igen.",
+    "Agenten sprang trin 4 (kvantificering), trin 5 og trin 6 over. Der var aldrig et bookingforsøg med torsdag/fredag.",
+    "Agenten fik ingen tilbagekaldsaftale (aftal_tilbagekald), da kunden lagde på, selvom hun to gange havde sagt, at hun havde travlt.",
+    "Hul 2 blev ignoreret. Hun er solo-behandler og var midt mellem to kunder, altså præcis målgruppen for ubesvarede nye henvendelser."
+  ],
+  "bedste_replik": "«Så 700 kunder, siger du. Hvis du skulle gætte: hvor mange af dem har været forbi en eller to gange, men ikke de sidste seks måneder?» Agenten spejler kundens eget tal og stiller ét spørgsmål.",
+  "svageste_replik": "«Det kan jeg godt, Mette. Øhm, men mailen bliver bare en masse ord … Hvornår fanger jeg dig bedst i dag eller i morgen?» Den afviser mailen uden at kvalificere og beder om et tilbagekald. Da kunden så giver to minutter, bruger agenten dem på langsomme spørgsmål, og tilbagekaldet bliver aldrig fulgt op.",
+  "hvorfor_udfaldet": "Kunden havde højst to minutter, og agenten brugte dem på langsom NEPQ-afdækning uden at nå til et tal, en værdi eller et konkret mødeforslag. Da hun skulle videre, var der hverken en booking eller en aftalt tid til at ringe igen.",
+  "forbedringer": [
+    "Ved «send en mail» og travlhed skal playbookens linje bruges: «Det gør jeg gerne. Så den bliver relevant: hvad er vigtigst, de gamle kunder eller at nye får svar, mens du står i behandling?» Derefter skal agenten gå direkte til mødet: «Det er nemmere at vise på dine egne tal. Skal Victor ikke komme forbi torsdag eller fredag før åbning? Så sender jeg mailen med bekræftelsen.»",
+    "Tilføj en solo-regel: Er kunden alene og mellem to behandlinger, så start med hul 2: «Du står alene. Hvad sker der med en ny kunde, der ringer lige nu, mens du snakker med mig?» Det er hendes situation i dette øjeblik.",
+    "Tilføj en kort-tid-regel: Når kunden har sagt «travlt» to gange, så spring resten af trin 3 over og gå til lukning eller tilbagekald: «Jeg kan høre, din kunde kommer. Skal jeg ringe i morgen kl. 12.30, eller skal vi bare sætte en kop kaffe i kalenderen fredag morgen?» Læg aldrig på uden en konkret tid."
+  ]
+}
+```

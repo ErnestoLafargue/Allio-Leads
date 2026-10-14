@@ -6,7 +6,8 @@
 import { ALLIO_PRICE_TEXT } from "@/lib/allio-offer";
 import { APPROACHES, type Variant } from "./agents";
 
-export function aiSaelgerSystemPrompt(variant: Variant, playbook: string): string {
+/** `training`: «Sådan svarer Ernesto» + svarbanken (lib/ai-saelger/training-db.ts), lægges sidst. */
+export function aiSaelgerSystemPrompt(variant: Variant, playbook: string, training = ""): string {
   const name = variant.voice.agentName;
   const approach = APPROACHES[variant.approach];
   const delivery = variant.voice.audioTags
@@ -57,5 +58,5 @@ Læg ingen besked. Sæt udfaldet VOICEMAIL og afslut.
 ## Tilgang: ${approach.label}
 ${approach.summary}
 
-${playbook.trim() || "(Playbooken skrives sammen med Ernesto.)"}`;
+${playbook.trim() || "(Playbooken skrives sammen med Ernesto.)"}${training.trim() ? `\n\n${training.trim()}` : ""}`;
 }

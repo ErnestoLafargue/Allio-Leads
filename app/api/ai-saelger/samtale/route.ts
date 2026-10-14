@@ -8,6 +8,7 @@ import { AGENT_MODELS, agentTurn, leadMessage, type AgentModel, type ToolState }
 import { withRouterHint } from "@/lib/ai-saelger/router";
 import { createJevClient, routeWithJev, type JevRoute } from "@/lib/ai-saelger/router-jev";
 import { aiSaelgerSystemPrompt } from "@/lib/ai-saelger/system-prompt";
+import { adrianTrainingSection } from "@/lib/ai-saelger/training-db";
 import { createAnthropicClient } from "@/lib/anthropic-client";
 import { getViewer } from "@/lib/scripts-traening/queries";
 
@@ -46,7 +47,7 @@ export async function POST(req: Request) {
 
   const variant = { key: `${approach}/christian-v3c`, approach, voice: VOICES.find((v) => v.key === "christian-v3c")! };
   const playbook = readFileSync(join(process.cwd(), APPROACHES[approach].file!), "utf8");
-  const system = aiSaelgerSystemPrompt(variant, playbook);
+  const system = aiSaelgerSystemPrompt(variant, playbook, await adrianTrainingSection());
   const state: ToolState = { booked: b?.state?.booked ?? null, outcome: b?.state?.outcome ?? null, notes: b?.state?.notes ?? [], todayKey: new Date().toISOString().slice(0, 10) };
 
   // Jev: label + bryd ind (ca. 130 ms). Fejler Jev, svarer Adrian uden hint.
