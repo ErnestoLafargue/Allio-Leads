@@ -7,22 +7,13 @@
  * svar fra sælgernes samtaler.
  */
 import { useEffect, useRef, useState } from "react";
+import { speak, stopSpeaking } from "@/lib/tts/speak-client";
 import { startSonioxStream, SpeakerTranscript, type SonioxStream } from "@/lib/live-coach/soniox-stream";
 
 type Option = { key: string; label: string };
-type Card = { situation: string; label: string; customerLine: string; strong: string[] };
+type Card = { situation: string; label: string; customerLine: string; agentBefore: string | null; strong: string[] };
 type Lesson = { id: string; situation: string; label: string; customerLine: string; answer: string };
 
-function speak(text: string) {
-  try {
-    window.speechSynthesis.cancel();
-    const u = new SpeechSynthesisUtterance(text.replace(/\[[^\]]*\]/g, " "));
-    u.lang = "da-DK";
-    window.speechSynthesis.speak(u);
-  } catch {
-    /* ingen oplæsning i denne browser */
-  }
-}
 
 export function AdrianTrainer({ situations }: { situations: Option[] }) {
   const [situation, setSituation] = useState("");
@@ -60,7 +51,7 @@ export function AdrianTrainer({ situations }: { situations: Option[] }) {
       if (!res.ok) throw new Error();
       const c = (await res.json()) as Card;
       setCard(c);
-      speak(c.customerLine);
+      speak(c.customerLine, "kunde");
     } catch {
       setError("Kunne ikke hente et kort.");
     } finally {
@@ -76,7 +67,7 @@ export function AdrianTrainer({ situations }: { situations: Option[] }) {
       const res = await fetch("/api/ai-saelger/traening/adrian", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ customerLine: card.customerLine }),
+        body: JSON.stringify({ customerLine: card.customerLine, agentBefore: card.agentBefore }),
       });
       const d = (await res.json()) as { reply?: string; error?: string };
       if (!res.ok || d.reply === undefined) throw new Error(d.error);
@@ -117,7 +108,7 @@ export function AdrianTrainer({ situations }: { situations: Option[] }) {
   const startRecording = async () => {
     setError(null);
     try {
-      window.speechSynthesis?.cancel();
+      stopSpeaking();
       const mic = await navigator.mediaDevices.getUserMedia({ audio: { echoCancellation: true, noiseSuppression: true } });
       const res = await fetch("/api/live-coach/session", { method: "POST" });
       if (!res.ok) throw new Error();
@@ -174,8 +165,9 @@ export function AdrianTrainer({ situations }: { situations: Option[] }) {
           <div className="mt-4 space-y-4">
             <div>
               <p className="text-[11px] font-semibold uppercase tracking-wider text-stone-400">{card.label}</p>
+              {card.agentBefore ? <p className="mt-1 text-sm leading-relaxed text-stone-500">Sælgeren: «{card.agentBefore}»</p> : null}
               <p className="mt-1 text-lg leading-relaxed text-stone-900">Kunden: «{card.customerLine}»</p>
-              <button type="button" onClick={() => speak(card.customerLine)} className="text-xs text-stone-500 hover:text-stone-800">
+              <button type="button" onClick={() => speak(card.customerLine, "kunde")} className="text-xs text-stone-500 hover:text-stone-800">
                 🔊 Hør igen
               </button>
             </div>
@@ -214,7 +206,7 @@ export function AdrianTrainer({ situations }: { situations: Option[] }) {
               <div className="rounded-xl bg-emerald-50 p-3 ring-1 ring-emerald-100">
                 <p className="text-xs font-semibold uppercase tracking-wide text-emerald-800">Adrian nu</p>
                 <p className="mt-1 text-[15px] text-stone-900">{adrian || "(siger ingenting)"}</p>
-                <button type="button" onClick={() => speak(adrian)} className="text-xs text-stone-500 hover:text-stone-800">
+                <button type="button" onClick={() => speak(adrian, "christian-v3c")} className="text-xs text-stone-500 hover:text-stone-800">
                   🔊
                 </button>
               </div>

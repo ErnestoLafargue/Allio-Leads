@@ -18,13 +18,22 @@ export const FIXED_SITUATIONS = {
 } as const satisfies Record<string, { label: string; lines: readonly string[] }>;
 
 export type FixedSituation = keyof typeof FIXED_SITUATIONS;
+
+/** Lektioner fra 👍/👎 i «Tal med Adrian» (ikke et øvekort). */
+export const FROM_CALL_SITUATION = "fra_samtale";
 export type TrainingCategory = Exclude<ObjectionCategory, "other">;
 export type Situation = TrainingCategory | FixedSituation;
 
 export const TRAINING_CATEGORIES = (Object.keys(OBJECTION_LABELS) as ObjectionCategory[]).filter((c): c is TrainingCategory => c !== "other");
 
 export function situationLabel(s: string): string {
+  if (s === FROM_CALL_SITUATION) return "Fra samtaler med Adrian";
   return (FIXED_SITUATIONS as Record<string, { label: string }>)[s]?.label ?? OBJECTION_LABELS[s as ObjectionCategory] ?? s;
+}
+
+/** Situation for en lektion (øvekortenes situationer + lektioner fra samtaler). */
+export function isLessonSituation(s: string): boolean {
+  return s === FROM_CALL_SITUATION || isSituation(s);
 }
 
 export function isSituation(s: string): s is Situation {
@@ -33,21 +42,22 @@ export function isSituation(s: string): s is Situation {
 
 export const ALL_SITUATIONS: readonly Situation[] = [...(Object.keys(FIXED_SITUATIONS) as FixedSituation[]), ...TRAINING_CATEGORIES];
 
-export type Lesson = { situation: string; customerLine: string; answer: string };
+export type Lesson = { situation: string; customerLine: string; answer: string; avoidAnswer?: string | null };
 
 /**
  * Sektionen til Adrians systemprompt. Ernestos lektioner først (højst `perSituation` nyeste pr. situation),
  * derefter svarbanken fra sælgernes samtaler. Tom streng, hvis der intet er.
  */
 export function lessonsPromptSection(lessons: readonly Lesson[], bank: Partial<Record<ObjectionCategory, string[]>> = {}, perSituation = 4): string {
+  const limit = (s: string) => (s === FROM_CALL_SITUATION ? 12 : perSituation);
   const bySituation = new Map<string, Lesson[]>();
   for (const l of lessons) {
     const list = bySituation.get(l.situation) ?? [];
-    if (list.length < perSituation) list.push(l);
+    if (list.length < limit(l.situation)) list.push(l);
     bySituation.set(l.situation, list);
   }
   const ernesto = [...bySituation.entries()].map(
-    ([s, list]) => `### ${situationLabel(s)}\n${list.map((l) => `- Kunden: «${l.customerLine}»\n  Ernesto: «${l.answer}»`).join("\n")}`,
+    ([s, list]) => `### ${situationLabel(s)}\n${list.map((l) => `- Kunden: «${l.customerLine}»${l.avoidAnswer ? `\n  Ikke sådan (dit svar, som Ernesto afviste): «${l.avoidAnswer}»` : ""}\n  Ernesto: «${l.answer}»`).join("\n")}`,
   );
   const banked = Object.entries(bank)
     .filter(([, list]) => list?.length)
