@@ -35,6 +35,19 @@ export const AI_SAELGER_TOOLS: Anthropic.Tool[] = [
     },
   },
   {
+    name: "beregn_potentiale",
+    description:
+      "Regn tallene ud til denne kunde, når du kender antal kunder i kartoteket (og gerne prisen pr. behandling): inaktive, genbookinger om måneden og kroner. Brug tallene i stedet for at regne selv.",
+    input_schema: {
+      type: "object",
+      properties: {
+        kunder_i_kartotek: { type: "number" },
+        pris_pr_behandling: { type: "number", description: "Kr. pr. typisk behandling, hvis kendt." },
+      },
+      required: ["kunder_i_kartotek"],
+    },
+  },
+  {
     name: "skriv_note",
     description:
       "Gem en note på leadet til specialisten, der tager ud: bookingsystem, antal kunder i kartoteket, om prisen er nævnt og reaktionen, hvad de har brugt før, beslutningstagere, andet relevant. Brug den løbende.",
@@ -102,6 +115,7 @@ export const AI_SAELGER_TOOLS: Anthropic.Tool[] = [
 
 export type AiSaelgerToolName =
   | "find_ledige_tider"
+  | "beregn_potentiale"
   | "book_moede"
   | "skriv_note"
   | "aftal_tilbagekald"
