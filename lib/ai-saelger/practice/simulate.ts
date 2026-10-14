@@ -95,7 +95,7 @@ export async function simulateCall(params: {
 
   for (let turn = 0; turn < (params.maxAgentTurns ?? 24); turn++) {
     // Agentens tur (inkl. værktøjskald, til den har noget at sige).
-    let spoken = "";
+    const spokenParts: string[] = [];
     let hangup = false;
     for (let step = 0; step < 6; step++) {
       const res = await client.messages.create({
@@ -108,7 +108,7 @@ export async function simulateCall(params: {
       });
       result.costUsd += usageCostUsd(res.usage, AGENT_MODEL);
       agentMsgs.push({ role: "assistant", content: res.content });
-      spoken += res.content.flatMap((b) => (b.type === "text" ? [b.text] : [])).join(" ");
+      spokenParts.push(...res.content.flatMap((b) => (b.type === "text" ? [b.text] : [])));
       const uses = res.content.filter((b): b is Anthropic.ToolUseBlock => b.type === "tool_use");
       if (uses.length === 0) break;
       const results: Anthropic.ToolResultBlockParam[] = uses.map((u) => {
@@ -120,7 +120,7 @@ export async function simulateCall(params: {
       agentMsgs.push({ role: "user", content: results });
       if (hangup) break;
     }
-    spoken = spoken.replace(/\s+/g, " ").trim();
+    const spoken = spokenParts.join(" ").replace(/\s+/g, " ").trim();
     if (spoken) result.lines.push({ speaker: "agent", text: spoken });
     if (hangup) {
       result.endedBy = "agent";
@@ -131,7 +131,8 @@ export async function simulateCall(params: {
     customerMsgs.push({ role: "user", content: spoken || "(stilhed)" });
     const c = await client.messages.create({
       model: CUSTOMER_MODEL,
-      max_tokens: 400,
+      // Opus 5.5 tænker altid; med et lille max_tokens går hele budgettet til thinking, og svaret bliver tomt.
+      max_tokens: 4000,
       output_config: { effort: "low" },
       system: [{ type: "text", text: customerSystem, cache_control: { type: "ephemeral" } }],
       messages: customerMsgs,
@@ -141,7 +142,7 @@ export async function simulateCall(params: {
     customerMsgs.push({ role: "assistant", content: said || "…" });
     const ended = said.includes(HANGUP);
     const text = said.replace(HANGUP, "").trim();
-    if (text) result.lines.push({ speaker: "kunde", text });
+    result.lines.push({ speaker: "kunde", text: text || "(stilhed)" });
     if (ended) {
       result.endedBy = "kunde";
       break;
