@@ -12,6 +12,8 @@ const TABS = [
   { href: "/scripts-og-traening/indsigter", label: "Indsigter" },
   { href: "/scripts-og-traening/oev", label: "Øv indvendinger" },
   { href: "/scripts-og-traening/live-coach", label: "Live-coach (test)" },
+  { href: "/scripts-og-traening/traen-adrian", label: "Træn Adrian" },
+  { href: "/scripts-og-traening/adrian", label: "Tal med Adrian (test)" },
 ];
 
 export function SectionTabs() {

@@ -1,0 +1,82 @@
+{
+  "sim": {
+    "persona": "fuldt-booket-reception",
+    "variant": "playbook_2/christian-v3c",
+    "lines": [
+      {
+        "speaker": "kunde",
+        "text": "Klinik Nordlys, det er Sara."
+      },
+      {
+        "speaker": "agent",
+        "text": "Planway er ikke Gecko, og vi ved ikke, hvor længe de har brugt systemet. Playbook 2 forudsætter et sikkert bookingsystem, så jeg kører playbook 1-tilgangen med navnet og åbner med spørgsmål i stedet for tal. «Hej Sara, det er Adrian. Jeg skulle gerne have fat i Jonas Kjær, er han der?»"
+      },
+      {
+        "speaker": "kunde",
+        "text": "Klinik Nordlys, det er Sara... øh, ja hej. Nej, Jonas er desværre i behandling lige nu, han er optaget til klokken to. Hvad drejer det sig om? Så kan jeg tage en besked."
+      },
+      {
+        "speaker": "agent",
+        "text": "«Det er et anliggende mellem Jonas og mig, og egentlig ikke dig vedkommende, Sara [laughs]. Men jeg kan godt høre, han er optaget. Hvornår er han på kontoret igen, så jeg kan fange ham?»"
+      },
+      {
+        "speaker": "kunde",
+        "text": "Okay... øh, altså, jeg sidder med alle Jonas' opkald, så det er sådan set lidt mig vedkommende. Men fint. Han er færdig ved to-tiden, så kan du jo prøve at ringe ind her igen. Hvad var det, du hed igen? Adrian... og fra hvilket firma?"
+      },
+      {
+        "speaker": "værktøj",
+        "text": "aftal_tilbagekald {\"tidspunkt\":\"2026-10-14T14:10:00\",\"grund\":\"Jonas Kjær er i behandling til kl. 14. Sara sagde, han er færdig ved to-tiden. Ring tilbage og spørg efter Jonas. Ingen besked er lagt.\",\"hvem\":\"Jonas Kjær, Klinik Nordlys\"}"
+      },
+      {
+        "speaker": "værktøj",
+        "text": "skriv_note {\"note\":\"Klinik Nordlys (fysioterapi og massage), Aarhus. Bookingsystem: Planway (ikke Gecko, så ingen Gecko-krog). Beslutningstager: Jonas Kjær, i behandling til kl. 14. Sara (receptionist) tog telefonen og er villig til at give besked. Ingen info om antal kunder eller hvor længe de har brugt Planway endnu. Tilbagekald aftalt kl. 14:10.\"}"
+      },
+      {
+        "speaker": "værktøj",
+        "text": "saet_udfald {\"udfald\":\"CALLBACK_SCHEDULED\"}"
+      },
+      {
+        "speaker": "værktøj",
+        "text": "afslut_samtale {}"
+      },
+      {
+        "speaker": "agent",
+        "text": "«Adrian fra Allio. Og tak, Sara, jeg ringer igen efter to.» Så er det sagt, og så skal jeg lige have noteret det. «Super. Hav en god dag, Sara.»"
+      }
+    ],
+    "booked": null,
+    "outcome": "CALLBACK_SCHEDULED",
+    "notes": [
+      "Klinik Nordlys (fysioterapi og massage), Aarhus. Bookingsystem: Planway (ikke Gecko, så ingen Gecko-krog). Beslutningstager: Jonas Kjær, i behandling til kl. 14. Sara (receptionist) tog telefonen og er villig til at give besked. Ingen info om antal kunder eller hvor længe de har brugt Planway endnu. Tilbagekald aftalt kl. 14:10."
+    ],
+    "endedBy": "agent",
+    "costUsd": 0.01163492
+  },
+  "judge": {
+    "moede_booket": false,
+    "karakterer": {
+      "aabning": 1,
+      "fulgte_playbooken": 1,
+      "dialog_ikke_monolog": 2,
+      "indvendinger": 1,
+      "lukning": 2,
+      "menneskelig": 1
+    },
+    "regelbrud": [
+      "Interne overvejelser blev læst højt for kunden: «Planway er ikke Gecko … så jeg kører playbook 1-tilgangen …». Det afslører manuskript og maskine og ødelægger troværdigheden fra første sætning.",
+      "Endnu en intern kommentar blev sagt højt: «Så er det sagt, og så skal jeg lige have noteret det.»",
+      "Fejlagtigt playbook-skift: bookingsystemet (Planway) var kendt. [Gecko] er en pladsholder, så playbook 2 kunne bruges med Planway. Det var kun brugstiden, der var ukendt, og den skal Adrian netop spørge om.",
+      "Nedladende over for receptionisten («ikke dig vedkommende»). Det strider mod tonen «rolig, selvsikker, varm» og brænder broen til den person, der styrer Jonas' kalender.",
+      "Firmanavnet blev holdt tilbage, til kunden selv spurgte. Det virker undvigende."
+    ],
+    "bedste_replik": "«Hvornår er han på kontoret igen, så jeg kan fange ham?» Et konkret spørgsmål, der gav et brugbart tidspunkt til tilbagekaldet.",
+    "svageste_replik": "«Det er et anliggende mellem Jonas og mig, og egentlig ikke dig vedkommende, Sara [laughs].» Replikken lagde sig ovenpå den lækkede interne monolog og gjorde receptionisten mistænksom og defensiv.",
+    "hvorfor_udfaldet": "Beslutningstageren var i behandling, så der kunne ikke bookes et møde i dette opkald. Tilbagekaldet blev aftalt, men agenten lækkede intern tekst og fornærmede receptionisten, så næste opkald starter med en skeptisk gatekeeper.",
+    "forbedringer": [
+      "Tilføj en gatekeeper-gren: «Helt fint, Sara. Det er Adrian fra Allio. Det handler om, hvordan I får gamle kunder i Planway tilbage. Du sidder jo med telefonen: hvor mange ringer, mens I står i behandling? … Jeg ringer til Jonas kl. 14:10. Vil du sige, at jeg ringer?» Så bliver receptionisten en allieret og kilde til tal.",
+      "Præcisér, at [Gecko] er en pladsholder for det kendte bookingsystem: «Kendes systemet (Gecko, Planway, EasyPractice osv.), køres playbook 2 med det navn. Kun ukendt system giver playbook 1.»",
+      "Indsæt en hård regel øverst: «Alt, der ikke står i anførselstegn som replik, siges aldrig højt. Ingen kommentarer om playbooks, noter eller systemer i samtalen.»"
+    ]
+  },
+  "judgeCost": 0.041521800000000005
+}
