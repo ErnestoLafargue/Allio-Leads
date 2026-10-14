@@ -118,6 +118,14 @@ Forbehold: Jev er i early access (september 2026), kontekst 32K, kun tekst. Endp
 (`@typesafe-ai/sdk`, `api.typesafe.ai`) bekræftes mod TypeSafes egne docs, og dansk testes på rigtige
 kundecitater fra jeres samtaler, før den bruges live. Claude Haiku er reserve.
 
+**Bekræftet 14/10 (TypeSafes eget SDK, `@typesafe-ai/sdk` 0.6.0):** ét endpoint,
+`POST https://api.typesafe.ai/v1/systemone`, `Authorization: Bearer $TYPESAFE_API_KEY`, body
+`{ model, state, questions }`. Spørgsmål: `choice` (`criteria`: label → beskrivelse; svar `choice`,
+`confidence`, `probabilities`), `noul` (`criteria.true/false`; svar `noul` = sandsynlighed for ja) og `score`;
+flere i samme kald. Modeller: `jev-latest` (standard) og `jev-preview`. Kode: `lib/ai-saelger/router-jev.ts`.
+Måling mod Haiku: `scripts/ai-saelger-router-eval.ts --cases <citater.json>`; citaterne ligger ikke i repoet,
+og der er endnu ikke målt (afventer Ernestos ja til at sende kundecitater til TypeSafe, og ANTHROPIC_API_KEY).
+
 ## 4d. Læring
 - **Opstart på sælgerdata (én gang):** kun lange samtaler med interesse og `CallAnalysis.overallScore`
   over 60. Herfra: stærke svar pr. indvending, åbninger og lukninger der virkede, og eksempelsamtaler
