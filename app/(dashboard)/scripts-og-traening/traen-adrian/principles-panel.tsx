@@ -5,11 +5,43 @@
  * feedback, du godkender eller afviser, og «Test Adrian» spiller dine 👎 igen for at se, om han har lært det.
  */
 import { useEffect, useState } from "react";
+import { kroner } from "@/lib/ai-saelger/money";
 
 type Version = { id: string; version: number; text: string; status: string; lessonCount: number; rationale: string | null; costUsd: number; createdAt: string };
 type TestResult = { model: string; passed: number; total: number; costUsd: number; results: { id: string; customerLine: string; newAnswer: string; pass: boolean; why: string }[] };
 
 const STATUS: Record<string, string> = { active: "Aktiv", draft: "Forslag", rejected: "Afvist", retired: "Tidligere" };
+
+const rules = (text: string) =>
+  text
+    .split("\n")
+    .map((l) => l.replace(/^\s*[-•]\s*/, "").trim())
+    .filter(Boolean);
+
+/** Reglerne som nummereret liste: overskriften (før første kolon) med fed, nye regler markeret. */
+function RuleList({ text, compareTo }: { text: string; compareTo?: string }) {
+  const old = new Set(compareTo ? rules(compareTo) : []);
+  return (
+    <ol className="space-y-2">
+      {rules(text).map((r, i) => {
+        const cut = r.indexOf(":");
+        const head = cut > 0 && cut < 70 ? r.slice(0, cut) : null;
+        const body = head ? r.slice(cut + 1).trim() : r;
+        const isNew = compareTo !== undefined && !old.has(r);
+        return (
+          <li key={i} className="flex gap-3 rounded-xl bg-white px-3 py-2 ring-1 ring-stone-200">
+            <span className="mt-0.5 flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-stone-100 text-xs font-semibold text-stone-600">{i + 1}</span>
+            <p className="text-sm leading-relaxed text-stone-800">
+              {isNew ? <span className="mr-1.5 rounded-full bg-amber-100 px-1.5 py-0.5 text-[10px] font-semibold uppercase text-amber-800">Ny</span> : null}
+              {head ? <b className="font-semibold text-stone-900">{head}: </b> : null}
+              {body}
+            </p>
+          </li>
+        );
+      })}
+    </ol>
+  );
+}
 
 export function PrinciplesPanel() {
   const [versions, setVersions] = useState<Version[]>([]);
@@ -85,28 +117,49 @@ export function PrinciplesPanel() {
         godkender, kommer de i Adrians hjerne. «Test» spiller dine 👎 igen og viser, om han nu svarer, som du ville.
       </p>
 
-      {drafts.map((d) => (
-        <div key={d.id} className="rounded-xl bg-amber-50 p-3 ring-1 ring-amber-200">
-          <p className="text-xs font-semibold text-amber-800">
-            Forslag v{d.version} · bygger på {d.lessonCount} svar · ${d.costUsd.toFixed(3)}
-          </p>
-          {d.rationale ? <p className="mt-1 text-sm italic text-stone-600">{d.rationale}</p> : null}
-          <pre className="mt-2 whitespace-pre-wrap font-sans text-sm text-stone-900">{d.text}</pre>
-          <div className="mt-2 flex gap-2">
-            <button type="button" onClick={() => void post({ action: "godkend", id: d.id }, d.id)} disabled={busy !== null} className="rounded-lg bg-emerald-700 px-3 py-1 text-xs text-white">
-              Godkend
+      {drafts.map((d) => {
+        const decide = (
+          <div className="flex gap-2">
+            <button
+              type="button"
+              onClick={() => void post({ action: "godkend", id: d.id }, d.id)}
+              disabled={busy !== null}
+              className="rounded-xl bg-emerald-700 px-5 py-2.5 text-sm font-semibold text-white shadow-sm hover:bg-emerald-800 disabled:opacity-40"
+            >
+              ✓ Godkend
             </button>
-            <button type="button" onClick={() => void post({ action: "afvis", id: d.id }, d.id)} disabled={busy !== null} className="rounded-lg px-3 py-1 text-xs text-stone-600 ring-1 ring-stone-300">
-              Afvis
+            <button
+              type="button"
+              onClick={() => void post({ action: "afvis", id: d.id }, d.id)}
+              disabled={busy !== null}
+              className="rounded-xl bg-white px-5 py-2.5 text-sm font-semibold text-stone-700 ring-1 ring-stone-300 hover:bg-stone-50 disabled:opacity-40"
+            >
+              ✕ Afvis
             </button>
           </div>
-        </div>
-      ))}
+        );
+        return (
+          <div key={d.id} className="space-y-3 rounded-2xl bg-amber-50 p-4 ring-1 ring-amber-200">
+            <div className="flex flex-wrap items-center gap-3">
+              <div>
+                <p className="text-sm font-semibold text-amber-900">Forslag v{d.version}</p>
+                <p className="text-xs text-amber-800">
+                  Bygger på {d.lessonCount} svar · {kroner(d.costUsd)}
+                </p>
+              </div>
+              <div className="ml-auto">{decide}</div>
+            </div>
+            {d.rationale ? <p className="rounded-xl bg-white/70 px-3 py-2 text-sm italic text-stone-700">{d.rationale}</p> : null}
+            <RuleList text={d.text} compareTo={active?.text ?? ""} />
+            <div className="flex justify-end">{decide}</div>
+          </div>
+        );
+      })}
 
       {active ? (
         <div className="rounded-xl bg-emerald-50 p-3 ring-1 ring-emerald-100">
-          <p className="text-xs font-semibold text-emerald-800">Aktiv v{active.version}</p>
-          <pre className="mt-1 whitespace-pre-wrap font-sans text-sm text-stone-900">{active.text}</pre>
+          <p className="mb-2 text-sm font-semibold text-emerald-800">Aktiv v{active.version}</p>
+          <RuleList text={active.text} />
         </div>
       ) : drafts.length ? null : (
         <p className="text-sm text-stone-500">Ingen principper endnu. Giv feedback i «Tal med Adrian» eller her, og tryk «Lær af feedback».</p>
@@ -123,7 +176,9 @@ export function PrinciplesPanel() {
                   <p className="text-xs text-stone-500">
                     v{v.version} · {STATUS[v.status] ?? v.status}
                   </p>
-                  <pre className="mt-1 whitespace-pre-wrap font-sans text-stone-700">{v.text}</pre>
+                  <div className="mt-2">
+                    <RuleList text={v.text} />
+                  </div>
                   <button type="button" onClick={() => void post({ action: "godkend", id: v.id }, v.id)} disabled={busy !== null} className="mt-1 text-xs text-emerald-700">
                     Gør aktiv igen
                   </button>
@@ -136,7 +191,7 @@ export function PrinciplesPanel() {
       {test ? (
         <div className="rounded-xl bg-stone-50 p-3 ring-1 ring-stone-200">
           <p className="text-sm font-medium text-stone-900">
-            Adrian svarer som dig i {test.passed} af {test.total} af dine 👎 ({test.model}, ${test.costUsd.toFixed(3)})
+            Adrian svarer som dig i {test.passed} af {test.total} af dine 👎 ({test.model}, {kroner(test.costUsd)})
           </p>
           <ul className="mt-2 space-y-2 text-sm">
             {test.results.map((r) => (

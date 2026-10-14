@@ -9,6 +9,7 @@
  */
 import { useEffect, useRef, useState } from "react";
 import { startSonioxStream, SpeakerTranscript, type SonioxStream } from "@/lib/live-coach/soniox-stream";
+import { kroner } from "@/lib/ai-saelger/money";
 import { SpeechQueue, stopSpeaking } from "@/lib/tts/speak-client";
 
 type Option = { key: string; label: string };
@@ -453,7 +454,7 @@ export function AdrianChat({ playbooks, models, voices }: { playbooks: Option[];
               {state.notes.length ? <p className="mt-1 text-xs text-stone-500">Noter: {state.notes.join(" · ")}</p> : null}
             </div>
           ) : null}
-          {entries.length ? <p className="text-right text-[11px] text-stone-400">Pris for Adrians hjerne i denne samtale: ${cost.toFixed(3)} (stemmen afregnes hos ElevenLabs)</p> : null}
+          {entries.length ? <p className="text-right text-[11px] text-stone-400">Pris for Adrians hjerne i denne samtale: {kroner(cost)} (stemmen afregnes hos ElevenLabs)</p> : null}
         </section>
       ) : null}
       {error ? <p className="text-sm text-rose-700">{error}</p> : null}
