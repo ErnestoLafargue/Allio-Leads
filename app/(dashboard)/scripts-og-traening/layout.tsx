@@ -1,6 +1,8 @@
+import { getViewer } from "@/lib/scripts-traening/queries";
 import { SectionTabs } from "./_components/section-tabs";
 
-export default function ScriptsTrainingLayout({ children }: { children: React.ReactNode }) {
+export default async function ScriptsTrainingLayout({ children }: { children: React.ReactNode }) {
+  const viewer = await getViewer();
   return (
     <div>
       <header className="mb-4">
@@ -9,7 +11,7 @@ export default function ScriptsTrainingLayout({ children }: { children: React.Re
           Analyse af jeres samtaler: hvad virker, hvad kan gøres bedre, ugens script og personlig træning.
         </p>
       </header>
-      <SectionTabs />
+      <SectionTabs isAdmin={viewer?.isAdmin ?? false} />
       {children}
     </div>
   );

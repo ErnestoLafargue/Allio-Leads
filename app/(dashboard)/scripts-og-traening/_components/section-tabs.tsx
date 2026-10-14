@@ -12,18 +12,19 @@ const TABS = [
   { href: "/scripts-og-traening/indsigter", label: "Indsigter" },
   { href: "/scripts-og-traening/oev", label: "Øv indvendinger" },
   { href: "/scripts-og-traening/live-coach", label: "Live-coach (test)" },
-  { href: "/scripts-og-traening/traen-adrian", label: "Træn Adrian" },
-  { href: "/scripts-og-traening/adrian", label: "Tal med Adrian (test)" },
+  { href: "/scripts-og-traening/traen-adrian", label: "Træn Adrian", adminOnly: true },
+  { href: "/scripts-og-traening/adrian", label: "Tal med Adrian (test)", adminOnly: true },
 ];
 
-export function SectionTabs() {
+/** Faner med adminOnly (AI-sælgeren Adrian) vises kun for admin. */
+export function SectionTabs({ isAdmin = false }: { isAdmin?: boolean }) {
   const pathname = usePathname() ?? "";
   return (
     <nav
       aria-label="Scripts & Træning"
       className="-mx-4 mb-5 flex items-center gap-1 overflow-x-auto border-b border-stone-200 px-4 py-1 sm:mx-0 sm:rounded-xl sm:border sm:border-stone-200/90 sm:bg-white sm:px-2 sm:py-1.5 sm:shadow-sm"
     >
-      {TABS.map((t) => {
+      {TABS.filter((t) => isAdmin || !("adminOnly" in t && t.adminOnly)).map((t) => {
         const active = t.exact ? pathname === t.href : pathname === t.href || pathname.startsWith(`${t.href}/`);
         return (
           <Link
