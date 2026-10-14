@@ -26,11 +26,19 @@ function browserSpeak(text: string) {
   }
 }
 
-/** Afspiller teksten. `voice`: en agentstemme (fx christian-v3c) eller "kunde". Kalder onPlaying ved første lyd. */
-export function speak(text: string, voice = "kunde", handlers: { onPlaying?: () => void; onEnded?: () => void } = {}): HTMLAudioElement | null {
+/**
+ * Afspiller teksten. `voice`: en agentstemme (fx christian-v3c) eller "kunde". Kalder onPlaying ved første
+ * lyd. Fejler ElevenLabs, læses teksten op med browserens stemme, og onError får årsagen fra serveren.
+ */
+export function speak(
+  text: string,
+  voice = "kunde",
+  handlers: { onPlaying?: () => void; onEnded?: () => void; onError?: (reason: string) => void } = {},
+): HTMLAudioElement | null {
   stopSpeaking();
   if (!text.trim()) return null;
-  const audio = new Audio(`/api/tts?voice=${encodeURIComponent(voice)}&text=${encodeURIComponent(text)}`);
+  const url = `/api/tts?voice=${encodeURIComponent(voice)}&text=${encodeURIComponent(text)}`;
+  const audio = new Audio(url);
   current = audio;
   audio.onplaying = () => handlers.onPlaying?.();
   audio.onended = () => {
@@ -42,6 +50,10 @@ export function speak(text: string, voice = "kunde", handlers: { onPlaying?: () 
     current = null;
     browserSpeak(text);
     handlers.onEnded?.();
+    if (handlers.onError)
+      void fetch(url)
+        .then(async (r) => handlers.onError?.(`${r.status}: ${(await r.text()).slice(0, 200)}`))
+        .catch(() => handlers.onError?.("ingen forbindelse"));
   };
   void audio.play().catch(() => {
     if (current === audio) browserSpeak(text);

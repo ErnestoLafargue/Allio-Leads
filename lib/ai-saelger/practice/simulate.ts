@@ -69,7 +69,7 @@ function runTool(name: string, input: Record<string, unknown>, state: ToolState)
 
 export function leadMessage(p: Persona): string {
   const l = p.lead;
-  return `## Leadet
+  return `## Leadet: klinikken, du ringer TIL (du er selv fra Allio)
 Klinik: ${l.kliniknavn} (${l.branche}), ${l.by}
 Beslutningstager: ${l.beslutningstager}
 Bookingsystem: ${l.bookingsystem}

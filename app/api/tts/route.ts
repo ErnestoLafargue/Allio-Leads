@@ -30,8 +30,10 @@ export async function GET(req: NextRequest) {
     body: JSON.stringify({ text, model_id: voice.model, language_code: "da" }),
   });
   if (!res.ok || !res.body) {
-    console.warn("[tts]", res.status, await res.text().catch(() => ""));
-    return new Response("Stemmen fejlede", { status: 502 });
+    const detail = await res.text().catch(() => "");
+    console.warn("[tts]", res.status, detail);
+    // Årsagen vises på siden (fx ubetalt faktura eller manglende rettigheder på nøglen).
+    return new Response(`ElevenLabs ${res.status}: ${detail.slice(0, 300)}`, { status: 502 });
   }
   return new Response(res.body, { headers: { "content-type": "audio/mpeg", "cache-control": "private, max-age=86400" } });
 }

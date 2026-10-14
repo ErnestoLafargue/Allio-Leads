@@ -107,6 +107,7 @@ export function AdrianChat({ playbooks, models, voices }: { playbooks: Option[];
             const now = performance.now();
             setEntries((es) => es.map((e, i) => (i === idx.n && e.who === "adrian" ? { ...e, voiceMs: now - responseAt, totalMs: now - endedAt } : e)));
           },
+          onError: (reason) => setError(`Adrians stemme (ElevenLabs) fejlede, så browserens stemme blev brugt: ${reason}`),
           onEnded: () => {
             speaking.current = false;
             setStatus(hangup ? "" : "Din tur");
