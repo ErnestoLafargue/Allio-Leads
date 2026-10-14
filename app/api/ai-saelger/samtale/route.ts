@@ -16,8 +16,14 @@ export const maxDuration = 60;
 /** Genbruges mellem kald, så Jev ikke skal åbne en ny forbindelse hver gang (ca. 500 → 130 ms). */
 let jev: ReturnType<typeof createJevClient> | null = null;
 
+type Lead = { kliniknavn: string; by: string; beslutningstager: string; bookingsystem: string; branche: string };
+
 type Body = {
   approach?: string;
+  /** Klinikken, Adrian ringer til (du selv). Uden: øvebanens første lead. */
+  lead?: Partial<Lead>;
+  /** Adrians stemme (VOICES), styrer navnet han siger. */
+  voiceKey?: string;
   personaKey?: string;
   model?: string;
   /** Kundens replik (første gang: det, kunden siger, når telefonen tages). */
@@ -40,11 +46,25 @@ export async function POST(req: Request) {
   const b = (await req.json().catch(() => null)) as Body | null;
   const kunde = b?.kunde?.trim().slice(0, 2000);
   const approach = (b?.approach ?? "lavt_pres") as ApproachKey;
-  const persona = PERSONAS.find((p) => p.key === b?.personaKey) ?? PERSONAS[0]!;
+  const base = PERSONAS.find((p) => p.key === b?.personaKey) ?? PERSONAS[0]!;
+  const clean = (v: unknown, fallback: string) => (typeof v === "string" && v.trim() ? v.trim().slice(0, 120) : fallback);
+  const persona = {
+    ...base,
+    lead: b?.lead
+      ? {
+          kliniknavn: clean(b.lead.kliniknavn, base.lead.kliniknavn),
+          by: clean(b.lead.by, base.lead.by),
+          beslutningstager: clean(b.lead.beslutningstager, base.lead.beslutningstager),
+          bookingsystem: clean(b.lead.bookingsystem, base.lead.bookingsystem),
+          branche: clean(b.lead.branche, base.lead.branche),
+        }
+      : base.lead,
+  };
   const model = (b?.model && b.model in AGENT_MODELS ? b.model : "claude-haiku-5-5") as AgentModel;
   if (!kunde || !APPROACHES[approach]?.file) return NextResponse.json({ error: "Mangler kundens replik eller playbook" }, { status: 400 });
 
-  const variant = { key: `${approach}/christian-v3c`, approach, voice: VOICES.find((v) => v.key === "christian-v3c")! };
+  const voice = VOICES.find((v) => v.key === b?.voiceKey) ?? VOICES.find((v) => v.key === "christian-v3c")!;
+  const variant = { key: `${approach}/${voice.key}`, approach, voice };
   const playbook = readPlaybook(approach);
   const system = aiSaelgerSystemPrompt(variant, playbook, await adrianTrainingSection());
   const state: ToolState = { booked: b?.state?.booked ?? null, outcome: b?.state?.outcome ?? null, notes: b?.state?.notes ?? [], todayKey: new Date().toISOString().slice(0, 10) };

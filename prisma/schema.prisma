@@ -894,6 +894,8 @@ model AiSaelgerLesson {
   customerLine String
   /// Svaret, Adrian skal lære af
   answer       String
+  /// Adrians dårlige svar, som svaret erstatter (👎 i «Tal med Adrian»)
+  avoidAnswer  String?
   createdById  String?
   createdAt    DateTime @default(now())
 

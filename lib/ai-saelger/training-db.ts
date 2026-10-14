@@ -12,7 +12,7 @@ export async function loadLessons(take = 300): Promise<(Lesson & { id: string; c
   return prisma.aiSaelgerLesson.findMany({
     orderBy: { createdAt: "desc" },
     take,
-    select: { id: true, situation: true, customerLine: true, answer: true, createdAt: true },
+    select: { id: true, situation: true, customerLine: true, answer: true, avoidAnswer: true, createdAt: true },
   });
 }
 
