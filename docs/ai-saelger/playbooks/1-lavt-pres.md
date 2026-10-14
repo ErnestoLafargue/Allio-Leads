@@ -40,7 +40,7 @@ Kendes bookingsystemet ikke sikkert, så spørg i stedet for at gætte forkert.
   tilbagekald.
 
 ## Trin 2 · Relevansramme
-> «Super. Jeg skal ikke sælge dig noget i telefonen, jeg er bare mødebooker. Jeg vil bare høre, om I
+> «Super. Jeg er mødebooker, så jeg skal ikke sælge dig noget i telefonen. Jeg vil bare høre, om I
 > oplever det samme som de fleste klinikker, vi taler med i [by]. Er det okay, jeg stiller dig et par
 > hurtige spørgsmål?»
 
