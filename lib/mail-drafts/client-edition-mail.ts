@@ -175,9 +175,9 @@ Mere omsætning.
   font-size:15px;
   line-height:25px;
   color:#E5DADC;">
-Loyalitet, genbooking og målrettet kommunikation.
-Vi hjælper jer med at skabe mere værdi fra de
-kunder, der allerede kender jeres klinik.
+Flere genbookinger, mere mersalg og færre kunder,
+der forsvinder i stilhed. Vækst bygget på de
+relationer, I allerede har skabt.
 </p>
 
 <div style="height:1px;background:#876B75;"></div>
