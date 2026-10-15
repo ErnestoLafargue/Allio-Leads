@@ -1014,6 +1014,11 @@ function LeadDetailInner() {
         defaultTo={email}
         defaultSubject={`Opfølgning vedr. ${companyName || "jeres virksomhed"}`}
         defaultMessage=""
+        draftContext={{
+          contactName: meetingContactName,
+          companyName,
+          sender: session?.user,
+        }}
         saving={mailSending}
         errorText={mailError}
         onClose={() => {
