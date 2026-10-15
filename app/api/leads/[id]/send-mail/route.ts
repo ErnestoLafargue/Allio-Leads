@@ -6,6 +6,7 @@ import { prisma } from "@/lib/prisma";
 import { requireSession } from "@/lib/api-auth";
 import { canAccessBookedMeetingNotes } from "@/lib/lead-meeting-access";
 import { canAccessCallbackLead } from "@/lib/lead-callback-access";
+import { embedInlineImages, htmlToPlainText } from "@/lib/mail-send/prepare-outgoing-mail";
 
 type Params = { params: Promise<{ id: string }> };
 
@@ -33,22 +34,6 @@ function parseRecipientList(v: string): string[] {
     .split(",")
     .map((s) => s.trim())
     .filter(Boolean);
-}
-
-function stripHtml(html: string): string {
-  return html
-    .replace(/<style[\s\S]*?<\/style>/gi, " ")
-    .replace(/<script[\s\S]*?<\/script>/gi, " ")
-    .replace(/<\/(p|div|h1|h2|h3|h4|h5|h6|li|tr)>/gi, "\n")
-    .replace(/<br\s*\/?>/gi, "\n")
-    .replace(/<[^>]+>/g, " ")
-    .replace(/&nbsp;/gi, " ")
-    .replace(/&amp;/gi, "&")
-    .replace(/&lt;/gi, "<")
-    .replace(/&gt;/gi, ">")
-    .replace(/[ \t]+\n/g, "\n")
-    .replace(/\n{3,}/g, "\n\n")
-    .trim();
 }
 
 function looksLikeHtml(v: string): boolean {
@@ -155,16 +140,20 @@ export async function POST(req: Request, { params }: Params) {
   }
 
   try {
+    const fromDomain = fromAddress.split("@")[1] || "allio.dk";
     const transporter = nodemailer.createTransport({
       host,
       port: parseSmtpPort(portRaw),
       secure: parseSecure(secureRaw),
       auth: { user, pass },
       requireTLS: !parseSecure(secureRaw),
+      /** EHLO-navn: standard er serverens hostname (fx en Vercel-container), som ser mistænkeligt ud. */
+      name: fromDomain,
     });
 
     const isHtml = looksLikeHtml(message);
-    let textPart = isHtml ? stripHtml(message) : message;
+    const inline = isHtml ? embedInlineImages(message) : { html: message, attachments: [] };
+    let textPart = isHtml ? htmlToPlainText(message) : message;
     if (isHtml && textPart.trim().length === 0) {
       textPart =
         "Allio har sendt dig en HTML-mail. Åbn den i din mailapp for at se layout og links.";
@@ -177,11 +166,16 @@ export async function POST(req: Request, { params }: Params) {
       to,
       subject,
       text: textPart,
-      html: isHtml ? message : undefined,
-      envelope: { from: fromAddress, to: toRecipients },
+      html: isHtml ? inline.html : undefined,
+      attachments: inline.attachments,
+      messageId: `<${crypto.randomUUID()}@${fromDomain}>`,
+      date: new Date(),
+      headers: {
+        "List-Unsubscribe": `<mailto:${fromAddress}?subject=Afmeld>`,
+      },
     };
-    await transporter.sendMail(mailInput);
 
+    /** Byg mailen én gang, så den sendte og den gemte i «Sendt» er identiske (samme Message-ID). */
     const rawMessage = await new Promise<Buffer>((resolve, reject) => {
       const composer = new MailComposer(mailInput);
       composer.compile().build((err, msg) => {
@@ -189,12 +183,15 @@ export async function POST(req: Request, { params }: Params) {
         resolve(msg);
       });
     });
+    await transporter.sendMail({ envelope: { from: fromAddress, to: toRecipients }, raw: rawMessage });
+
+    /** Mailen er sendt — en fejl her må ikke give «Kunne ikke sende» og føre til dobbelte mails. */
     await appendToSentMailbox({
       rawMessage,
       smtpUser: user,
       smtpPass: pass,
       defaultMailboxName: "Sent",
-    });
+    }).catch((e) => console.error("appendToSentMailbox", e));
 
     return NextResponse.json({ ok: true, to, subject, leadId: lead.id });
   } catch (e) {

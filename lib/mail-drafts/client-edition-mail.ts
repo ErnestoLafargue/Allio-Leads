@@ -49,6 +49,7 @@ export const CLIENT_EDITION_MESSAGE = `<!DOCTYPE html>
       display: block !important;
       width: 100% !important;
       box-sizing: border-box !important;
+      padding-right: 0 !important;
     }
     .stack-space {
       padding-top: 13px !important;
@@ -58,12 +59,12 @@ export const CLIENT_EDITION_MESSAGE = `<!DOCTYPE html>
       display: block !important;
       width: 100% !important;
       border-right: 0 !important;
-      padding-bottom: 20px !important;
+      padding: 0 0 20px !important;
     }
     .three-col-last {
       display: block !important;
       width: 100% !important;
-      padding-bottom: 0 !important;
+      padding: 0 !important;
     }
     .button-link {
       display: block !important;
