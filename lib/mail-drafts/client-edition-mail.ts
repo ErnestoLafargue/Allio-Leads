@@ -164,9 +164,9 @@ ALLIO &nbsp;/&nbsp; FOR KLINIKKER
   font-weight:normal;
   letter-spacing:-1.7px;
   color:#FFF9F5;">
-Flere kunder.<br>
+Samme kunder.<br>
 <span style="color:#E8BCC4;font-style:italic;">
-Flere, der kommer igen.
+Mere omsætning.
 </span>
 </h1>
 
