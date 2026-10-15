@@ -15,6 +15,22 @@ export {
 } from "./adam-focus-mail";
 
 export {
+  CLIENT_EDITION_DRAFT_ID,
+  CLIENT_EDITION_SUBJECT,
+  CLIENT_EDITION_MESSAGE,
+  clientEditionMailDraft,
+} from "./client-edition-mail";
+
+export {
+  MAIL_PLACEHOLDERS,
+  mailSenderEmail,
+  mailSenderName,
+  personalizeMailDraft,
+  type MailDraftContext,
+  type MailSenderUser,
+} from "./personalize";
+
+export {
   REACTIVATION_DRAFT_ID,
   REACTIVATION_SUBJECT,
   REACTIVATION_MESSAGE,
@@ -22,12 +38,14 @@ export {
 } from "./reactivation-mail";
 
 import { adamFocusMailDraft } from "./adam-focus-mail";
+import { clientEditionMailDraft } from "./client-edition-mail";
 import { reactivationMailDraft } from "./reactivation-mail";
 
-export const DEFAULT_MAIL_DRAFT_ID = adamFocusMailDraft.id;
+export const DEFAULT_MAIL_DRAFT_ID = clientEditionMailDraft.id;
 
 export const MAIL_DRAFTS: MailDraft[] = [
   { id: EMPTY_DRAFT_ID, label: "Tom mail", subject: "", message: "" },
+  { ...clientEditionMailDraft },
   { ...adamFocusMailDraft },
   { ...reactivationMailDraft },
 ];

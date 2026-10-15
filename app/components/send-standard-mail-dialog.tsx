@@ -3,10 +3,13 @@
 import { useEffect, useState } from "react";
 import {
   ADAM_FOCUS_DRAFT_ID,
+  CLIENT_EDITION_DRAFT_ID,
   DEFAULT_MAIL_DRAFT_ID,
   EMPTY_DRAFT_ID,
   MAIL_DRAFTS,
   REACTIVATION_DRAFT_ID,
+  personalizeMailDraft,
+  type MailDraftContext,
 } from "@/lib/mail-drafts";
 
 function isLikelyHtml(value: string): boolean {
@@ -19,6 +22,8 @@ type Props = {
   defaultTo: string;
   defaultSubject?: string;
   defaultMessage?: string;
+  /** Udfylder kontaktnavn, kliniknavn og afsender i udkastene. */
+  draftContext?: MailDraftContext;
   saving: boolean;
   errorText: string | null;
   onClose: () => void;
@@ -31,6 +36,7 @@ export function SendStandardMailDialog({
   defaultTo,
   defaultSubject = "",
   defaultMessage = "",
+  draftContext,
   saving,
   errorText,
   onClose,
@@ -42,15 +48,28 @@ export function SendStandardMailDialog({
   const [subject, setSubject] = useState("");
   const [message, setMessage] = useState("");
 
+  const contactName = draftContext?.contactName ?? "";
+  const companyName = draftContext?.companyName ?? "";
+  const senderName = draftContext?.sender?.name ?? "";
+  const senderEmail = draftContext?.sender?.email ?? "";
+  const personalize = (raw: string) =>
+    personalizeMailDraft(raw, {
+      contactName,
+      companyName,
+      sender: { name: senderName, email: senderEmail },
+    });
+
   useEffect(() => {
     if (!open) return;
     const initialDraft = MAIL_DRAFTS.find((d) => d.id === DEFAULT_MAIL_DRAFT_ID);
     setDraftId(DEFAULT_MAIL_DRAFT_ID);
     setTo(defaultTo);
     setSubject(initialDraft?.subject || defaultSubject);
-    setMessage(initialDraft?.message || defaultMessage);
+    setMessage(personalize(initialDraft?.message || defaultMessage));
     setMessageMode("preview");
-  }, [open, defaultTo, defaultSubject, defaultMessage]);
+    // personalize afhænger kun af de primitive værdier herunder.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [open, defaultTo, defaultSubject, defaultMessage, contactName, companyName, senderName, senderEmail]);
 
   if (!open) return null;
 
@@ -179,13 +198,14 @@ export function SendStandardMailDialog({
                 const selected = MAIL_DRAFTS.find((d) => d.id === nextDraftId);
                 if (!selected) return;
                 setSubject(selected.subject);
-                setMessage(selected.message);
+                setMessage(personalize(selected.message));
                 setMessageMode(isLikelyHtml(selected.message) ? "preview" : "html");
               }}
               className="mt-1 w-full rounded-lg border border-stone-200 bg-white px-3 py-2 text-sm text-stone-900 shadow-sm outline-none ring-stone-400 focus:ring-2 disabled:bg-stone-100"
             >
               <option value={EMPTY_DRAFT_ID}>Tom mail</option>
               <optgroup label="Klinikker">
+                <option value={CLIENT_EDITION_DRAFT_ID}>Klinik intro mail</option>
                 <option value={ADAM_FOCUS_DRAFT_ID}>Adam Fokus Mail</option>
                 <option value={REACTIVATION_DRAFT_ID}>Genaktiverings mail</option>
               </optgroup>
