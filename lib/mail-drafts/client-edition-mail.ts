@@ -55,6 +55,16 @@ export const CLIENT_EDITION_MESSAGE = `<!DOCTYPE html>
       padding-top: 13px !important;
       padding-left: 0 !important;
     }
+    .box-col {
+      display: block !important;
+      width: 100% !important;
+      box-sizing: border-box !important;
+    }
+    .box-gap {
+      display: block !important;
+      width: 100% !important;
+      height: 13px !important;
+    }
     .three-col {
       display: block !important;
       width: 100% !important;
@@ -363,15 +373,11 @@ kundernes historik og interesser.
 </tr>
 </table>
 
-<!-- SEKUNDÆRE FUNKTIONER -->
-<table role="presentation" width="100%">
+<!-- SEKUNDÆRE FUNKTIONER: kasserne er celler i samme række, så de altid er lige høje på computer -->
+<table role="presentation" width="100%" cellpadding="0" cellspacing="0">
 <tr>
 
-<td class="stack" width="50%" valign="top"
-  style="padding-right:7px;">
-<table role="presentation" width="100%">
-<tr>
-<td bgcolor="#EFE4E3"
+<td class="box-col" width="48%" valign="top" bgcolor="#EFE4E3"
   style="padding:23px 20px;background:#EFE4E3;">
 
 <p style="font-size:10px;letter-spacing:1.6px;color:#906572;">
@@ -396,15 +402,10 @@ besøg gør det nemt at dele en ægte oplevelse.
 </p>
 
 </td>
-</tr>
-</table>
-</td>
 
-<td class="stack stack-space" width="50%"
-  valign="top" style="padding-left:7px;">
-<table role="presentation" width="100%">
-<tr>
-<td bgcolor="#EFE4E3"
+<td class="box-gap" width="14" style="width:14px;font-size:0;line-height:0;">&nbsp;</td>
+
+<td class="box-col" width="48%" valign="top" bgcolor="#EFE4E3"
   style="padding:23px 20px;background:#EFE4E3;">
 
 <p style="font-size:10px;letter-spacing:1.6px;color:#906572;">
@@ -428,9 +429,6 @@ Booking, indbakke og AI-klinikassistent
 samler mere af den daglige kundekontakt.
 </p>
 
-</td>
-</tr>
-</table>
 </td>
 
 </tr>
