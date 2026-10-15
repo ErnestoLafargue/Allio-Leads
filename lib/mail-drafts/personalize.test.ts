@@ -37,6 +37,7 @@ describe("personalizeMailDraft", () => {
     expect(html).toContain("<strong>Klinik &lt;Glow&gt;</strong>");
     expect(html).toContain("Mads Jensen");
     expect(html).toContain("mailto:hej@allio.dk");
+    expect(html).toContain('href="https://calendar.app.google/pojTzzLC2h3qXB56A"');
     expect(html).not.toContain("ernesto@allio.dk");
     expect(html).not.toContain("{{");
   });

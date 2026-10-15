@@ -837,7 +837,8 @@ fungerer i praksis.
   style="background:#F3E7E2;text-align:center;">
 
 <a class="button-link"
-  href="mailto:${P.senderEmail}?subject=Uforpligtende%20gennemgang%20af%20Allio"
+  href="https://calendar.app.google/pojTzzLC2h3qXB56A"
+  target="_blank"
   style="
     display:inline-block;
     padding:17px 23px;
