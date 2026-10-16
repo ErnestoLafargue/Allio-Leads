@@ -448,7 +448,7 @@ besøg gør det nemt at dele en ægte oplevelse.
   style="padding:23px 20px;background:#EFE4E3;">
 
 <p style="font-size:10px;letter-spacing:1.6px;color:#906572;">
-MINDRE ADMINISTRATION
+ALTID TILGÆNGELIG
 </p>
 
 <h3 style="
@@ -456,7 +456,7 @@ MINDRE ADMINISTRATION
   font-size:20px;
   font-weight:normal;
   color:#39252D;">
-Én samlet kunderejse
+AI-klinikassistent
 </h3>
 
 <p style="
@@ -464,8 +464,10 @@ MINDRE ADMINISTRATION
   font-size:12px;
   line-height:20px;
   color:#605458;">
-Booking, indbakke og AI-klinikassistent
-samler mere af den daglige kundekontakt.
+Besvarer henvendelser på telefon, SMS,
+mail og sociale medier – og hjælper nye
+og eksisterende kunder til en booking, når
+I har lukket, holder ferie eller står i behandling.
 </p>
 
 </td>
