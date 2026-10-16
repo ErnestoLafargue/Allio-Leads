@@ -110,13 +110,13 @@ export const CLIENT_EDITION_MESSAGE = `<!DOCTYPE html>
 
 <table role="presentation">
 <tr>
-<td style="padding-right:12px;">
+<td style="padding-right:10px;">
 <img
   src="${ALLIO_LOGO_PUBLIC_URL}"
   alt="Allio"
-  width="47"
-  height="47"
-  style="display:block;width:47px;height:47px;object-fit:contain;">
+  width="29"
+  height="28"
+  style="display:block;width:29px;height:28px;border:0;">
 </td>
 <td style="
   font-family:Arial,Helvetica,sans-serif;
@@ -124,7 +124,7 @@ export const CLIENT_EDITION_MESSAGE = `<!DOCTYPE html>
   font-weight:600;
   letter-spacing:-1.2px;
   color:#39252D;">
-allio
+Allio
 </td>
 </tr>
 </table>
@@ -230,6 +230,45 @@ ikke nødvendigvis om at tiltrække flere nye
 kunder. Det kan være mindst lige så interessant
 at få mere ud af de kunder, I allerede har.
 </p>
+
+<!-- INTEGRATION -->
+<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="margin-top:26px;">
+<tr>
+<td bgcolor="#F7F1EF"
+  style="padding:20px 22px;background:#F7F1EF;border-left:2px solid #AB7480;">
+
+<p style="
+  margin:0 0 8px;
+  font-size:10px;
+  font-weight:bold;
+  letter-spacing:2px;
+  color:#A2737C;">
+VI INTEGRERER MED JERES SYSTEM
+</p>
+
+<h3 style="
+  margin:0 0 8px;
+  font-family:Georgia,serif;
+  font-size:20px;
+  font-weight:normal;
+  color:#39252D;">
+Vi arbejder med det, I bruger i dag.
+</h3>
+
+<p style="
+  margin:0;
+  font-size:13px;
+  line-height:22px;
+  color:#5C5355;">
+Allio integreres med jeres nuværende bookingsystem
+– om det er GeckoBooking, Onlinebooq, Bookee eller
+et andet. Så kan vi komme i gang med det samme, med
+udgangspunkt i de kunder og den data, I allerede har.
+</p>
+
+</td>
+</tr>
+</table>
 
 </td>
 </tr>
@@ -681,7 +720,7 @@ Vi vurderer dem ud fra jeres egne data.
 </p>
 
 <h2 class="body-title" style="
-  margin:0 0 24px;
+  margin:0 0 16px;
   font-family:Georgia,serif;
   font-size:33px;
   font-weight:normal;
@@ -690,6 +729,19 @@ Vi vurderer dem ud fra jeres egne data.
 Strategi og udførelse.<br>
 <em style="color:#94606E;">Ikke bare software.</em>
 </h2>
+
+<p style="
+  margin:0 0 26px;
+  font-size:14px;
+  line-height:24px;
+  color:#51484B;">
+Et bookingsystem giver jer typisk et par værktøjer
+– lidt som et IKEA-køkken med kun få af delene
+i kassen, som I selv skal samle. Med Allio får I
+et fuldt udstyret køkken, sat op og klar – med en
+kok, der laver maden, følger med i, hvad gæsterne
+bedst kan lide, og løbende tilpasser menuen efter sæsonen.
+</p>
 
 <table role="presentation" width="100%">
 
