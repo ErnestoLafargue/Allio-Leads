@@ -387,7 +387,7 @@ SMS-kampagner, der gør det nemt at booke igen.
   font-size:22px;
   font-weight:normal;
   color:#39252D;">
-Skab flere bookinger og mere mersalg
+Mersalg, der følger kunden
 </h3>
 
 <p style="
@@ -395,9 +395,10 @@ Skab flere bookinger og mere mersalg
   font-size:13px;
   line-height:22px;
   color:#61575A;">
-Målrettede SMS-kampagner på behandlinger,
-klippekort og produkter – baseret på
-kundernes historik og interesser.
+Når en kunde køber et produkt, ved vi, hvornår
+det typisk slipper op. Så får kunden en venlig
+påmindelse i tide – en ekstra service for dem
+og mere omsætning pr. kunde for jer.
 </p>
 </td>
 </tr>
