@@ -398,7 +398,7 @@ Mersalg, der følger kunden
 Når en kunde har købt et produkt, ved vi, hvornår
 det typisk slipper op. Ved kundens næste booking får
 jeres medarbejder en diskret påmindelse – så produktet
-kan tilbydes som en del af god service, og omsætningen
+igen kan tilbydes som en del af god service, og omsætningen
 pr. kunde stiger.
 </p>
 </td>
