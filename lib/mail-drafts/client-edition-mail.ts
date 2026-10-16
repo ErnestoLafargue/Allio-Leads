@@ -736,8 +736,8 @@ Strategi og udførelse.<br>
   line-height:24px;
   color:#51484B;">
 Et bookingsystem giver jer typisk et par værktøjer
-– lidt som et IKEA-køkken med kun få af delene
-i kassen, som I selv skal samle. Med Allio får I
+– lidt som et IKEA-køkken, der bliver leveret med
+få dele i kasser, som I selv skal bygge. Med Allio får I
 et fuldt udstyret køkken, sat op og klar – med en
 kok, der laver maden, følger med i, hvad gæsterne
 bedst kan lide, og løbende tilpasser menuen efter sæsonen.
