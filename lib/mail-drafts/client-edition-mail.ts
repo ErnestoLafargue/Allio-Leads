@@ -832,9 +832,11 @@ pr. lokation / 4 uger
 </tr>
 </table>
 
-<p style="font-size:11px;line-height:18px;color:#827478;">
-Standardpris. Endelig opsætning og eventuelle
-forbrugsomkostninger aftales særskilt.
+<p style="margin:14px 0 0;font-size:12px;line-height:19px;color:#6C5960;">
+<strong style="color:#39252D;">Vi tager ikke alle klinikker ind.</strong>
+Vi samarbejder kun, hvor vi kan se et reelt potentiale,
+og kundegrundlaget skal have en vis størrelse. Derfor kommer
+vi altid forbi og vurderer jeres data, før vi indgår en aftale.
 </p>
 
 </td>
