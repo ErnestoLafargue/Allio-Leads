@@ -797,34 +797,35 @@ relevante samtykker, adgangsforhold og aftaler.
 <tr>
 <td class="padding-x"
   bgcolor="#F7F1EF"
-  style="padding:27px 45px;background:#F7F1EF;">
+  style="padding:34px 45px 30px;background:#F7F1EF;">
 
-<table role="presentation" width="100%">
+<table role="presentation" width="100%" cellpadding="0" cellspacing="0">
 <tr>
 
 <td valign="top" style="padding-right:18px;">
 <p style="
-  margin:0 0 7px;
+  margin:0 0 9px;
   font-size:10px;
   letter-spacing:2px;
   color:#8C6C75;">
 ALLIO KOMPLET
 </p>
-<p style="font-size:13px;line-height:21px;color:#39252D;">
+<p style="margin:0;font-size:13px;line-height:21px;color:#39252D;">
 Platform, strategi og hjælp til kampagner
 </p>
 </td>
 
-<td align="right" valign="middle"
+<td align="right" valign="top"
   style="white-space:nowrap;">
 <p style="
-  margin:0;
+  margin:0 0 4px;
   font-family:Georgia,serif;
   font-size:26px;
+  line-height:30px;
   color:#39252D;">
 2.500 kr.
 </p>
-<p style="font-size:11px;color:#796A6F;">
+<p style="margin:0;font-size:11px;color:#796A6F;">
 pr. lokation / 4 uger
 </p>
 </td>
@@ -832,8 +833,24 @@ pr. lokation / 4 uger
 </tr>
 </table>
 
-<p style="margin:14px 0 0;max-width:400px;font-size:11px;line-height:17px;color:#827478;">
-<em style="font-family:Georgia,serif;font-size:12px;color:#5C4A51;">Vi tager ikke alle klinikker ind.</em><br>
+<div style="height:1px;margin:26px 0 18px;background:#E8DCDA;line-height:1px;font-size:0;">&nbsp;</div>
+
+<p style="
+  margin:0 0 6px;
+  font-family:Georgia,serif;
+  font-style:italic;
+  font-size:12px;
+  line-height:16px;
+  color:#94606E;">
+Vi tager ikke alle klinikker ind.
+</p>
+<p style="
+  margin:0;
+  max-width:360px;
+  font-size:10px;
+  line-height:16px;
+  letter-spacing:0.2px;
+  color:#9A8D91;">
 Vi samarbejder kun, hvor vi kan se et reelt potentiale,
 og kundegrundlaget skal have en vis størrelse. Derfor kommer
 vi altid forbi og vurderer jeres data, før vi indgår en aftale.
