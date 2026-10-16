@@ -395,10 +395,11 @@ Mersalg, der følger kunden
   font-size:13px;
   line-height:22px;
   color:#61575A;">
-Når en kunde køber et produkt, ved vi, hvornår
-det typisk slipper op. Så får kunden en venlig
-påmindelse i tide – en ekstra service for dem
-og mere omsætning pr. kunde for jer.
+Når en kunde har købt et produkt, ved vi, hvornår
+det typisk slipper op. Ved kundens næste booking får
+jeres medarbejder en diskret påmindelse – så produktet
+kan tilbydes som en del af god service, og omsætningen
+pr. kunde stiger.
 </p>
 </td>
 </tr>
