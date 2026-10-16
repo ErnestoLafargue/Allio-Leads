@@ -39,7 +39,7 @@ async function fetchRecordingBytes(url: string): Promise<{ body: Buffer; content
  * GET /api/leads/call-recordings/[id]/audio
  * Same-origin stream til afspilleren, så dual-track kan mixes til begge højttalere.
  */
-export async function GET(_req: Request, { params }: Params) {
+export async function GET(req: Request, { params }: Params) {
   const { response } = await requireSession();
   if (response) return response;
 
@@ -73,14 +73,29 @@ export async function GET(_req: Request, { params }: Params) {
     return NextResponse.json({ error: "Kunne ikke hente optagelsen." }, { status: 502 });
   }
 
+  const headers = {
+    "Content-Type": contentType,
+    "Accept-Ranges": "bytes",
+    "Content-Disposition": "inline",
+    "Cache-Control": "private, max-age=3600",
+  };
+  // Safari afspiller kun lyd, når serveren svarer på Range-forespørgsler (206).
+  const range = /^bytes=(\d*)-(\d*)$/.exec(req.headers.get("range") ?? "");
+  if (range) {
+    const size = bytes.length;
+    const start = range[1] ? Number(range[1]) : Math.max(0, size - Number(range[2] || 0));
+    const end = range[1] && range[2] ? Math.min(Number(range[2]), size - 1) : size - 1;
+    if (start >= size || start > end) {
+      return new NextResponse(null, { status: 416, headers: { "Content-Range": `bytes */${size}` } });
+    }
+    return new NextResponse(new Uint8Array(bytes.subarray(start, end + 1)), {
+      status: 206,
+      headers: { ...headers, "Content-Range": `bytes ${start}-${end}/${size}`, "Content-Length": String(end - start + 1) },
+    });
+  }
   return new NextResponse(new Uint8Array(bytes), {
     status: 200,
-    headers: {
-      "Content-Type": contentType,
-      "Content-Length": String(bytes.length),
-      "Content-Disposition": "inline",
-      "Cache-Control": "private, max-age=3600",
-    },
+    headers: { ...headers, "Content-Length": String(bytes.length) },
   });
 }
 

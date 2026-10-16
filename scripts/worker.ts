@@ -20,6 +20,7 @@ import { prisma } from "@/lib/prisma";
 import { importCallRecordings } from "@/lib/call-recording-import";
 import { analyzeCallViaApi } from "@/lib/call-analysis/api";
 import { transcribeCallRecording } from "@/lib/call-transcription/transcribe-call";
+import { convertRecordings } from "@/lib/recording-convert";
 import { generateWeeklyScriptViaApi } from "@/lib/sales-scripts/generate";
 import { isoWeekKey } from "@/lib/sales-scripts/publish";
 import { MIN_GROUP } from "@/lib/scripts-traening/insights";
@@ -76,6 +77,7 @@ async function runOnce(opts: {
   minSeconds: number;
   analyzeIds: string[] | null;
   weekly: boolean;
+  convertLimit: number;
 }) {
   if (!opts.analyzeIds) {
     // Først de 250 nyeste uden tidsfilter (Telnyx' created_at-filter har i perioder udeladt dagens
@@ -114,6 +116,12 @@ async function runOnce(opts: {
         await markFailed(id, err);
       }
     }
+  }
+
+  if (!opts.analyzeIds) {
+    // Lydfiler: Telnyx' MP3 (MPEG 2.5) kan ikke afspilles på Mac/iPhone — konvertér til standard-MP3.
+    const conv = await convertRecordings(opts.convertLimit, log);
+    if (conv.converted || conv.failed) log(`Lydfiler: ${conv.converted} konverteret til standard-MP3, ${conv.failed} fejl`);
   }
 
   const toAnalyze = opts.analyzeIds
@@ -177,11 +185,12 @@ async function main() {
     sonioxApiKey,
     claudeBudget: Number(process.env.CLAUDE_MONTHLY_BUDGET_USD ?? 5),
     sonioxBudget: Number(process.env.SONIOX_MONTHLY_BUDGET_USD ?? 5),
-    analyzeLimit: Number(arg("--analyze-limit") ?? 5),
+    analyzeLimit: Number(arg("--analyze-limit") ?? 20),
     transcribeLimit: Number(arg("--transcribe-limit") ?? 20),
     minSeconds: Number(process.env.WORKER_MIN_SECONDS ?? 45),
     analyzeIds: arg("--analyze-ids")?.split(",").filter(Boolean) ?? null,
     weekly: !has("--no-weekly"),
+    convertLimit: Number(arg("--convert-limit") ?? 200),
   };
   const intervalMs = Number(arg("--interval-min") ?? 5) * 60 * 1000;
   for (;;) {
