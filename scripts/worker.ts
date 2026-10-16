@@ -50,6 +50,16 @@ async function sonioxSpentThisMonth(): Promise<number> {
   return r._sum.costUsd ?? 0;
 }
 
+/**
+ * Midlertidige fejl hos udbyderen (tom kredit, overbelastning, rate limit, 5xx): samtalen markeres
+ * IKKE som fejlet — den tages igen i næste runde, når udbyderen virker.
+ */
+export const TRANSIENT_ERROR = /credit balance|insufficient|balance|quota|overloaded|rate.?limit|\b(429|500|502|503|504|529)\b|timeout|ECONNRESET|fetch failed/i;
+/** Fejltekster fra tidligere midlertidige fejl — de samtaler prøves igen automatisk. */
+const RETRYABLE_ERRORS = ["credit balance", "overloaded", "rate_limit", "rate limit"];
+
+const errorText = (err: unknown) => (err instanceof Error ? err.message : String(err));
+
 async function markFailed(id: string, err: unknown) {
   const message = err instanceof Error ? err.message : String(err);
   await prisma.callRecording.update({ where: { id }, data: { pipelineStatus: "FAILED", pipelineError: message.slice(0, 500) } });
@@ -68,11 +78,18 @@ async function runOnce(opts: {
   weekly: boolean;
 }) {
   if (!opts.analyzeIds) {
+    // Først de 250 nyeste uden tidsfilter (Telnyx' created_at-filter har i perioder udeladt dagens
+    // optagelser i timevis), derefter 3 døgn med filter som sikkerhedsnet.
+    const recent = await importCallRecordings({
+      apiKey: opts.telnyxApiKey,
+      fromIso: new Date(Date.now() - 24 * 3600 * 1000).toISOString(),
+      newestPages: 1,
+    });
     const imported = await importCallRecordings({
       apiKey: opts.telnyxApiKey,
       fromIso: new Date(Date.now() - 3 * 24 * 3600 * 1000).toISOString(),
     });
-    log(`Afstemning: ${imported.fetched} optagelser, ${imported.created} nye`);
+    log(`Afstemning: ${recent.created + imported.created} nye (nyeste: ${recent.fetched} optagelser, 3 døgn: ${imported.fetched})`);
 
     const statuses = has("--retry-failed") ? ["NEW", "FAILED"] : ["NEW"];
     const toTranscribe = await prisma.callRecording.findMany({
@@ -90,6 +107,10 @@ async function runOnce(opts: {
         const r = await transcribeCallRecording(id, { telnyxApiKey: opts.telnyxApiKey, sonioxApiKey: opts.sonioxApiKey });
         log(`Transskriberet ${id}: ${r.status}, ${r.words} ord, $${r.costUsd.toFixed(4)}`);
       } catch (err) {
+        if (TRANSIENT_ERROR.test(errorText(err)) && !/HTTP 404/.test(errorText(err))) {
+          log(`Soniox midlertidigt utilgængelig (${errorText(err).slice(0, 120)}) — prøver igen næste runde.`);
+          break;
+        }
         await markFailed(id, err);
       }
     }
@@ -99,7 +120,17 @@ async function runOnce(opts: {
     ? opts.analyzeIds
     : (
         await prisma.callRecording.findMany({
-          where: { pipelineStatus: "TRANSCRIBED" },
+          // Klar til analyse + dem, der tidligere fejlede midlertidigt (fx tom Claude-kredit).
+          where: {
+            OR: [
+              { pipelineStatus: "TRANSCRIBED" },
+              {
+                pipelineStatus: "FAILED",
+                transcript: { isNot: null },
+                OR: RETRYABLE_ERRORS.map((e) => ({ pipelineError: { contains: e } })),
+              },
+            ],
+          },
           orderBy: { startedAt: "desc" },
           take: opts.analyzeLimit,
           select: { id: true },
@@ -115,6 +146,10 @@ async function runOnce(opts: {
       const r = await analyzeCallViaApi(id);
       log(`Analyseret ${id}: score ${r.overall ?? "–"}, ${r.warnings.length} advarsler, $${r.costUsd.toFixed(4)} (${r.model})`);
     } catch (err) {
+      if (TRANSIENT_ERROR.test(errorText(err))) {
+        log(`Claude midlertidigt utilgængelig (${errorText(err).slice(0, 120)}) — prøver igen næste runde.`);
+        break;
+      }
       await markFailed(id, err);
     }
   }
