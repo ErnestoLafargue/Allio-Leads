@@ -130,12 +130,6 @@ Allio
 </table>
 
 </td>
-<td align="right" style="
-  font-size:10px;
-  letter-spacing:2.2px;
-  color:#927C80;">
-THE CLIENT EDITION
-</td>
 </tr>
 </table>
 
