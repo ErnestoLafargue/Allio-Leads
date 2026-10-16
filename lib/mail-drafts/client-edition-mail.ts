@@ -915,7 +915,7 @@ fungerer i praksis.
     font-weight:bold;
     color:#39252D;
     text-decoration:none;">
-Aftal en uforpligtende gennemgang &nbsp; →
+Book en uforpligtende telefonisk gennemgang &nbsp; →
 </a>
 
 </td>

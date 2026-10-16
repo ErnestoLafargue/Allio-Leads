@@ -29,7 +29,7 @@ describe("htmlToPlainText", () => {
     const text = htmlToPlainText(html);
     expect(text).not.toMatch(/@media|<|&nbsp;|&amp;|Allio – Mere værdi/);
     expect(text).toContain("Hej Sofie,");
-    expect(text).toContain("Aftal en uforpligtende gennemgang → (https://calendar.app.google/pojTzzLC2h3qXB56A)");
+    expect(text).toContain("Book en uforpligtende telefonisk gennemgang → (https://calendar.app.google/pojTzzLC2h3qXB56A)");
     expect(text).toContain("Ernesto Frank Lafargue");
   });
 });
