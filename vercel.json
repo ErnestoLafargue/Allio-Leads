@@ -4,6 +4,10 @@
   "buildCommand": "npm run build",
   "crons": [
     {
+      "path": "/api/cron/keep-warm",
+      "schedule": "*/5 * * * *"
+    },
+    {
       "path": "/api/cron/meeting-reminders",
       "schedule": "45 16 * * *"
     },
@@ -18,6 +22,10 @@
     {
       "path": "/api/cron/sync-podio-outcomes",
       "schedule": "30 3 * * *"
+    },
+    {
+      "path": "/api/cron/sync-allio-native-occupancy",
+      "schedule": "0 * * * *"
     }
   ],
   "git": {

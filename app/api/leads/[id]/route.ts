@@ -34,7 +34,10 @@ import {
 } from "@/lib/lead-meeting-archive";
 import { releaseExpiredLocksEverywhere, sellerMayEditLead } from "@/lib/lead-lock";
 import { blockedTimeConflictMessage } from "@/lib/booking/availability";
-import { getMeetingBlockMinutes } from "@/lib/booking/meeting-block-setting";
+import {
+  meetingDurationMinutes,
+  transportBufferMinutes,
+} from "@/lib/booking/meeting-type-buffers";
 import { findBlockedTimeConflictInDb } from "@/lib/booking/meeting-slots";
 import { findLeadBookingOverlapInDb } from "@/lib/booking/overlap-db";
 import { getDefaultMeetingAssigneeId } from "@/lib/meeting-assignee";
@@ -45,6 +48,10 @@ import { canonicalLeadPhoneForStorage } from "@/lib/phone-e164";
 import { applyPostalCityFromAddressFields } from "@/lib/postal-from-address";
 import { syncPostBookingIntegrations } from "@/lib/booking/post-booking-sync";
 import { leadNeedsPostBookingSync } from "@/lib/booking/post-booking-sync-needs";
+import {
+  MEETING_TYPE_PHYSICAL,
+  normalizeMeetingType,
+} from "@/lib/meeting-type";
 import {
   isMeetingNotesSufficient,
   MEETING_NOTES_REQUIRED_ERROR,
@@ -307,6 +314,8 @@ export async function PATCH(req: Request, { params }: Params) {
   let meetingContactEmail = existing.meetingContactEmail;
   let meetingContactPhonePrivate = existing.meetingContactPhonePrivate;
   let meetingCompanyName = existing.meetingCompanyName;
+  let meetingType = normalizeMeetingType(existing.meetingType);
+  let meetingAddress = existing.meetingAddress ?? "";
 
   let meetingOutcomeStatus = existing.meetingOutcomeStatus ?? MEETING_OUTCOME_PENDING;
   let meetingCommissionDayKey = existing.meetingCommissionDayKey ?? "";
@@ -339,6 +348,12 @@ export async function PATCH(req: Request, { params }: Params) {
     if (typeof body?.meetingCompanyName === "string") {
       meetingCompanyName = body.meetingCompanyName.trim();
     }
+    if (body?.meetingType !== undefined) {
+      meetingType = normalizeMeetingType(body.meetingType);
+    }
+    if (typeof body?.meetingAddress === "string") {
+      meetingAddress = body.meetingAddress.trim();
+    }
 
     if (!meetingContactName || !meetingContactEmail || !meetingContactPhonePrivate) {
       return NextResponse.json(
@@ -357,6 +372,15 @@ export async function PATCH(req: Request, { params }: Params) {
         { error: "Virksomhedsnavn til mødet er påkrævet ved møde booket." },
         { status: 400 },
       );
+    }
+    if (meetingType === MEETING_TYPE_PHYSICAL && !meetingAddress.trim()) {
+      return NextResponse.json(
+        { error: "Mødeadresse er påkrævet ved fysisk møde." },
+        { status: 400 },
+      );
+    }
+    if (meetingType !== MEETING_TYPE_PHYSICAL) {
+      meetingAddress = meetingAddress.trim(); // valgfri ved online
     }
 
     const newMeetingConfirm =
@@ -476,15 +500,20 @@ export async function PATCH(req: Request, { params }: Params) {
     normalizeMeetingOutcomeStatus(meetingOutcomeStatus) !== MEETING_OUTCOME_CANCELLED &&
     !adminSkipBookingOverlap
   ) {
-    const blockMinutes = await getMeetingBlockMinutes();
+    const durationMin = meetingDurationMinutes(meetingType);
+    const transportMin = transportBufferMinutes(meetingType);
     const overlap = await findLeadBookingOverlapInDb(meetingScheduledFor, {
       excludeLeadId: id,
-      blockMinutes,
+      meetingType,
     });
     if (overlap) {
+      const transportHint =
+        transportMin > 0
+          ? ` Fysisk møde er ${durationMin} min + ${transportMin} min transport før/efter.`
+          : ` Onlinemøde er ${durationMin} min.`;
       return NextResponse.json(
         {
-          error: `Det valgte tidspunkt overlapper et andet møde. Hvert møde reserverer ${blockMinutes} min før og ${blockMinutes} min efter start — vælg et andet tidspunkt.`,
+          error: `Det valgte tidspunkt overlapper et andet møde.${transportHint} Vælg et andet tidspunkt.`,
         },
         { status: 409 },
       );
@@ -492,7 +521,11 @@ export async function PATCH(req: Request, { params }: Params) {
     const calendarUserId =
       existing.assignedUserId ?? (await getDefaultMeetingAssigneeId());
     if (calendarUserId) {
-      const blocked = await findBlockedTimeConflictInDb(calendarUserId, meetingScheduledFor);
+      const blocked = await findBlockedTimeConflictInDb(
+        calendarUserId,
+        meetingScheduledFor,
+        meetingType,
+      );
       if (blocked) {
         return NextResponse.json(
           { error: blockedTimeConflictMessage(blocked.title) },
@@ -645,6 +678,8 @@ export async function PATCH(req: Request, { params }: Params) {
           meetingContactEmail,
           meetingContactPhonePrivate,
           meetingCompanyName,
+          meetingType,
+          meetingAddress,
           meetingOutcomeStatus,
           meetingCommissionDayKey,
           bookedFromRebookingCampaign,
@@ -783,6 +818,9 @@ export async function PATCH(req: Request, { params }: Params) {
     meetingContactPhonePrivate,
     meetingCompanyName,
     calComBookingUid: lead.calComBookingUid,
+    allioBookingId: lead.allioBookingId,
+    meetingType,
+    meetingAddress,
   };
   const shouldSyncIntegrations =
     status === "MEETING_BOOKED" &&
@@ -798,6 +836,9 @@ export async function PATCH(req: Request, { params }: Params) {
         meetingContactPhonePrivate: existing.meetingContactPhonePrivate,
         meetingCompanyName: existing.meetingCompanyName,
         calComBookingUid: existing.calComBookingUid,
+        allioBookingId: existing.allioBookingId,
+        meetingType: existing.meetingType,
+        meetingAddress: existing.meetingAddress,
       },
       afterSyncSnapshot,
     );

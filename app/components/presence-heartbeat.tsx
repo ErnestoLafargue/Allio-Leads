@@ -2,7 +2,7 @@
 
 import { usePathname } from "next/navigation";
 import { useEffect } from "react";
-import { getActiveDialerCampaign } from "@/lib/active-dialer-campaign";
+import { getActiveDialerCampaign, getActiveDialerLinePhase } from "@/lib/active-dialer-campaign";
 
 const HEARTBEAT_MS = 60_000;
 
@@ -22,10 +22,11 @@ export function PresenceHeartbeat() {
       // Aktiv VoIP-linje uden for arbejdssiden (fx lead-detaljesiden) tæller
       // også som dialer-tid på den kampagne opkaldet hører til.
       const campaignId = pathCampaignId ?? getActiveDialerCampaign();
+      const linePhase = campaignId ? getActiveDialerLinePhase() : null;
       void fetch("/api/presence/heartbeat", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ campaignId }),
+        body: JSON.stringify({ campaignId, linePhase }),
         credentials: "same-origin",
         keepalive: true,
       }).catch(() => {

@@ -4,19 +4,31 @@
  * Live-coachen i hjørnet af opkaldssiderne (kampagne-arbejdsfladen og lead-siderne). Knappen
  * «Live-coach: til/fra» ligger der altid; selve coachen åbner først under et aktivt opkald
  * (klik-for-at-ringe, predictive, power dialer), når den er slået til, og det sidste kort bliver
- * stående efter opkaldet, til næste opkald starter. Valget huskes i browseren.
+ * stående efter opkaldet, til næste opkald starter.
+ *
+ * Standard er fra. Kun aktivt tryk tænder den. Hver morgen kl. 08:00 (Europe/Copenhagen)
+ * slås den automatisk fra igen, så den ikke bruger credits overnight.
  */
 import { usePathname } from "next/navigation";
-import { useState, useSyncExternalStore } from "react";
+import { useEffect, useState, useSyncExternalStore } from "react";
 import { useActiveCallAudio } from "@/lib/live-coach/call-audio";
+import { liveCoachDayKey, nextLiveCoachResetAt } from "@/lib/live-coach/daily-reset";
 import { LiveCoach } from "./live-coach";
 
 const STORAGE_KEY = "allio.liveCoach.enabled";
+const DAY_KEY = "allio.liveCoach.day";
 const listeners = new Set<() => void>();
 
 function readEnabled(): boolean {
   try {
-    return localStorage.getItem(STORAGE_KEY) === "1";
+    if (localStorage.getItem(STORAGE_KEY) !== "1") return false;
+    const storedDay = localStorage.getItem(DAY_KEY);
+    if (!storedDay || storedDay !== liveCoachDayKey()) {
+      localStorage.setItem(STORAGE_KEY, "0");
+      localStorage.removeItem(DAY_KEY);
+      return false;
+    }
+    return true;
   } catch {
     return false; // privat vindue o.l. — standard: slukket
   }
@@ -24,7 +36,13 @@ function readEnabled(): boolean {
 
 function setEnabled(next: boolean): void {
   try {
-    localStorage.setItem(STORAGE_KEY, next ? "1" : "0");
+    if (next) {
+      localStorage.setItem(STORAGE_KEY, "1");
+      localStorage.setItem(DAY_KEY, liveCoachDayKey());
+    } else {
+      localStorage.setItem(STORAGE_KEY, "0");
+      localStorage.removeItem(DAY_KEY);
+    }
   } catch {
     /* ignorér */
   }
@@ -48,6 +66,14 @@ export function LiveCoachDock() {
     readEnabled,
     () => false,
   );
+
+  // Auto-fra kl. 08:00, også hvis fanen står åben overnight.
+  useEffect(() => {
+    if (!enabled) return;
+    const ms = nextLiveCoachResetAt().getTime() - Date.now();
+    const t = window.setTimeout(() => setEnabled(false), Math.max(ms, 0));
+    return () => window.clearTimeout(t);
+  }, [enabled]);
 
   if (!call && !CALL_PAGES.some((r) => r.test(pathname))) return null;
   const shown = call ?? lastCall;

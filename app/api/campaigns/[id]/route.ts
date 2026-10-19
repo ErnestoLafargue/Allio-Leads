@@ -29,31 +29,34 @@ export async function GET(_req: Request, { params }: Params) {
   if (response) return response;
 
   const { id } = await params;
-  const campaign = await prisma.campaign.findUnique({
-    where: { id },
-    select: {
-      id: true,
-      name: true,
-      fieldConfig: true,
-      activeQueueFilter: true,
-      includeProtectedBusinesses: true,
-      includeLeadsWithoutPhone: true,
-      isSystemCampaign: true,
-      systemCampaignType: true,
-      dialMode: true,
-      dialPhonePriority: true,
-      maxContactAttempts: true,
-      unansweredCooldownHours: true,
-      ...POWER_DIALER_CAMPAIGN_SELECT,
-      createdAt: true,
-      updatedAt: true,
-      _count: {
-        select: {
-          leads: { where: workableCampaignLeadsWhere },
-        },
+  const [campaign, totalWorkableLeads] = await Promise.all([
+    prisma.campaign.findUnique({
+      where: { id },
+      select: {
+        id: true,
+        name: true,
+        fieldConfig: true,
+        activeQueueFilter: true,
+        includeProtectedBusinesses: true,
+        includeLeadsWithoutPhone: true,
+        isSystemCampaign: true,
+        systemCampaignType: true,
+        dialMode: true,
+        dialPhonePriority: true,
+        maxContactAttempts: true,
+        unansweredCooldownHours: true,
+        ...POWER_DIALER_CAMPAIGN_SELECT,
+        createdAt: true,
+        updatedAt: true,
       },
-    },
-  });
+    }),
+    prisma.lead.count({
+      where: {
+        campaignId: id,
+        ...workableCampaignLeadsWhere,
+      },
+    }),
+  ]);
   if (!campaign) return NextResponse.json({ error: "Ikke fundet" }, { status: 404 });
   if (!(await userCanAccessCampaign(session!.user, id))) {
     return NextResponse.json(
@@ -62,7 +65,6 @@ export async function GET(_req: Request, { params }: Params) {
     );
   }
 
-  const totalWorkableLeads = campaign._count.leads;
   const eligibleForDialing =
     campaign.maxContactAttempts != null
       ? await prisma.lead.count({
@@ -76,6 +78,7 @@ export async function GET(_req: Request, { params }: Params) {
 
   return NextResponse.json({
     ...campaign,
+    _count: { leads: totalWorkableLeads },
     powerDialer: powerDialerSettingsFromCampaign(campaign),
     contactAttemptStats: {
       totalWorkableLeads,

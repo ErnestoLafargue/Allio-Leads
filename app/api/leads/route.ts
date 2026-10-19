@@ -19,6 +19,10 @@ import {
 import { requireDefaultMeetingAssigneeId } from "@/lib/meeting-assignee";
 import { canonicalLeadPhoneForStorage } from "@/lib/phone-e164";
 import { applyPostalCityFromAddressFields } from "@/lib/postal-from-address";
+import {
+  MEETING_TYPE_PHYSICAL,
+  normalizeMeetingType,
+} from "@/lib/meeting-type";
 import { scheduleMeetingBookedRecordings } from "@/lib/telnyx-recordings-auto-sync";
 
 export async function GET(req: Request) {
@@ -289,6 +293,9 @@ export async function POST(req: Request) {
       : "";
   const meetingCompanyName =
     typeof body?.meetingCompanyName === "string" ? body.meetingCompanyName.trim() : "";
+  const meetingType = normalizeMeetingType(body?.meetingType);
+  const meetingAddress =
+    typeof body?.meetingAddress === "string" ? body.meetingAddress.trim() : "";
 
   if (meetingContactEmail.length > 0 && !meetingContactEmailValid(meetingContactEmail)) {
     return NextResponse.json({ error: "Ugyldig e-mail til mødekontakten." }, { status: 400 });
@@ -303,6 +310,12 @@ export async function POST(req: Request) {
     }
     if (!meetingCompanyName) {
       return NextResponse.json({ error: "Virksomhedsnavn til mødet er påkrævet." }, { status: 400 });
+    }
+    if (meetingType === MEETING_TYPE_PHYSICAL && !meetingAddress) {
+      return NextResponse.json(
+        { error: "Mødeadresse er påkrævet ved fysisk møde." },
+        { status: 400 },
+      );
     }
   }
 
@@ -333,6 +346,8 @@ export async function POST(req: Request) {
       meetingContactEmail,
       meetingContactPhonePrivate,
       meetingCompanyName,
+      meetingType,
+      meetingAddress,
       customFields: stringifyCustomFields(custom),
       status,
       meetingScheduledFor,

@@ -7,9 +7,13 @@ import type { LeadOpenedFrom } from "@/lib/lead-navigation";
 import { buildLeadDetailHref } from "@/lib/lead-navigation";
 import {
   blockedSegmentsForDay,
+  snapTimeFromColumnClick,
+  transportSegmentsForDay,
   type BlockedTimeRow,
   type BlockedTimeSegment,
+  type TransportSegment,
 } from "@/lib/blocked-time-calendar";
+import { meetingDurationMinutes } from "@/lib/booking/meeting-type-buffers";
 import {
   filterMeetingsInWeek,
   formatWeekColumnHeaderDa,
@@ -19,7 +23,6 @@ import {
   MEETING_CALENDAR_HOUR_START,
   MEETING_CALENDAR_HOURS,
   MEETING_CALENDAR_ROW_HEIGHT_PX,
-  MEETING_DEFAULT_DURATION_MIN,
   meetingPlacement,
   meetingsForDayKey,
   nowLinePercent,
@@ -27,15 +30,22 @@ import {
   todayDayKey,
   weekDayKeys,
 } from "@/lib/meeting-week-calendar";
+import { normalizeMeetingType } from "@/lib/meeting-type";
 
 export type MeetingCalendarRow = {
   id: string;
   companyName: string;
   meetingContactName?: string | null;
   meetingScheduledFor: string | null;
+  meetingType?: string | null;
   meetingOutcomeStatus?: string | null;
   bookedByUser: { id: string; name: string; username: string } | null;
   assignedUser?: { id: string; name: string; username: string; phone: string | null } | null;
+};
+
+export type CalendarEmptySlotClick = {
+  dayKey: string;
+  startTime: string;
 };
 
 type Props = {
@@ -47,9 +57,11 @@ type Props = {
   canOpen: (m: MeetingCalendarRow) => boolean;
   onWeekStartChange: (dayKey: string) => void;
   onBlockTimesClick?: () => void;
-  /** Admin: åbn kalender-indstillinger (mødeblok 55/75 min). */
+  /** Admin: åbn kalender-indstillinger. */
   onSettingsClick?: () => void;
   onBlockedSegmentClick?: (segment: BlockedTimeSegment) => void;
+  /** Klik på tomt felt i gitteret — åbn blokering med forudfyldt tid. */
+  onEmptySlotClick?: (slot: CalendarEmptySlotClick) => void;
 };
 
 function meetingContactDisplayName(meeting: MeetingCalendarRow): string {
@@ -177,6 +189,25 @@ function BlockedSegmentCard({
   );
 }
 
+function TransportSegmentCard({ segment }: { segment: TransportSegment }) {
+  const style: React.CSSProperties = {
+    top: `${segment.topPct}%`,
+    height: `${segment.heightPct}%`,
+    left: "3px",
+    right: "3px",
+    minHeight: "1.25rem",
+  };
+  return (
+    <div
+      className="pointer-events-none absolute z-[1] flex flex-col justify-center overflow-hidden rounded-lg border border-dashed border-violet-300/80 bg-violet-100/55 px-2 py-0.5 text-violet-800"
+      style={style}
+      title="Transportblokering (fysisk møde)"
+    >
+      <span className="line-clamp-1 text-[10px] font-semibold leading-tight">{segment.title}</span>
+    </div>
+  );
+}
+
 export function MeetingsWeekCalendar({
   rows,
   blockedTimes = [],
@@ -188,6 +219,7 @@ export function MeetingsWeekCalendar({
   onBlockTimesClick,
   onSettingsClick,
   onBlockedSegmentClick,
+  onEmptySlotClick,
 }: Props) {
   const weekKeys = useMemo(() => weekDayKeys(weekStartDayKey), [weekStartDayKey]);
   const weekMeetings = useMemo(
@@ -312,9 +344,15 @@ export function MeetingsWeekCalendar({
                   const layoutMap = layoutMeetingColumns(
                     dayMeetings.map((m) => m.id),
                     (id) => dayMeetings.find((m) => m.id === id)!.meetingScheduledFor!,
-                    MEETING_DEFAULT_DURATION_MIN,
+                    (id) =>
+                      meetingDurationMinutes(
+                        normalizeMeetingType(
+                          dayMeetings.find((m) => m.id === id)?.meetingType,
+                        ),
+                      ),
                   );
                   const isToday = dayKey === today;
+                  const transports = transportSegmentsForDay(dayKey, dayMeetings);
 
                   return (
                     <div
@@ -322,13 +360,26 @@ export function MeetingsWeekCalendar({
                       className={[
                         "relative min-w-0 flex-1 border-r border-stone-200",
                         isToday ? "bg-sky-50/25" : "bg-white",
+                        onEmptySlotClick ? "cursor-crosshair" : "",
                       ].join(" ")}
                       style={{ height: gridBodyHeight }}
+                      onClick={
+                        onEmptySlotClick
+                          ? (e) => {
+                              const target = e.target as HTMLElement;
+                              if (target.closest("a, button")) return;
+                              const rect = e.currentTarget.getBoundingClientRect();
+                              const offsetY = e.clientY - rect.top;
+                              const startTime = snapTimeFromColumnClick(offsetY, rect.height);
+                              onEmptySlotClick({ dayKey, startTime });
+                            }
+                          : undefined
+                      }
                     >
                       {hours.map((hour, hi) => (
                         <div
                           key={hour}
-                          className="absolute left-0 right-0 border-b border-stone-100"
+                          className="pointer-events-none absolute left-0 right-0 border-b border-stone-100"
                           style={{ top: hi * MEETING_CALENDAR_ROW_HEIGHT_PX, height: MEETING_CALENDAR_ROW_HEIGHT_PX }}
                         />
                       ))}
@@ -339,6 +390,10 @@ export function MeetingsWeekCalendar({
                           style={{ top: `${nowPct}%` }}
                         />
                       ) : null}
+
+                      {transports.map((seg) => (
+                        <TransportSegmentCard key={seg.id} segment={seg} />
+                      ))}
 
                       {blockedSegmentsForDay(dayKey, blockedTimes).map((seg) => {
                         const row = blockedTimes.find((b) => b.id === seg.id);
@@ -355,7 +410,8 @@ export function MeetingsWeekCalendar({
 
                       {dayMeetings.map((m) => {
                         if (!m.meetingScheduledFor) return null;
-                        const placement = meetingPlacement(m.meetingScheduledFor);
+                        const duration = meetingDurationMinutes(normalizeMeetingType(m.meetingType));
+                        const placement = meetingPlacement(m.meetingScheduledFor, duration);
                         if (!placement) return null;
                         const layout = layoutMap.get(m.id) ?? {
                           leftPct: 0,
@@ -389,8 +445,9 @@ export function MeetingsWeekCalendar({
 
       <p className="text-xs text-stone-500">
         Ugevisning mandag–søndag, {MEETING_CALENDAR_HOUR_START}:00–
-        {MEETING_CALENDAR_HOUR_START + MEETING_CALENDAR_HOURS - 1}:00 (Europe/Copenhagen). Grå felter er
-        blokerede tider — klik for at redigere. Klik et møde for at åbne leadet.
+        {MEETING_CALENDAR_HOUR_START + MEETING_CALENDAR_HOURS - 1}:00 (Europe/Copenhagen). Klik et tomt
+        felt for at blokere tid. Grå felter er manuelle blokeringer — klik for at redigere. Lilla
+        stiplede felter er transport (fysiske møder). Klik et møde for at åbne leadet.
       </p>
     </div>
   );

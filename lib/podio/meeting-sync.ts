@@ -28,6 +28,8 @@ export const MOEDE_FIELDS = {
   dato: "Dato for møde",
   moedeLink: "Møde link",
   moedeNoter: "Møde noter",
+  /** Location-felt «Adresse» i Podio — fyldes ved fysisk møde. */
+  adresse: "Adresse",
   produkter: "Produkter",
   leadId: "Lead-Id",
   itemId: "Item-id",
@@ -54,6 +56,8 @@ type LeadMeetingSnapshot = {
   meetingContactEmail: string;
   meetingContactPhonePrivate: string;
   meetingScheduledFor: Date | null;
+  meetingType: string;
+  meetingAddress: string;
   calComMeetingUrl: string | null;
   notes: string | null;
   bookedByUser: { name: string | null } | null;
@@ -140,6 +144,17 @@ async function buildMoedeFields(
     await setPodioFieldValue("moeder", fields, MOEDE_FIELDS.moedeLink, opts.meetingUrl);
   }
 
+  const address = (lead.meetingAddress ?? "").trim();
+  const isPhysical = String(lead.meetingType ?? "").trim().toUpperCase() === "PHYSICAL";
+  if (isPhysical && address) {
+    try {
+      // Podio-feltet er type «location» — setPodioFieldValue sender adressen som streng.
+      await setPodioFieldValue("moeder", fields, MOEDE_FIELDS.adresse, address);
+    } catch (err) {
+      logPodioError(`Adresse (lead=${lead.id})`, err);
+    }
+  }
+
   if (opts?.itemId) {
     await setPodioFieldValue("moeder", fields, MOEDE_FIELDS.itemId, String(opts.itemId));
   }
@@ -170,6 +185,8 @@ async function loadLeadMeetingSnapshot(leadId: string): Promise<LeadMeetingSnaps
       meetingContactEmail: true,
       meetingContactPhonePrivate: true,
       meetingScheduledFor: true,
+      meetingType: true,
+      meetingAddress: true,
       calComMeetingUrl: true,
       notes: true,
       bookedByUser: { select: { name: true } },

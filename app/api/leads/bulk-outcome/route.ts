@@ -11,14 +11,16 @@ import {
   shouldLogOutcomeForLeaderboard,
 } from "@/lib/lead-outcome-log";
 import { isLockedByOtherUser, releaseExpiredLocksEverywhere } from "@/lib/lead-lock";
-import { blockedTimeConflictMessage } from "@/lib/booking/availability";
-import { getMeetingBlockMinutes } from "@/lib/booking/meeting-block-setting";
+import {
+  blockedTimeConflictMessage,
+  findBookingTimeConflict,
+} from "@/lib/booking/availability";
 import { findBlockedTimeConflictInDb } from "@/lib/booking/meeting-slots";
 import { findLeadBookingOverlapInDb } from "@/lib/booking/overlap-db";
 import { getDefaultMeetingAssigneeId } from "@/lib/meeting-assignee";
 import { campaignIdForBookedMeetingOutcome } from "@/lib/meeting-campaign-routing";
 import { ensureStandardCampaignId } from "@/lib/ensure-system-campaigns";
-import { findBookingTimeConflict } from "@/lib/booking/availability";
+import { normalizeMeetingType } from "@/lib/meeting-type";
 import {
   isFutureMeetingTime,
   isNewMeetingBookingConfirm,
@@ -174,24 +176,29 @@ export async function POST(req: Request) {
         }
       }
       const defaultAssigneeId = await getDefaultMeetingAssigneeId();
-      const blockMinutes = await getMeetingBlockMinutes();
       for (const p of proposals) {
+        const existing = existingRows.find((r) => r.id === p.id);
+        const meetingType = normalizeMeetingType(existing?.meetingType);
         const clash = await findLeadBookingOverlapInDb(p.start, {
           excludeLeadIds: idList,
-          blockMinutes,
+          meetingType,
         });
         if (clash) {
           return NextResponse.json(
             {
-              error: `Mindst ét tidspunkt overlapper et eksisterende møde (${blockMinutes} min før/efter start). Vælg andre tider.`,
+              error:
+                "Mindst ét tidspunkt overlapper et eksisterende møde (varighed/transport). Vælg andre tider.",
             },
             { status: 409 },
           );
         }
-        const existing = existingRows.find((r) => r.id === p.id);
         const calendarUserId = existing?.assignedUserId ?? defaultAssigneeId;
         if (calendarUserId) {
-          const blocked = await findBlockedTimeConflictInDb(calendarUserId, p.start);
+          const blocked = await findBlockedTimeConflictInDb(
+            calendarUserId,
+            p.start,
+            meetingType,
+          );
           if (blocked) {
             return NextResponse.json(
               { error: blockedTimeConflictMessage(blocked.title) },
@@ -202,18 +209,32 @@ export async function POST(req: Request) {
       }
       for (let i = 0; i < proposals.length; i++) {
         const a = proposals[i]!;
+        const aType = normalizeMeetingType(
+          existingRows.find((r) => r.id === a.id)?.meetingType,
+        );
         for (let j = i + 1; j < proposals.length; j++) {
           const b = proposals[j]!;
+          const bType = normalizeMeetingType(
+            existingRows.find((r) => r.id === b.id)?.meetingType,
+          );
           if (
             findBookingTimeConflict(
               a.start,
-              [{ id: b.id, meetingScheduledFor: b.start, meetingOutcomeStatus: "PENDING" }],
-              { blockBeforeMinutes: blockMinutes, blockAfterMinutes: blockMinutes },
+              [
+                {
+                  id: b.id,
+                  meetingScheduledFor: b.start,
+                  meetingOutcomeStatus: "PENDING",
+                  meetingType: bType,
+                },
+              ],
+              { proposedMeetingType: aType },
             )
           ) {
             return NextResponse.json(
               {
-                error: `Flere valgte møder overlapper hinanden i tid (${blockMinutes} min før/efter pr. booking).`,
+                error:
+                  "Flere valgte møder overlapper hinanden i tid (varighed/transport).",
               },
               { status: 409 },
             );

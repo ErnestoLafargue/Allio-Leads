@@ -58,6 +58,7 @@ export async function GET(req: Request) {
         loginSecondsEstimated: r.loginSecondsEstimated,
         dialerSeconds: r.dialerSeconds,
         dialerSecondsEstimated: r.dialerSecondsEstimated,
+        lineSeconds: r.lineSeconds,
         avgConversationSeconds: r.avgConversationSeconds,
         buyRatePct: r.buyRatePct,
       };
@@ -79,6 +80,7 @@ export async function GET(req: Request) {
         loginSecondsEstimated: false,
         dialerSeconds: c.dialerSeconds,
         dialerSecondsEstimated: c.dialerSecondsEstimated,
+        lineSeconds: c.lineSeconds,
         avgConversationSeconds: c.avgConversationSeconds,
         buyRatePct: c.buyRatePct,
       }));

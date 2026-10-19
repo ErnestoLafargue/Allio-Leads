@@ -49,6 +49,12 @@ export function CallReview({ audioSrc, initialT, segments, analysis }: Props) {
   const [playing, setPlaying] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const mono = supportsMonoPlayback(audioSrc);
+  /**
+   * Same-origin `/api/.../audio` kræver session-cookie.
+   * `crossOrigin="anonymous"` sender ikke cookies → 401.
+   */
+  const crossOriginAttr =
+    mono && !audioSrc.startsWith("/") ? ("anonymous" as const) : undefined;
 
   useEffect(() => () => monoRef.current?.close(), []);
 
@@ -90,7 +96,7 @@ export function CallReview({ audioSrc, initialT, segments, analysis }: Props) {
           <audio
             ref={audioRef}
             src={audioSrc}
-            crossOrigin={mono ? "anonymous" : undefined}
+            crossOrigin={crossOriginAttr}
             preload="metadata"
             className="hidden"
             onLoadedMetadata={(e) => {

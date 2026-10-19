@@ -165,8 +165,8 @@ describe("tallyTelnyxLeaderboardMetrics", () => {
     expect(conversations.get("u1")).toBe(1);
   });
 
-  it("tæller ikke samtale under 20 s", () => {
-    const { conversations } = tallyTelnyxLeaderboardMetrics(
+  it("tæller ikke samtale under 20 s, men taletid tælles", () => {
+    const { conversations, talkSeconds } = tallyTelnyxLeaderboardMetrics(
       [
         {
           callControlId: "cc1",
@@ -184,6 +184,7 @@ describe("tallyTelnyxLeaderboardMetrics", () => {
       [],
     );
     expect(conversations.get("u1")).toBeUndefined();
+    expect(talkSeconds.get("u1")).toBe(13);
   });
 
   it("CALL_ATTEMPT med durationSeconds ≥ 20 tæller som samtale (WebRTC-taletid)", () => {
@@ -204,8 +205,8 @@ describe("tallyTelnyxLeaderboardMetrics", () => {
     expect(conversationPairs.has("u1\0l1")).toBe(true);
   });
 
-  it("CALL_ATTEMPT under 20 s eller uden duration tæller kun som kontakt", () => {
-    const { contacts, conversations } = tallyTelnyxLeaderboardMetrics(
+  it("CALL_ATTEMPT under 20 s eller uden duration tæller kun som kontakt — korte kald tæller i taletid", () => {
+    const { contacts, conversations, talkSeconds } = tallyTelnyxLeaderboardMetrics(
       [],
       [
         {
@@ -226,6 +227,7 @@ describe("tallyTelnyxLeaderboardMetrics", () => {
     );
     expect(contacts.get("u1")).toBe(2);
     expect(conversations.get("u1")).toBeUndefined();
+    expect(talkSeconds.get("u1")).toBe(5);
   });
 
   it("CALL_RECORDING tæller ikke som samtale længere", () => {
@@ -337,6 +339,7 @@ describe("mergeConversationsWithOutcomeFallback", () => {
     conversations: new Map(counts),
     conversationPairs: new Set(pairs.map(([u, l]) => `${u}\0${l}`)),
     talkSeconds: new Map<string, number>(),
+    qualifiedTalkSeconds: new Map<string, number>(),
   });
 
   it("udfald med samtale tæller når leadet ikke har talk-samtale", () => {

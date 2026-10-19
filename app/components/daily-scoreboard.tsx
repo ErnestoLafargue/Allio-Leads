@@ -12,6 +12,7 @@ export type LeaderboardCampaignSlice = {
   talkSeconds: number;
   dialerSeconds: number;
   dialerSecondsEstimated?: boolean;
+  lineSeconds: number;
   avgConversationSeconds: number;
   buyRatePct: number;
 };
@@ -30,6 +31,7 @@ export type LeaderboardRow = {
   loginSecondsEstimated?: boolean;
   dialerSeconds?: number;
   dialerSecondsEstimated?: boolean;
+  lineSeconds?: number;
   avgConversationSeconds?: number;
   buyRatePct?: number;
   campaigns?: LeaderboardCampaignSlice[];
@@ -127,14 +129,13 @@ export function DailyScoreboard() {
 
   const me = session?.user?.id;
   const isAdmin = data.isAdmin === true;
-  const columnCount = isAdmin ? 10 : 6;
+  const columnCount = isAdmin ? 12 : 6;
 
   return (
     <div className="space-y-3 rounded-xl border border-amber-200/80 bg-gradient-to-b from-amber-50/90 to-white p-6 shadow-sm">
       <div className="flex flex-wrap items-baseline justify-between gap-2">
         <h2 className="text-sm font-semibold text-amber-950">
-          Scoreboard pr. dag · kontakter og samtaler fra opkald (Telnyx/WebRTC), møder fra udfald ·
-          København
+          Scoreboard pr. dag · talt med og kontakter fra opkald, møder fra udfald · København
         </h2>
         <div className="flex flex-wrap items-center gap-2">
           <button
@@ -163,19 +164,46 @@ export function DailyScoreboard() {
         </div>
       </div>
       <div className="overflow-x-auto rounded-lg border border-amber-100 bg-white/90">
-        <table className={`w-full ${isAdmin ? "min-w-[64rem]" : "min-w-[28rem]"} text-left text-sm`}>
+        <table className={`w-full ${isAdmin ? "min-w-[76rem]" : "min-w-[28rem]"} text-left text-sm`}>
           <thead className="border-b border-amber-100 bg-amber-50/80 text-amber-950/80">
             <tr>
               <th className="w-10 px-3 py-2.5 font-medium">#</th>
               <th className="px-3 py-2.5 font-medium">Bruger</th>
               <th className="px-3 py-2.5 font-medium">Rolle</th>
               <th className="px-3 py-2.5 text-right font-medium tabular-nums">Møder</th>
-              <th className="px-3 py-2.5 text-right font-medium tabular-nums">Samtaler</th>
-              <th className="px-3 py-2.5 text-right font-medium tabular-nums">Kontakter</th>
+              <th
+                className="px-3 py-2.5 text-right font-medium tabular-nums"
+                title="Samtaler med mindst 20 sekunders forbundet tale, eller udfald der kræver samtale"
+              >
+                Talt med
+              </th>
+              <th
+                className="px-3 py-2.5 text-right font-medium tabular-nums"
+                title="Opkaldsforsøg — max ét pr. lead pr. 2 timer"
+              >
+                Kontakter
+              </th>
               {isAdmin && (
                 <>
                   <th className="px-3 py-2.5 text-right font-medium tabular-nums">Login-tid</th>
-                  <th className="px-3 py-2.5 text-right font-medium tabular-nums">Dialer-tid</th>
+                  <th
+                    className="px-3 py-2.5 text-right font-medium tabular-nums"
+                    title="Tid sælgerens egen linje ringer eller er i samtale"
+                  >
+                    Linjetid
+                  </th>
+                  <th
+                    className="px-3 py-2.5 text-right font-medium tabular-nums"
+                    title="Tid med kampagnesiden åben (noter, wrap-up, venten)"
+                  >
+                    Tid i kampagne
+                  </th>
+                  <th
+                    className="px-3 py-2.5 text-right font-medium tabular-nums"
+                    title="Samlet forbundet taletid, også korte kald"
+                  >
+                    Taletid
+                  </th>
                   <th className="px-3 py-2.5 text-right font-medium tabular-nums">Gns. samtale</th>
                   <th className="px-3 py-2.5 text-right font-medium tabular-nums">Buyrate</th>
                 </>
@@ -269,11 +297,17 @@ export function DailyScoreboard() {
                         >
                           {formatPresence(r.loginSeconds, r.loginSecondsEstimated)}
                         </td>
+                        <td className="px-3 py-2.5 text-right tabular-nums text-stone-700">
+                          {formatPresence(r.lineSeconds)}
+                        </td>
                         <td
                           className="px-3 py-2.5 text-right tabular-nums text-stone-700"
                           title={r.dialerSecondsEstimated ? ESTIMATE_TITLE : undefined}
                         >
                           {formatPresence(r.dialerSeconds, r.dialerSecondsEstimated)}
+                        </td>
+                        <td className="px-3 py-2.5 text-right tabular-nums text-stone-700">
+                          {formatPresence(r.talkSeconds)}
                         </td>
                         <td className="px-3 py-2.5 text-right tabular-nums text-stone-700">
                           {formatTalk(r.avgConversationSeconds)}
@@ -306,11 +340,17 @@ export function DailyScoreboard() {
                               {c.contacts}
                             </td>
                             <td className="px-3 py-2 text-right tabular-nums text-stone-400">—</td>
+                            <td className="px-3 py-2 text-right tabular-nums text-stone-600">
+                              {formatPresence(c.lineSeconds)}
+                            </td>
                             <td
                               className="px-3 py-2 text-right tabular-nums text-stone-600"
                               title={c.dialerSecondsEstimated ? ESTIMATE_TITLE : undefined}
                             >
                               {formatPresence(c.dialerSeconds, c.dialerSecondsEstimated)}
+                            </td>
+                            <td className="px-3 py-2 text-right tabular-nums text-stone-600">
+                              {formatPresence(c.talkSeconds)}
                             </td>
                             <td className="px-3 py-2 text-right tabular-nums text-stone-600">
                               {formatTalk(c.avgConversationSeconds)}
@@ -337,10 +377,10 @@ export function DailyScoreboard() {
         </table>
       </div>
       <p className="text-xs text-stone-500">
-        Kontakter: opkaldsforsøg (max ét pr. 2 t. pr. lead); samtaler: ≥ 20 s. forbundet tale
-        (dage uden registreret taletid: udfald der kræver samtale); møder: booket møde via udfald.
+        Talt med: samtaler ≥ 20 s. forbundet tale (eller udfald der kræver samtale). Kontakter:
+        opkaldsforsøg (max ét pr. 2 t. pr. lead). Møder: booket møde via udfald.
         {isAdmin
-          ? " Login-/dialer-tid måles mens Allio-fanen er åben; buyrate er møder pr. samtale. Stjerne (*) betyder estimeret tid ud fra opkaldsaktivitet på dage før målingen begyndte. Gns. samtale kræver registreret taletid og er derfor tom for dage før 5. august. Klik på en bruger for fordeling pr. kampagne."
+          ? " Linjetid er ring + tale på sælgerens egen linje (måles fremad). Tid i kampagne er tid med siden åben. Taletid er al forbundet tale, også korte kald. Login-tid er Allio-fanen synlig. Buyrate er møder pr. samtale. Stjerne (*) betyder estimeret skrivebordstid. Klik på en bruger for fordeling pr. kampagne."
           : ""}
       </p>
       {data.rows.length === 0 && (

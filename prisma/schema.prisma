@@ -286,6 +286,10 @@ model Lead {
   meetingContactName         String @default("")
   meetingContactEmail        String @default("")
   meetingContactPhonePrivate String @default("")
+  /// ONLINE | PHYSICAL — styrer Cal.eu (kun online) + Allio-Native ydelse
+  meetingType                String @default("ONLINE")
+  /// Mødeadresse ved fysisk møde (sendes også til Native-kunde)
+  meetingAddress             String @default("")
 
   /// PENDING | HELD | CANCELLED | REBOOK | SALE | LOST | IN_PROGRESS — kun relevant når status = MEETING_BOOKED (admin sætter udfald)
   meetingOutcomeStatus        String  @default("PENDING")
@@ -326,6 +330,11 @@ model Lead {
   /// Cal.eu booking uid + ekstern mødelink (Google Meet/Cal Video) — sættes når booking oprettes eksternt.
   calComBookingUid  String?
   calComMeetingUrl  String?
+  /// Allio-Native kunde/booking-spejl (oprettes ved mødebooking).
+  allioCustomerId   String?
+  allioBookingId    String?
+  /// Kort lås mens Allio-Native-sync kører (forhindrer webhook-echo).
+  allioNativeSyncLockUntil DateTime?
   /// Idempotens-stempler for leverancemails (sættes når mail er sendt).
   welcomeMailSentAt DateTime?
   geckoMailSentAt   DateTime?
@@ -355,6 +364,7 @@ model Lead {
   @@index([campaignId, powerDialerEligibleAfter])
   @@index([unansweredAttempts])
   @@index([campaignId, unansweredAttempts])
+  @@index([allioBookingId])
 }
 
 /// Arkiveret møde-snapshot (historik til Mine salg / provision når lead får nyt møde).
@@ -932,4 +942,32 @@ model AiSaelgerPrinciples {
   decidedAt    DateTime?
 
   @@index([status, version])
+}
+
+/// Optagne intervaller spejlet fra Allio-Native (fremmede bookinger + vores egne).
+/// start/end = ydelsens vindue; Leads udvider med buffer ud fra serviceIds.
+model AllioNativeOccupancy {
+  id             String   @id @default(cuid())
+  allioBookingId String   @unique
+  startDateTime  DateTime
+  endDateTime    DateTime
+  /// JSON-array af Native service UUIDs
+  serviceIds     String   @default("[]")
+  status         String   @default("confirmed")
+  source         String   @default("booking")
+  title          String   @default("")
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  @@index([startDateTime, endDateTime])
+  @@index([status])
+}
+
+/// Idempotens for Allio-Native webhook-events.
+model AllioNativeWebhookEvent {
+  id          String   @id
+  type        String
+  processedAt DateTime @default(now())
+
+  @@index([processedAt])
 }

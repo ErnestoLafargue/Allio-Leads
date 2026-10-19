@@ -31,6 +31,10 @@ export function kickoffEventTypeId(): number {
   return parseEventTypeId(process.env.CALCOM_KICKOFF_EVENT_TYPE_ID);
 }
 
+export function physicalEventTypeId(): number {
+  return parseEventTypeId(process.env.CALCOM_PHYSICAL_EVENT_TYPE_ID);
+}
+
 export function isCalComConfigured(): boolean {
   return Boolean(apiKey()) && onboardingEventTypeId() > 0;
 }
@@ -46,8 +50,13 @@ export type CalComBookingInput = {
   attendeeEmail: string;
   /** Valgfrit telefonnummer (E.164) — vises på bookingen hvis event type understøtter det. */
   attendeePhone?: string;
-  /** Override event type (fx kick-off). Default: CALCOM_EVENT_TYPE_ID (onboarding). */
+  /** Override event type (fx kick-off / fysisk). Default: CALCOM_EVENT_TYPE_ID (onboarding). */
   eventTypeId?: number;
+  /**
+   * Fysisk mødeadresse — sendes som Cal location når understøttet.
+   * Ved fysisk møde uden separat event type forsøges location i body.
+   */
+  location?: string;
 };
 
 export type CalComBookingResult = {
@@ -94,6 +103,11 @@ export async function createCalComBooking(
       // BEVIDST ingen notes/bookingFieldsResponses: interne lead-noter må
       // aldrig sendes til Cal.eu, da attendee kan se dem (mail + kalender).
     };
+    const loc = (input.location ?? "").trim();
+    if (loc) {
+      // Cal.eu v2: location som adresse-streng for in-person events.
+      body.location = loc;
+    }
 
     return fetch(url, {
       method: "POST",

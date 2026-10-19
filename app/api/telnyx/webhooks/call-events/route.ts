@@ -580,27 +580,23 @@ export async function POST(req: Request) {
         });
       }
 
-      // Kopiér optagelsen til Vercel Blob i baggrunden og opdatér URL når den er klar,
-      // så afspilning ikke afhænger af udløbende Telnyx-download-links.
+      // Kopiér til Vercel Blob synkront før webhook-svar — `after()` kørte ikke
+      // pålideligt på vores Node-host, så S3-URL'er (Expires=600) blev stående.
       // Skip hvis vi allerede har en Blob-kopi (undgår dubletter + URL-thrash).
       if (telnyxRecordingUrl && !existingBlobUrl) {
         const sidForBlob = sessionIdForRec;
-        after(() => {
-          void (async () => {
-            try {
-              const { playbackUrl, storedOnAllio } = await persistTelnyxRecordingToAllio({
-                telnyxMp3Url: telnyxRecordingUrl,
-                leadId,
-                callControlId,
-              });
-              if (!storedOnAllio || playbackUrl === telnyxRecordingUrl) return;
-              // Overskriv ikke hvis en anden sti allerede lagde Blob-URL ind.
-              const current = await prisma.leadActivityEvent.findFirst({
-                where: { leadId, telnyxCallLegId: callControlId },
-                select: { recordingUrl: true },
-              });
-              if (current?.recordingUrl && isVercelBlobUrl(current.recordingUrl)) return;
-
+        try {
+          const { playbackUrl, storedOnAllio } = await persistTelnyxRecordingToAllio({
+            telnyxMp3Url: telnyxRecordingUrl,
+            leadId,
+            callControlId,
+          });
+          if (storedOnAllio && playbackUrl !== telnyxRecordingUrl) {
+            const current = await prisma.leadActivityEvent.findFirst({
+              where: { leadId, telnyxCallLegId: callControlId },
+              select: { recordingUrl: true },
+            });
+            if (!(current?.recordingUrl && isVercelBlobUrl(current.recordingUrl))) {
               await prisma.leadActivityEvent.updateMany({
                 where: { leadId, telnyxCallLegId: callControlId },
                 data: { recordingUrl: playbackUrl },
@@ -619,11 +615,16 @@ export async function POST(req: Request) {
                   data: { recordingUrl: playbackUrl },
                 });
               }
-            } catch (err) {
-              console.error("[call-events] recording blob persist (after):", err);
             }
-          })();
-        });
+          } else {
+            console.warn("[call-events] recording blob persist skipped/failed", {
+              callControlIdSuffix: callControlId.length > 8 ? callControlId.slice(-8) : callControlId,
+              storedOnAllio,
+            });
+          }
+        } catch (err) {
+          console.error("[call-events] recording blob persist:", err);
+        }
       }
       break;
     }

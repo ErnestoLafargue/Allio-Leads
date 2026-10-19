@@ -6,6 +6,7 @@ import { useSession } from "next-auth/react";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import {
   BlockedTimeDialog,
+  type BlockedTimeCreatePrefill,
   type BlockedTimeDto,
 } from "@/app/(dashboard)/meetings/_components/blocked-time-dialog";
 import { MeetingBlockSettingDialog } from "@/app/(dashboard)/meetings/_components/meeting-block-setting-dialog";
@@ -36,6 +37,7 @@ type MeetingRow = {
   phone: string;
   meetingBookedAt: string | null;
   meetingScheduledFor: string | null;
+  meetingType?: string | null;
   meetingOutcomeStatus?: string | null;
   bookedByUser: { id: string; name: string; username: string } | null;
   assignedUser?: { id: string; name: string; username: string; phone: string | null } | null;
@@ -122,6 +124,9 @@ export function MeetingsList({ type }: { type: "upcoming" | "past" }) {
   const [blockedDialogOpen, setBlockedDialogOpen] = useState(false);
   const [blockedDialogMode, setBlockedDialogMode] = useState<"create" | "edit">("create");
   const [blockedDialogInitial, setBlockedDialogInitial] = useState<BlockedTimeDto | null>(null);
+  const [blockedDialogPrefill, setBlockedDialogPrefill] = useState<BlockedTimeCreatePrefill | null>(
+    null,
+  );
   const [blockedSaving, setBlockedSaving] = useState(false);
   const [settingsDialogOpen, setSettingsDialogOpen] = useState(false);
 
@@ -177,15 +182,17 @@ export function MeetingsList({ type }: { type: "upcoming" | "past" }) {
     void loadBlockedTimes();
   }, [loadBlockedTimes]);
 
-  function openCreateBlockedDialog() {
+  function openCreateBlockedDialog(prefill?: BlockedTimeCreatePrefill | null) {
     setBlockedDialogMode("create");
     setBlockedDialogInitial(null);
+    setBlockedDialogPrefill(prefill ?? null);
     setBlockedDialogOpen(true);
   }
 
   function openEditBlockedDialog(row: BlockedTimeDto) {
     setBlockedDialogMode("edit");
     setBlockedDialogInitial(row);
+    setBlockedDialogPrefill(null);
     setBlockedDialogOpen(true);
   }
 
@@ -397,18 +404,25 @@ export function MeetingsList({ type }: { type: "upcoming" | "past" }) {
             openedFrom={upcomingOpenedFrom}
             canOpen={(m) => canOpen(m as MeetingRow)}
             onWeekStartChange={setWeekStartDayKey}
-            onBlockTimesClick={openCreateBlockedDialog}
+            onBlockTimesClick={() => openCreateBlockedDialog()}
             onSettingsClick={isAdmin ? () => setSettingsDialogOpen(true) : undefined}
             onBlockedSegmentClick={(seg) => {
               const full = blockedTimesFull.find((b) => b.id === seg.id);
               if (!full) return;
               openEditBlockedDialog(full);
             }}
+            onEmptySlotClick={(slot) =>
+              openCreateBlockedDialog({
+                startDate: slot.dayKey,
+                startTime: slot.startTime,
+              })
+            }
           />
           <BlockedTimeDialog
             open={blockedDialogOpen}
             mode={blockedDialogMode}
             initial={blockedDialogInitial}
+            createPrefill={blockedDialogPrefill}
             currentUserId={userId}
             isAdmin={isAdmin}
             defaultUserId={defaultAssigneeId}

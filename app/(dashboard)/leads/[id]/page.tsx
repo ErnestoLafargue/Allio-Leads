@@ -38,6 +38,11 @@ import { VOIP_API_CONTEXT } from "@/lib/voip-api-context";
 import { useActivityRecordingPoll } from "@/lib/use-activity-recording-poll";
 import { LEAD_NAV_FALLBACK_PATH, parseLeadNavigation } from "@/lib/lead-navigation";
 import { canScheduleCallbackFromLead } from "@/lib/lead-callback-schedule";
+import {
+  MEETING_TYPE_ONLINE,
+  type MeetingType,
+  normalizeMeetingType,
+} from "@/lib/meeting-type";
 
 type Lead = {
   id: string;
@@ -61,6 +66,8 @@ type Lead = {
   meetingContactEmail?: string;
   meetingContactPhonePrivate?: string;
   meetingCompanyName?: string;
+  meetingType?: string;
+  meetingAddress?: string;
   meetingOutcomeStatus?: string;
   campaign: { id: string; name: string; fieldConfig: string } | null;
   lockedByUserId?: string | null;
@@ -108,6 +115,8 @@ function LeadDetailInner() {
   const [meetingContactEmail, setMeetingContactEmail] = useState("");
   const [meetingContactPhonePrivate, setMeetingContactPhonePrivate] = useState("");
   const [meetingCompanyName, setMeetingCompanyName] = useState("");
+  const [meetingType, setMeetingType] = useState<MeetingType>(MEETING_TYPE_ONLINE);
+  const [meetingAddress, setMeetingAddress] = useState("");
   const [meetingContactErrors, setMeetingContactErrors] = useState<MeetingContactFieldErrors>({});
   const [meetingNotesRequiredOpen, setMeetingNotesRequiredOpen] = useState(false);
   const [meetingOutcomeStatus, setMeetingOutcomeStatus] = useState(MEETING_OUTCOME_PENDING);
@@ -199,6 +208,8 @@ function LeadDetailInner() {
       setMeetingContactEmail(data.meetingContactEmail ?? "");
       setMeetingContactPhonePrivate(data.meetingContactPhonePrivate ?? "");
       setMeetingCompanyName(data.meetingCompanyName ?? "");
+      setMeetingType(normalizeMeetingType(data.meetingType));
+      setMeetingAddress(data.meetingAddress ?? "");
       setMeetingOutcomeStatus(
         String(data.meetingOutcomeStatus ?? "").trim().toUpperCase() || MEETING_OUTCOME_PENDING,
       );
@@ -350,11 +361,13 @@ function LeadDetailInner() {
 
   async function onConfirmBookingFromPanel(detail: BookingConfirmPayload) {
     if (!lead || status !== "MEETING_BOOKED") return;
+    const type = detail.meetingType ?? meetingType;
     const contactErr = validateMeetingContactFields(
       meetingContactName,
       meetingContactEmail,
       meetingContactPhonePrivate,
       meetingCompanyName,
+      { meetingType: type, meetingAddress },
     );
     if (contactErr) {
       setMeetingContactErrors(contactErr);
@@ -368,6 +381,7 @@ function LeadDetailInner() {
     }
     setError(null);
     setSaving(true);
+    setMeetingType(type);
     const body: Record<string, unknown> = {
       companyName,
       phone,
@@ -386,6 +400,8 @@ function LeadDetailInner() {
       meetingContactEmail: meetingContactEmail.trim(),
       meetingContactPhonePrivate: meetingContactPhonePrivate.trim(),
       meetingCompanyName: meetingCompanyName.trim(),
+      meetingType: type,
+      meetingAddress: meetingAddress.trim(),
     };
     if (detail.adminSkipBookingOverlap) {
       body.adminSkipBookingOverlap = true;
@@ -430,10 +446,11 @@ function LeadDetailInner() {
         meetingContactEmail,
         meetingContactPhonePrivate,
         meetingCompanyName,
+        { meetingType, meetingAddress },
       );
       if (contactErr) {
         setMeetingContactErrors(contactErr);
-        setError("Du skal udfylde de tre mødekontakt-felter, før du kan gemme med udfaldet «Møde booket».");
+        setError("Du skal udfylde mødekontakt-oplysningerne, før du kan gemme med udfaldet «Møde booket».");
         return;
       }
       setMeetingContactErrors({});
@@ -467,6 +484,8 @@ function LeadDetailInner() {
       body.meetingContactEmail = meetingContactEmail.trim();
       body.meetingContactPhonePrivate = meetingContactPhonePrivate.trim();
       body.meetingCompanyName = meetingCompanyName.trim();
+      body.meetingType = meetingType;
+      body.meetingAddress = meetingAddress.trim();
     }
     const res = await fetch(`/api/leads/${id}`, {
       method: "PATCH",
@@ -914,6 +933,8 @@ function LeadDetailInner() {
                 meetingContactEmail,
                 meetingContactPhonePrivate,
                 meetingCompanyName,
+                meetingType,
+                meetingAddress,
                 onMeetingContactName: (v) => {
                   setMeetingContactName(v);
                   setMeetingContactErrors((prev) => ({ ...prev, name: undefined }));
@@ -930,6 +951,10 @@ function LeadDetailInner() {
                   setMeetingCompanyName(v);
                   setMeetingContactErrors((prev) => ({ ...prev, meetingCompany: undefined }));
                 },
+                onMeetingAddress: (v) => {
+                  setMeetingAddress(v);
+                  setMeetingContactErrors((prev) => ({ ...prev, address: undefined }));
+                },
                 contactRequired: status === "MEETING_BOOKED",
                 meetingContactErrors: status === "MEETING_BOOKED" ? meetingContactErrors : undefined,
               }}
@@ -937,6 +962,8 @@ function LeadDetailInner() {
                 campaignId: lead.campaignId ?? undefined,
                 leadId: lead.id,
                 initialMeetingLocal: status === "MEETING_BOOKED" ? meetingScheduledFor || undefined : undefined,
+                meetingType,
+                onMeetingTypeChange: setMeetingType,
                 isSubmitting: saving,
                 allowMeetingConfirm: status === "MEETING_BOOKED",
                 allowAdminAvailabilityOverride: isAdmin,

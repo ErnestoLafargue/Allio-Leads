@@ -2,6 +2,10 @@ import { NextResponse } from "next/server";
 import { requireSession } from "@/lib/api-auth";
 import { prisma } from "@/lib/prisma";
 import { copenhagenDayKey } from "@/lib/copenhagen-day";
+import {
+  creditDialerLineOccupancy,
+  isDialerLinePhase,
+} from "@/lib/dialer-line-occupancy";
 
 /**
  * Maks. sekunder ét heartbeat kan kreditere. Klienten pinger hvert ~60. sekund,
@@ -27,6 +31,7 @@ export async function POST(req: Request) {
     typeof body?.campaignId === "string" && body.campaignId.trim()
       ? body.campaignId.trim()
       : null;
+  const linePhase = isDialerLinePhase(body?.linePhase) ? body.linePhase : null;
 
   const userId = session.user.id;
   const dayKey = copenhagenDayKey();
@@ -72,6 +77,11 @@ export async function POST(req: Request) {
         create: { userId, campaignId, dayKey, dialerSeconds: 0, lastSeenAt: now },
         update: { dialerSeconds: { increment: dialerCredit }, lastSeenAt: now },
       });
+      await creditDialerLineOccupancy({
+        userId,
+        campaignId,
+        phase: linePhase,
+      }).catch(() => undefined);
     }
   }
 

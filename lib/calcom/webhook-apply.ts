@@ -6,6 +6,7 @@ import {
 } from "@/lib/meeting-outcome";
 import { LEAD_ACTIVITY_KIND } from "@/lib/lead-activity-kinds";
 import { MOEDE_STATUS, updateMoedeInPodio } from "@/lib/podio/meeting-sync";
+import { cancelAllioNativeBookingForLead } from "@/lib/allio-native/sync-lead-booking";
 
 /**
  * Anvender Cal.eu-webhook-handlinger på et lead.
@@ -36,7 +37,13 @@ export type CalRebookSource = "cancelled" | "no_show";
  */
 export async function applyCalRebook(
   leadId: string,
-  opts: { source: CalRebookSource; reason?: string; mirrorToPodio?: boolean },
+  opts: {
+    source: CalRebookSource;
+    reason?: string;
+    mirrorToPodio?: boolean;
+    /** true når aflysningen allerede kom fra Allio-Native (undgå delete-loop). */
+    skipNativeCancel?: boolean;
+  },
 ): Promise<void> {
   const rebookingCampaignId = await ensureSystemCampaignId("rebooking");
 
@@ -53,7 +60,9 @@ export async function applyCalRebook(
   const summary =
     opts.source === "no_show"
       ? `Kunden udeblev fra mødet (Cal.eu) — sat til Genbook.${reasonSuffix}`
-      : `Kunden aflyste mødet via Cal.eu — sat til Genbook.${reasonSuffix}`;
+      : opts.reason?.includes("Allio-Native")
+        ? `Møde aflyst i Allio-Native — sat til Genbook.${reasonSuffix}`
+        : `Kunden aflyste mødet via Cal.eu — sat til Genbook.${reasonSuffix}`;
 
   await prisma.leadActivityEvent.create({
     data: {
@@ -66,6 +75,18 @@ export async function applyCalRebook(
 
   if (opts.mirrorToPodio !== false) {
     await updateMoedeInPodio(leadId, { status: MOEDE_STATUS.genbook });
+  }
+
+  if (opts.skipNativeCancel) return;
+
+  // Aflys spejlet booking i Allio-Native (ikke-fatalt; springes over ved echo-lås).
+  try {
+    await cancelAllioNativeBookingForLead(leadId);
+  } catch (err) {
+    console.error(
+      "[allio-native] cancel efter Cal-rebook fejlede:",
+      err instanceof Error ? err.message : err,
+    );
   }
 }
 

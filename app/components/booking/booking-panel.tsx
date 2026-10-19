@@ -3,12 +3,11 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { BookingCalendar } from "@/app/components/booking/booking-calendar";
 import { BookingTimeSlots } from "@/app/components/booking/booking-time-slots";
+import type { CopenhagenBookingSlotWithAvailability } from "@/lib/booking/availability";
 import {
-  BOOKING_MEETING_BLOCK_BEFORE_MIN,
-  getCopenhagenBookingSlotsWithAvailability,
-  parseOccupiedBlocksFromApi,
-  type CopenhagenBookingSlotWithAvailability,
-} from "@/lib/booking/availability";
+  meetingDurationMinutes,
+  transportBufferMinutes,
+} from "@/lib/booking/meeting-type-buffers";
 import { startOfLocalDay, toCopenhagenDateKey } from "@/lib/booking/mock-availability";
 import {
   MEETING_TYPE_ONLINE,
@@ -70,7 +69,6 @@ export function BookingPanel({
   const [slotOptions, setSlotOptions] = useState<CopenhagenBookingSlotWithAvailability[]>([]);
   const [slotsLoading, setSlotsLoading] = useState(false);
   const [adminAvailabilityOverride, setAdminAvailabilityOverride] = useState(false);
-  const [blockMinutes, setBlockMinutes] = useState<number>(BOOKING_MEETING_BLOCK_BEFORE_MIN);
   const [resolvedCalendarUserId, setResolvedCalendarUserId] = useState<string | undefined>(
     calendarUserIdProp,
   );
@@ -79,6 +77,8 @@ export function BookingPanel({
   );
   const meetingType =
     meetingTypeProp !== undefined ? normalizeMeetingType(meetingTypeProp) : internalMeetingType;
+  const durationMin = meetingDurationMinutes(meetingType);
+  const transportMin = transportBufferMinutes(meetingType);
 
   function setMeetingType(next: MeetingType) {
     if (meetingTypeProp === undefined) setInternalMeetingType(next);
@@ -145,18 +145,13 @@ export function BookingPanel({
       });
       if (leadId) qs.set("excludeLeadId", leadId);
       const res = await fetch(`/api/booking/availability?${qs}`);
-      let occupied: ReturnType<typeof parseOccupiedBlocksFromApi> = [];
+      let allSlots: CopenhagenBookingSlotWithAvailability[] = [];
       if (res.ok) {
         const payload = (await res.json()) as {
-          blocks: { start: string; end: string }[];
-          blockMinutes?: number;
+          slots?: CopenhagenBookingSlotWithAvailability[];
         };
-        occupied = parseOccupiedBlocksFromApi(payload.blocks);
-        if (typeof payload.blockMinutes === "number" && !cancelled) {
-          setBlockMinutes(payload.blockMinutes);
-        }
+        allSlots = Array.isArray(payload.slots) ? payload.slots : [];
       }
-      const allSlots = getCopenhagenBookingSlotsWithAvailability(dayKey, occupied);
       const display =
         allowAdminAvailabilityOverride && adminAvailabilityOverride
           ? allSlots
@@ -277,34 +272,58 @@ export function BookingPanel({
       ].join(" ")}
     >
       <div className="mb-4 flex flex-col gap-3 border-b border-slate-100 pb-4 sm:flex-row sm:items-start sm:justify-between">
-        <div className="space-y-2">
-          <h2 className="text-lg font-semibold tracking-tight text-slate-900">Vælg tid til møde</h2>
-          {allowAdminAvailabilityOverride ? (
-            <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:gap-3">
-              <button
-                type="button"
-                aria-pressed={adminAvailabilityOverride}
-                onClick={() => setAdminAvailabilityOverride((v) => !v)}
-                className={[
-                  "rounded-lg border px-3 py-2 text-left text-xs font-semibold shadow-sm transition sm:text-sm",
-                  adminAvailabilityOverride
-                    ? "border-amber-600 bg-amber-100 text-amber-950 ring-2 ring-amber-400/60"
-                    : "border-slate-200 bg-white text-slate-800 hover:border-slate-300 hover:bg-slate-50",
-                ].join(" ")}
-              >
-                Overskrid
-                <span className="mt-0.5 block font-normal text-slate-600">
-                  Vis alle tider inkl. optagne — book alligevel som admin ({blockMinutes} min blokering gælder stadig for det nye møde).
-                </span>
-              </button>
-            </div>
-          ) : null}
-        </div>
+        <h2 className="text-lg font-semibold tracking-tight text-slate-900">Vælg tid til møde</h2>
         <p className="text-xs text-slate-600 sm:max-w-sm">
-          Hvert møde reserverer <strong>{blockMinutes} min før</strong> og <strong>{blockMinutes} min efter</strong> start (gitter 15 min).
+          {meetingType === MEETING_TYPE_PHYSICAL ? (
+            <>
+              Fysisk møde: <strong>{durationMin} min</strong> +{" "}
+              <strong>{transportMin} min transport</strong> før og efter (gitter 15 min).
+            </>
+          ) : (
+            <>
+              Onlinemøde: <strong>{durationMin} min</strong> (gitter 15 min).
+            </>
+          )}
           {!adminAvailabilityOverride || !allowAdminAvailabilityOverride
             ? " Ledige tider er filtreret."
             : null}
+        </p>
+      </div>
+
+      <div className="mb-5">
+        <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-slate-500">
+          Mødetype
+        </p>
+        <div className="flex flex-col gap-2 sm:flex-row">
+          {(
+            [
+              [MEETING_TYPE_ONLINE, meetingTypeLabel(MEETING_TYPE_ONLINE)],
+              [MEETING_TYPE_PHYSICAL, meetingTypeLabel(MEETING_TYPE_PHYSICAL)],
+            ] as const
+          ).map(([value, label]) => {
+            const active = meetingType === value;
+            return (
+              <button
+                key={value}
+                type="button"
+                aria-pressed={active}
+                onClick={() => setMeetingType(value)}
+                className={[
+                  "flex-1 rounded-xl border px-4 py-3 text-sm font-semibold shadow-sm transition",
+                  active
+                    ? "border-blue-600 bg-blue-600 text-white ring-2 ring-blue-300/70"
+                    : "border-slate-200 bg-white text-slate-800 hover:border-slate-300 hover:bg-slate-50",
+                ].join(" ")}
+              >
+                {label}
+              </button>
+            );
+          })}
+        </div>
+        <p className="mt-1.5 text-xs text-slate-500">
+          {meetingType === MEETING_TYPE_PHYSICAL
+            ? "Fysisk møde — udfyld mødeadresse i det grønne felt. Podio + Allio-Native (uden Cal.eu). Transportblokeringer må overlappe hinanden."
+            : "Onlinemøde — Cal.eu sender invitation/Meet-link. Podio + Allio-Native."}
         </p>
       </div>
 
@@ -339,68 +358,50 @@ export function BookingPanel({
         />
       </div>
 
-      <div className="mt-6 space-y-4 border-t border-slate-100 pt-4">
-        <div>
-          <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-slate-500">
-            Mødetype
-          </p>
-          <div className="flex flex-col gap-2 sm:flex-row">
-            {(
-              [
-                [MEETING_TYPE_ONLINE, meetingTypeLabel(MEETING_TYPE_ONLINE)],
-                [MEETING_TYPE_PHYSICAL, meetingTypeLabel(MEETING_TYPE_PHYSICAL)],
-              ] as const
-            ).map(([value, label]) => {
-              const active = meetingType === value;
-              return (
-                <button
-                  key={value}
-                  type="button"
-                  aria-pressed={active}
-                  onClick={() => setMeetingType(value)}
-                  className={[
-                    "flex-1 rounded-xl border px-4 py-3 text-sm font-semibold shadow-sm transition",
-                    active
-                      ? "border-blue-600 bg-blue-600 text-white ring-2 ring-blue-300/70"
-                      : "border-slate-200 bg-white text-slate-800 hover:border-slate-300 hover:bg-slate-50",
-                  ].join(" ")}
-                >
-                  {label}
-                </button>
-              );
-            })}
-          </div>
-          <p className="mt-1.5 text-xs text-slate-500">
-            {meetingType === MEETING_TYPE_PHYSICAL
-              ? "Fysisk møde — udfyld mødeadresse i det grønne felt. Ledige tider følger fysisk buffer."
-              : "Onlinemøde — Cal.eu sender mødelink. Ledige tider følger online-buffer."}
-          </p>
+      {allowAdminAvailabilityOverride ? (
+        <div className="mt-6">
+          <button
+            type="button"
+            aria-pressed={adminAvailabilityOverride}
+            onClick={() => setAdminAvailabilityOverride((v) => !v)}
+            className={[
+              "w-full rounded-lg border px-3 py-2 text-left text-xs font-semibold shadow-sm transition sm:text-sm",
+              adminAvailabilityOverride
+                ? "border-amber-600 bg-amber-100 text-amber-950 ring-2 ring-amber-400/60"
+                : "border-slate-200 bg-white text-slate-800 hover:border-slate-300 hover:bg-slate-50",
+            ].join(" ")}
+          >
+            Overskrid
+            <span className="mt-0.5 block font-normal text-slate-600">
+              Vis alle tider inkl. optagne — book alligevel som admin (varighed/transport gælder stadig for det nye møde).
+            </span>
+          </button>
         </div>
+      ) : null}
 
-        <div className="flex flex-col items-stretch gap-2 sm:flex-row sm:items-center sm:justify-end">
-          {!allowMeetingConfirm ? (
-            <p className="order-2 text-center text-xs text-slate-500 sm:order-1 sm:mr-auto sm:text-left">
-              Vælg udfaldet <strong>Møde booket</strong> for at gemme tidspunktet på leadet.
-            </p>
-          ) : null}
-          <div className="order-1 flex w-full flex-col gap-2 sm:order-2 sm:w-auto sm:flex-row sm:gap-3">
-            <a
-              href="https://calendly.com/victor-allio/onboarding"
-              target="_blank"
-              rel="noopener noreferrer"
-              className="inline-flex items-center justify-center rounded-xl border border-slate-200 bg-white px-5 py-2.5 text-center text-sm font-semibold text-slate-800 shadow-sm transition hover:bg-slate-50"
-            >
-              Calendly
-            </a>
-            <button
-              type="button"
-              disabled={!canConfirm}
-              onClick={() => void handleConfirm()}
-              className="rounded-xl bg-blue-600 px-5 py-2.5 text-sm font-semibold text-white shadow-md transition hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-50"
-            >
-              {isSubmitting ? "Gemmer…" : "Bekræft booking"}
-            </button>
-          </div>
+      <div className="mt-6 flex flex-col items-stretch gap-2 border-t border-slate-100 pt-4 sm:flex-row sm:items-center sm:justify-end">
+        {!allowMeetingConfirm ? (
+          <p className="order-2 text-center text-xs text-slate-500 sm:order-1 sm:mr-auto sm:text-left">
+            Vælg udfaldet <strong>Møde booket</strong> for at gemme tidspunktet på leadet.
+          </p>
+        ) : null}
+        <div className="order-1 flex w-full flex-col gap-2 sm:order-2 sm:w-auto sm:flex-row sm:gap-3">
+          <a
+            href="https://calendly.com/victor-allio/onboarding"
+            target="_blank"
+            rel="noopener noreferrer"
+            className="inline-flex items-center justify-center rounded-xl border border-slate-200 bg-white px-5 py-2.5 text-center text-sm font-semibold text-slate-800 shadow-sm transition hover:bg-slate-50"
+          >
+            Calendly
+          </a>
+          <button
+            type="button"
+            disabled={!canConfirm}
+            onClick={() => void handleConfirm()}
+            className="rounded-xl bg-blue-600 px-5 py-2.5 text-sm font-semibold text-white shadow-md transition hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-50"
+          >
+            {isSubmitting ? "Gemmer…" : "Bekræft booking"}
+          </button>
         </div>
       </div>
     </section>

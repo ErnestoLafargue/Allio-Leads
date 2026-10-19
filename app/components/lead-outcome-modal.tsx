@@ -3,11 +3,6 @@
 import { useEffect, useState } from "react";
 import { LEAD_STATUS_LABELS, type LeadStatus } from "@/lib/lead-status";
 import { OUTCOME_ORDER, outcomeButtonClass } from "@/lib/lead-outcome-ui";
-import {
-  BOOKING_MEETING_BLOCK_BEFORE_MIN,
-  getAvailableCopenhagenBookingSlots,
-  parseOccupiedBlocksFromApi,
-} from "@/lib/booking/availability";
 import { toCopenhagenDateKey } from "@/lib/booking/mock-availability";
 import { MeetingNotesRequiredDialog } from "@/app/components/meeting-notes-required-dialog";
 
@@ -52,8 +47,8 @@ export function LeadOutcomeModal({
 
   async function isMeetingTimeSelectable(
     meetingIso: string,
-  ): Promise<{ selectable: boolean; blockMinutes: number }> {
-    const fallback = { selectable: false, blockMinutes: BOOKING_MEETING_BLOCK_BEFORE_MIN };
+  ): Promise<{ selectable: boolean }> {
+    const fallback = { selectable: false };
     const dt = new Date(meetingIso);
     if (Number.isNaN(dt.getTime())) return fallback;
     const dayKey = toCopenhagenDateKey(dt);
@@ -64,18 +59,13 @@ export function LeadOutcomeModal({
     const res = await fetch(`/api/booking/availability?${qs.toString()}`);
     if (!res.ok) return fallback;
     const payload = (await res.json().catch(() => ({}))) as {
-      blocks?: { start: string; end: string }[];
-      blockMinutes?: number;
+      slots?: { utcMs: number; available: boolean }[];
     };
-    const blockMinutes =
-      typeof payload.blockMinutes === "number"
-        ? payload.blockMinutes
-        : BOOKING_MEETING_BLOCK_BEFORE_MIN;
-    const occupied = parseOccupiedBlocksFromApi(Array.isArray(payload.blocks) ? payload.blocks : []);
-    const available = getAvailableCopenhagenBookingSlots(dayKey, occupied);
+    const slots = Array.isArray(payload.slots) ? payload.slots : [];
     return {
-      selectable: available.some((s) => Math.abs(s.utcMs - dt.getTime()) < 90_000),
-      blockMinutes,
+      selectable: slots.some(
+        (s) => s.available && Math.abs(s.utcMs - dt.getTime()) < 90_000,
+      ),
     };
   }
 
@@ -92,11 +82,11 @@ export function LeadOutcomeModal({
         ? new Date(draftMeeting).toISOString()
         : undefined;
     if (draftStatus === "MEETING_BOOKED" && meetingIso) {
-      const { selectable, blockMinutes } = await isMeetingTimeSelectable(meetingIso);
+      const { selectable } = await isMeetingTimeSelectable(meetingIso);
       if (!selectable) {
         setSaving(false);
         setError(
-          `Det valgte mødetidspunkt overlapper buffer-reglen (${blockMinutes} min før / ${blockMinutes} min efter) eller er ikke længere ledigt. Vælg en ledig tid i kalenderen.`,
+          "Det valgte mødetidspunkt overlapper et andet møde, transport eller blokering — eller er ikke længere ledigt. Vælg en ledig tid i kalenderen.",
         );
         return;
       }

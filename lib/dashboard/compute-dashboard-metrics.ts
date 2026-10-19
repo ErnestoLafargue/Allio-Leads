@@ -20,6 +20,7 @@ type AggUser = {
   talkSeconds: number;
   loginSeconds: number;
   dialerSeconds: number;
+  lineSeconds: number;
   /** Sum of talk-based conversation counts for avg (approx via talkSeconds days) */
   talkConversationDays: number;
 };
@@ -32,6 +33,7 @@ type AggCampaign = {
   contacts: number;
   talkSeconds: number;
   dialerSeconds: number;
+  lineSeconds: number;
 };
 
 function emptyUser(row: ScoreboardUserRow): AggUser {
@@ -45,6 +47,7 @@ function emptyUser(row: ScoreboardUserRow): AggUser {
     talkSeconds: 0,
     loginSeconds: 0,
     dialerSeconds: 0,
+    lineSeconds: 0,
     talkConversationDays: 0,
   };
 }
@@ -100,6 +103,7 @@ function aggregateUsers(
       agg.talkSeconds += row.talkSeconds;
       agg.loginSeconds += row.loginSeconds;
       agg.dialerSeconds += row.dialerSeconds;
+      agg.lineSeconds += row.lineSeconds;
       if (row.avgConversationSeconds > 0 && row.talkSeconds > 0) {
         // Estimér talk-samtaler fra gns: talkSeconds / avg ≈ count
         const est = Math.round(row.talkSeconds / row.avgConversationSeconds);
@@ -131,12 +135,14 @@ function aggregateCampaigns(
           contacts: 0,
           talkSeconds: 0,
           dialerSeconds: 0,
+          lineSeconds: 0,
         };
         agg.meetings += c.meetings;
         agg.conversations += c.conversations;
         agg.contacts += c.contacts;
         agg.talkSeconds += c.talkSeconds;
         agg.dialerSeconds += c.dialerSeconds;
+        agg.lineSeconds += c.lineSeconds;
         byKey.set(k, agg);
       }
     }
@@ -153,6 +159,7 @@ function scoreboardValue(
     talkSeconds: number;
     loginSeconds: number;
     dialerSeconds: number;
+    lineSeconds?: number;
     talkConversationDays?: number;
   },
 ): number {
@@ -171,6 +178,8 @@ function scoreboardValue(
       return u.loginSeconds;
     case "scoreboard.dialerSeconds":
       return u.dialerSeconds;
+    case "scoreboard.lineSeconds":
+      return u.lineSeconds ?? 0;
     case "scoreboard.avgConversationSeconds":
       return avgTalk(u.talkSeconds, u.talkConversationDays ?? 0);
     default:
@@ -459,6 +468,7 @@ function computeOneWidget(
           acc.talkSeconds += r.talkSeconds;
           acc.loginSeconds += r.loginSeconds;
           acc.dialerSeconds += r.dialerSeconds;
+          acc.lineSeconds += r.lineSeconds;
           return acc;
         },
         {
@@ -468,6 +478,7 @@ function computeOneWidget(
           talkSeconds: 0,
           loginSeconds: 0,
           dialerSeconds: 0,
+          lineSeconds: 0,
         },
       );
       return {
@@ -549,6 +560,7 @@ function computeOneWidget(
       acc.talkSeconds += u.talkSeconds;
       acc.loginSeconds += u.loginSeconds;
       acc.dialerSeconds += u.dialerSeconds;
+      acc.lineSeconds += u.lineSeconds;
       acc.talkConversationDays += u.talkConversationDays;
       return acc;
     },
@@ -559,6 +571,7 @@ function computeOneWidget(
       talkSeconds: 0,
       loginSeconds: 0,
       dialerSeconds: 0,
+      lineSeconds: 0,
       talkConversationDays: 0,
     },
   );

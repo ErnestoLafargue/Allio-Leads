@@ -21,6 +21,7 @@ export type MetricDefinition = {
     | "scoreboard.talkSeconds"
     | "scoreboard.loginSeconds"
     | "scoreboard.dialerSeconds"
+    | "scoreboard.lineSeconds"
     | "scoreboard.avgConversationSeconds"
     | "scoreboard.rank_meetings"
     | "leads.total"
@@ -46,8 +47,8 @@ export const METRIC_CATALOG: MetricDefinition[] = [
   },
   {
     id: "conversations",
-    label: "Samtaler",
-    description: "Opkald med mindst 20 sekunders forbundet tale (eller udfalds-fallback).",
+    label: "Talt med",
+    description: "Samtaler: opkald med mindst 20 sekunders forbundet tale (eller udfalds-fallback).",
     unit: "count",
     source: "scoreboard.conversations",
     periods: ["today", "this_week", "this_month"],
@@ -80,7 +81,7 @@ export const METRIC_CATALOG: MetricDefinition[] = [
   {
     id: "talk_seconds",
     label: "Taletid",
-    description: "Samlet forbundet taletid i sekunder.",
+    description: "Samlet forbundet taletid i sekunder (alle connected, også under 20 s).",
     unit: "seconds",
     source: "scoreboard.talkSeconds",
     periods: ["today", "this_week", "this_month"],
@@ -101,8 +102,8 @@ export const METRIC_CATALOG: MetricDefinition[] = [
   },
   {
     id: "dialer_seconds",
-    label: "Dialer-tid",
-    description: "Tid på kampagne-arbejdsside / aktiv VoIP-linje.",
+    label: "Tid i kampagnen",
+    description: "Tid med kampagne-arbejdssiden åben (skrivebordstid, inkl. noter og wrap-up).",
     unit: "seconds",
     source: "scoreboard.dialerSeconds",
     periods: ["today", "this_week", "this_month"],
@@ -111,9 +112,20 @@ export const METRIC_CATALOG: MetricDefinition[] = [
     category: "seller",
   },
   {
+    id: "line_seconds",
+    label: "Linjetid",
+    description: "Tid sælgerens egen linje ringer eller er i samtale (ikke parallelle lead-ben).",
+    unit: "seconds",
+    source: "scoreboard.lineSeconds",
+    periods: ["today", "this_week", "this_month"],
+    groupBy: ["none", "seller", "campaign", "day"],
+    viz: ["kpi", "table", "bar", "line"],
+    category: "seller",
+  },
+  {
     id: "avg_conversation",
     label: "Gns. samtale",
-    description: "Gennemsnitlig taletid pr. talk-baseret samtale.",
+    description: "Gennemsnitlig taletid pr. samtale på mindst 20 sekunder.",
     unit: "seconds",
     source: "scoreboard.avgConversationSeconds",
     periods: ["today", "this_week", "this_month"],

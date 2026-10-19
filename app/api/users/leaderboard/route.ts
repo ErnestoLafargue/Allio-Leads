@@ -8,7 +8,7 @@ import { warnIfScoreboardUserTallyInconsistent } from "@/lib/lead-outcome-log";
  * GET /api/users/leaderboard?dayKey=YYYY-MM-DD
  *
  * Dags-scoreboard. Alle ser møder/samtaler/kontakter; admin får derudover
- * tidsmålinger (login-/dialer-tid, gns. samtaletid, buyrate) og fordeling
+ * tidsmålinger (login-/linje-/kampagnetid, gns. samtaletid, buyrate) og fordeling
  * pr. kampagne. Beregning ligger i lib/scoreboard-day.ts (delt med Plecto-eksport).
  */
 export async function GET(req: Request) {
@@ -44,6 +44,7 @@ export async function GET(req: Request) {
         loginSecondsEstimated: r.loginSecondsEstimated,
         dialerSeconds: r.dialerSeconds,
         dialerSecondsEstimated: r.dialerSecondsEstimated,
+        lineSeconds: r.lineSeconds,
         avgConversationSeconds: r.avgConversationSeconds,
         buyRatePct: r.buyRatePct,
         campaigns: r.campaigns,

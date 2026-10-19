@@ -6,7 +6,8 @@ export const MEETING_CALENDAR_HOURS =
   MEETING_CALENDAR_HOUR_END - MEETING_CALENDAR_HOUR_START + 1;
 export const MEETING_CALENDAR_MINUTES =
   MEETING_CALENDAR_HOURS * 60;
-export const MEETING_DEFAULT_DURATION_MIN = 45;
+/** Fallback når mødetype mangler — onlinemøde. */
+export const MEETING_DEFAULT_DURATION_MIN = 60;
 export const MEETING_CALENDAR_ROW_HEIGHT_PX = 56;
 export const MEETING_CALENDAR_HEADER_HEIGHT_PX = 56;
 
@@ -218,8 +219,11 @@ function meetingStartEndMin(iso: string, durationMin: number): { start: number; 
 export function layoutMeetingColumns(
   meetingIds: string[],
   getScheduledFor: (id: string) => string,
-  durationMin = MEETING_DEFAULT_DURATION_MIN,
+  durationMin: number | ((id: string) => number) = MEETING_DEFAULT_DURATION_MIN,
 ): Map<string, MeetingColumnLayout> {
+  const durationOf = (id: string) =>
+    typeof durationMin === "function" ? durationMin(id) : durationMin;
+
   const sorted = [...meetingIds].sort((a, b) => {
     const ta = new Date(getScheduledFor(a)).getTime();
     const tb = new Date(getScheduledFor(b)).getTime();
@@ -232,9 +236,9 @@ export function layoutMeetingColumns(
 
   function groupOverlaps(id: string): boolean {
     if (currentGroup.length === 0) return false;
-    const { start, end } = meetingStartEndMin(getScheduledFor(id), durationMin);
+    const { start, end } = meetingStartEndMin(getScheduledFor(id), durationOf(id));
     return currentGroup.some((other) => {
-      const o = meetingStartEndMin(getScheduledFor(other), durationMin);
+      const o = meetingStartEndMin(getScheduledFor(other), durationOf(other));
       return rangesOverlap(start, end, o.start, o.end);
     });
   }
@@ -251,11 +255,11 @@ export function layoutMeetingColumns(
   for (const group of groups) {
     const cols: string[][] = [];
     for (const id of group) {
-      const { start, end } = meetingStartEndMin(getScheduledFor(id), durationMin);
+      const { start, end } = meetingStartEndMin(getScheduledFor(id), durationOf(id));
       let placed = false;
       for (let ci = 0; ci < cols.length; ci++) {
         const colHasOverlap = cols[ci].some((otherId) => {
-          const o = meetingStartEndMin(getScheduledFor(otherId), durationMin);
+          const o = meetingStartEndMin(getScheduledFor(otherId), durationOf(otherId));
           return rangesOverlap(start, end, o.start, o.end);
         });
         if (!colHasOverlap) {

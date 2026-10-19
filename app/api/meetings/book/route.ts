@@ -8,7 +8,6 @@ import { copenhagenDayKey } from "@/lib/copenhagen-day";
 import { MEETING_OUTCOME_PENDING } from "@/lib/meeting-outcome";
 import { shouldLogOutcomeForLeaderboard } from "@/lib/lead-outcome-log";
 import { blockedTimeConflictMessage } from "@/lib/booking/availability";
-import { getMeetingBlockMinutes } from "@/lib/booking/meeting-block-setting";
 import { findBlockedTimeConflictInDb } from "@/lib/booking/meeting-slots";
 import { findLeadBookingOverlapInDb } from "@/lib/booking/overlap-db";
 import { requireDefaultMeetingAssigneeId } from "@/lib/meeting-assignee";
@@ -19,6 +18,14 @@ import {
   isMeetingNotesSufficient,
   MEETING_NOTES_REQUIRED_ERROR,
 } from "@/lib/meeting-notes-quality";
+import {
+  MEETING_TYPE_PHYSICAL,
+  normalizeMeetingType,
+} from "@/lib/meeting-type";
+import {
+  meetingDurationMinutes,
+  transportBufferMinutes,
+} from "@/lib/booking/meeting-type-buffers";
 import { scheduleMeetingBookedRecordings } from "@/lib/telnyx-recordings-auto-sync";
 
 export async function POST(req: Request) {
@@ -36,6 +43,9 @@ export async function POST(req: Request) {
       : "";
   const meetingCompanyName =
     typeof body?.meetingCompanyName === "string" ? body.meetingCompanyName.trim() : "";
+  const meetingType = normalizeMeetingType(body?.meetingType);
+  const meetingAddress =
+    typeof body?.meetingAddress === "string" ? body.meetingAddress.trim() : "";
   const scheduledRaw = body?.meetingScheduledFor;
 
   /** Lead kræver companyName/phone — udfyldes automatisk fra mødekontakt når kunden ikke angiver virksomhed. */
@@ -65,6 +75,12 @@ export async function POST(req: Request) {
       { status: 400 },
     );
   }
+  if (meetingType === MEETING_TYPE_PHYSICAL && !meetingAddress) {
+    return NextResponse.json(
+      { error: "Mødeadresse er påkrævet ved fysisk møde." },
+      { status: 400 },
+    );
+  }
 
   const companyName = "Direkte møde";
   const phone = phoneFromBody || meetingContactPhonePrivate;
@@ -91,17 +107,26 @@ export async function POST(req: Request) {
   const assignedUserId = await requireDefaultMeetingAssigneeId();
 
   if (!adminSkipBookingOverlap) {
-    const blockMinutes = await getMeetingBlockMinutes();
-    const overlap = await findLeadBookingOverlapInDb(meetingScheduledFor, { blockMinutes });
+    const durationMin = meetingDurationMinutes(meetingType);
+    const transportMin = transportBufferMinutes(meetingType);
+    const overlap = await findLeadBookingOverlapInDb(meetingScheduledFor, { meetingType });
     if (overlap) {
+      const transportHint =
+        transportMin > 0
+          ? ` Fysisk møde er ${durationMin} min + ${transportMin} min transport før/efter.`
+          : ` Onlinemøde er ${durationMin} min.`;
       return NextResponse.json(
         {
-          error: `Tidspunktet overlapper et eksisterende møde. Hvert møde reserverer ${blockMinutes} min før og ${blockMinutes} min efter start — vælg et andet tidspunkt.`,
+          error: `Tidspunktet overlapper et eksisterende møde.${transportHint} Vælg et andet tidspunkt.`,
         },
         { status: 409 },
       );
     }
-    const blocked = await findBlockedTimeConflictInDb(assignedUserId, meetingScheduledFor);
+    const blocked = await findBlockedTimeConflictInDb(
+      assignedUserId,
+      meetingScheduledFor,
+      meetingType,
+    );
     if (blocked) {
       return NextResponse.json(
         { error: blockedTimeConflictMessage(blocked.title) },
@@ -136,6 +161,8 @@ export async function POST(req: Request) {
           meetingContactEmail,
           meetingContactPhonePrivate,
           meetingCompanyName,
+          meetingType,
+          meetingAddress,
           meetingOutcomeStatus: MEETING_OUTCOME_PENDING,
           meetingCommissionDayKey: copenhagenDayKey(meetingBookedAt),
           assignedUserId,
