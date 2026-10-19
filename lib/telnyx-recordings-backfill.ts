@@ -401,6 +401,14 @@ async function processOneRecording(
     const durationUnchanged =
       durationSeconds == null || existing.durationSeconds === durationSeconds;
     if (existingBlobUrl && existing.recordingUrl === playbackUrl && durationUnchanged) {
+      // URL og varighed er uændrede, men sælgeren kan mangle. Uden userId viser
+      // Lydfiler ingen rækker, når man filtrerer på brugeren.
+      if (located.agentUserId && existing.userId !== located.agentUserId) {
+        await prisma.leadActivityEvent.update({
+          where: { id: existing.id },
+          data: { userId: located.agentUserId },
+        });
+      }
       return;
     }
     await prisma.leadActivityEvent.update({

@@ -327,10 +327,31 @@ export async function findLeadsNeedingRecordingSync(params?: {
   const needing: RecordingSyncCandidate[] = [];
   for (const c of candidates) {
     if (needing.length >= limit) break;
-    if (c.source === "meeting_booked" && (await leadHasPlayableRecording(c.leadId))) continue;
+    // Møde booket skal have alle filer — også når leadet allerede har én kort optagelse.
+    if (c.source === "meeting_booked" && !(await leadNeedsMoreRecordings(c.leadId))) continue;
     needing.push(c);
   }
   return needing;
+}
+
+/** Mindst 12 sekunder: samme grænse som Lydfiler. */
+const MIN_LISTED_RECORDING_SECONDS = 12;
+
+/**
+ * Leadet mangler en afspilbar fil, eller kataloget har en samtale ≥ 12 s uden Blob-kopi.
+ */
+async function leadNeedsMoreRecordings(leadId: string): Promise<boolean> {
+  const missingFile = await prisma.callRecording.findFirst({
+    where: {
+      leadId,
+      durationSeconds: { gte: MIN_LISTED_RECORDING_SECONDS },
+      OR: [{ playbackUrl: null }, { playbackUrl: "" }],
+      pipelineStatus: { not: "SKIPPED_DUPLICATE" },
+    },
+    select: { id: true },
+  });
+  if (missingFile) return true;
+  return !(await leadHasPlayableRecording(leadId));
 }
 
 /**

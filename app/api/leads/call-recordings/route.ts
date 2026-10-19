@@ -32,6 +32,70 @@ function buildLeadWhere(params: {
   return parts.length ? { AND: parts } : {};
 }
 
+/**
+ * Lydfiler filtrerer på hvem der lavede optagelsen. Mange CALL_RECORDING-rækker
+ * har userId = null, mens sælgeren ligger på CallRecording.agentUserId.
+ */
+async function activityMatchForAgent(agentUserId: string): Promise<Record<string, unknown>[]> {
+  const linked = await prisma.callRecording.findMany({
+    where: { agentUserId },
+    select: { activityEventId: true, telnyxRecordingId: true, telnyxCallControlId: true },
+  });
+  const ids: string[] = [];
+  const legs: string[] = [];
+  for (const row of linked) {
+    if (row.activityEventId) ids.push(row.activityEventId);
+    if (row.telnyxRecordingId) legs.push(`rec:${row.telnyxRecordingId}`);
+    if (row.telnyxCallControlId) legs.push(row.telnyxCallControlId);
+  }
+  const or: Record<string, unknown>[] = [{ userId: agentUserId }];
+  if (ids.length > 0) or.push({ id: { in: ids } });
+  if (legs.length > 0) or.push({ telnyxCallLegId: { in: legs } });
+  return or;
+}
+
+async function agentsForUnassignedRecordings(
+  rows: { id: string; user: { id: string; name: string } | null; telnyxCallLegId: string | null }[],
+): Promise<Map<string, { id: string; name: string }>> {
+  const out = new Map<string, { id: string; name: string }>();
+  const missing = rows.filter((r) => !r.user);
+  if (missing.length === 0) return out;
+  const ids = missing.map((r) => r.id);
+  const legs = missing.map((r) => r.telnyxCallLegId).filter((leg): leg is string => Boolean(leg));
+  const recs = await prisma.callRecording.findMany({
+    where: {
+      agentUserId: { not: null },
+      OR: [
+        { activityEventId: { in: ids } },
+        ...(legs.length > 0
+          ? [{ telnyxCallControlId: { in: legs } }, { telnyxRecordingId: { in: legs.map((leg) => leg.replace(/^rec:/, "")) } }]
+          : []),
+      ],
+    },
+    select: {
+      activityEventId: true,
+      telnyxRecordingId: true,
+      telnyxCallControlId: true,
+      agent: { select: { id: true, name: true } },
+    },
+  });
+  for (const rec of recs) {
+    if (!rec.agent) continue;
+    const agent = { id: rec.agent.id, name: rec.agent.name };
+    if (rec.activityEventId && ids.includes(rec.activityEventId)) out.set(rec.activityEventId, agent);
+    for (const row of missing) {
+      if (!row.telnyxCallLegId) continue;
+      if (
+        row.telnyxCallLegId === rec.telnyxCallControlId ||
+        row.telnyxCallLegId === `rec:${rec.telnyxRecordingId}`
+      ) {
+        out.set(row.id, agent);
+      }
+    }
+  }
+  return out;
+}
+
 export async function GET(req: Request) {
   const { session, response } = await requireSession();
   if (response) return response;
@@ -52,14 +116,6 @@ export async function GET(req: Request) {
     q,
     statusFilter,
   });
-
-  const where = {
-    kind: LEAD_ACTIVITY_KIND.CALL_RECORDING,
-    recordingUrl: { not: null },
-    durationSeconds: { gte: MIN_LYDFILER_DURATION_SECONDS },
-    ...(agentUserId ? { userId: agentUserId } : {}),
-    ...(Object.keys(leadWhere).length > 0 ? { lead: leadWhere } : {}),
-  };
 
   let orderBy:
     | { createdAt: "asc" | "desc" }
@@ -85,6 +141,15 @@ export async function GET(req: Request) {
   }
 
   try {
+    const agentMatch = agentUserId ? await activityMatchForAgent(agentUserId) : null;
+    const where = {
+      kind: LEAD_ACTIVITY_KIND.CALL_RECORDING,
+      recordingUrl: { not: null },
+      durationSeconds: { gte: MIN_LYDFILER_DURATION_SECONDS },
+      ...(agentMatch ? { OR: agentMatch } : {}),
+      ...(Object.keys(leadWhere).length > 0 ? { lead: leadWhere } : {}),
+    };
+
     const canMergeUncoupled =
       session.user.role === "ADMIN" && !statusFilter && !agentUserId && sort === "time";
     const fetchTake = canMergeUncoupled ? page * pageSize : pageSize;
@@ -103,6 +168,7 @@ export async function GET(req: Request) {
           durationSeconds: true,
           recordingUrl: true,
           summary: true,
+          telnyxCallLegId: true,
           lead: {
             select: {
               id: true,
@@ -160,16 +226,20 @@ export async function GET(req: Request) {
         : Promise.resolve([]),
     ]);
 
+    const agentByEvent = await agentsForUnassignedRecordings(activityRows);
     const activityItems = activityRows.map((r) => {
       const st = r.lead.status;
       const statusLabel = isLeadStatus(st) ? LEAD_STATUS_LABELS[st as LeadStatus] : st;
+      const agent = r.user
+        ? { id: r.user.id, name: r.user.name }
+        : agentByEvent.get(r.id) ?? null;
       return {
         id: r.id,
         at: r.createdAt.toISOString(),
         durationSeconds: r.durationSeconds,
         recordingUrl: r.recordingUrl,
         summary: r.summary,
-        agent: r.user ? { id: r.user.id, name: r.user.name } : null,
+        agent,
         lead: {
           id: r.lead.id,
           companyName: r.lead.companyName,
