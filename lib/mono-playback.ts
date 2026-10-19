@@ -8,13 +8,30 @@
  * samme origin (fx /api/leads/call-recordings/…/audio). Andre links afspilles nativt.
  */
 
-export function supportsMonoPlayback(src: string): boolean {
-  if (src.startsWith("/") && !src.startsWith("//")) return true;
+export function isVercelBlobPlaybackUrl(url: string): boolean {
   try {
-    return new URL(src).hostname.endsWith(".blob.vercel-storage.com");
+    return new URL(url).hostname.endsWith(".blob.vercel-storage.com");
   } catch {
     return false;
   }
+}
+
+/**
+ * Blob-kopien afspilles direkte. Lageret svarer med bidder (HTTP 206), så
+ * browseren starter lyden og henter resten mens den spiller — også på 30 min.
+ * Andre URL'er går gennem proxyen, som videresender samme Range-kald.
+ */
+export function playbackSourceForRecording(src: string, eventId?: string | null): string {
+  const url = src.trim();
+  if (isVercelBlobPlaybackUrl(url)) return url;
+  const id = eventId?.trim();
+  if (id) return `/api/leads/call-recordings/${encodeURIComponent(id)}/audio`;
+  return url;
+}
+
+export function supportsMonoPlayback(src: string): boolean {
+  if (src.startsWith("/") && !src.startsWith("//")) return true;
+  return isVercelBlobPlaybackUrl(src);
 }
 
 export type MonoPlayback = {

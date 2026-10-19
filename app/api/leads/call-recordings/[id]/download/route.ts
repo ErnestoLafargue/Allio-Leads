@@ -2,6 +2,8 @@ import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { requireSession } from "@/lib/api-auth";
 import { LEAD_ACTIVITY_KIND } from "@/lib/lead-activity-kinds";
+import { isVercelBlobUrl } from "@/lib/telnyx-recordings-backfill";
+import { resolvePlayableRecordingUrl } from "@/lib/telnyx-recording-recover";
 
 const MAX_RECORDING_BYTES = 45 * 1024 * 1024;
 
@@ -70,6 +72,8 @@ export async function GET(_req: Request, { params }: Params) {
       id: true,
       createdAt: true,
       recordingUrl: true,
+      leadId: true,
+      telnyxCallLegId: true,
       lead: {
         select: {
           id: true,
@@ -83,10 +87,35 @@ export async function GET(_req: Request, { params }: Params) {
     return NextResponse.json({ error: "Ikke fundet." }, { status: 404 });
   }
 
+  let playable: string | null = null;
+  try {
+    playable = await resolvePlayableRecordingUrl({
+      eventId,
+      leadId: ev.leadId,
+      telnyxCallLegId: ev.telnyxCallLegId,
+      recordingUrl: ev.recordingUrl,
+    });
+  } catch (recoverErr) {
+    console.warn(
+      "[call-recordings/download] recover failed",
+      recoverErr instanceof Error ? recoverErr.message : recoverErr,
+      eventId,
+    );
+  }
+
+  if (!playable) {
+    return NextResponse.json({ error: "Kunne ikke hente optagelsen." }, { status: 502 });
+  }
+
+  // Blob-filer er ofte over det en funktion må sende tilbage. Browseren henter dem selv.
+  if (isVercelBlobUrl(playable)) {
+    return NextResponse.redirect(playable, 302);
+  }
+
   let bytes: Buffer;
   let contentType: string;
   try {
-    const got = await fetchRecordingBytes(ev.recordingUrl);
+    const got = await fetchRecordingBytes(playable);
     bytes = got.body;
     contentType = got.contentType;
   } catch (e) {

@@ -306,6 +306,8 @@ export default function LydfilerPage() {
                           {r.downloadEventId ? (
                             <a
                               href={`/api/leads/call-recordings/${encodeURIComponent(r.downloadEventId)}/download`}
+                              target="_blank"
+                              rel="noopener noreferrer"
                               className="inline-flex shrink-0 items-center justify-center rounded-md border border-stone-300 bg-white px-2.5 py-1.5 text-xs font-medium text-stone-800 shadow-sm hover:bg-stone-50"
                             >
                               Download
