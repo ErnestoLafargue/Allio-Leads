@@ -700,6 +700,7 @@ function LeadDetailInner() {
     );
   }
 
+  const leadId = lead.id;
   const canScheduleCallback = canScheduleCallbackFromLead({
     status: lead.status,
     callbackStatus: lead.callbackStatus,
@@ -724,7 +725,7 @@ function LeadDetailInner() {
       setPhone(nextPhone);
     }
     try {
-      const res = await fetch(`/api/leads/${lead.id}`, {
+      const res = await fetch(`/api/leads/${leadId}`, {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(dialingPrivate ? { privatePhone: nextPhone } : { phone: nextPhone }),
