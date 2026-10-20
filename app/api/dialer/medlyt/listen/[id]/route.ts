@@ -62,7 +62,7 @@ export async function PATCH(req: Request, ctx: Ctx) {
     const result = await setMedlytListenOffer({
       id,
       adminUserId: uid,
-      offerSdp: body.offerSdp.trim(),
+      offerSdp: body.offerSdp,
     });
     if (!result.ok) {
       return NextResponse.json({ error: result.error }, { status: result.status });
@@ -74,7 +74,7 @@ export async function PATCH(req: Request, ctx: Ctx) {
     const result = await setMedlytListenAnswer({
       id,
       targetUserId: uid,
-      answerSdp: body.answerSdp.trim(),
+      answerSdp: body.answerSdp,
     });
     // #region agent log
     fetch("http://localhost:7723/ingest/7a50d2a1-e6f0-436c-8453-6828c3db5e26", {

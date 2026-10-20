@@ -5,6 +5,7 @@
 
 import { prisma } from "@/lib/prisma";
 import { PRESENCE_FRESH_WINDOW_MS } from "@/lib/dialer-shared";
+import { normalizeMedlytSdp } from "@/lib/medlyt-webrtc";
 
 const ACTIVE = ["requested", "negotiating", "live"] as const;
 
@@ -137,7 +138,7 @@ export async function setMedlytListenOffer(params: {
   }
   await prisma.medlytListenSession.update({
     where: { id: params.id },
-    data: { offerSdp: params.offerSdp, status: "negotiating" },
+    data: { offerSdp: normalizeMedlytSdp(params.offerSdp), status: "negotiating" },
   });
   return { ok: true };
 }
@@ -156,7 +157,7 @@ export async function setMedlytListenAnswer(params: {
   }
   await prisma.medlytListenSession.update({
     where: { id: params.id },
-    data: { answerSdp: params.answerSdp, status: "live" },
+    data: { answerSdp: normalizeMedlytSdp(params.answerSdp), status: "live" },
   });
   return { ok: true };
 }

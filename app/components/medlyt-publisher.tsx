@@ -5,12 +5,8 @@
  */
 
 import { useEffect, useRef } from "react";
-import {
-  createMedlytMix,
-  fallbackPublishStream,
-  type MedlytMixHandle,
-} from "@/lib/medlyt-mix-audio";
-import { createMedlytPeerConnection } from "@/lib/medlyt-webrtc";
+import { createMedlytMix, type MedlytMixHandle } from "@/lib/medlyt-mix-audio";
+import { createMedlytPeerConnection, normalizeMedlytSdp } from "@/lib/medlyt-webrtc";
 import { iceCandidatesFromJson } from "@/lib/medlyt-listen-client";
 
 type Props = {
@@ -83,27 +79,14 @@ export function MedlytPublisher({ micStream, remoteStream, enabled = true }: Pro
       }).catch(() => undefined);
     };
 
-    const pickPublish = (): { stream: MediaStream; track: MediaStreamTrack; via: string } | null => {
-      try {
-        const mix = ensureMix();
-        const track = mix.stream.getAudioTracks()[0];
-        if (track) return { stream: mix.stream, track, via: "mix" };
-      } catch (err) {
-        lastErrorRef.current = err instanceof Error ? err.message : "mix-failed";
-      }
-      const fallback = fallbackPublishStream(micRef.current);
-      const ft = fallback?.getAudioTracks()[0];
-      if (fallback && ft) return { stream: fallback, track: ft, via: "mic-fallback" };
-      return null;
-    };
-
     const answerSession = async (s: PendingSession) => {
       if (!s.offerSdp) return;
       if (sessionIdRef.current && sessionIdRef.current !== s.id) cleanupPc();
       if (answeredRef.current && sessionIdRef.current === s.id) return;
 
       sessionIdRef.current = s.id;
-      const pub = pickPublish();
+      const mix = ensureMix();
+      const track = mix.stream.getAudioTracks()[0];
       // #region agent log
       fetch("http://localhost:7723/ingest/7a50d2a1-e6f0-436c-8453-6828c3db5e26", {
         method: "POST",
@@ -111,14 +94,14 @@ export function MedlytPublisher({ micStream, remoteStream, enabled = true }: Pro
         body: JSON.stringify({
           sessionId: "c1392e",
           runId: "post-fix",
-          hypothesisId: "H4",
+          hypothesisId: "H6",
           location: "app/components/medlyt-publisher.tsx:answerSession",
           message: "seller answering listen",
           data: {
             listenId: s.id,
             hasOffer: Boolean(s.offerSdp),
-            via: pub?.via ?? null,
-            hasTrack: Boolean(pub?.track),
+            hasTrack: Boolean(track),
+            offerEndsWithCrlf: s.offerSdp.endsWith("\r\n") || s.offerSdp.endsWith("\n"),
             lastError: lastErrorRef.current,
             micTracks: micRef.current?.getAudioTracks().length ?? 0,
             remoteTracks: remoteRef.current?.getAudioTracks().length ?? 0,
@@ -127,8 +110,8 @@ export function MedlytPublisher({ micStream, remoteStream, enabled = true }: Pro
         }),
       }).catch(() => {});
       // #endregion
-      if (!pub) {
-        lastErrorRef.current = lastErrorRef.current || "no-publish-track";
+      if (!track) {
+        lastErrorRef.current = "no-publish-track";
         return;
       }
 
@@ -145,10 +128,10 @@ export function MedlytPublisher({ micStream, remoteStream, enabled = true }: Pro
         }
       };
 
-      const sender = pc.addTrack(pub.track, pub.stream);
+      const sender = pc.addTrack(track, mix.stream);
       senderRef.current = sender;
 
-      await pc.setRemoteDescription({ type: "offer", sdp: s.offerSdp });
+      await pc.setRemoteDescription({ type: "offer", sdp: normalizeMedlytSdp(s.offerSdp) });
       const answer = await pc.createAnswer();
       await pc.setLocalDescription(answer);
       answeredRef.current = true;

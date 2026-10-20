@@ -5,7 +5,7 @@
  */
 
 import { useCallback, useEffect, useId, useRef, useState } from "react";
-import { createMedlytPeerConnection } from "@/lib/medlyt-webrtc";
+import { createMedlytPeerConnection, normalizeMedlytSdp } from "@/lib/medlyt-webrtc";
 import { iceCandidatesFromJson } from "@/lib/medlyt-listen-client";
 
 export type MedlytListenerState = {
@@ -201,7 +201,7 @@ export function MedlytListener({ targetUserId, stopSignal, onStateChange }: Prop
           if (data.session.answerSdp && !remotePc.currentRemoteDescription) {
             await remotePc.setRemoteDescription({
               type: "answer",
-              sdp: data.session.answerSdp,
+              sdp: normalizeMedlytSdp(data.session.answerSdp),
             });
           }
 
