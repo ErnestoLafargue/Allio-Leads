@@ -3,7 +3,6 @@
 import { useSession } from "next-auth/react";
 import { useRouter } from "next/navigation";
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { MedlytPhone, type MedlytPhoneState } from "@/app/components/medlyt-phone";
 import {
   MedlytListener,
   type MedlytListenerState,
@@ -39,23 +38,15 @@ export default function MedlytPage() {
   const [loadError, setLoadError] = useState<string | null>(null);
   const [actionError, setActionError] = useState<string | null>(null);
   const [busyUserId, setBusyUserId] = useState<string | null>(null);
-  const [whisperBusy, setWhisperBusy] = useState(false);
   const [activeTargetUserId, setActiveTargetUserId] = useState<string | null>(null);
   const [stopSignal, setStopSignal] = useState(0);
-  const [supervisorCallControlId, setSupervisorCallControlId] = useState<string | null>(null);
-  const [whisperAvailable, setWhisperAvailable] = useState(false);
-  const [whisperOn, setWhisperOn] = useState(false);
-  const [hangupSignal, setHangupSignal] = useState(0);
-  const [phone, setPhone] = useState<MedlytPhoneState>({
-    registered: false,
-    listening: false,
-    problem: null,
-  });
+  const [talkOn, setTalkOn] = useState(true);
   const [listen, setListen] = useState<MedlytListenerState>({
     sessionId: null,
     listening: false,
     negotiating: false,
     problem: null,
+    talkReady: false,
   });
 
   const isAdmin = authStatus === "authenticated" && session?.user.role === "ADMIN";
@@ -105,35 +96,20 @@ export default function MedlytPage() {
     );
   }, [agents, query]);
 
-  const clearWhisper = () => {
-    setSupervisorCallControlId(null);
-    setWhisperOn(false);
-    setWhisperAvailable(false);
-  };
-
   const startMedlyt = (targetUserId: string) => {
     setActionError(null);
     setBusyUserId(null);
-    clearWhisper();
+    setTalkOn(true);
     setActiveTargetUserId(targetUserId);
   };
 
   const stopMedlyt = async () => {
-    const cc = supervisorCallControlId;
     setBusyUserId(activeTargetUserId);
     setActionError(null);
     try {
-      if (cc) {
-        await fetch("/api/dialer/medlyt/stop", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ supervisorCallControlId: cc }),
-        });
-        setHangupSignal((n) => n + 1);
-      }
       setStopSignal((n) => n + 1);
       setActiveTargetUserId(null);
-      clearWhisper();
+      setTalkOn(true);
     } catch {
       setActionError("Netværksfejl ved stop.");
     } finally {
@@ -141,122 +117,28 @@ export default function MedlytPage() {
     }
   };
 
-  /** Whisper via Telnyx supervise — kun når sælger er i opkald med et agent-ben. */
-  const ensureTelnyxWhisper = async (): Promise<{
-    cc: string;
-    canWhisper: boolean;
-  } | null> => {
-    if (supervisorCallControlId) {
-      return { cc: supervisorCallControlId, canWhisper: whisperAvailable };
-    }
-    if (!activeTargetUserId) return null;
-    const res = await fetch("/api/dialer/medlyt/start", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ targetUserId: activeTargetUserId }),
-    });
-    const data = (await res.json().catch(() => ({}))) as {
-      supervisorCallControlId?: string;
-      whisperAvailable?: boolean;
-      supervisedLeg?: string;
-      error?: string;
-    };
-    if (!res.ok || !data.supervisorCallControlId) {
-      setActionError(
-        data.error ||
-          "«Tal til sælger» kræver at sælgeren er i et Telnyx-opkald. Medlyt-lyt virker stadig.",
-      );
-      return null;
-    }
-    const canWhisper =
-      data.whisperAvailable === true || data.supervisedLeg === "agent";
-    setSupervisorCallControlId(data.supervisorCallControlId);
-    setWhisperAvailable(canWhisper);
-    return { cc: data.supervisorCallControlId, canWhisper };
-  };
-
-  const toggleWhisper = async () => {
-    if (!activeTargetUserId || !listen.listening) return;
-    const next = !whisperOn;
-    setWhisperBusy(true);
-    setActionError(null);
-    try {
-      if (next) {
-        if (!phone.registered) {
-          setActionError("Softphone er ikke klar endnu — vent et øjeblik.");
-          return;
-        }
-        const started = await ensureTelnyxWhisper();
-        if (!started) return;
-        if (!started.canWhisper) {
-          setActionError(
-            "Tal til sælger kræver sælgerens Telnyx-ben (ellers hører kunden dig).",
-          );
-          return;
-        }
-        const res = await fetch("/api/dialer/medlyt/whisper", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            supervisorCallControlId: started.cc,
-            enabled: true,
-          }),
-        });
-        const data = (await res.json().catch(() => ({}))) as { error?: string };
-        if (!res.ok) {
-          setActionError(data.error || "Kunne ikke slå «Tal til sælger» til.");
-          return;
-        }
-        setWhisperOn(true);
-      } else {
-        const cc = supervisorCallControlId;
-        if (cc) {
-          await fetch("/api/dialer/medlyt/whisper", {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ supervisorCallControlId: cc, enabled: false }),
-          });
-        }
-        setWhisperOn(false);
-      }
-    } catch {
-      setActionError("Netværksfejl ved whisper.");
-    } finally {
-      setWhisperBusy(false);
-    }
-  };
-
   if (authStatus === "loading" || !isAdmin) {
     return <div className="p-6 text-sm text-[var(--muted)]">Indlæser…</div>;
   }
 
-  const whisperBtnEnabled =
-    Boolean(activeTargetUserId) &&
-    listen.listening &&
-    phone.registered &&
-    !whisperBusy &&
-    busyUserId === null;
+  const talkBtnEnabled = Boolean(activeTargetUserId) && listen.talkReady && busyUserId === null;
 
   return (
     <div className="mx-auto max-w-3xl p-6">
       <header className="mb-6">
         <h1 className="text-2xl font-semibold tracking-tight text-[var(--foreground)]">Medlyt</h1>
         <p className="mt-1 text-sm text-[var(--muted)]">
-          Hør sælgerens mikrofon hele tiden mens de er på kampagne. Når en kunde er på linjen, høres
-          samtalen også. «Tal til sælger» coacher via Telnyx — kunden hører dig ikke.
+          Hør sælgerens mikrofon mens de er på kampagne — også når de ringer. Når en kunde er på,
+          høres samtalen. «Tal til sælger» går direkte til hans headset, ikke gennem Telnyx eller
+          kunden.
         </p>
       </header>
 
       <MedlytListener
         targetUserId={activeTargetUserId}
         stopSignal={stopSignal}
+        talkOn={talkOn}
         onStateChange={setListen}
-      />
-      <MedlytPhone
-        enabled
-        hangupSignal={hangupSignal}
-        whisperOn={whisperOn}
-        onStateChange={setPhone}
       />
 
       <div className="mb-4 flex flex-wrap items-center gap-3 text-sm">
@@ -276,19 +158,11 @@ export default function MedlytPage() {
               ? "forbinder til sælger…"
               : "klar"}
         </span>
-        <span
-          className={
-            phone.registered ? "text-emerald-700 dark:text-emerald-400" : "text-[var(--muted)]"
-          }
-        >
-          Softphone (whisper): {phone.registered ? "klar" : phone.problem ? "fejl" : "forbinder…"}
-        </span>
-        {whisperOn ? (
+        {talkOn && listen.talkReady ? (
           <span className="font-medium text-emerald-700 dark:text-emerald-400">
             Taler til sælger
           </span>
         ) : null}
-        {phone.problem ? <span className="text-red-600">{phone.problem}</span> : null}
       </div>
 
       <label className="mb-3 block">
@@ -314,20 +188,20 @@ export default function MedlytPage() {
           <div className="flex flex-wrap items-center gap-2">
             <button
               type="button"
-              disabled={!whisperBtnEnabled}
-              onClick={() => void toggleWhisper()}
+              disabled={!talkBtnEnabled}
+              onClick={() => setTalkOn((v) => !v)}
               title={
-                whisperOn
-                  ? "Slå fra — stille medlyt igen"
-                  : "Slå til — kun sælgeren hører dig (kræver aktivt Telnyx-opkald)"
+                talkOn
+                  ? "Slå fra — sælgeren hører dig ikke"
+                  : "Slå til — kun sælgeren hører dig (ikke kunden)"
               }
               className={
-                whisperOn
+                talkOn
                   ? "rounded-md bg-emerald-600 px-3 py-1.5 text-white hover:bg-emerald-700 disabled:opacity-50"
                   : "rounded-md bg-neutral-200 px-3 py-1.5 text-neutral-700 hover:bg-neutral-300 disabled:opacity-50 dark:bg-neutral-700 dark:text-neutral-200 dark:hover:bg-neutral-600"
               }
             >
-              {whisperBusy ? "Skifter…" : "Tal til sælger"}
+              Tal til sælger
             </button>
             <button
               type="button"

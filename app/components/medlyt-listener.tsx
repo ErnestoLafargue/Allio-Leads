@@ -1,15 +1,18 @@
 "use client";
 
 /**
- * Admin: start browser-Medlyt — opret session, send offer, afspil sælger-mic + evt. kunde.
+ * Admin Medlyt: [0] hør sælger-mic, [1] tal til sælger, [2] hør Telnyx/kunde.
  */
 
 import { useCallback, useEffect, useId, useRef, useState } from "react";
 import {
   applyMedlytLowDelay,
+  attachMedlytPlayback,
   createMedlytPeerConnection,
+  liveAudioTrack,
   normalizeMedlytSdp,
   preferMedlytOpus,
+  waitForIceGathering,
 } from "@/lib/medlyt-webrtc";
 import { iceCandidatesFromJson } from "@/lib/medlyt-listen-client";
 
@@ -18,19 +21,24 @@ export type MedlytListenerState = {
   listening: boolean;
   negotiating: boolean;
   problem: string | null;
+  talkReady: boolean;
 };
 
 type Props = {
   targetUserId: string | null;
   stopSignal: number;
+  /** true = send admin-mic til sælger. */
+  talkOn: boolean;
   onStateChange: (state: MedlytListenerState) => void;
 };
 
-export function MedlytListener({ targetUserId, stopSignal, onStateChange }: Props) {
+export function MedlytListener({ targetUserId, stopSignal, talkOn, onStateChange }: Props) {
   const reactId = useId().replace(/:/g, "");
-  const audioId = `medlyt-listen-audio-${reactId}`;
-  const audioIdB = `medlyt-listen-audio-b-${reactId}`;
+  const audioSellerId = `medlyt-seller-${reactId}`;
+  const audioCustId = `medlyt-cust-${reactId}`;
   const pcRef = useRef<RTCPeerConnection | null>(null);
+  const talkSenderRef = useRef<RTCRtpSender | null>(null);
+  const talkTrackRef = useRef<MediaStreamTrack | null>(null);
   const sessionIdRef = useRef<string | null>(null);
   const appliedSellerIceRef = useRef(0);
   const stopSeenRef = useRef(stopSignal);
@@ -39,10 +47,11 @@ export function MedlytListener({ targetUserId, stopSignal, onStateChange }: Prop
   const [listening, setListening] = useState(false);
   const [negotiating, setNegotiating] = useState(false);
   const [problem, setProblem] = useState<string | null>(null);
+  const [talkReady, setTalkReady] = useState(false);
 
   useEffect(() => {
-    onStateChange({ sessionId, listening, negotiating, problem });
-  }, [sessionId, listening, negotiating, problem, onStateChange]);
+    onStateChange({ sessionId, listening, negotiating, problem, talkReady });
+  }, [sessionId, listening, negotiating, problem, talkReady, onStateChange]);
 
   const clearPoll = () => {
     if (pollIntervalRef.current != null) {
@@ -58,9 +67,20 @@ export function MedlytListener({ targetUserId, stopSignal, onStateChange }: Prop
     setSessionId(null);
     setListening(false);
     setNegotiating(false);
+    setTalkReady(false);
     appliedSellerIceRef.current = 0;
     const pc = pcRef.current;
     pcRef.current = null;
+    talkSenderRef.current = null;
+    const talk = talkTrackRef.current;
+    talkTrackRef.current = null;
+    if (talk) {
+      try {
+        talk.stop();
+      } catch {
+        /* no-op */
+      }
+    }
     if (pc) {
       try {
         pc.close();
@@ -68,8 +88,8 @@ export function MedlytListener({ targetUserId, stopSignal, onStateChange }: Prop
         /* no-op */
       }
     }
-    const elA = document.getElementById(audioId) as HTMLAudioElement | null;
-    const elB = document.getElementById(audioIdB) as HTMLAudioElement | null;
+    const elA = document.getElementById(audioSellerId) as HTMLAudioElement | null;
+    const elB = document.getElementById(audioCustId) as HTMLAudioElement | null;
     if (elA) elA.srcObject = null;
     if (elB) elB.srcObject = null;
     if (endRemote && sid) {
@@ -79,13 +99,23 @@ export function MedlytListener({ targetUserId, stopSignal, onStateChange }: Prop
         body: JSON.stringify({ end: true }),
       }).catch(() => undefined);
     }
-  }, [audioId, audioIdB]);
+  }, [audioSellerId, audioCustId]);
 
   useEffect(() => {
     if (stopSignal === stopSeenRef.current) return;
     stopSeenRef.current = stopSignal;
     void cleanup(true);
   }, [stopSignal, cleanup]);
+
+  useEffect(() => {
+    const sender = talkSenderRef.current;
+    const track = talkTrackRef.current;
+    if (!track) return;
+    track.enabled = talkOn;
+    if (sender && sender.track !== track) {
+      void sender.replaceTrack(talkOn ? track : null).catch(() => undefined);
+    }
+  }, [talkOn]);
 
   useEffect(() => {
     if (!targetUserId) {
@@ -109,6 +139,7 @@ export function MedlytListener({ targetUserId, stopSignal, onStateChange }: Prop
       setProblem(null);
       setNegotiating(true);
       setListening(false);
+      setTalkReady(false);
 
       const createRes = await fetch("/api/dialer/medlyt/listen", {
         method: "POST",
@@ -139,25 +170,49 @@ export function MedlytListener({ targetUserId, stopSignal, onStateChange }: Prop
       sessionIdRef.current = sid;
       setSessionId(sid);
 
+      let talkTrack: MediaStreamTrack | null = null;
+      try {
+        const talkStream = await navigator.mediaDevices.getUserMedia({
+          audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true },
+        });
+        talkTrack = liveAudioTrack(talkStream);
+      } catch {
+        if (!cancelled) {
+          setProblem("Tillad mikrofon for at tale til sælger — lyt virker stadig.");
+        }
+      }
+      if (cancelled) {
+        talkTrack?.stop();
+        return;
+      }
+      if (talkTrack) {
+        talkTrack.enabled = talkOn;
+        talkTrackRef.current = talkTrack;
+        setTalkReady(true);
+      }
+
       const pc = createMedlytPeerConnection();
       pcRef.current = pc;
       pc.addTransceiver("audio", { direction: "recvonly" });
+      const talkTx = pc.addTransceiver("audio", { direction: "sendonly" });
       pc.addTransceiver("audio", { direction: "recvonly" });
+      if (talkTrack) {
+        await talkTx.sender.replaceTrack(talkTrack);
+        talkSenderRef.current = talkTx.sender;
+      }
       preferMedlytOpus(pc);
       pc.onicecandidate = (ev) => {
         if (ev.candidate) void postIce(sid, ev.candidate);
       };
+      let inbound = 0;
       pc.ontrack = (ev) => {
         if (ev.track.kind !== "audio") return;
         applyMedlytLowDelay(ev.receiver);
-        const stream = new MediaStream([ev.track]);
-        const elA = document.getElementById(audioId) as HTMLAudioElement | null;
-        const elB = document.getElementById(audioIdB) as HTMLAudioElement | null;
-        const el = elA && !elA.srcObject ? elA : elB;
-        if (el) {
-          el.srcObject = stream;
-          void el.play().catch(() => undefined);
-        }
+        const elA = document.getElementById(audioSellerId) as HTMLAudioElement | null;
+        const elB = document.getElementById(audioCustId) as HTMLAudioElement | null;
+        const el = inbound === 0 ? elA : elB;
+        inbound += 1;
+        attachMedlytPlayback(el, ev.track);
         setListening(true);
         setNegotiating(false);
         setProblem(null);
@@ -178,10 +233,26 @@ export function MedlytListener({ targetUserId, stopSignal, onStateChange }: Prop
 
       const offer = await pc.createOffer();
       await pc.setLocalDescription(offer);
+      const iceMs = await waitForIceGathering(pc);
+      const sdp = normalizeMedlytSdp(pc.localDescription?.sdp || offer.sdp || "");
+      // #region agent log
+      fetch("http://localhost:7723/ingest/7a50d2a1-e6f0-436c-8453-6828c3db5e26", {
+        method: "POST",
+        headers: { "Content-Type": "application/json", "X-Debug-Session-Id": "c1392e" },
+        body: JSON.stringify({
+          sessionId: "c1392e",
+          hypothesisId: "H-connect",
+          location: "medlyt-listener.tsx:offer",
+          message: "admin offer ready",
+          data: { iceMs, hasTalk: Boolean(talkTrack) },
+          timestamp: Date.now(),
+        }),
+      }).catch(() => {});
+      // #endregion
       const offerRes = await fetch(`/api/dialer/medlyt/listen/${sid}`, {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ offerSdp: offer.sdp }),
+        body: JSON.stringify({ offerSdp: sdp }),
       });
       if (!offerRes.ok) {
         const err = (await offerRes.json().catch(() => ({}))) as { error?: string };
@@ -239,7 +310,7 @@ export function MedlytListener({ targetUserId, stopSignal, onStateChange }: Prop
       };
 
       void poll();
-      pollIntervalRef.current = window.setInterval(() => void poll(), 400);
+      pollIntervalRef.current = window.setInterval(() => void poll(), 250);
     };
 
     void start();
@@ -248,12 +319,14 @@ export function MedlytListener({ targetUserId, stopSignal, onStateChange }: Prop
       cancelled = true;
       void cleanup(true);
     };
-  }, [targetUserId, audioId, audioIdB, cleanup]);
+    // talkOn læses kun ved start til initial enabled; mute styres af effect
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [targetUserId, audioSellerId, audioCustId, cleanup]);
 
   return (
     <>
-      <audio id={audioId} autoPlay playsInline style={{ display: "none" }} />
-      <audio id={audioIdB} autoPlay playsInline style={{ display: "none" }} />
+      <audio id={audioSellerId} autoPlay playsInline style={{ display: "none" }} />
+      <audio id={audioCustId} autoPlay playsInline style={{ display: "none" }} />
     </>
   );
 }

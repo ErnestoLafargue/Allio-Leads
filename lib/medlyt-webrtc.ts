@@ -5,8 +5,8 @@ export const MEDLYT_ICE_SERVERS: RTCIceServer[] = [
   { urls: "stun:stun1.l.google.com:19302" },
 ];
 
-/** Lav jitter-buffer på admin-siden (~40 ms i stedet for Chromes default ~120–200). */
-export const MEDLYT_JITTER_TARGET_MS = 40;
+/** Lav jitter-buffer — Chromes default er ofte 120–200 ms. */
+export const MEDLYT_JITTER_TARGET_MS = 20;
 
 /** Chrome kræver CRLF efter hver SDP-linje — også den sidste. */
 export function normalizeMedlytSdp(sdp: string): string {
@@ -58,4 +58,36 @@ export function applyMedlytLowDelay(receiver: RTCRtpReceiver): void {
 
 export function liveAudioTrack(stream: MediaStream | null): MediaStreamTrack | null {
   return stream?.getAudioTracks().find((t) => t.readyState === "live") ?? null;
+}
+
+/** Vent til ICE er samlet (hele SDP) så vi ikke er afhængige af langsom trickle-poll. */
+export function waitForIceGathering(pc: RTCPeerConnection, timeoutMs = 700): Promise<number> {
+  const started = Date.now();
+  if (pc.iceGatheringState === "complete") return Promise.resolve(0);
+  return new Promise((resolve) => {
+    const done = () => {
+      pc.removeEventListener("icegatheringstatechange", onChange);
+      window.clearTimeout(timer);
+      resolve(Date.now() - started);
+    };
+    const onChange = () => {
+      if (pc.iceGatheringState === "complete") done();
+    };
+    const timer = window.setTimeout(done, timeoutMs);
+    pc.addEventListener("icegatheringstatechange", onChange);
+  });
+}
+
+export function attachMedlytPlayback(
+  el: HTMLAudioElement | null,
+  track: MediaStreamTrack,
+): void {
+  if (!el) return;
+  const prev = el.srcObject;
+  if (prev instanceof MediaStream && prev.getTracks()[0]?.id === track.id) {
+    void el.play().catch(() => undefined);
+    return;
+  }
+  el.srcObject = new MediaStream([track]);
+  void el.play().catch(() => undefined);
 }

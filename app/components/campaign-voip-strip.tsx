@@ -1798,10 +1798,7 @@ export function CampaignVoipStrip({
       aria-label={standbyInboundOnly ? "VoIP standby (skjult)" : "VoIP opkald"}
     >
       <audio ref={remoteAudioRef} id={remoteAudioId} autoPlay playsInline />
-      <MedlytPublisher
-        micStream={micMonitorStream}
-        remoteStream={lineStatus === "live" || lineStatus === "ringing" ? remoteStream : null}
-      />
+      <MedlytPublisher micStream={micMonitorStream} remoteStream={remoteStream} />
 
       <header className="flex flex-wrap items-start justify-between gap-3">
         <div className="min-w-0">

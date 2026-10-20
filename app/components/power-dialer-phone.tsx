@@ -973,10 +973,7 @@ export function PowerDialerPhone({
       aria-label="Power Dialer telefon"
     >
       <audio ref={remoteAudioRef} id={remoteAudioId} autoPlay playsInline />
-      <MedlytPublisher
-        micStream={micStream}
-        remoteStream={lineStatus === "live" || lineStatus === "ringing" ? remoteStream : null}
-      />
+      <MedlytPublisher micStream={micStream} remoteStream={remoteStream} />
       <div className="flex flex-wrap items-center gap-3">
         <span
           className={`inline-flex items-center gap-1.5 rounded-full border px-2.5 py-1 text-xs font-semibold ${pill.cls}`}
