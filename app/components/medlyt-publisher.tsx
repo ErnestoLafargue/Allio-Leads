@@ -5,7 +5,11 @@
  */
 
 import { useEffect, useRef } from "react";
-import { createMedlytMix, type MedlytMixHandle } from "@/lib/medlyt-mix-audio";
+import {
+  createMedlytMix,
+  fallbackPublishStream,
+  type MedlytMixHandle,
+} from "@/lib/medlyt-mix-audio";
 import { createMedlytPeerConnection } from "@/lib/medlyt-webrtc";
 import { iceCandidatesFromJson } from "@/lib/medlyt-listen-client";
 
@@ -36,6 +40,8 @@ export function MedlytPublisher({ micStream, remoteStream, enabled = true }: Pro
   const answeredRef = useRef(false);
   const appliedAdminIceRef = useRef(0);
   const senderRef = useRef<RTCRtpSender | null>(null);
+  const lastErrorRef = useRef<string | null>(null);
+  const lastPubRef = useRef<string>("");
 
   useEffect(() => {
     if (!enabled) return;
@@ -77,27 +83,43 @@ export function MedlytPublisher({ micStream, remoteStream, enabled = true }: Pro
       }).catch(() => undefined);
     };
 
+    const pickPublish = (): { stream: MediaStream; track: MediaStreamTrack; via: string } | null => {
+      try {
+        const mix = ensureMix();
+        const track = mix.stream.getAudioTracks()[0];
+        if (track) return { stream: mix.stream, track, via: "mix" };
+      } catch (err) {
+        lastErrorRef.current = err instanceof Error ? err.message : "mix-failed";
+      }
+      const fallback = fallbackPublishStream(micRef.current);
+      const ft = fallback?.getAudioTracks()[0];
+      if (fallback && ft) return { stream: fallback, track: ft, via: "mic-fallback" };
+      return null;
+    };
+
     const answerSession = async (s: PendingSession) => {
-      if (!s.offerSdp || answeredRef.current) return;
+      if (!s.offerSdp) return;
       if (sessionIdRef.current && sessionIdRef.current !== s.id) cleanupPc();
+      if (answeredRef.current && sessionIdRef.current === s.id) return;
 
       sessionIdRef.current = s.id;
-      const mix = ensureMix();
-      const track = mix.stream.getAudioTracks()[0];
+      const pub = pickPublish();
       // #region agent log
       fetch("http://localhost:7723/ingest/7a50d2a1-e6f0-436c-8453-6828c3db5e26", {
         method: "POST",
         headers: { "Content-Type": "application/json", "X-Debug-Session-Id": "c1392e" },
         body: JSON.stringify({
           sessionId: "c1392e",
-          runId: "pre-fix",
+          runId: "post-fix",
           hypothesisId: "H4",
           location: "app/components/medlyt-publisher.tsx:answerSession",
           message: "seller answering listen",
           data: {
             listenId: s.id,
             hasOffer: Boolean(s.offerSdp),
-            hasTrack: Boolean(track),
+            via: pub?.via ?? null,
+            hasTrack: Boolean(pub?.track),
+            lastError: lastErrorRef.current,
             micTracks: micRef.current?.getAudioTracks().length ?? 0,
             remoteTracks: remoteRef.current?.getAudioTracks().length ?? 0,
           },
@@ -105,7 +127,10 @@ export function MedlytPublisher({ micStream, remoteStream, enabled = true }: Pro
         }),
       }).catch(() => {});
       // #endregion
-      if (!track) return;
+      if (!pub) {
+        lastErrorRef.current = lastErrorRef.current || "no-publish-track";
+        return;
+      }
 
       const pc = createMedlytPeerConnection();
       pcRef.current = pc;
@@ -120,7 +145,7 @@ export function MedlytPublisher({ micStream, remoteStream, enabled = true }: Pro
         }
       };
 
-      const sender = pc.addTrack(track, mix.stream);
+      const sender = pc.addTrack(pub.track, pub.stream);
       senderRef.current = sender;
 
       await pc.setRemoteDescription({ type: "offer", sdp: s.offerSdp });
@@ -134,7 +159,10 @@ export function MedlytPublisher({ micStream, remoteStream, enabled = true }: Pro
         body: JSON.stringify({ answerSdp: answer.sdp }),
       });
       if (!res.ok) {
+        lastErrorRef.current = `answer-http-${res.status}`;
         cleanupPc();
+      } else {
+        lastErrorRef.current = null;
       }
     };
 
@@ -165,7 +193,17 @@ export function MedlytPublisher({ micStream, remoteStream, enabled = true }: Pro
           }
         }
 
-        const res = await fetch("/api/dialer/medlyt/listen/pending");
+        const pubState = {
+          answered: answeredRef.current,
+          sid: sessionIdRef.current,
+          err: lastErrorRef.current,
+          mic: micRef.current?.getAudioTracks().length ?? 0,
+          remote: remoteRef.current?.getAudioTracks().length ?? 0,
+        };
+        lastPubRef.current = JSON.stringify(pubState);
+        const res = await fetch("/api/dialer/medlyt/listen/pending", {
+          headers: { "x-medlyt-pub": lastPubRef.current },
+        });
         const data = (await res.json().catch(() => ({}))) as {
           sessions?: PendingSession[];
         };
@@ -187,8 +225,8 @@ export function MedlytPublisher({ micStream, remoteStream, enabled = true }: Pro
           await answerSession(active);
         }
         await applyAdminIce(active.id, active.adminIceJson);
-      } catch {
-        /* netværk — prøv igen */
+      } catch (err) {
+        lastErrorRef.current = err instanceof Error ? err.message : "tick-failed";
       }
     };
 
