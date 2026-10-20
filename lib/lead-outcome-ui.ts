@@ -15,9 +15,6 @@ export function outcomeButtonClass(status: LeadStatus, active: boolean): string 
   const base =
     "rounded-xl border-2 px-4 py-3 text-center text-sm font-semibold shadow-sm transition focus:outline-none focus-visible:ring-2 focus-visible:ring-offset-2 min-w-[8rem] flex-1 sm:flex-none";
   if (!active) {
-    if (status === "DELETED") {
-      return `${base} border-stone-400 bg-stone-100 text-stone-800 hover:border-stone-500 hover:bg-stone-200`;
-    }
     return `${base} border-stone-200 bg-white text-stone-600 hover:border-stone-300 hover:bg-stone-50`;
   }
   switch (status) {
