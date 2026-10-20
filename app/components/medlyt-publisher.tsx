@@ -1,18 +1,21 @@
 "use client";
 
 /**
- * Kører i sælgerens dialer: poller efter admin-Medlyt, svarer med blandet mic+remote via WebRTC.
+ * Kører i sælgerens dialer: sender mic (og Telnyx-remote når der er opkald)
+ * direkte som WebRTC-spor — uden AudioContext-mix, så delay bliver lavere.
  */
 
 import { useEffect, useRef } from "react";
-import { createMedlytMix, type MedlytMixHandle } from "@/lib/medlyt-mix-audio";
-import { createMedlytPeerConnection, normalizeMedlytSdp } from "@/lib/medlyt-webrtc";
+import {
+  createMedlytPeerConnection,
+  liveAudioTrack,
+  normalizeMedlytSdp,
+  preferMedlytOpus,
+} from "@/lib/medlyt-webrtc";
 import { iceCandidatesFromJson } from "@/lib/medlyt-listen-client";
 
 type Props = {
-  /** Persistent mic (åben mens dialeren er klar). */
   micStream: MediaStream | null;
-  /** Telnyx remote (kunde) — null når der ikke er opkald. */
   remoteStream: MediaStream | null;
   enabled?: boolean;
 };
@@ -31,13 +34,11 @@ export function MedlytPublisher({ micStream, remoteStream, enabled = true }: Pro
   remoteRef.current = remoteStream;
 
   const pcRef = useRef<RTCPeerConnection | null>(null);
-  const mixRef = useRef<MedlytMixHandle | null>(null);
   const sessionIdRef = useRef<string | null>(null);
   const answeredRef = useRef(false);
   const appliedAdminIceRef = useRef(0);
-  const senderRef = useRef<RTCRtpSender | null>(null);
-  const lastErrorRef = useRef<string | null>(null);
-  const lastPubRef = useRef<string>("");
+  const micSenderRef = useRef<RTCRtpSender | null>(null);
+  const remoteSenderRef = useRef<RTCRtpSender | null>(null);
 
   useEffect(() => {
     if (!enabled) return;
@@ -47,7 +48,8 @@ export function MedlytPublisher({ micStream, remoteStream, enabled = true }: Pro
     const cleanupPc = () => {
       const pc = pcRef.current;
       pcRef.current = null;
-      senderRef.current = null;
+      micSenderRef.current = null;
+      remoteSenderRef.current = null;
       answeredRef.current = false;
       appliedAdminIceRef.current = 0;
       if (pc) {
@@ -57,16 +59,20 @@ export function MedlytPublisher({ micStream, remoteStream, enabled = true }: Pro
           /* no-op */
         }
       }
-      const mix = mixRef.current;
-      mixRef.current = null;
-      mix?.destroy();
       sessionIdRef.current = null;
     };
 
-    const ensureMix = () => {
-      if (!mixRef.current) mixRef.current = createMedlytMix();
-      mixRef.current.update(micRef.current, remoteRef.current);
-      return mixRef.current;
+    const syncTracks = async () => {
+      const micSender = micSenderRef.current;
+      const remoteSender = remoteSenderRef.current;
+      const mic = liveAudioTrack(micRef.current);
+      const remote = liveAudioTrack(remoteRef.current);
+      if (micSender && micSender.track?.id !== mic?.id) {
+        await micSender.replaceTrack(mic).catch(() => undefined);
+      }
+      if (remoteSender && remoteSender.track?.id !== remote?.id) {
+        await remoteSender.replaceTrack(remote).catch(() => undefined);
+      }
     };
 
     const postIce = async (sessionId: string, candidate: RTCIceCandidate) => {
@@ -84,39 +90,13 @@ export function MedlytPublisher({ micStream, remoteStream, enabled = true }: Pro
       if (sessionIdRef.current && sessionIdRef.current !== s.id) cleanupPc();
       if (answeredRef.current && sessionIdRef.current === s.id) return;
 
-      sessionIdRef.current = s.id;
-      const mix = ensureMix();
-      const track = mix.stream.getAudioTracks()[0];
-      // #region agent log
-      fetch("http://localhost:7723/ingest/7a50d2a1-e6f0-436c-8453-6828c3db5e26", {
-        method: "POST",
-        headers: { "Content-Type": "application/json", "X-Debug-Session-Id": "c1392e" },
-        body: JSON.stringify({
-          sessionId: "c1392e",
-          runId: "post-fix",
-          hypothesisId: "H6",
-          location: "app/components/medlyt-publisher.tsx:answerSession",
-          message: "seller answering listen",
-          data: {
-            listenId: s.id,
-            hasOffer: Boolean(s.offerSdp),
-            hasTrack: Boolean(track),
-            offerEndsWithCrlf: s.offerSdp.endsWith("\r\n") || s.offerSdp.endsWith("\n"),
-            lastError: lastErrorRef.current,
-            micTracks: micRef.current?.getAudioTracks().length ?? 0,
-            remoteTracks: remoteRef.current?.getAudioTracks().length ?? 0,
-          },
-          timestamp: Date.now(),
-        }),
-      }).catch(() => {});
-      // #endregion
-      if (!track) {
-        lastErrorRef.current = "no-publish-track";
-        return;
-      }
+      const mic = liveAudioTrack(micRef.current);
+      if (!mic || !micRef.current) return;
 
+      sessionIdRef.current = s.id;
       const pc = createMedlytPeerConnection();
       pcRef.current = pc;
+      preferMedlytOpus(pc);
       pc.onicecandidate = (ev) => {
         if (ev.candidate && sessionIdRef.current) {
           void postIce(sessionIdRef.current, ev.candidate);
@@ -128,10 +108,16 @@ export function MedlytPublisher({ micStream, remoteStream, enabled = true }: Pro
         }
       };
 
-      const sender = pc.addTrack(track, mix.stream);
-      senderRef.current = sender;
+      micSenderRef.current = pc.addTrack(mic, micRef.current);
+      const remote = liveAudioTrack(remoteRef.current);
+      if (remote && remoteRef.current) {
+        remoteSenderRef.current = pc.addTrack(remote, remoteRef.current);
+      } else {
+        remoteSenderRef.current = pc.addTransceiver("audio", { direction: "sendonly" }).sender;
+      }
 
       await pc.setRemoteDescription({ type: "offer", sdp: normalizeMedlytSdp(s.offerSdp) });
+      preferMedlytOpus(pc);
       const answer = await pc.createAnswer();
       await pc.setLocalDescription(answer);
       answeredRef.current = true;
@@ -141,12 +127,7 @@ export function MedlytPublisher({ micStream, remoteStream, enabled = true }: Pro
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ answerSdp: answer.sdp }),
       });
-      if (!res.ok) {
-        lastErrorRef.current = `answer-http-${res.status}`;
-        cleanupPc();
-      } else {
-        lastErrorRef.current = null;
-      }
+      if (!res.ok) cleanupPc();
     };
 
     const applyAdminIce = async (sessionId: string, adminIceJson: string | null) => {
@@ -166,27 +147,9 @@ export function MedlytPublisher({ micStream, remoteStream, enabled = true }: Pro
     const tick = async () => {
       if (cancelled) return;
       try {
-        // Hold mix syncet med mic/remote (replaceTrack hvis spor skifter).
-        if (mixRef.current && pcRef.current) {
-          mixRef.current.update(micRef.current, remoteRef.current);
-          const t = mixRef.current.stream.getAudioTracks()[0];
-          const sender = senderRef.current;
-          if (t && sender && sender.track?.id !== t.id) {
-            await sender.replaceTrack(t).catch(() => undefined);
-          }
-        }
+        if (pcRef.current) await syncTracks();
 
-        const pubState = {
-          answered: answeredRef.current,
-          sid: sessionIdRef.current,
-          err: lastErrorRef.current,
-          mic: micRef.current?.getAudioTracks().length ?? 0,
-          remote: remoteRef.current?.getAudioTracks().length ?? 0,
-        };
-        lastPubRef.current = JSON.stringify(pubState);
-        const res = await fetch("/api/dialer/medlyt/listen/pending", {
-          headers: { "x-medlyt-pub": lastPubRef.current },
-        });
+        const res = await fetch("/api/dialer/medlyt/listen/pending");
         const data = (await res.json().catch(() => ({}))) as {
           sessions?: PendingSession[];
         };
@@ -198,23 +161,21 @@ export function MedlytPublisher({ micStream, remoteStream, enabled = true }: Pro
           if (sessionIdRef.current) cleanupPc();
           return;
         }
-
         if (active.status === "ended") {
           cleanupPc();
           return;
         }
-
         if (!answeredRef.current || sessionIdRef.current !== active.id) {
           await answerSession(active);
         }
         await applyAdminIce(active.id, active.adminIceJson);
-      } catch (err) {
-        lastErrorRef.current = err instanceof Error ? err.message : "tick-failed";
+      } catch {
+        /* prøv igen */
       }
     };
 
     void tick();
-    const interval = window.setInterval(() => void tick(), 1200);
+    const interval = window.setInterval(() => void tick(), 400);
     return () => {
       cancelled = true;
       window.clearInterval(interval);
@@ -222,15 +183,13 @@ export function MedlytPublisher({ micStream, remoteStream, enabled = true }: Pro
     };
   }, [enabled]);
 
-  // Opdater mix når streams skifter (uden at genstarte PC).
   useEffect(() => {
-    if (!mixRef.current) return;
-    mixRef.current.update(micStream, remoteStream);
-    const t = mixRef.current.stream.getAudioTracks()[0];
-    const sender = senderRef.current;
-    if (t && sender) {
-      void sender.replaceTrack(t).catch(() => undefined);
-    }
+    const micSender = micSenderRef.current;
+    const remoteSender = remoteSenderRef.current;
+    const mic = liveAudioTrack(micStream);
+    const remote = liveAudioTrack(remoteStream);
+    if (micSender) void micSender.replaceTrack(mic).catch(() => undefined);
+    if (remoteSender) void remoteSender.replaceTrack(remote).catch(() => undefined);
   }, [micStream, remoteStream]);
 
   return null;

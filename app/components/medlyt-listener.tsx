@@ -1,11 +1,16 @@
 "use client";
 
 /**
- * Admin: start browser-Medlyt — opret session, send offer, afspil sælgerens blandede lyd.
+ * Admin: start browser-Medlyt — opret session, send offer, afspil sælger-mic + evt. kunde.
  */
 
 import { useCallback, useEffect, useId, useRef, useState } from "react";
-import { createMedlytPeerConnection, normalizeMedlytSdp } from "@/lib/medlyt-webrtc";
+import {
+  applyMedlytLowDelay,
+  createMedlytPeerConnection,
+  normalizeMedlytSdp,
+  preferMedlytOpus,
+} from "@/lib/medlyt-webrtc";
 import { iceCandidatesFromJson } from "@/lib/medlyt-listen-client";
 
 export type MedlytListenerState = {
@@ -17,7 +22,6 @@ export type MedlytListenerState = {
 
 type Props = {
   targetUserId: string | null;
-  /** Når true: stop aktiv session. */
   stopSignal: number;
   onStateChange: (state: MedlytListenerState) => void;
 };
@@ -26,6 +30,7 @@ export function MedlytListener({ targetUserId, stopSignal, onStateChange }: Prop
   const reactId = useId().replace(/:/g, "");
   const audioId = `medlyt-listen-audio-${reactId}`;
   const pcRef = useRef<RTCPeerConnection | null>(null);
+  const extrasRef = useRef<HTMLAudioElement[]>([]);
   const sessionIdRef = useRef<string | null>(null);
   const appliedSellerIceRef = useRef(0);
   const stopSeenRef = useRef(stopSignal);
@@ -63,6 +68,11 @@ export function MedlytListener({ targetUserId, stopSignal, onStateChange }: Prop
         /* no-op */
       }
     }
+    for (const extra of extrasRef.current) {
+      extra.srcObject = null;
+      extra.remove();
+    }
+    extrasRef.current = [];
     const el = document.getElementById(audioId) as HTMLAudioElement | null;
     if (el) el.srcObject = null;
     if (endRemote && sid) {
@@ -135,12 +145,26 @@ export function MedlytListener({ targetUserId, stopSignal, onStateChange }: Prop
       const pc = createMedlytPeerConnection();
       pcRef.current = pc;
       pc.addTransceiver("audio", { direction: "recvonly" });
+      pc.addTransceiver("audio", { direction: "recvonly" });
+      preferMedlytOpus(pc);
       pc.onicecandidate = (ev) => {
         if (ev.candidate) void postIce(sid, ev.candidate);
       };
       pc.ontrack = (ev) => {
-        const el = document.getElementById(audioId) as HTMLAudioElement | null;
-        const stream = ev.streams[0] ?? new MediaStream([ev.track]);
+        if (ev.track.kind !== "audio") return;
+        applyMedlytLowDelay(ev.receiver);
+        const stream = new MediaStream([ev.track]);
+        const primary = document.getElementById(audioId) as HTMLAudioElement | null;
+        const usingPrimary = Boolean(primary && !primary.srcObject);
+        const el = usingPrimary
+          ? primary
+          : Object.assign(document.createElement("audio"), { autoplay: true });
+        if (!usingPrimary) {
+          el.setAttribute("playsinline", "");
+          el.style.display = "none";
+          document.body.appendChild(el);
+          extrasRef.current.push(el);
+        }
         if (el) {
           el.srcObject = stream;
           void el.play().catch(() => undefined);
@@ -151,6 +175,9 @@ export function MedlytListener({ targetUserId, stopSignal, onStateChange }: Prop
       };
       pc.onconnectionstatechange = () => {
         if (pc.connectionState === "connected") {
+          for (const r of pc.getReceivers()) {
+            if (r.track?.kind === "audio") applyMedlytLowDelay(r);
+          }
           setListening(true);
           setNegotiating(false);
         }
@@ -203,6 +230,9 @@ export function MedlytListener({ targetUserId, stopSignal, onStateChange }: Prop
               type: "answer",
               sdp: normalizeMedlytSdp(data.session.answerSdp),
             });
+            for (const r of remotePc.getReceivers()) {
+              if (r.track?.kind === "audio") applyMedlytLowDelay(r);
+            }
           }
 
           const cands = iceCandidatesFromJson(data.session.sellerIceJson);
@@ -220,7 +250,7 @@ export function MedlytListener({ targetUserId, stopSignal, onStateChange }: Prop
       };
 
       void poll();
-      pollIntervalRef.current = window.setInterval(() => void poll(), 800);
+      pollIntervalRef.current = window.setInterval(() => void poll(), 400);
     };
 
     void start();

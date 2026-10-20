@@ -76,26 +76,6 @@ export async function PATCH(req: Request, ctx: Ctx) {
       targetUserId: uid,
       answerSdp: body.answerSdp,
     });
-    // #region agent log
-    fetch("http://localhost:7723/ingest/7a50d2a1-e6f0-436c-8453-6828c3db5e26", {
-      method: "POST",
-      headers: { "Content-Type": "application/json", "X-Debug-Session-Id": "c1392e" },
-      body: JSON.stringify({
-        sessionId: "c1392e",
-        runId: "post-fix",
-        hypothesisId: "H4",
-        location: "app/api/dialer/medlyt/listen/[id]/route.ts",
-        message: "seller answer PATCH",
-        data: { id, ok: result.ok, error: result.ok ? null : result.error },
-        timestamp: Date.now(),
-      }),
-    }).catch(() => {});
-    console.warn("[medlyt-debug] H4 seller-answer", {
-      id,
-      ok: result.ok,
-      error: result.ok ? null : result.error,
-    });
-    // #endregion
     if (!result.ok) {
       return NextResponse.json({ error: result.error }, { status: result.status });
     }
