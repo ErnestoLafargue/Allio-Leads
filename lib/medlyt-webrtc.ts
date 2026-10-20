@@ -32,8 +32,6 @@ export function medlytSellerCaptureConstraints(deviceId?: string | null): Medlyt
   };
 }
 
-type AudioContextWithSink = AudioContext & { setSinkId?: (id: string) => Promise<void> };
-
 type PlaybackBind = {
   ctx: AudioContext | null;
   source: MediaStreamAudioSourceNode | null;
@@ -291,8 +289,8 @@ export function detachMedlytPlayback(el: HTMLAudioElement | null): void {
 }
 
 /**
- * Afspil via Web Audio (`interactive`) — `<audio>` bufferer ofte 80–200 ms ekstra.
- * Falder tilbage til elementet hvis AudioContext ikke kan starte.
+ * Afspil via `<audio>`. Web Audio på et muted WebRTC-spor bliver ved med at være
+ * stille efter unmute — Chromes audio-element starter selv når RTP kommer.
  */
 export function attachMedlytPlayback(
   el: HTMLAudioElement | null,
@@ -301,91 +299,51 @@ export function attachMedlytPlayback(
   debugSessionId?: string | null,
 ): void {
   if (!el) return;
-  let bind = playbackBinds.get(el);
-  if (bind?.trackId === track.id && bind.source) {
-    void bind.ctx?.resume().catch(() => undefined);
-    return;
+  playViaElement(el, track, sinkId);
+  track.addEventListener(
+    "unmute",
+    () => {
+      playViaElement(el, track, sinkId);
+    },
+    { once: true },
+  );
+  // #region agent log
+  fetch("http://localhost:7723/ingest/7a50d2a1-e6f0-436c-8453-6828c3db5e26", {
+    method: "POST",
+    headers: { "Content-Type": "application/json", "X-Debug-Session-Id": "c1392e" },
+    body: JSON.stringify({
+      sessionId: "c1392e",
+      hypothesisId: "H-play",
+      location: "medlyt-webrtc.ts:attachMedlytPlayback",
+      message: "playback bind",
+      data: {
+        usingWa: false,
+        path: "element",
+        trackMuted: track.muted,
+        readyState: track.readyState,
+        hasEl: true,
+      },
+      timestamp: Date.now(),
+    }),
+  }).catch(() => {});
+  if (debugSessionId) {
+    fetch(`/api/dialer/medlyt/listen/${debugSessionId}`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        clientDebug: {
+          hypothesisId: "H-play",
+          location: "medlyt-webrtc.ts:attachMedlytPlayback",
+          message: "playback bind",
+          data: {
+            usingWa: false,
+            path: "element",
+            trackMuted: track.muted,
+            readyState: track.readyState,
+          },
+        },
+      }),
+    }).catch(() => {});
   }
-  if (bind?.source) {
-    try {
-      bind.source.disconnect();
-    } catch {
-      /* no-op */
-    }
-    bind.source = null;
-  }
-  if (!bind) {
-    bind = { ctx: null, source: null, trackId: null };
-    playbackBinds.set(el, bind);
-  }
-
-  const useElement = () => playViaElement(el, track, sinkId);
-
-  try {
-    if (!bind.ctx || bind.ctx.state === "closed") {
-      bind.ctx = new AudioContext({ latencyHint: "interactive" });
-    }
-    const ctx = bind.ctx;
-    const sink = sinkId?.trim();
-    if (sink && typeof (ctx as AudioContextWithSink).setSinkId === "function") {
-      void (ctx as AudioContextWithSink).setSinkId!(sink).catch(() => undefined);
-    }
-    void ctx
-      .resume()
-      .then(() => {
-        const usingWa = ctx.state === "running";
-        // #region agent log
-        fetch("http://localhost:7723/ingest/7a50d2a1-e6f0-436c-8453-6828c3db5e26", {
-          method: "POST",
-          headers: { "Content-Type": "application/json", "X-Debug-Session-Id": "c1392e" },
-          body: JSON.stringify({
-            sessionId: "c1392e",
-            hypothesisId: "H-play",
-            location: "medlyt-webrtc.ts:attachMedlytPlayback",
-            message: "playback bind",
-            data: {
-              usingWa,
-              ctxState: ctx.state,
-              trackMuted: track.muted,
-              readyState: track.readyState,
-              hasEl: true,
-            },
-            timestamp: Date.now(),
-          }),
-        }).catch(() => {});
-        if (debugSessionId) {
-          fetch(`/api/dialer/medlyt/listen/${debugSessionId}`, {
-            method: "PATCH",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({
-              clientDebug: {
-                hypothesisId: "H-play",
-                location: "medlyt-webrtc.ts:attachMedlytPlayback",
-                message: "playback bind",
-                data: {
-                  usingWa,
-                  ctxState: ctx.state,
-                  trackMuted: track.muted,
-                  readyState: track.readyState,
-                },
-              },
-            }),
-          }).catch(() => {});
-        }
-        // #endregion
-        if (!usingWa) {
-          useElement();
-          return;
-        }
-        const src = ctx.createMediaStreamSource(new MediaStream([track]));
-        src.connect(ctx.destination);
-        bind.source = src;
-        bind.trackId = track.id;
-        el.srcObject = null;
-        el.muted = true;
-      })
-      .catch(useElement);
-  } catch {
-    useElement();
-  }
+  // #endregion
 }
