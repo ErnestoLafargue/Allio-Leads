@@ -8,6 +8,7 @@ import {
   dialTelnyxOutbound,
   hangupTelnyxCall,
   pickTelnyxFromNumber,
+  switchTelnyxSupervisorRole,
 } from "@/lib/telnyx-call-control";
 import {
   ensurePowerDialerAgentTelnyx,
@@ -47,20 +48,34 @@ function firstNonEmpty(...vals: Array<string | null | undefined>): string | null
   return null;
 }
 
-/** Find et Telnyx-ben at supervise — lead, agent, WebRTC eller åben DialerCallLog. */
+export type MedlytSupervisedLeg = "agent" | "lead";
+
+export type MedlytSuperviseTarget = {
+  callControlId: string;
+  /** agent = sælgerens ben (whisper går kun til sælger); lead = kundens ben (whisper usikker). */
+  leg: MedlytSupervisedLeg;
+};
+
+/**
+ * Find et Telnyx-ben at supervise.
+ * Foretræk agent/WebRTC — whisper går kun til det supervisede ben, så sælger-coaching
+ * kræver agent-benet (ellers ville kunden høre admin).
+ */
 export async function resolveMedlytSuperviseCallControlId(session: {
   userId: string;
   currentLeadId: string | null;
   currentLeadCallControlId: string | null;
   currentAgentCallControlId: string | null;
   webRtcCallControlId: string | null;
-}): Promise<string | null> {
-  const fromSession = firstNonEmpty(
-    session.currentLeadCallControlId,
+}): Promise<MedlytSuperviseTarget | null> {
+  const agentCc = firstNonEmpty(
     session.currentAgentCallControlId,
     session.webRtcCallControlId,
   );
-  if (fromSession) return fromSession;
+  if (agentCc) return { callControlId: agentCc, leg: "agent" };
+
+  const leadCc = firstNonEmpty(session.currentLeadCallControlId);
+  if (leadCc) return { callControlId: leadCc, leg: "lead" };
 
   const openLog = await prisma.dialerCallLog.findFirst({
     where: {
@@ -72,31 +87,45 @@ export async function resolveMedlytSuperviseCallControlId(session: {
     select: { callControlId: true, bridgeTargetId: true, direction: true },
   });
   if (openLog) {
-    // Preferér lead-benet når vi har agent-loggen (supervise på kundens ben).
+    // Agent-loggen er sælgerens ben — foretræk den til whisper.
     if (openLog.direction === "outbound-agent") {
-      const bridged = openLog.bridgeTargetId?.trim();
-      if (bridged) return bridged;
+      const cc = openLog.callControlId?.trim();
+      if (cc) return { callControlId: cc, leg: "agent" };
     }
+    if (openLog.direction === "outbound-lead") {
+      const cc = openLog.callControlId?.trim();
+      if (cc) return { callControlId: cc, leg: "lead" };
+    }
+    const bridged = openLog.bridgeTargetId?.trim();
+    if (bridged) return { callControlId: bridged, leg: "lead" };
     const cc = openLog.callControlId?.trim();
-    if (cc) return cc;
+    if (cc) return { callControlId: cc, leg: "lead" };
   }
 
   if (session.currentLeadId) {
+    const agentLog = await prisma.dialerCallLog.findFirst({
+      where: {
+        leadId: session.currentLeadId,
+        endedAt: null,
+        direction: "outbound-agent",
+      },
+      orderBy: { startedAt: "desc" },
+      select: { callControlId: true },
+    });
+    const agentFromLog = agentLog?.callControlId?.trim();
+    if (agentFromLog) return { callControlId: agentFromLog, leg: "agent" };
+
     const leadLog = await prisma.dialerCallLog.findFirst({
       where: {
         leadId: session.currentLeadId,
         endedAt: null,
-        direction: { in: ["outbound-lead", "outbound-agent"] },
+        direction: "outbound-lead",
       },
       orderBy: { startedAt: "desc" },
-      select: { callControlId: true, bridgeTargetId: true, direction: true },
+      select: { callControlId: true },
     });
-    if (leadLog?.direction === "outbound-lead") {
-      return leadLog.callControlId?.trim() || null;
-    }
-    return (
-      firstNonEmpty(leadLog?.bridgeTargetId, leadLog?.callControlId)
-    );
+    const leadFromLog = leadLog?.callControlId?.trim();
+    if (leadFromLog) return { callControlId: leadFromLog, leg: "lead" };
   }
 
   return null;
@@ -170,6 +199,9 @@ export type MedlytStartResult =
       supervisorCallControlId: string;
       targetUserId: string;
       leadCallControlId: string;
+      supervisedLeg: MedlytSupervisedLeg;
+      /** True når whisper til sælger er sikkert (supervisede ben er agent). */
+      whisperAvailable: boolean;
     }
   | { ok: false; status: number; error: string };
 
@@ -209,8 +241,8 @@ export async function startMedlyt(params: {
     };
   }
 
-  const superviseCc = await resolveMedlytSuperviseCallControlId(target);
-  if (!superviseCc) {
+  const supervise = await resolveMedlytSuperviseCallControlId(target);
+  if (!supervise) {
     return {
       ok: false,
       status: 409,
@@ -218,6 +250,7 @@ export async function startMedlyt(params: {
         "Kunne ikke finde et aktivt Telnyx-ben at lytte på. Prøv igen om et øjeblik, når opkaldet er forbundet.",
     };
   }
+  const superviseCc = supervise.callControlId;
 
   await ensurePowerDialerAgentTelnyx({ userId: params.supervisorUserId, apiKey }).catch(() => null);
   const supervisor = await prisma.user.findUnique({
@@ -311,7 +344,39 @@ export async function startMedlyt(params: {
     supervisorCallControlId: dial.callControlId,
     targetUserId: params.targetUserId,
     leadCallControlId: superviseCc,
+    supervisedLeg: supervise.leg,
+    whisperAvailable: supervise.leg === "agent",
   };
+}
+
+/** Skift supervisor-rolle: whisper (tal til sælger) ↔ monitor (stille). */
+export async function setMedlytWhisper(params: {
+  supervisorCallControlId: string;
+  enabled: boolean;
+}): Promise<{ ok: true; role: "whisper" | "monitor" } | { ok: false; status: number; error: string }> {
+  const apiKey = process.env.TELNYX_API_KEY?.trim();
+  if (!apiKey) {
+    return { ok: false, status: 503, error: "TELNYX_API_KEY mangler." };
+  }
+  const cc = params.supervisorCallControlId.trim();
+  if (!cc) {
+    return { ok: false, status: 400, error: "supervisorCallControlId mangler." };
+  }
+  const role = params.enabled ? "whisper" : "monitor";
+  const result = await switchTelnyxSupervisorRole({
+    apiKey,
+    callControlId: cc,
+    role,
+    commandId: `medlyt-role-${role}-${cc.slice(-12)}-${Date.now()}`,
+  });
+  if (!result.ok) {
+    return {
+      ok: false,
+      status: result.status || 502,
+      error: result.message.slice(0, 200) || "Kunne ikke skifte medlyt-rolle.",
+    };
+  }
+  return { ok: true, role };
 }
 
 export async function stopMedlyt(params: {

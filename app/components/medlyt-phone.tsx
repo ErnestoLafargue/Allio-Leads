@@ -4,7 +4,7 @@ import { useCallback, useEffect, useId, useRef, useState } from "react";
 
 /**
  * Let softphone til admin-Medlyt: WebRTC + auto-svar på indgående supervising leg.
- * Ingen udgående dial — serveren dial'er Ernesto ind via Telnyx monitor.
+ * Mic er muted under monitor; unmute kun når whisper (tal til sælger) er slået til.
  */
 
 type TelnyxCall = {
@@ -12,6 +12,8 @@ type TelnyxCall = {
   state?: unknown;
   direction?: "outbound" | "inbound";
   hangup?: () => Promise<void> | void;
+  muteAudio?: () => void;
+  unmuteAudio?: () => void;
   answer?: (options?: {
     audio?: boolean;
     video?: boolean;
@@ -61,39 +63,61 @@ export type MedlytPhoneState = {
 type Props = {
   enabled: boolean;
   hangupSignal: number;
+  /** Når true: unmute mic (whisper). Ellers muted (monitor). */
+  whisperOn: boolean;
   onStateChange: (state: MedlytPhoneState) => void;
 };
 
-export function MedlytPhone({ enabled, hangupSignal, onStateChange }: Props) {
+export function MedlytPhone({ enabled, hangupSignal, whisperOn, onStateChange }: Props) {
   const reactId = useId().replace(/:/g, "");
   const remoteAudioId = `medlyt-remote-${reactId}`;
   const clientRef = useRef<TelnyxClient | null>(null);
   const activeCallRef = useRef<TelnyxCall | null>(null);
   const connectGenerationRef = useRef(0);
   const hangupSeenRef = useRef(hangupSignal);
+  const whisperOnRef = useRef(whisperOn);
   const [registered, setRegistered] = useState(false);
   const [listening, setListening] = useState(false);
   const [problem, setProblem] = useState<string | null>(null);
 
+  whisperOnRef.current = whisperOn;
+
   useEffect(() => {
     onStateChange({ registered, listening, problem });
   }, [registered, listening, problem, onStateChange]);
+
+  const applyMicMute = useCallback((call: TelnyxCall | null, allowTalk: boolean) => {
+    if (!call) return;
+    try {
+      if (allowTalk) call.unmuteAudio?.();
+      else call.muteAudio?.();
+    } catch {
+      /* no-op */
+    }
+  }, []);
 
   const autoAnswer = useCallback(
     (call: TelnyxCall) => {
       try {
         void Promise.resolve(
           call.answer?.({ audio: true, video: false, remoteElement: remoteAudioId }),
-        ).catch(() => {
-          void Promise.resolve(call.answer?.({ remoteElement: remoteAudioId })).catch(() => {
-            setProblem("Kunne ikke besvare medlyt-opkaldet.");
+        )
+          .then(() => {
+            // Start muted indtil whisper er slået til.
+            applyMicMute(call, whisperOnRef.current);
+          })
+          .catch(() => {
+            void Promise.resolve(call.answer?.({ remoteElement: remoteAudioId }))
+              .then(() => applyMicMute(call, whisperOnRef.current))
+              .catch(() => {
+                setProblem("Kunne ikke besvare medlyt-opkaldet.");
+              });
           });
-        });
       } catch {
         setProblem("Kunne ikke besvare medlyt-opkaldet.");
       }
     },
-    [remoteAudioId],
+    [remoteAudioId, applyMicMute],
   );
 
   const handleNotification = useCallback(
@@ -119,10 +143,15 @@ export function MedlytPhone({ enabled, hangupSignal, onStateChange }: Props) {
         activeCallRef.current = call;
         setListening(true);
         setProblem(null);
+        applyMicMute(call, whisperOnRef.current);
       }
     },
-    [autoAnswer],
+    [autoAnswer, applyMicMute],
   );
+
+  useEffect(() => {
+    applyMicMute(activeCallRef.current, whisperOn);
+  }, [whisperOn, applyMicMute, listening]);
 
   const disconnectClient = useCallback(() => {
     const call = activeCallRef.current;

@@ -1094,6 +1094,53 @@ export async function bridgeTelnyxCalls(params: {
 }
 
 /**
+ * Skift supervisor-rolle på et supervising leg midt i opkaldet.
+ * - monitor: stille medlyt (ingen hører supervisor)
+ * - whisper: kun det supervisede ben hører supervisor (brug agent-ben til salgs-coach)
+ * - barge: begge parter hører supervisor (ikke i Medlyt v1)
+ */
+export async function switchTelnyxSupervisorRole(params: {
+  apiKey: string;
+  callControlId: string;
+  role: "monitor" | "whisper" | "barge";
+  commandId?: string;
+}): Promise<ActionResult> {
+  const body: Record<string, unknown> = { role: params.role };
+  if (params.commandId) body.command_id = params.commandId;
+
+  try {
+    const res = await fetch(
+      `${TELNYX_API_BASE}/calls/${encodeURIComponent(params.callControlId)}/actions/switch_supervisor_role`,
+      {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${params.apiKey}`,
+          "Content-Type": "application/json",
+          Accept: "application/json",
+        },
+        body: JSON.stringify(body),
+      },
+    );
+    const json: unknown = await res.json().catch(() => null);
+    if (!res.ok) {
+      return {
+        ok: false,
+        status: res.status,
+        message: formatTelnyxError(json) || `Telnyx HTTP ${res.status}`,
+        telnyx: json,
+      };
+    }
+    return { ok: true, raw: json };
+  } catch (err) {
+    return {
+      ok: false,
+      status: 0,
+      message: err instanceof Error ? err.message : "Ukendt fejl ved switch_supervisor_role.",
+    };
+  }
+}
+
+/**
  * Hangup et aktivt opkald. Bruges fx når AMD detekterer voicemail og vi vil afbryde.
  */
 export async function hangupTelnyxCall(params: {
