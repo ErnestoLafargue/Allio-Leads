@@ -84,6 +84,27 @@ export function MedlytPublisher({ micStream, remoteStream, enabled = true }: Pro
       sessionIdRef.current = s.id;
       const mix = ensureMix();
       const track = mix.stream.getAudioTracks()[0];
+      // #region agent log
+      fetch("http://localhost:7723/ingest/7a50d2a1-e6f0-436c-8453-6828c3db5e26", {
+        method: "POST",
+        headers: { "Content-Type": "application/json", "X-Debug-Session-Id": "c1392e" },
+        body: JSON.stringify({
+          sessionId: "c1392e",
+          runId: "pre-fix",
+          hypothesisId: "H4",
+          location: "app/components/medlyt-publisher.tsx:answerSession",
+          message: "seller answering listen",
+          data: {
+            listenId: s.id,
+            hasOffer: Boolean(s.offerSdp),
+            hasTrack: Boolean(track),
+            micTracks: micRef.current?.getAudioTracks().length ?? 0,
+            remoteTracks: remoteRef.current?.getAudioTracks().length ?? 0,
+          },
+          timestamp: Date.now(),
+        }),
+      }).catch(() => {});
+      // #endregion
       if (!track) return;
 
       const pc = createMedlytPeerConnection();

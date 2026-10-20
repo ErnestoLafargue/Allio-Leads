@@ -67,7 +67,9 @@ export default function MedlytPage() {
 
   const loadAgents = useCallback(async () => {
     try {
-      const res = await fetch("/api/dialer/medlyt/agents");
+      const res = await fetch("/api/dialer/medlyt/agents", {
+        headers: { "x-medlyt-ui": "browser-v2" },
+      });
       const data = (await res.json().catch(() => ({}))) as {
         agents?: AgentRow[];
         error?: string;
@@ -112,6 +114,21 @@ export default function MedlytPage() {
   };
 
   const startMedlyt = (targetUserId: string) => {
+    // #region agent log
+    fetch("http://localhost:7723/ingest/7a50d2a1-e6f0-436c-8453-6828c3db5e26", {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "X-Debug-Session-Id": "c1392e" },
+      body: JSON.stringify({
+        sessionId: "c1392e",
+        runId: "pre-fix",
+        hypothesisId: "H3",
+        location: "app/(dashboard)/administration/medlyt/page.tsx:startMedlyt",
+        message: "browser-v2 start click (no telnyx /start)",
+        data: { targetUserId },
+        timestamp: Date.now(),
+      }),
+    }).catch(() => {});
+    // #endregion
     setActionError(null);
     setBusyUserId(null);
     clearWhisper();
