@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useAudioLevel } from "@/lib/use-audio-level";
 import { useCallAudioPublisher } from "@/lib/live-coach/call-audio";
+import { MedlytPublisher } from "@/app/components/medlyt-publisher";
 import {
   clearActiveDialerCampaignIfMatches,
   setActiveDialerCampaign,
@@ -972,6 +973,10 @@ export function PowerDialerPhone({
       aria-label="Power Dialer telefon"
     >
       <audio ref={remoteAudioRef} id={remoteAudioId} autoPlay playsInline />
+      <MedlytPublisher
+        micStream={micStream}
+        remoteStream={lineStatus === "live" || lineStatus === "ringing" ? remoteStream : null}
+      />
       <div className="flex flex-wrap items-center gap-3">
         <span
           className={`inline-flex items-center gap-1.5 rounded-full border px-2.5 py-1 text-xs font-semibold ${pill.cls}`}

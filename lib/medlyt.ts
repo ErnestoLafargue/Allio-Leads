@@ -34,15 +34,26 @@ export type MedlytAgentRow = {
   campaignName: string | null;
   leadId: string | null;
   hasLeadLeg: boolean;
-  /** Grøn = talking, blå = ringing, ellers disabled (dialer ikke i opkald). */
-  buttonTone: "green" | "blue" | "disabled";
+  /** Grøn = talking, blå = ringing, amber = klar på kampagne, disabled = ikke i dialer. */
+  buttonTone: "green" | "blue" | "ready" | "disabled";
   canStart: boolean;
 };
 
-/** Knap aktiv så længe sælgeren ringer eller er i samtale — dialer «i brug». */
+/**
+ * Browser-Medlyt: knap aktiv så længe sælgeren er i dialeren (klar/ringer/taler).
+ * Mic streames via browser — kræver ikke Telnyx call-leg.
+ */
 export function medlytButtonTone(status: string): MedlytAgentRow["buttonTone"] {
   if (status === "talking") return "green";
   if (status === "ringing") return "blue";
+  if (
+    status === "ready" ||
+    status === "paused" ||
+    status === "wrap_up" ||
+    status === "draining"
+  ) {
+    return "ready";
+  }
   return "disabled";
 }
 
@@ -236,12 +247,12 @@ export async function listMedlytAgents(): Promise<MedlytAgentRow[]> {
         leadId: s.currentLeadId,
         hasLeadLeg,
         buttonTone: tone,
-        canStart: tone === "green" || tone === "blue",
+        canStart: tone !== "disabled",
       };
     })
     .sort((a, b) => {
       const tr = (t: MedlytAgentRow["buttonTone"]) =>
-        t === "green" ? 0 : t === "blue" ? 1 : 2;
+        t === "green" ? 0 : t === "blue" ? 1 : t === "ready" ? 2 : 3;
       const d = tr(a.buttonTone) - tr(b.buttonTone);
       if (d !== 0) return d;
       return a.name.localeCompare(b.name, "da");

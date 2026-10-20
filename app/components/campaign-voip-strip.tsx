@@ -5,6 +5,7 @@ import type { CampaignDialMode } from "@/lib/dial-mode";
 import { normalizePhoneToE164ForDial, stripDialFormatting } from "@/lib/phone-e164";
 import { useAudioLevel } from "@/lib/use-audio-level";
 import { useCallAudioPublisher } from "@/lib/live-coach/call-audio";
+import { MedlytPublisher } from "@/app/components/medlyt-publisher";
 import {
   ensureMicPermissionAndEnumerate,
   headsetSetupBlockedReason,
@@ -1797,6 +1798,10 @@ export function CampaignVoipStrip({
       aria-label={standbyInboundOnly ? "VoIP standby (skjult)" : "VoIP opkald"}
     >
       <audio ref={remoteAudioRef} id={remoteAudioId} autoPlay playsInline />
+      <MedlytPublisher
+        micStream={micMonitorStream}
+        remoteStream={lineStatus === "live" || lineStatus === "ringing" ? remoteStream : null}
+      />
 
       <header className="flex flex-wrap items-start justify-between gap-3">
         <div className="min-w-0">

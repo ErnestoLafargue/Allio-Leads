@@ -537,6 +537,24 @@ model AgentSession {
   @@index([userId, powerPool])
 }
 
+/// Browser-til-browser Medlyt: WebRTC-signalering (admin lytter til sælgerens mic + evt. remote).
+model MedlytListenSession {
+  id            String   @id @default(cuid())
+  adminUserId   String
+  targetUserId  String
+  /// requested | negotiating | live | ended
+  status        String   @default("requested")
+  offerSdp      String?  @db.Text
+  answerSdp     String?  @db.Text
+  adminIceJson  String?  @db.Text
+  sellerIceJson String?  @db.Text
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  @@index([targetUserId, status])
+  @@index([adminUserId, status])
+}
+
 /// Per-opkald log fra Telnyx. Skrives af webhook'en. Bruges af dispatcher til at vide
 /// hvilke opkald der er i flight, og af bridge-flow til at finde tilhørende lead/agent.
 model DialerCallLog {
