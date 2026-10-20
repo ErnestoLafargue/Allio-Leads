@@ -3,10 +3,16 @@
  */
 
 import { prisma } from "@/lib/prisma";
-import { PRESENCE_FRESH_WINDOW_MS, encodeDialerClientState } from "@/lib/dialer-shared";
+import {
+  PRESENCE_FRESH_WINDOW_MS,
+  decodeDialerClientState,
+  encodeDialerClientState,
+} from "@/lib/dialer-shared";
 import {
   dialTelnyxOutbound,
+  getTelnyxConnectionId,
   hangupTelnyxCall,
+  listTelnyxActiveCalls,
   pickTelnyxFromNumber,
   switchTelnyxSupervisorRole,
 } from "@/lib/telnyx-call-control";
@@ -60,9 +66,11 @@ export type MedlytSuperviseTarget = {
  * Find et Telnyx-ben at supervise.
  * Foretræk agent/WebRTC — whisper går kun til det supervisede ben, så sælger-coaching
  * kræver agent-benet (ellers ville kunden høre admin).
+ * Under ringing (bip/jingle) findes ofte kun lead-benet — det er OK til stille medlyt.
  */
 export async function resolveMedlytSuperviseCallControlId(session: {
   userId: string;
+  campaignId?: string | null;
   currentLeadId: string | null;
   currentLeadCallControlId: string | null;
   currentAgentCallControlId: string | null;
@@ -126,6 +134,70 @@ export async function resolveMedlytSuperviseCallControlId(session: {
     });
     const leadFromLog = leadLog?.callControlId?.trim();
     if (leadFromLog) return { callControlId: leadFromLog, leg: "lead" };
+  }
+
+  // Kampagne-åbne lead-ben (predictive dialer før agentUserId sættes).
+  if (session.campaignId) {
+    const campLead = await prisma.dialerCallLog.findFirst({
+      where: {
+        campaignId: session.campaignId,
+        endedAt: null,
+        direction: "outbound-lead",
+        state: { in: ["initiated", "ringing", "answered", "human", "bridged"] },
+        OR: [{ agentUserId: session.userId }, { agentUserId: null }],
+      },
+      orderBy: { startedAt: "desc" },
+      select: { callControlId: true, agentUserId: true },
+    });
+    if (campLead) {
+      const campCc = campLead.callControlId?.trim();
+      if (campCc && (!campLead.agentUserId || campLead.agentUserId === session.userId)) {
+        return { callControlId: campCc, leg: "lead" };
+      }
+    }
+  }
+
+  // Live Telnyx-fallback: agentens credential-connection (WebRTC-ben under ringing/talking).
+  const apiKey = process.env.TELNYX_API_KEY?.trim();
+  if (apiKey) {
+    const agentConn = await resolvePowerAgentOutboundConnectionId({
+      apiKey,
+      agentUserId: session.userId,
+    });
+    if (agentConn) {
+      const live = await listTelnyxActiveCalls({ apiKey, connectionId: agentConn });
+      if (live.ok) {
+        for (const call of live.calls) {
+          const state = decodeDialerClientState(call.clientState);
+          if (state && "userId" in state && state.userId === session.userId) {
+            return { callControlId: call.callControlId, leg: "agent" };
+          }
+          if (state?.kind === "agent") {
+            return { callControlId: call.callControlId, leg: "agent" };
+          }
+        }
+        // Én aktiv call på sælgerens connection ≈ deres WebRTC-ben.
+        if (live.calls.length === 1 && live.calls[0]) {
+          return { callControlId: live.calls[0].callControlId, leg: "agent" };
+        }
+      }
+    }
+
+    // Global Call Control-app: lead-ben med client_state for denne kampagne.
+    const globalConn = getTelnyxConnectionId();
+    if (globalConn && session.campaignId) {
+      const live = await listTelnyxActiveCalls({ apiKey, connectionId: globalConn });
+      if (live.ok) {
+        for (const call of live.calls) {
+          const state = decodeDialerClientState(call.clientState);
+          if (!state || state.kind !== "lead") continue;
+          if (state.campaignId !== session.campaignId) continue;
+          // Prefer lead der allerede er koblet til denne sælger via linked state — ellers
+          // tag nyeste lead på kampagnen (typisk under ringing før agent-assign).
+          return { callControlId: call.callControlId, leg: "lead" };
+        }
+      }
+    }
   }
 
   return null;
@@ -241,7 +313,10 @@ export async function startMedlyt(params: {
     };
   }
 
-  const supervise = await resolveMedlytSuperviseCallControlId(target);
+  const supervise = await resolveMedlytSuperviseCallControlId({
+    ...target,
+    campaignId: target.campaignId,
+  });
   if (!supervise) {
     return {
       ok: false,

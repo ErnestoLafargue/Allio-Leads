@@ -34,8 +34,13 @@ function leadStatusAllowsAmdVoicemail(status: string | null | undefined): boolea
  */
 export async function reserveReadyAgent(params: {
   campaignId: string;
+  /** Sæt straks ved reserve, så Medlyt kan lytte under ringing (før agent-ben findes). */
+  leadCallControlId?: string;
+  leadId?: string;
 }): Promise<{ userId: string; sipUsername: string; sessionId: string } | null> {
   const cutoff = new Date(Date.now() - PRESENCE_FRESH_WINDOW_MS);
+  const leadCc = params.leadCallControlId?.trim() || null;
+  const leadId = params.leadId?.trim() || null;
   // Vi laver en transaktion: find første ready agent og marker den som "ringing"
   // i én atomic operation så ingen anden dispatcher tager samme agent.
   const result = await prisma.$transaction(async (tx) => {
@@ -52,9 +57,20 @@ export async function reserveReadyAgent(params: {
     for (const session of ready) {
       // Marker som "ringing" — hvis det fejler (ramt af anden dispatcher) prøver vi næste.
       // updateMany returnerer count, så vi ved om vi vandt rasen.
+      // Gem lead-benet med det samme — ellers er Medlyt blind under bip/jingle.
       const updated = await tx.agentSession.updateMany({
         where: { id: session.id, status: "ready" },
-        data: { status: "ringing" },
+        data: {
+          status: "ringing",
+          reservedAt: new Date(),
+          ...(leadCc
+            ? {
+                currentLeadCallControlId: leadCc,
+                currentLeadId: leadId,
+                currentAgentCallControlId: null,
+              }
+            : {}),
+        },
       });
       if (updated.count === 1) {
         const user = await tx.user.findUnique({
@@ -71,7 +87,13 @@ export async function reserveReadyAgent(params: {
         // Agent mangler SIP eller Telnyx-credential — sæt tilbage til ready og prøv næste
         await tx.agentSession.update({
           where: { id: session.id },
-          data: { status: "ready" },
+          data: {
+            status: "ready",
+            reservedAt: null,
+            currentLeadCallControlId: null,
+            currentAgentCallControlId: null,
+            currentLeadId: null,
+          },
         });
       }
     }
@@ -166,7 +188,11 @@ export async function handleAmdHuman(params: {
     return { status: "lead-gone" };
   }
 
-  const reserved = await reserveReadyAgent({ campaignId: params.campaignId });
+  const reserved = await reserveReadyAgent({
+    campaignId: params.campaignId,
+    leadCallControlId: params.leadCallControlId,
+    leadId: params.leadId,
+  });
   if (!reserved) {
     // Ingen ledig agent → drop opkaldet (abandon)
     await hangupTelnyxCall({

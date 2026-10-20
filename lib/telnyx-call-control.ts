@@ -1140,6 +1140,73 @@ export async function switchTelnyxSupervisorRole(params: {
   }
 }
 
+export type TelnyxActiveCall = {
+  callControlId: string;
+  callSessionId: string | null;
+  clientState: string | null;
+};
+
+/** GET /v2/connections/{id}/active_calls — live ben på en connection. */
+export async function listTelnyxActiveCalls(params: {
+  apiKey: string;
+  connectionId: string;
+}): Promise<{ ok: true; calls: TelnyxActiveCall[] } | { ok: false; status: number; message: string }> {
+  try {
+    const res = await fetch(
+      `${TELNYX_API_BASE}/connections/${encodeURIComponent(params.connectionId)}/active_calls`,
+      {
+        method: "GET",
+        headers: {
+          Authorization: `Bearer ${params.apiKey}`,
+          Accept: "application/json",
+        },
+      },
+    );
+    const json: unknown = await res.json().catch(() => null);
+    if (!res.ok) {
+      return {
+        ok: false,
+        status: res.status,
+        message: formatTelnyxError(json) || `Telnyx HTTP ${res.status}`,
+      };
+    }
+    const data =
+      json && typeof json === "object" && "data" in json
+        ? (json as { data: unknown }).data
+        : null;
+    const rows = Array.isArray(data) ? data : [];
+    const calls: TelnyxActiveCall[] = [];
+    for (const row of rows) {
+      if (!row || typeof row !== "object") continue;
+      const r = row as Record<string, unknown>;
+      const cc =
+        typeof r.call_control_id === "string"
+          ? r.call_control_id
+          : typeof r.call_control_id === "number"
+            ? String(r.call_control_id)
+            : null;
+      if (!cc) continue;
+      calls.push({
+        callControlId: cc,
+        callSessionId:
+          typeof r.call_session_id === "string"
+            ? r.call_session_id
+            : typeof r.call_session_id === "number"
+              ? String(r.call_session_id)
+              : null,
+        clientState: typeof r.client_state === "string" ? r.client_state : null,
+      });
+    }
+    return { ok: true, calls };
+  } catch (err) {
+    return {
+      ok: false,
+      status: 0,
+      message: err instanceof Error ? err.message : "Ukendt fejl ved list active_calls.",
+    };
+  }
+}
+
 /**
  * Hangup et aktivt opkald. Bruges fx når AMD detekterer voicemail og vi vil afbryde.
  */

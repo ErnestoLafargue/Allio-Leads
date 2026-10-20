@@ -175,7 +175,15 @@ export async function POST(req: Request) {
             userId: clientState.userId,
             campaignId: clientState.campaignId,
           },
-          data: { status: "talking" },
+          data: {
+            status: "talking",
+            // Bevar/sæt ben-id'er så Medlyt kan finde et supervise-mål under samtale.
+            ...(clientState.linkedCallControlId
+              ? { currentLeadCallControlId: clientState.linkedCallControlId }
+              : {}),
+            ...(callControlId ? { currentAgentCallControlId: callControlId } : {}),
+            ...(clientState.leadId ? { currentLeadId: clientState.leadId } : {}),
+          },
         });
       }
       // Click-to-call (kind=manual): ingen AMD, men agenten har eksplicit valgt at ringe
