@@ -70,6 +70,15 @@ export async function POST(req: Request) {
     );
   }
 
+  // Medlyt: sælgerens browser sender aktivt WebRTC call_control_id på hvert heartbeat.
+  const hasCallControlField = Object.prototype.hasOwnProperty.call(body ?? {}, "callControlId");
+  const callControlId =
+    body?.callControlId === null || body?.callControlId === ""
+      ? null
+      : typeof body?.callControlId === "string"
+        ? body.callControlId.trim()
+        : undefined;
+
   // Hvis vi sender "offline" → slet sessionen helt så den ikke fylder i pacing-aggregater.
   if (status === "offline") {
     await prisma.agentSession.deleteMany({
@@ -93,14 +102,22 @@ export async function POST(req: Request) {
     select: { id: true, status: true },
   });
 
+  const ccPatch =
+    hasCallControlField && callControlId !== undefined
+      ? {
+          webRtcCallControlId: callControlId,
+          ...(callControlId ? { currentAgentCallControlId: callControlId } : {}),
+        }
+      : {};
+
   if (existing) {
     await prisma.agentSession.update({
       where: { id: existing.id },
-      data: { status, lastHeartbeat: heartbeatAt },
+      data: { status, lastHeartbeat: heartbeatAt, ...ccPatch },
     });
   } else {
     await prisma.agentSession.create({
-      data: { userId, campaignId, status, lastHeartbeat: heartbeatAt },
+      data: { userId, campaignId, status, lastHeartbeat: heartbeatAt, ...ccPatch },
     });
   }
   await creditDialerLineOccupancy({
@@ -267,9 +284,22 @@ async function powerPresence(
     skipWrapUp: bool(power.skipWrapUp),
   };
 
-  let result = await applyPowerPresence(userId, campaign, report, { powerPool: opts.powerPool });
+  const hasCallControlField = Object.prototype.hasOwnProperty.call(power, "callControlId");
+  const callControlId =
+    power.callControlId === null || power.callControlId === ""
+      ? null
+      : typeof power.callControlId === "string"
+        ? power.callControlId.trim()
+        : null;
+  const presenceOpts = {
+    powerPool: opts.powerPool,
+    hasCallControlField,
+    callControlId: hasCallControlField ? callControlId : undefined,
+  };
+
+  let result = await applyPowerPresence(userId, campaign, report, presenceOpts);
   if (result === "conflict") {
-    result = await applyPowerPresence(userId, campaign, report, { powerPool: opts.powerPool });
+    result = await applyPowerPresence(userId, campaign, report, presenceOpts);
   }
   if (result === "conflict") {
     return NextResponse.json({ ok: false, error: "Status blev ændret samtidig — prøv igen." }, { status: 409 });
@@ -373,7 +403,9 @@ async function applyPowerPresence(
   userId: string,
   campaign: PowerCampaign,
   report: PowerReport,
-  opts: { powerPool: boolean } = { powerPool: false },
+  opts: { powerPool: boolean; callControlId?: string | null; hasCallControlField?: boolean } = {
+    powerPool: false,
+  },
 ): Promise<"conflict" | { superseded: boolean; status: string }> {
   const now = new Date();
   const prev = await prisma.agentSession.findUnique({
@@ -410,6 +442,12 @@ async function applyPowerPresence(
 
   const next = decision.next;
   const busy = next.status === "ringing" || next.status === "talking";
+  const callControlId =
+    opts.callControlId === null || opts.callControlId === ""
+      ? null
+      : typeof opts.callControlId === "string"
+        ? opts.callControlId.trim()
+        : undefined;
   const data = {
     status: next.status,
     readySince: next.readySince,
@@ -422,7 +460,18 @@ async function applyPowerPresence(
     powerPool: opts.powerPool,
     ...(busy
       ? {}
-      : { currentLeadId: null, currentLeadCallControlId: null, currentAgentCallControlId: null }),
+      : {
+          currentLeadId: null,
+          currentLeadCallControlId: null,
+          currentAgentCallControlId: null,
+          webRtcCallControlId: null,
+        }),
+    ...(opts.hasCallControlField && callControlId !== undefined
+      ? {
+          webRtcCallControlId: callControlId,
+          ...(callControlId && busy ? { currentAgentCallControlId: callControlId } : {}),
+        }
+      : {}),
   };
 
   if (!prev) {

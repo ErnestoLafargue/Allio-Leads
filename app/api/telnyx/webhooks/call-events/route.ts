@@ -31,6 +31,7 @@ import {
   scheduleLeadRecordingSync,
   talkSecondsFromCallTimestamps,
 } from "@/lib/telnyx-recordings-auto-sync";
+import { bindAgentSessionFromTelnyxParties } from "@/lib/medlyt-bind-agent-leg";
 
 /** Sidste 2 cifre til logs — ikke fuldt nummer. */
 function maskPhoneTailForLog(raw: string | null | undefined): string {
@@ -147,6 +148,19 @@ export async function POST(req: Request) {
       }
     });
     return NextResponse.json({ ok: true, eventType, power: true });
+  }
+
+  // Medlyt: bind sælger-session til call_control_id via SIP (to/from), så admin kan supervise.
+  if (
+    eventType === "call.initiated" ||
+    eventType === "call.answered" ||
+    eventType === "call.bridged"
+  ) {
+    await bindAgentSessionFromTelnyxParties({
+      callControlId,
+      to: payload.to,
+      from: payload.from,
+    }).catch(() => undefined);
   }
 
   // State-transition håndtering

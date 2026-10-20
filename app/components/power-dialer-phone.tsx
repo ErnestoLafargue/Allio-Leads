@@ -63,6 +63,8 @@ type Props = {
   /** Øges af parent for at lægge det aktuelle opkald på. */
   hangupSignal: number;
   onStateChange: (state: PowerPhoneState) => void;
+  /** Aktivt Telnyx call_control_id (Medlyt / presence). */
+  onCallControlIdChange?: (callControlId: string | null) => void;
 };
 
 type TelnyxCall = {
@@ -168,6 +170,7 @@ export function PowerDialerPhone({
   leadDial = null,
   hangupSignal,
   onStateChange,
+  onCallControlIdChange,
 }: Props) {
   // --- Lydopsætning -------------------------------------------------------
   const [devices, setDevices] = useState<MediaDeviceInfo[]>([]);
@@ -287,35 +290,34 @@ export function PowerDialerPhone({
     };
   }, [campaignId, enabled, lineStatus]);
 
-  /** Rapportér WebRTC call_control_id til AgentSession — bruges af Medlyt (supervise). */
+  /** Rapportér WebRTC call_control_id kontinuerligt — Medlyt kan ikke bruge active_calls på credentials. */
+  const onCallControlIdChangeRef = useRef(onCallControlIdChange);
+  onCallControlIdChangeRef.current = onCallControlIdChange;
+  const lastPostedCcRef = useRef<string | null>(null);
   useEffect(() => {
     if (!campaignId) return;
-    if (lineStatus === "idle") {
+    const postCc = (cc: string | null) => {
+      if (cc === lastPostedCcRef.current) return;
+      lastPostedCcRef.current = cc;
+      onCallControlIdChangeRef.current?.(cc);
       void fetch("/api/dialer/agent/call-control", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ campaignId, callControlId: null }),
+        body: JSON.stringify({ campaignId, callControlId: cc }),
         credentials: "include",
       }).catch(() => {});
+    };
+    if (lineStatus === "idle") {
+      postCc(null);
       return;
     }
-    let ticks = 0;
-    const interval = window.setInterval(() => {
-      ticks += 1;
+    const tick = () => {
       const call = activeCallRef.current;
-      const cc = call?.telnyxIDs?.telnyxCallControlId;
-      if (cc) {
-        void fetch("/api/dialer/agent/call-control", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ campaignId, callControlId: cc }),
-          credentials: "include",
-        }).catch(() => {});
-        window.clearInterval(interval);
-        return;
-      }
-      if (ticks >= 40) window.clearInterval(interval);
-    }, 500);
+      const cc = call?.telnyxIDs?.telnyxCallControlId?.trim() || null;
+      if (cc) postCc(cc);
+    };
+    tick();
+    const interval = window.setInterval(tick, 1500);
     return () => window.clearInterval(interval);
   }, [lineStatus, campaignId]);
 

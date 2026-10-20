@@ -779,6 +779,8 @@ export function CampaignWorkspace({
   // VoIP-strip linje-status (bruges til at rapportere agentens dialer-presence)
   const [voipLineStatus, setVoipLineStatus] = useState<LineStatus>("idle");
   const [voipHangupSignal, setVoipHangupSignal] = useState(0);
+  /** Telnyx call_control_id fra aktiv WebRTC-linje — Medlyt / presence. */
+  const [voipCallControlId, setVoipCallControlId] = useState<string | null>(null);
 
   /**
    * Predictive: mapper voip-strip's lokale lineStatus + auto-dial-pause til presence-status.
@@ -931,6 +933,7 @@ export function CampaignWorkspace({
     leadOpen: Boolean(activeLead),
     lineLive: powerPhone.lineStatus === "live",
     webrtcReady: powerPhone.webrtcReady,
+    callControlId: voipCallControlId,
     onAssignedLead: handleAssignedLead,
     // Twilio/Flex: reservation → UI med det samme. Hurtig poll mens agent-ben ringer.
     intervalMs: powerPresenceFastPoll ? 1000 : 5000,
@@ -946,6 +949,7 @@ export function CampaignWorkspace({
   const { stats: dialerStats, sipReady } = useDialerPresence({
     campaignId: isAutoDialModeForPresence && campaignId ? campaignId : null,
     status: presenceStatus,
+    callControlId: voipCallControlId,
     intervalMs: 5000,
     onAssignedLead: handleAssignedLead,
     enableDispatch: false,
@@ -1804,6 +1808,7 @@ export function CampaignWorkspace({
             }
             hangupSignal={voipHangupSignal}
             onStateChange={setPowerPhone}
+            onCallControlIdChange={setVoipCallControlId}
           />
         </div>
       ) : null}
@@ -2232,6 +2237,7 @@ export function CampaignWorkspace({
           onUpdateLeadPhone={handleUpdateLeadPhoneFromVoip}
           unansweredTimeoutMs={25_000}
           onLineStatusChange={setVoipLineStatus}
+          onCallControlIdChange={setVoipCallControlId}
           hangupSignal={voipHangupSignal}
           onVoipFailureLogged={bumpVoipActivity}
           onCallEndedForActivity={schedulePollAfterCall}

@@ -157,46 +157,29 @@ export async function resolveMedlytSuperviseCallControlId(session: {
     }
   }
 
-  // Live Telnyx-fallback: agentens credential-connection (WebRTC-ben under ringing/talking).
+  // Live Telnyx-fallback på Call Control-appen (credential-connections understøtter IKKE active_calls).
   const apiKey = process.env.TELNYX_API_KEY?.trim();
-  if (apiKey) {
-    const agentConn = await resolvePowerAgentOutboundConnectionId({
-      apiKey,
-      agentUserId: session.userId,
-    });
-    if (agentConn) {
-      const live = await listTelnyxActiveCalls({ apiKey, connectionId: agentConn });
-      if (live.ok) {
-        for (const call of live.calls) {
-          const state = decodeDialerClientState(call.clientState);
-          if (state && "userId" in state && state.userId === session.userId) {
-            return { callControlId: call.callControlId, leg: "agent" };
-          }
-          if (state?.kind === "agent") {
-            return { callControlId: call.callControlId, leg: "agent" };
-          }
-        }
-        // Én aktiv call på sælgerens connection ≈ deres WebRTC-ben.
-        if (live.calls.length === 1 && live.calls[0]) {
-          return { callControlId: live.calls[0].callControlId, leg: "agent" };
+  const globalConn = getTelnyxConnectionId();
+  if (apiKey && globalConn) {
+    const live = await listTelnyxActiveCalls({ apiKey, connectionId: globalConn });
+    if (live.ok) {
+      for (const call of live.calls) {
+        const state = decodeDialerClientState(call.clientState);
+        if (!state) continue;
+        if (state.kind === "agent" && "userId" in state && state.userId === session.userId) {
+          return { callControlId: call.callControlId, leg: "agent" };
         }
       }
-    }
-
-    // Global Call Control-app: lead-ben med client_state for denne kampagne.
-    const globalConn = getTelnyxConnectionId();
-    if (globalConn && session.campaignId) {
-      const live = await listTelnyxActiveCalls({ apiKey, connectionId: globalConn });
-      if (live.ok) {
+      if (session.campaignId) {
         for (const call of live.calls) {
           const state = decodeDialerClientState(call.clientState);
           if (!state || state.kind !== "lead") continue;
           if (state.campaignId !== session.campaignId) continue;
-          // Prefer lead der allerede er koblet til denne sælger via linked state — ellers
-          // tag nyeste lead på kampagnen (typisk under ringing før agent-assign).
           return { callControlId: call.callControlId, leg: "lead" };
         }
       }
+    } else {
+      console.warn("[medlyt] active_calls fejlede:", live.message);
     }
   }
 
@@ -318,13 +301,32 @@ export async function startMedlyt(params: {
     campaignId: target.campaignId,
   });
   if (!supervise) {
+    console.warn("[medlyt] ingen supervise-target", {
+      targetUserId: params.targetUserId,
+      status: target.status,
+      hasLeadCc: Boolean(target.currentLeadCallControlId),
+      hasAgentCc: Boolean(target.currentAgentCallControlId),
+      hasWebRtcCc: Boolean(target.webRtcCallControlId),
+    });
     return {
       ok: false,
       status: 409,
       error:
-        "Kunne ikke finde et aktivt Telnyx-ben at lytte på. Prøv igen om et øjeblik, når opkaldet er forbundet.",
+        "Kunne ikke finde sælgerens aktive opkalds-ben. Bed sælgeren om at have dialeren åben (headset aktiv). Prøv igen om 2–3 sekunder.",
     };
   }
+
+  // Cache fundet ben på sessionen så næste Start er hurtigere.
+  await prisma.agentSession.updateMany({
+    where: { userId: params.targetUserId },
+    data:
+      supervise.leg === "agent"
+        ? {
+            webRtcCallControlId: supervise.callControlId,
+            currentAgentCallControlId: supervise.callControlId,
+          }
+        : { currentLeadCallControlId: supervise.callControlId },
+  });
   const superviseCc = supervise.callControlId;
 
   await ensurePowerDialerAgentTelnyx({ userId: params.supervisorUserId, apiKey }).catch(() => null);

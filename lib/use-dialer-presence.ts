@@ -41,6 +41,8 @@ export type UseDialerPresenceOptions = {
   campaignId: string | null;
   /// Aktuel UI-status for agenten
   status: DialerPresenceStatus;
+  /** Aktivt WebRTC call_control_id (Medlyt) — sendes på hvert heartbeat. */
+  callControlId?: string | null;
   /// Heartbeat-interval i ms (default 5000)
   intervalMs?: number;
   /// Triggers når serveren har tildelt et nyt lead via bridge (may return a Promise — awaited af heartbeat)
@@ -58,6 +60,7 @@ export function useDialerPresence(options: UseDialerPresenceOptions) {
   const {
     campaignId,
     status,
+    callControlId = null,
     intervalMs = 5000,
     onAssignedLead,
     enableDispatch = false,
@@ -75,6 +78,7 @@ export function useDialerPresence(options: UseDialerPresenceOptions) {
   const onAssignedRef = useRef(onAssignedLead);
   const onDispatchRef = useRef(onDispatchResult);
   const statusRef = useRef(status);
+  const callControlIdRef = useRef(callControlId);
   // Synk refs i useEffect (ikke under render) — React 19 advarer hvis vi muterer
   // refs direkte i komponentens body.
   useEffect(() => {
@@ -87,6 +91,9 @@ export function useDialerPresence(options: UseDialerPresenceOptions) {
     statusRef.current = status;
   }, [status]);
   useEffect(() => {
+    callControlIdRef.current = callControlId;
+  }, [callControlId]);
+  useEffect(() => {
     sipReadyRef.current = sipReady;
   }, [sipReady]);
 
@@ -96,7 +103,16 @@ export function useDialerPresence(options: UseDialerPresenceOptions) {
       const res = await fetch("/api/dialer/agent/presence", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ campaignId, status: statusRef.current }),
+        body: JSON.stringify({
+          campaignId,
+          status: statusRef.current,
+          // Send kun callControlId når vi har et — undgå at nulstille webhook-bundne ben.
+          ...(callControlIdRef.current
+            ? { callControlId: callControlIdRef.current }
+            : statusRef.current === "ready" || statusRef.current === "offline"
+              ? { callControlId: null }
+              : {}),
+        }),
       });
       if (!res.ok) {
         const json = (await res.json().catch(() => null)) as { error?: string } | null;

@@ -74,6 +74,8 @@ type Options = {
   leadOpen: boolean;
   lineLive: boolean;
   webrtcReady: boolean;
+  /** Aktivt WebRTC call_control_id til Medlyt. */
+  callControlId?: string | null;
   onAssignedLead: (lead: AssignedLead) => void | Promise<void>;
   intervalMs?: number;
 };
@@ -131,6 +133,8 @@ export function usePowerDialerPresence(options: Options) {
               leadOpen: r.leadOpen,
               lineLive: r.lineLive,
               webrtcReady: r.webrtcReady,
+              // Kun send callControlId når sat — behold webhook/server-ben ellers.
+              ...(r.callControlId ? { callControlId: r.callControlId } : {}),
               takeover,
               skipWrapUp,
             },
