@@ -1594,6 +1594,7 @@ export function CampaignWorkspace({
     }
     setMailDialogOpen(false);
     setMailSuccess(`Mail sendt til ${payload.to}.`);
+    bumpVoipActivity();
   }
 
   if (loading) {

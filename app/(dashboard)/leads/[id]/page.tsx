@@ -671,6 +671,7 @@ function LeadDetailInner() {
     }
     setMailDialogOpen(false);
     setMailSuccess(`Mail sendt til ${payload.to}.`);
+    bumpActivityReload();
   }
 
   const nextLeadId =

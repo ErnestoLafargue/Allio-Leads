@@ -24,7 +24,8 @@ type ActivityItemKind =
   | "call"
   | "call_attempt"
   | "outcome"
-  | "callback_schedule";
+  | "callback_schedule"
+  | "mail";
 
 function mapDbKindToItemKind(dbKind: string): ActivityItemKind {
   switch (dbKind) {
@@ -40,11 +41,19 @@ function mapDbKindToItemKind(dbKind: string): ActivityItemKind {
       return "visit";
     case LEAD_ACTIVITY_KIND.MEETING_OUTCOME_SET:
       return "outcome";
+    case LEAD_ACTIVITY_KIND.MAIL_SENT:
+      return "mail";
     case LEAD_ACTIVITY_KIND.NOTE_UPDATE:
     default:
       return "note";
   }
 }
+
+const EMPTY_MAIL = {
+  mailTo: null as string | null,
+  mailSubject: null as string | null,
+  mailBody: null as string | null,
+};
 
 type Params = { params: Promise<{ id: string }> };
 
@@ -125,6 +134,7 @@ export async function GET(_req: Request, { params }: Params) {
       durationSeconds: null as number | null,
       noteAdded: null as string | null,
       noteRemoved: null as string | null,
+      ...EMPTY_MAIL,
     }));
 
     const eventItems = events.map((e) => ({
@@ -137,6 +147,9 @@ export async function GET(_req: Request, { params }: Params) {
       durationSeconds: e.durationSeconds,
       noteAdded: e.noteAdded,
       noteRemoved: e.noteRemoved,
+      mailTo: e.mailTo ?? null,
+      mailSubject: e.mailSubject ?? null,
+      mailBody: e.mailBody ?? null,
     }));
 
     /** Undgå dobbeltlinje når samme gem både skrev LeadActivityEvent (OUTCOME_SET) og LeadOutcomeLog. */
@@ -160,6 +173,7 @@ export async function GET(_req: Request, { params }: Params) {
       durationSeconds: null as number | null,
       noteAdded: null as string | null,
       noteRemoved: null as string | null,
+      ...EMPTY_MAIL,
     }));
 
     const leadOriginAt = lead.importedAt ?? lead.createdAt;
@@ -173,6 +187,7 @@ export async function GET(_req: Request, { params }: Params) {
       durationSeconds: null as number | null,
       noteAdded: null as string | null,
       noteRemoved: null as string | null,
+      ...EMPTY_MAIL,
     };
 
     const items = [...visitItems, ...eventItems, ...outcomeLogItems, originItem].sort(

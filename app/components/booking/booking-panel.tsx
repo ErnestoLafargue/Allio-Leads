@@ -81,6 +81,8 @@ export function BookingPanel({
   const transportMin = transportBufferMinutes(meetingType);
 
   function setMeetingType(next: MeetingType) {
+    if (next === meetingType) return;
+    setSelectedSlot(null);
     if (meetingTypeProp === undefined) setInternalMeetingType(next);
     onMeetingTypeChange?.(next);
   }
@@ -271,28 +273,15 @@ export function BookingPanel({
         className,
       ].join(" ")}
     >
-      <div className="mb-4 flex flex-col gap-3 border-b border-slate-100 pb-4 sm:flex-row sm:items-start sm:justify-between">
-        <h2 className="text-lg font-semibold tracking-tight text-slate-900">Vælg tid til møde</h2>
-        <p className="text-xs text-slate-600 sm:max-w-sm">
-          {meetingType === MEETING_TYPE_PHYSICAL ? (
-            <>
-              Fysisk møde: <strong>{durationMin} min</strong> +{" "}
-              <strong>{transportMin} min transport</strong> før og efter (gitter 15 min).
-            </>
-          ) : (
-            <>
-              Onlinemøde: <strong>{durationMin} min</strong> (gitter 15 min).
-            </>
-          )}
-          {!adminAvailabilityOverride || !allowAdminAvailabilityOverride
-            ? " Ledige tider er filtreret."
-            : null}
-        </p>
-      </div>
+      <h2 className="mb-4 text-lg font-semibold tracking-tight text-slate-900">Vælg tid til møde</h2>
 
-      <div className="mb-5">
-        <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-slate-500">
-          Mødetype
+      {/* Mødetype først — ledige tider afhænger af Online (60 min) vs Fysisk (90 + transport). */}
+      <div className="mb-5 rounded-xl border border-blue-100 bg-blue-50/40 p-4">
+        <p className="mb-1 text-xs font-semibold uppercase tracking-wide text-blue-900/80">
+          1. Mødetype
+        </p>
+        <p className="mb-3 text-xs text-slate-600">
+          Vælg type først — ledige tider nedenfor opdateres automatisk.
         </p>
         <div className="flex flex-col gap-2 sm:flex-row">
           {(
@@ -320,13 +309,28 @@ export function BookingPanel({
             );
           })}
         </div>
-        <p className="mt-1.5 text-xs text-slate-500">
-          {meetingType === MEETING_TYPE_PHYSICAL
-            ? "Fysisk møde — udfyld mødeadresse i det grønne felt. Podio + Allio-Native (uden Cal.eu). Transportblokeringer må overlappe hinanden."
-            : "Onlinemøde — Cal.eu sender invitation/Meet-link. Podio + Allio-Native."}
+        <p className="mt-3 text-xs text-slate-600">
+          {meetingType === MEETING_TYPE_PHYSICAL ? (
+            <>
+              Fysisk: <strong>{durationMin} min</strong> +{" "}
+              <strong>{transportMin} min transport</strong> før og efter. Udfyld mødeadresse i det
+              grønne felt. Podio + Allio-Native (uden Cal.eu).
+            </>
+          ) : (
+            <>
+              Online: <strong>{durationMin} min</strong>. Cal.eu sender invitation/Meet-link. Podio +
+              Allio-Native.
+            </>
+          )}
+          {!adminAvailabilityOverride || !allowAdminAvailabilityOverride
+            ? " Optagne tider er skjult."
+            : null}
         </p>
       </div>
 
+      <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-slate-500">
+        2. Dato og tid
+      </p>
       <p className="mb-4 flex flex-wrap items-center gap-1 text-xs text-slate-500">
         <span className="text-sm" aria-hidden>
           🌐

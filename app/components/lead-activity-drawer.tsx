@@ -13,7 +13,7 @@ import { MEETING_OUTCOME_LABELS, meetingOutcomeBadgeClass } from "@/lib/meeting-
 export type DrawerActivityItem = {
   /** Stabilt id fra API'et — bruges som React-key så afspilning ikke afbrydes ved genindlæsning. */
   id?: string;
-  kind: "visit" | "note" | "call" | "call_attempt" | "outcome" | "callback_schedule";
+  kind: "visit" | "note" | "call" | "call_attempt" | "outcome" | "callback_schedule" | "mail";
   at: string;
   summary: string;
   user: { name: string; username: string } | null;
@@ -21,6 +21,9 @@ export type DrawerActivityItem = {
   durationSeconds: number | null;
   noteAdded: string | null;
   noteRemoved: string | null;
+  mailTo?: string | null;
+  mailSubject?: string | null;
+  mailBody?: string | null;
 };
 
 type Props = {
@@ -44,12 +47,16 @@ type ActivityVisual = {
   cardRingClass: string;
 };
 
-const TABS: { id: TabKey; label: string; placeholder?: boolean }[] = [
+const TABS: { id: TabKey; label: string }[] = [
   { id: "timeline", label: "Tidslinje" },
   { id: "notes", label: "Noter" },
   { id: "calls", label: "Opkald" },
-  { id: "messages", label: "Beskeder", placeholder: true },
+  { id: "messages", label: "Beskeder" },
 ];
+
+function looksLikeHtml(value: string): boolean {
+  return /<html|<body|<table|<div|<p|<a\s|<!doctype/i.test(value);
+}
 
 const AVATAR_PALETTE = [
   "bg-emerald-100 text-emerald-800 ring-emerald-200",
@@ -127,6 +134,7 @@ function hasNoteJournal(row: DrawerActivityItem): boolean {
 
 function isImportantActivity(row: DrawerActivityItem): boolean {
   if (row.kind === "call") return true;
+  if (row.kind === "mail") return true;
   if (row.kind === "outcome") return true;
   if (row.kind === "callback_schedule") return true;
   if (row.kind === "call_attempt") return !isCallAttemptFailure(row.summary);
@@ -171,6 +179,15 @@ function getActivityVisual(row: DrawerActivityItem): ActivityVisual {
       dotClass: "bg-emerald-100 text-emerald-800 ring-emerald-200",
       icon: <PhoneIcon className="h-3.5 w-3.5" />,
       cardRingClass: "ring-emerald-100",
+    };
+  }
+
+  if (row.kind === "mail") {
+    return {
+      layout: "card",
+      dotClass: "bg-sky-100 text-sky-800 ring-sky-200",
+      icon: <MailIcon className="h-3.5 w-3.5" />,
+      cardRingClass: "ring-sky-100",
     };
   }
 
@@ -279,10 +296,12 @@ function ActivityTimelineRow({
   row,
   isLast,
   isNewest,
+  onOpenMail,
 }: {
   row: DrawerActivityItem;
   isLast: boolean;
   isNewest: boolean;
+  onOpenMail?: (row: DrawerActivityItem) => void;
 }) {
   const visual = getActivityVisual(row);
   const layout = visual.layout;
@@ -376,6 +395,31 @@ function ActivityTimelineRow({
                   {displaySummary}
                 </p>
 
+                {row.kind === "mail" ? (
+                  <div className="mt-2 space-y-1.5">
+                    {row.mailSubject ? (
+                      <p className="text-[12px] text-stone-600">
+                        <span className="font-medium text-stone-800">Emne:</span> {row.mailSubject}
+                      </p>
+                    ) : null}
+                    {row.mailTo ? (
+                      <p className="text-[12px] text-stone-600">
+                        <span className="font-medium text-stone-800">Til:</span> {row.mailTo}
+                      </p>
+                    ) : null}
+                    {row.mailBody?.trim() && onOpenMail ? (
+                      <button
+                        type="button"
+                        onClick={() => onOpenMail(row)}
+                        className="mt-1 inline-flex items-center gap-1.5 rounded-lg border border-sky-200 bg-sky-50 px-2.5 py-1.5 text-[12px] font-semibold text-sky-900 shadow-sm transition hover:bg-sky-100"
+                      >
+                        <MailIcon className="h-3.5 w-3.5" />
+                        Se sendt mail
+                      </button>
+                    ) : null}
+                  </div>
+                ) : null}
+
                 {hasNoteJournal(row) ? (
                   <NoteJournalDiff noteAdded={row.noteAdded} noteRemoved={row.noteRemoved} />
                 ) : null}
@@ -448,6 +492,26 @@ function PhoneIcon({ className }: { className?: string }) {
       aria-hidden
     >
       <path d="M22 16.92v3a2 2 0 0 1-2.18 2 19.86 19.86 0 0 1-8.63-3.07 19.5 19.5 0 0 1-6-6A19.86 19.86 0 0 1 2.12 4.18 2 2 0 0 1 4.11 2h3a2 2 0 0 1 2 1.72 12.8 12.8 0 0 0 .7 2.81 2 2 0 0 1-.45 2.11L8.09 9.91a16 16 0 0 0 6 6l1.27-1.27a2 2 0 0 1 2.11-.45 12.8 12.8 0 0 0 2.81.7A2 2 0 0 1 22 16.92Z" />
+    </svg>
+  );
+}
+
+function MailIcon({ className }: { className?: string }) {
+  return (
+    <svg
+      className={className}
+      width="14"
+      height="14"
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      aria-hidden
+    >
+      <rect width="20" height="16" x="2" y="4" rx="2" />
+      <path d="m22 7-8.97 5.7a1.94 1.94 0 0 1-2.06 0L2 7" />
     </svg>
   );
 }
@@ -535,25 +599,6 @@ function CalendarClockIcon({ className }: { className?: string }) {
   );
 }
 
-function ChatIcon({ className }: { className?: string }) {
-  return (
-    <svg
-      className={className}
-      width="42"
-      height="42"
-      viewBox="0 0 24 24"
-      fill="none"
-      stroke="currentColor"
-      strokeWidth="1.5"
-      strokeLinecap="round"
-      strokeLinejoin="round"
-      aria-hidden
-    >
-      <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" />
-    </svg>
-  );
-}
-
 export function LeadActivityDrawer({
   leadId,
   isOpen,
@@ -567,6 +612,7 @@ export function LeadActivityDrawer({
   const [error, setError] = useState<string | null>(null);
   const [syncBusy, setSyncBusy] = useState(false);
   const [syncHint, setSyncHint] = useState<string | null>(null);
+  const [mailPreview, setMailPreview] = useState<DrawerActivityItem | null>(null);
 
   const load = useCallback(async () => {
     if (!leadId) return;
@@ -641,6 +687,7 @@ export function LeadActivityDrawer({
     if (activeTab === "timeline") return items;
     if (activeTab === "notes") return items.filter((i) => i.kind === "note");
     if (activeTab === "calls") return items.filter((i) => i.kind === "call");
+    if (activeTab === "messages") return items.filter((i) => i.kind === "mail");
     return [];
   }, [items, activeTab]);
 
@@ -666,11 +713,13 @@ export function LeadActivityDrawer({
   const counts = useMemo(() => {
     let notes = 0;
     let calls = 0;
+    let messages = 0;
     for (const i of items) {
       if (i.kind === "note") notes += 1;
       if (i.kind === "call") calls += 1;
+      if (i.kind === "mail") messages += 1;
     }
-    return { all: items.length, notes, calls };
+    return { all: items.length, notes, calls, messages };
   }, [items]);
 
   return (
@@ -747,7 +796,9 @@ export function LeadActivityDrawer({
                     ? counts.notes
                     : t.id === "calls"
                       ? counts.calls
-                      : undefined;
+                      : t.id === "messages"
+                        ? counts.messages
+                        : undefined;
               return (
                 <button
                   key={t.id}
@@ -764,7 +815,7 @@ export function LeadActivityDrawer({
                   ].join(" ")}
                 >
                   {t.label}
-                  {typeof count === "number" && !t.placeholder ? (
+                  {typeof count === "number" ? (
                     <span
                       className={[
                         "ml-0.5 rounded-md px-1.5 text-[10px] font-semibold tabular-nums",
@@ -786,17 +837,7 @@ export function LeadActivityDrawer({
           id={`activity-tabpanel-${activeTab}`}
           className="min-h-0 flex-1 overflow-y-auto bg-stone-50/40"
         >
-          {activeTab === "messages" ? (
-            <div className="flex h-full min-h-[300px] flex-col items-center justify-center px-6 text-center">
-              <span className="mb-3 flex h-14 w-14 items-center justify-center rounded-2xl bg-stone-100 text-stone-400">
-                <ChatIcon className="h-7 w-7" />
-              </span>
-              <p className="text-sm font-medium text-stone-700">Beskeder kommer snart</p>
-              <p className="mt-1 max-w-[18rem] text-xs text-stone-500">
-                Når SMS/email-kommunikation er rullet ud, vises tråden her sammen med opkald og noter.
-              </p>
-            </div>
-          ) : loading && items.length === 0 ? (
+          {loading && items.length === 0 ? (
             <div className="px-5 py-6">
               <div className="space-y-4">
                 {Array.from({ length: 4 }).map((_, i) => (
@@ -825,16 +866,31 @@ export function LeadActivityDrawer({
             </div>
           ) : filtered.length === 0 ? (
             <div className="flex h-full min-h-[200px] flex-col items-center justify-center px-6 text-center">
-              <p className="text-sm font-medium text-stone-700">
-                {activeTab === "notes"
-                  ? "Ingen noter endnu"
-                  : activeTab === "calls"
-                    ? "Ingen opkald endnu"
-                    : "Ingen aktivitet endnu"}
-              </p>
-              <p className="mt-1 max-w-[18rem] text-xs text-stone-500">
-                Aktivitet bliver registreret automatisk, når du arbejder med leadet.
-              </p>
+              {activeTab === "messages" ? (
+                <>
+                  <span className="mb-3 flex h-14 w-14 items-center justify-center rounded-2xl bg-sky-50 text-sky-500">
+                    <MailIcon className="h-7 w-7" />
+                  </span>
+                  <p className="text-sm font-medium text-stone-700">Ingen sendte mails endnu</p>
+                  <p className="mt-1 max-w-[18rem] text-xs text-stone-500">
+                    Når du sender en mail fra leadet, vises den her — tryk «Se sendt mail» for at åbne
+                    udkastet.
+                  </p>
+                </>
+              ) : (
+                <>
+                  <p className="text-sm font-medium text-stone-700">
+                    {activeTab === "notes"
+                      ? "Ingen noter endnu"
+                      : activeTab === "calls"
+                        ? "Ingen opkald endnu"
+                        : "Ingen aktivitet endnu"}
+                  </p>
+                  <p className="mt-1 max-w-[18rem] text-xs text-stone-500">
+                    Aktivitet bliver registreret automatisk, når du arbejder med leadet.
+                  </p>
+                </>
+              )}
             </div>
           ) : (
             <div className="px-4 py-3">
@@ -851,6 +907,7 @@ export function LeadActivityDrawer({
                         row={row}
                         isLast={idx === group.items.length - 1}
                         isNewest={gi === 0 && idx === 0}
+                        onOpenMail={setMailPreview}
                       />
                     ))}
                   </ul>
@@ -917,6 +974,96 @@ export function LeadActivityDrawer({
           {syncHint ? <p className="text-[11px] text-stone-600">{syncHint}</p> : null}
         </div>
       </aside>
+
+      {mailPreview ? (
+        <MailPreviewDialog item={mailPreview} onClose={() => setMailPreview(null)} />
+      ) : null}
     </>
+  );
+}
+
+function MailPreviewDialog({
+  item,
+  onClose,
+}: {
+  item: DrawerActivityItem;
+  onClose: () => void;
+}) {
+  const body = item.mailBody?.trim() ?? "";
+  const isHtml = looksLikeHtml(body);
+  const sentAt = new Date(item.at);
+  const when = Number.isNaN(sentAt.getTime())
+    ? ""
+    : sentAt.toLocaleString("da-DK", {
+        day: "numeric",
+        month: "short",
+        year: "numeric",
+        hour: "2-digit",
+        minute: "2-digit",
+      });
+
+  return (
+    <div
+      className="fixed inset-0 z-[60] flex items-center justify-center bg-black/45 p-4"
+      role="dialog"
+      aria-modal="true"
+      aria-labelledby="mail-preview-title"
+      onClick={onClose}
+    >
+      <div
+        className="flex max-h-[90vh] w-full max-w-3xl flex-col overflow-hidden rounded-2xl border border-stone-200 bg-white shadow-2xl"
+        onClick={(e) => e.stopPropagation()}
+      >
+        <header className="flex shrink-0 items-start justify-between gap-3 border-b border-stone-100 px-5 py-4">
+          <div className="min-w-0">
+            <h2 id="mail-preview-title" className="text-base font-semibold text-stone-900">
+              Sendt mail
+            </h2>
+            <p className="mt-0.5 text-xs text-stone-500">
+              {item.user?.name ? `${item.user.name} · ` : null}
+              {when}
+            </p>
+          </div>
+          <button
+            type="button"
+            onClick={onClose}
+            aria-label="Luk mailforhåndsvisning"
+            className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg text-stone-500 transition hover:bg-stone-100 hover:text-stone-900"
+          >
+            <CloseIcon />
+          </button>
+        </header>
+
+        <div className="shrink-0 space-y-1.5 border-b border-stone-100 bg-stone-50/80 px-5 py-3 text-[13px]">
+          <p>
+            <span className="font-medium text-stone-500">Til:</span>{" "}
+            <span className="text-stone-900">{item.mailTo || "—"}</span>
+          </p>
+          <p>
+            <span className="font-medium text-stone-500">Emne:</span>{" "}
+            <span className="text-stone-900">{item.mailSubject || "—"}</span>
+          </p>
+        </div>
+
+        <div className="min-h-0 flex-1 overflow-auto bg-stone-100/60 p-4">
+          {body ? (
+            isHtml ? (
+              <iframe
+                title="Mailindhold"
+                sandbox=""
+                srcDoc={body}
+                className="h-[min(60vh,520px)] w-full rounded-xl border border-stone-200 bg-white shadow-sm"
+              />
+            ) : (
+              <pre className="whitespace-pre-wrap rounded-xl border border-stone-200 bg-white p-4 text-[13px] leading-relaxed text-stone-800 shadow-sm">
+                {body}
+              </pre>
+            )
+          ) : (
+            <p className="text-sm text-stone-500">Ingen mailtekst gemt for denne sending.</p>
+          )}
+        </div>
+      </div>
+    </div>
   );
 }

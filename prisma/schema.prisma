@@ -454,7 +454,7 @@ model LeadActivityEvent {
   id              String   @id @default(cuid())
   leadId          String
   userId          String?
-  /// NOTE_UPDATE | OUTCOME_SET | MEETING_OUTCOME_SET | CALLBACK_SCHEDULE | LEAD_DETAIL_OPEN | CALL_ATTEMPT | CALL_RECORDING
+  /// NOTE_UPDATE | OUTCOME_SET | MEETING_OUTCOME_SET | CALLBACK_SCHEDULE | LEAD_DETAIL_OPEN | CALL_ATTEMPT | CALL_RECORDING | MAIL_SENT
   kind            String
   /// Kort tekst til UI (fx «Marie opdaterede noterne») — aldrig fuld notetekst
   summary         String
@@ -467,12 +467,19 @@ model LeadActivityEvent {
   recordingUrl    String?
   durationSeconds Int?
   telnyxCallLegId String?
+  /// MAIL_SENT: modtager
+  mailTo          String?
+  /// MAIL_SENT: emne
+  mailSubject     String?
+  /// MAIL_SENT: brødtekst som sendt (HTML eller plain) til forhåndsvisning
+  mailBody        String?  @db.Text
   createdAt       DateTime @default(now())
 
   lead Lead  @relation(fields: [leadId], references: [id], onDelete: Cascade)
   user User? @relation(fields: [userId], references: [id], onDelete: SetNull)
 
   @@index([leadId, createdAt])
+  @@index([leadId, kind, createdAt])
 }
 
 /// Aktiv agent-session i en kampagne. Bruges af dispatcher til at finde ledige agenter
