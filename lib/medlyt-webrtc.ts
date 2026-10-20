@@ -11,8 +11,10 @@ export const MEDLYT_JITTER_TARGET_MS = 10;
 /** 10 ms Opus-rammer — default er 20 ms plus FEC. */
 export const MEDLYT_PTIME_MS = 10;
 
+type MedlytAudioConstraints = MediaTrackConstraints & { latency?: number };
+
 /** Admin-mic: AEC ja (ellers hører sælger sig selv), AGC/NS slået fra (de koster delay). */
-export const MEDLYT_TALK_AUDIO_CONSTRAINTS: MediaTrackConstraints = {
+export const MEDLYT_TALK_AUDIO_CONSTRAINTS: MedlytAudioConstraints = {
   echoCancellation: true,
   noiseSuppression: false,
   autoGainControl: false,
@@ -21,7 +23,7 @@ export const MEDLYT_TALK_AUDIO_CONSTRAINTS: MediaTrackConstraints = {
 };
 
 /** Sælger-capture: kun kortere buffer — AGC/NS røres ikke (går også til kunden). */
-export function medlytSellerCaptureConstraints(deviceId?: string | null): MediaTrackConstraints {
+export function medlytSellerCaptureConstraints(deviceId?: string | null): MedlytAudioConstraints {
   return {
     echoCancellation: true,
     channelCount: 1,
@@ -181,8 +183,7 @@ export function applyMedlytSendLowDelay(sender: RTCRtpSender): void {
     const encodings = params.encodings?.length ? params.encodings : [{}];
     for (const enc of encodings) {
       enc.priority = "high";
-      (enc as RTCRtpEncodingParameters & { networkPriority?: RTCPriorityType }).networkPriority =
-        "high";
+      (enc as RTCRtpEncodingParameters & { networkPriority?: "high" }).networkPriority = "high";
       enc.maxBitrate = 48_000;
     }
     params.encodings = encodings;
@@ -195,7 +196,7 @@ export function applyMedlytSendLowDelay(sender: RTCRtpSender): void {
 export function applyMedlytSpeechHint(track: MediaStreamTrack | null): void {
   if (!track) return;
   try {
-    if ("contentHint" in track) track.contentHint = "speech";
+    (track as MediaStreamTrack & { contentHint?: string }).contentHint = "speech";
   } catch {
     /* ældre browser */
   }
