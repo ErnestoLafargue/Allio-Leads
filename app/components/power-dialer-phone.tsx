@@ -287,6 +287,38 @@ export function PowerDialerPhone({
     };
   }, [campaignId, enabled, lineStatus]);
 
+  /** Rapportér WebRTC call_control_id til AgentSession — bruges af Medlyt (supervise). */
+  useEffect(() => {
+    if (!campaignId) return;
+    if (lineStatus === "idle") {
+      void fetch("/api/dialer/agent/call-control", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ campaignId, callControlId: null }),
+        credentials: "include",
+      }).catch(() => {});
+      return;
+    }
+    let ticks = 0;
+    const interval = window.setInterval(() => {
+      ticks += 1;
+      const call = activeCallRef.current;
+      const cc = call?.telnyxIDs?.telnyxCallControlId;
+      if (cc) {
+        void fetch("/api/dialer/agent/call-control", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ campaignId, callControlId: cc }),
+          credentials: "include",
+        }).catch(() => {});
+        window.clearInterval(interval);
+        return;
+      }
+      if (ticks >= 40) window.clearInterval(interval);
+    }, 500);
+    return () => window.clearInterval(interval);
+  }, [lineStatus, campaignId]);
+
   // Auto-init: genbrug tidligere givet mikrofon-tilladelse og gemte enheder.
   useEffect(() => {
     let cancelled = false;

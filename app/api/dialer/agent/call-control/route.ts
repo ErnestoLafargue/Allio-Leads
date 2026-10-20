@@ -36,8 +36,9 @@ export async function POST(req: Request) {
     );
   }
 
+  // Opdatér alle friske sessioner for brugeren (Power-pulje kan have andet anker-kampagne-id).
   const updated = await prisma.agentSession.updateMany({
-    where: { userId, campaignId },
+    where: { userId },
     data: { webRtcCallControlId: callControlId },
   });
 
