@@ -40,7 +40,13 @@ import {
 } from "@/lib/import-patch";
 
 const MAX_DETAIL_ROWS = 200;
-const PROTECTED_STATUSES = new Set(["CALLBACK_SCHEDULED", "MEETING_BOOKED", "UNQUALIFIED", "NOT_INTERESTED"]);
+const PROTECTED_STATUSES = new Set([
+  "CALLBACK_SCHEDULED",
+  "MEETING_BOOKED",
+  "UNQUALIFIED",
+  "NOT_INTERESTED",
+  "DELETED",
+]);
 /** Store berigelser kan overstige default; Pro/Fluid tillader op til 800s. */
 export const maxDuration = 800;
 
@@ -422,7 +428,11 @@ export async function POST(req: Request) {
             }
             const existing = cvrNorm ? cvrToLead.get(cvrNorm) : null;
             if (existing && cvrNorm) {
-              if (existing.status === "NOT_INTERESTED" || existing.status === "UNQUALIFIED") {
+              if (
+                existing.status === "NOT_INTERESTED" ||
+                existing.status === "UNQUALIFIED" ||
+                existing.status === "DELETED"
+              ) {
                 summary.skippedInvalid += 1;
                 handledCvrsInFile.add(cvrNorm);
                 pushDetail({

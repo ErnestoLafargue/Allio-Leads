@@ -8,6 +8,7 @@ describe("canScheduleCallbackFromLead", () => {
     expect(canScheduleCallbackFromLead({ status: "NOT_HOME" })).toBe(true);
     expect(canScheduleCallbackFromLead({ status: "NOT_INTERESTED" })).toBe(true);
     expect(canScheduleCallbackFromLead({ status: "UNQUALIFIED" })).toBe(true);
+    expect(canScheduleCallbackFromLead({ status: "DELETED" })).toBe(true);
   });
 
   it("tillader at flytte et ventende tilbagekald", () => {

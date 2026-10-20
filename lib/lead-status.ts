@@ -6,6 +6,8 @@ export const LEAD_STATUSES = [
   "UNQUALIFIED",
   "NOT_HOME",
   "CALLBACK_SCHEDULED",
+  /** Soft-slet fra dialer: leadet bliver på kampagnen, men kommer ikke i kø igen før manuelt udfald. */
+  "DELETED",
 ] as const;
 
 export type LeadStatus = (typeof LEAD_STATUSES)[number];
@@ -18,7 +20,19 @@ export const LEAD_STATUS_LABELS: Record<LeadStatus, string> = {
   UNQUALIFIED: "Ukvalificeret",
   NOT_HOME: "Ikke hjemme",
   CALLBACK_SCHEDULED: "Callback planlagt",
+  DELETED: "Slet",
 };
+
+/** Afsluttende udfald der permanent fjerner leadet fra opkaldskøen (indtil manuelt ændret). */
+export const DIALER_EXCLUDED_STATUSES: ReadonlySet<LeadStatus> = new Set([
+  "NOT_INTERESTED",
+  "UNQUALIFIED",
+  "DELETED",
+]);
+
+export function isDialerExcludedStatus(status: string): boolean {
+  return DIALER_EXCLUDED_STATUSES.has(status.trim().toUpperCase() as LeadStatus);
+}
 
 export function isLeadStatus(v: string): v is LeadStatus {
   return (LEAD_STATUSES as readonly string[]).includes(v);
@@ -33,6 +47,7 @@ export const LEAD_STATUS_STATS_ORDER: LeadStatus[] = [
   "NOT_HOME",
   "NOT_INTERESTED",
   "UNQUALIFIED",
+  "DELETED",
 ];
 
 /** Små tæller-badges der matcher udfalds-knappernes farver */
@@ -44,4 +59,5 @@ export const LEAD_STATUS_COUNT_BADGE_CLASS: Record<LeadStatus, string> = {
   UNQUALIFIED: "border border-red-600 bg-red-200 text-red-950",
   NOT_HOME: "border border-blue-600 bg-blue-200 text-blue-950",
   CALLBACK_SCHEDULED: "border border-violet-600 bg-violet-200 text-violet-950",
+  DELETED: "border border-stone-700 bg-stone-800 text-stone-50",
 };

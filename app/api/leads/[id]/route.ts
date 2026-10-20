@@ -64,6 +64,7 @@ type Params = { params: Promise<{ id: string }> };
 const PATCH_HANGUP_OUTBOUND_LEAD_STATUSES: ReadonlySet<LeadStatus> = new Set([
   "NOT_INTERESTED",
   "UNQUALIFIED",
+  "DELETED",
   "MEETING_BOOKED",
   "CALLBACK_SCHEDULED",
   "NOT_HOME",

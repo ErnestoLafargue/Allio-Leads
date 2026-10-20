@@ -11,6 +11,7 @@ export const LEADERBOARD_LOG_STATUSES = new Set<LeadStatus>([
   "NOT_HOME",
   "NOT_INTERESTED",
   "UNQUALIFIED",
+  "DELETED",
   "MEETING_BOOKED",
   "CALLBACK_SCHEDULED",
 ]);
@@ -51,6 +52,7 @@ const LEADERBOARD_DELTAS: Partial<Record<LeadStatus, LeaderboardOutcomeDeltas>> 
   NOT_HOME: { meetings: 0, conversations: 0, contacts: 1 },
   NOT_INTERESTED: { meetings: 0, conversations: 1, contacts: 1 },
   UNQUALIFIED: { meetings: 0, conversations: 0, contacts: 0 },
+  DELETED: { meetings: 0, conversations: 0, contacts: 0 },
   MEETING_BOOKED: { meetings: 1, conversations: 1, contacts: 1 },
   CALLBACK_SCHEDULED: { meetings: 0, conversations: 1, contacts: 1 },
 };

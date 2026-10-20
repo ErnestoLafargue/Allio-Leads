@@ -8,12 +8,16 @@ export const OUTCOME_ORDER: LeadStatus[] = [
   "UNQUALIFIED",
   "MEETING_BOOKED",
   "NOT_HOME",
+  "DELETED",
 ];
 
 export function outcomeButtonClass(status: LeadStatus, active: boolean): string {
   const base =
     "rounded-xl border-2 px-4 py-3 text-center text-sm font-semibold shadow-sm transition focus:outline-none focus-visible:ring-2 focus-visible:ring-offset-2 min-w-[8rem] flex-1 sm:flex-none";
   if (!active) {
+    if (status === "DELETED") {
+      return `${base} border-stone-400 bg-stone-100 text-stone-800 hover:border-stone-500 hover:bg-stone-200`;
+    }
     return `${base} border-stone-200 bg-white text-stone-600 hover:border-stone-300 hover:bg-stone-50`;
   }
   switch (status) {
@@ -30,6 +34,8 @@ export function outcomeButtonClass(status: LeadStatus, active: boolean): string 
       return `${base} border-blue-600 bg-blue-300 text-blue-950 ring-2 ring-blue-500`;
     case "CALLBACK_SCHEDULED":
       return `${base} border-violet-600 bg-violet-300 text-violet-950 ring-2 ring-violet-500`;
+    case "DELETED":
+      return `${base} border-stone-800 bg-stone-800 text-white ring-2 ring-stone-500`;
     default:
       return `${base} border-stone-500 bg-stone-200`;
   }

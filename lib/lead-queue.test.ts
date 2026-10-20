@@ -162,6 +162,9 @@ describe("isQueueEligibleStatus", () => {
     expect(isQueueEligibleStatus("CALLBACK_SCHEDULED")).toBe(false);
     expect(isQueueEligibleStatus("NEW")).toBe(true);
   });
+  it("ekluderer Slet permanent fra køen", () => {
+    expect(isQueueEligibleStatus("DELETED")).toBe(false);
+  });
 });
 
 describe("isLeadInRebookingDialerPool", () => {
@@ -171,12 +174,15 @@ describe("isLeadInRebookingDialerPool", () => {
       true,
     );
   });
-  it("afviser ikke interesseret og ukvalificeret", () => {
+  it("afviser ikke interesseret, ukvalificeret og slet", () => {
     expect(
       isLeadInRebookingDialerPool({ status: "NOT_INTERESTED", meetingOutcomeStatus: "PENDING" }),
     ).toBe(false);
     expect(
       isLeadInRebookingDialerPool({ status: "UNQUALIFIED", meetingOutcomeStatus: "PENDING" }),
+    ).toBe(false);
+    expect(
+      isLeadInRebookingDialerPool({ status: "DELETED", meetingOutcomeStatus: "PENDING" }),
     ).toBe(false);
   });
   it("afviser øvrige statusser i genbook-køen", () => {

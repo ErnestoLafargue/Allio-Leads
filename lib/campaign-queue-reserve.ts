@@ -235,7 +235,7 @@ export async function loadSortedNewLeadsForCampaign(opts: {
       campaign.systemCampaignType === "rebooking"
         ? {
             campaignId: campaign.id,
-            NOT: { status: { in: ["NOT_INTERESTED", "UNQUALIFIED"] } },
+            NOT: { status: { in: ["NOT_INTERESTED", "UNQUALIFIED", "DELETED"] } },
             OR: [
               { status: "MEETING_BOOKED", meetingOutcomeStatus: MEETING_OUTCOME_REBOOK },
               newInDialerPool,
