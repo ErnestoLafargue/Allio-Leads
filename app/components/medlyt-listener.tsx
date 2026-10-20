@@ -248,7 +248,7 @@ export function MedlytListener({ targetUserId, stopSignal, onStateChange }: Prop
       cancelled = true;
       void cleanup(true);
     };
-  }, [targetUserId, audioId, cleanup]);
+  }, [targetUserId, audioId, audioIdB, cleanup]);
 
   return (
     <>
