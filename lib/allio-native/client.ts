@@ -111,6 +111,7 @@ export type AllioBooking = {
   start_time?: string;
   end_time?: string;
   duration_minutes?: number;
+  total_price_cents?: number;
   status?: string;
   notes?: string | null;
   created_at?: string;
