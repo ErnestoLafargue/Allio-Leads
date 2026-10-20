@@ -29,8 +29,8 @@ type Props = {
 export function MedlytListener({ targetUserId, stopSignal, onStateChange }: Props) {
   const reactId = useId().replace(/:/g, "");
   const audioId = `medlyt-listen-audio-${reactId}`;
+  const audioIdB = `medlyt-listen-audio-b-${reactId}`;
   const pcRef = useRef<RTCPeerConnection | null>(null);
-  const extrasRef = useRef<HTMLAudioElement[]>([]);
   const sessionIdRef = useRef<string | null>(null);
   const appliedSellerIceRef = useRef(0);
   const stopSeenRef = useRef(stopSignal);
@@ -68,13 +68,10 @@ export function MedlytListener({ targetUserId, stopSignal, onStateChange }: Prop
         /* no-op */
       }
     }
-    for (const extra of extrasRef.current) {
-      extra.srcObject = null;
-      extra.remove();
-    }
-    extrasRef.current = [];
-    const el = document.getElementById(audioId) as HTMLAudioElement | null;
-    if (el) el.srcObject = null;
+    const elA = document.getElementById(audioId) as HTMLAudioElement | null;
+    const elB = document.getElementById(audioIdB) as HTMLAudioElement | null;
+    if (elA) elA.srcObject = null;
+    if (elB) elB.srcObject = null;
     if (endRemote && sid) {
       await fetch(`/api/dialer/medlyt/listen/${sid}`, {
         method: "PATCH",
@@ -82,7 +79,7 @@ export function MedlytListener({ targetUserId, stopSignal, onStateChange }: Prop
         body: JSON.stringify({ end: true }),
       }).catch(() => undefined);
     }
-  }, [audioId]);
+  }, [audioId, audioIdB]);
 
   useEffect(() => {
     if (stopSignal === stopSeenRef.current) return;
@@ -154,17 +151,9 @@ export function MedlytListener({ targetUserId, stopSignal, onStateChange }: Prop
         if (ev.track.kind !== "audio") return;
         applyMedlytLowDelay(ev.receiver);
         const stream = new MediaStream([ev.track]);
-        const primary = document.getElementById(audioId) as HTMLAudioElement | null;
-        const usingPrimary = Boolean(primary && !primary.srcObject);
-        const el = usingPrimary
-          ? primary
-          : Object.assign(document.createElement("audio"), { autoplay: true });
-        if (!usingPrimary) {
-          el.setAttribute("playsinline", "");
-          el.style.display = "none";
-          document.body.appendChild(el);
-          extrasRef.current.push(el);
-        }
+        const elA = document.getElementById(audioId) as HTMLAudioElement | null;
+        const elB = document.getElementById(audioIdB) as HTMLAudioElement | null;
+        const el = elA && !elA.srcObject ? elA : elB;
         if (el) {
           el.srcObject = stream;
           void el.play().catch(() => undefined);
@@ -261,5 +250,10 @@ export function MedlytListener({ targetUserId, stopSignal, onStateChange }: Prop
     };
   }, [targetUserId, audioId, cleanup]);
 
-  return <audio id={audioId} autoPlay playsInline style={{ display: "none" }} />;
+  return (
+    <>
+      <audio id={audioId} autoPlay playsInline style={{ display: "none" }} />
+      <audio id={audioIdB} autoPlay playsInline style={{ display: "none" }} />
+    </>
+  );
 }
