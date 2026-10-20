@@ -21,7 +21,7 @@ import {
   preferMedlytOpus,
   waitForIceGathering,
 } from "@/lib/medlyt-webrtc";
-import { iceCandidatesFromJson } from "@/lib/medlyt-listen-client";
+import { iceCandidatesFromJson, postMedlytClientDebug } from "@/lib/medlyt-listen-client";
 import { readStoredDeviceId, VOIP_STORED_SPK_KEY } from "@/lib/voip-audio-devices";
 
 type Props = {
@@ -131,7 +131,7 @@ export function MedlytPublisher({ micStream, remoteStream, enabled = true }: Pro
           if (ev.track.kind !== "audio") return;
           applyMedlytLowDelay(ev.receiver);
           const el = document.getElementById(coachAudioId) as HTMLAudioElement | null;
-          attachMedlytPlayback(el, ev.track, readStoredDeviceId(VOIP_STORED_SPK_KEY));
+          attachMedlytPlayback(el, ev.track, readStoredDeviceId(VOIP_STORED_SPK_KEY), s.id);
         };
         pc.onconnectionstatechange = () => {
           if (pc.connectionState === "failed" || pc.connectionState === "closed") {
@@ -196,7 +196,29 @@ export function MedlytPublisher({ micStream, remoteStream, enabled = true }: Pro
           return;
         }
         answeredRef.current = true;
-      } catch {
+        // #region agent log
+        postMedlytClientDebug(s.id, {
+          hypothesisId: "H-send",
+          location: "medlyt-publisher.tsx:answer",
+          message: "seller answered",
+          data: {
+            hasFastMic: Boolean(fastMicRef.current),
+            micLive: mic.readyState,
+            remoteLive: liveAudioTrack(remoteRef.current)?.readyState ?? null,
+            micSender: Boolean(micSenderRef.current?.track),
+            remoteSender: Boolean(remoteSenderRef.current?.track),
+          },
+        });
+        // #endregion
+      } catch (err) {
+        // #region agent log
+        postMedlytClientDebug(s.id, {
+          hypothesisId: "H-sdp",
+          location: "medlyt-publisher.tsx:answer-fail",
+          message: "seller answer failed",
+          data: { err: err instanceof Error ? err.message : String(err) },
+        });
+        // #endregion
         cleanupPc();
       } finally {
         answeringRef.current = false;
@@ -297,8 +319,24 @@ export function MedlytPublisher({ micStream, remoteStream, enabled = true }: Pro
         if (micSenderRef.current) {
           await micSenderRef.current.replaceTrack(track).catch(() => undefined);
         }
+        // #region agent log
+        postMedlytClientDebug(sessionIdRef.current, {
+          hypothesisId: "H-fast",
+          location: "medlyt-publisher.tsx:fast-mic",
+          message: "fast mic ready",
+          data: { live: track.readyState, device: track.getSettings().deviceId ? "set" : "none" },
+        });
+        // #endregion
       } catch {
         fastMicRef.current = null;
+        // #region agent log
+        postMedlytClientDebug(sessionIdRef.current, {
+          hypothesisId: "H-fast",
+          location: "medlyt-publisher.tsx:fast-mic-fail",
+          message: "fast mic failed",
+          data: { fallback: Boolean(liveAudioTrack(micRef.current)) },
+        });
+        // #endregion
       }
     })();
 
