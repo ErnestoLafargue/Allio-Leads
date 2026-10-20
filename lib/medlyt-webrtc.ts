@@ -60,6 +60,44 @@ export function liveAudioTrack(stream: MediaStream | null): MediaStreamTrack | n
   return stream?.getAudioTracks().find((t) => t.readyState === "live") ?? null;
 }
 
+/** Stille spor så et send-m-line ikke bliver `inactive` før Telnyx-remote findes. */
+export function createSilentAudioTrack(): { track: MediaStreamTrack; stop: () => void } {
+  const ctx = new AudioContext();
+  const dest = ctx.createMediaStreamDestination();
+  const osc = ctx.createOscillator();
+  const gain = ctx.createGain();
+  gain.gain.value = 0;
+  osc.connect(gain);
+  gain.connect(dest);
+  osc.start();
+  const track = dest.stream.getAudioTracks()[0]!;
+  return {
+    track,
+    stop: () => {
+      try {
+        osc.stop();
+      } catch {
+        /* no-op */
+      }
+      try {
+        void ctx.close();
+      } catch {
+        /* no-op */
+      }
+      try {
+        track.stop();
+      } catch {
+        /* no-op */
+      }
+    },
+  };
+}
+
+export function sdpDirectionSummary(sdp: string): string {
+  const dirs = [...sdp.matchAll(/a=(sendonly|recvonly|sendrecv|inactive)/g)].map((m) => m[1]);
+  return dirs.join(",");
+}
+
 /** Vent til ICE er samlet (hele SDP) så vi ikke er afhængige af langsom trickle-poll. */
 export function waitForIceGathering(pc: RTCPeerConnection, timeoutMs = 700): Promise<number> {
   const started = Date.now();
