@@ -19,7 +19,7 @@ import {
   preferMedlytOpus,
   waitForIceGathering,
 } from "@/lib/medlyt-webrtc";
-import { iceCandidatesFromJson, postMedlytClientDebug } from "@/lib/medlyt-listen-client";
+import { iceCandidatesFromJson } from "@/lib/medlyt-listen-client";
 
 export type MedlytListenerState = {
   sessionId: string | null;
@@ -219,34 +219,12 @@ export function MedlytListener({ targetUserId, stopSignal, talkOn, onStateChange
         const elB = document.getElementById(audioCustId) as HTMLAudioElement | null;
         const el = inbound === 0 ? elA : elB;
         inbound += 1;
-        attachMedlytPlayback(el, ev.track, null, sid);
+        attachMedlytPlayback(el, ev.track);
         setListening(true);
         setNegotiating(false);
         setProblem(null);
-        // #region agent log
-        postMedlytClientDebug(sid, {
-          hypothesisId: "H-track",
-          location: "medlyt-listener.tsx:ontrack",
-          message: "admin ontrack",
-          data: {
-            inbound,
-            hasEl: Boolean(el),
-            trackMuted: ev.track.muted,
-            readyState: ev.track.readyState,
-            conn: pc.connectionState,
-          },
-        });
-        // #endregion
       };
       pc.onconnectionstatechange = () => {
-        // #region agent log
-        postMedlytClientDebug(sid, {
-          hypothesisId: "H-track",
-          location: "medlyt-listener.tsx:conn",
-          message: "admin pc state",
-          data: { conn: pc.connectionState, ice: pc.iceConnectionState, inbound },
-        });
-        // #endregion
         if (pc.connectionState === "connected") {
           for (const r of pc.getReceivers()) {
             if (r.track?.kind === "audio") applyMedlytLowDelay(r);

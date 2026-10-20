@@ -50,31 +50,6 @@ export async function PATCH(req: Request, ctx: Ctx) {
   const uid = session!.user.id;
   const body = await req.json().catch(() => null);
 
-  if (body?.clientDebug && typeof body.clientDebug === "object") {
-    const dbg = body.clientDebug as {
-      hypothesisId?: string;
-      location?: string;
-      message?: string;
-      data?: unknown;
-    };
-    // #region agent log
-    console.warn("[medlyt-debug] client", dbg.hypothesisId, dbg.location, dbg.message, dbg.data);
-    fetch("http://localhost:7723/ingest/7a50d2a1-e6f0-436c-8453-6828c3db5e26", {
-      method: "POST",
-      headers: { "Content-Type": "application/json", "X-Debug-Session-Id": "c1392e" },
-      body: JSON.stringify({
-        sessionId: "c1392e",
-        hypothesisId: dbg.hypothesisId ?? "client",
-        location: dbg.location ?? "listen/[id]/route.ts:clientDebug",
-        message: dbg.message ?? "client debug",
-        data: dbg.data ?? {},
-        timestamp: Date.now(),
-      }),
-    }).catch(() => {});
-    // #endregion
-    return NextResponse.json({ ok: true });
-  }
-
   if (body?.end === true) {
     const result = await endMedlytListenSession({ id, userId: uid });
     if (!result.ok) {
@@ -92,14 +67,6 @@ export async function PATCH(req: Request, ctx: Ctx) {
     if (!result.ok) {
       return NextResponse.json({ error: result.error }, { status: result.status });
     }
-    // #region agent log
-    {
-      const dirs = [...body.offerSdp.matchAll(/a=(sendonly|recvonly|sendrecv|inactive)/g)].map(
-        (m: RegExpMatchArray) => m[1],
-      );
-      console.warn("[medlyt-debug] H-sdp admin-offer", { id, dirs: dirs.join(","), len: body.offerSdp.length });
-    }
-    // #endregion
     return NextResponse.json({ ok: true });
   }
 
@@ -112,14 +79,6 @@ export async function PATCH(req: Request, ctx: Ctx) {
     if (!result.ok) {
       return NextResponse.json({ error: result.error }, { status: result.status });
     }
-    // #region agent log
-    {
-      const dirs = [...body.answerSdp.matchAll(/a=(sendonly|recvonly|sendrecv|inactive)/g)].map(
-        (m: RegExpMatchArray) => m[1],
-      );
-      console.warn("[medlyt-debug] H-send seller-answer", { id, dirs: dirs.join(","), len: body.answerSdp.length });
-    }
-    // #endregion
     return NextResponse.json({ ok: true });
   }
 

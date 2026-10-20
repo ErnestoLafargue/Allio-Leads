@@ -296,7 +296,6 @@ export function attachMedlytPlayback(
   el: HTMLAudioElement | null,
   track: MediaStreamTrack,
   sinkId?: string | null,
-  debugSessionId?: string | null,
 ): void {
   if (!el) return;
   playViaElement(el, track, sinkId);
@@ -307,43 +306,4 @@ export function attachMedlytPlayback(
     },
     { once: true },
   );
-  // #region agent log
-  fetch("http://localhost:7723/ingest/7a50d2a1-e6f0-436c-8453-6828c3db5e26", {
-    method: "POST",
-    headers: { "Content-Type": "application/json", "X-Debug-Session-Id": "c1392e" },
-    body: JSON.stringify({
-      sessionId: "c1392e",
-      hypothesisId: "H-play",
-      location: "medlyt-webrtc.ts:attachMedlytPlayback",
-      message: "playback bind",
-      data: {
-        usingWa: false,
-        path: "element",
-        trackMuted: track.muted,
-        readyState: track.readyState,
-        hasEl: true,
-      },
-      timestamp: Date.now(),
-    }),
-  }).catch(() => {});
-  if (debugSessionId) {
-    fetch(`/api/dialer/medlyt/listen/${debugSessionId}`, {
-      method: "PATCH",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        clientDebug: {
-          hypothesisId: "H-play",
-          location: "medlyt-webrtc.ts:attachMedlytPlayback",
-          message: "playback bind",
-          data: {
-            usingWa: false,
-            path: "element",
-            trackMuted: track.muted,
-            readyState: track.readyState,
-          },
-        },
-      }),
-    }).catch(() => {});
-  }
-  // #endregion
 }
