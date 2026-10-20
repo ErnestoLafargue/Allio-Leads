@@ -341,6 +341,7 @@ const SIDEBAR_SECTIONS: SidebarSection[] = [
       { href: "/indstillinger", label: "Indstillinger" },
       { href: "/administration/telnyx", label: "Telnyx" },
       { href: "/administration/dialer", label: "Dialer" },
+      { href: "/administration/medlyt", label: "Medlyt" },
       { href: "/administration/cost", label: "Cost" },
     ],
   },

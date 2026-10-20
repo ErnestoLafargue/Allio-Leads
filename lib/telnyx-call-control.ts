@@ -949,6 +949,13 @@ export async function dialTelnyxOutbound(params: {
   preventDoubleBridge?: boolean;
   /// Telnyx ignorerer dial-kommandoer med samme command_id (idempotens ved dobbelte webhooks).
   commandId?: string;
+  /**
+   * Supervising Leg: tilføj dette nye ben som supervisor på et eksisterende opkald
+   * (uden conference). Se Telnyx Dial `supervise_call_control_id`.
+   */
+  superviseCallControlId?: string;
+  /** `monitor` = stille medlyt; `whisper` / `barge` til senere. */
+  supervisorRole?: "monitor" | "whisper" | "barge";
 }): Promise<DialResult> {
   const from = resolveOutboundCallFromField(params.from);
   const to = resolveOutboundCallToField(params.to);
@@ -964,6 +971,10 @@ export async function dialTelnyxOutbound(params: {
   if (params.bridgeOnAnswer) payload.bridge_on_answer = true;
   if (params.preventDoubleBridge) payload.prevent_double_bridge = true;
   if (params.commandId) payload.command_id = params.commandId;
+  if (params.superviseCallControlId) {
+    payload.supervise_call_control_id = params.superviseCallControlId;
+    payload.supervisor_role = params.supervisorRole ?? "monitor";
+  }
   if (typeof params.timeoutSecs === "number") payload.timeout_secs = params.timeoutSecs;
   if (typeof params.retryOnTimeout === "boolean") payload.retry_on_timeout = params.retryOnTimeout;
   if (typeof params.timeLimitSecs === "number") payload.time_limit_secs = params.timeLimitSecs;
