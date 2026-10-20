@@ -40,7 +40,7 @@ export default function MedlytPage() {
   const [busyUserId, setBusyUserId] = useState<string | null>(null);
   const [activeTargetUserId, setActiveTargetUserId] = useState<string | null>(null);
   const [stopSignal, setStopSignal] = useState(0);
-  const [talkOn, setTalkOn] = useState(true);
+  const [talkOn, setTalkOn] = useState(false);
   const [listen, setListen] = useState<MedlytListenerState>({
     sessionId: null,
     listening: false,
@@ -99,7 +99,7 @@ export default function MedlytPage() {
   const startMedlyt = (targetUserId: string) => {
     setActionError(null);
     setBusyUserId(null);
-    setTalkOn(true);
+    setTalkOn(false);
     setActiveTargetUserId(targetUserId);
   };
 
@@ -109,7 +109,7 @@ export default function MedlytPage() {
     try {
       setStopSignal((n) => n + 1);
       setActiveTargetUserId(null);
-      setTalkOn(true);
+      setTalkOn(false);
     } catch {
       setActionError("Netværksfejl ved stop.");
     } finally {
@@ -141,30 +141,6 @@ export default function MedlytPage() {
         onStateChange={setListen}
       />
 
-      <div className="mb-4 flex flex-wrap items-center gap-3 text-sm">
-        <span
-          className={
-            listen.listening
-              ? "text-emerald-700 dark:text-emerald-400"
-              : listen.negotiating
-                ? "text-amber-700 dark:text-amber-400"
-                : "text-[var(--muted)]"
-          }
-        >
-          Lyt:{" "}
-          {listen.listening
-            ? "aktiv"
-            : listen.negotiating
-              ? "forbinder til sælger…"
-              : "klar"}
-        </span>
-        {talkOn && listen.talkReady ? (
-          <span className="font-medium text-emerald-700 dark:text-emerald-400">
-            Taler til sælger
-          </span>
-        ) : null}
-      </div>
-
       <label className="mb-3 block">
         <span className="sr-only">Søg sælger</span>
         <input
@@ -178,42 +154,6 @@ export default function MedlytPage() {
 
       {loadError ? <p className="mb-3 text-sm text-red-600">{loadError}</p> : null}
       {actionError ? <p className="mb-3 text-sm text-red-600">{actionError}</p> : null}
-
-      {activeTargetUserId ? (
-        <div className="mb-4 flex flex-wrap items-center justify-between gap-3 rounded-md border border-emerald-300/60 bg-emerald-50 px-3 py-2 text-sm dark:border-emerald-800 dark:bg-emerald-950/40">
-          <span>
-            Aktiv medlyt på{" "}
-            <strong>{agents.find((a) => a.userId === activeTargetUserId)?.name ?? "sælger"}</strong>
-          </span>
-          <div className="flex flex-wrap items-center gap-2">
-            <button
-              type="button"
-              disabled={!talkBtnEnabled}
-              onClick={() => setTalkOn((v) => !v)}
-              title={
-                talkOn
-                  ? "Slå fra — sælgeren hører dig ikke"
-                  : "Slå til — kun sælgeren hører dig (ikke kunden)"
-              }
-              className={
-                talkOn
-                  ? "rounded-md bg-emerald-600 px-3 py-1.5 text-white hover:bg-emerald-700 disabled:opacity-50"
-                  : "rounded-md bg-neutral-200 px-3 py-1.5 text-neutral-700 hover:bg-neutral-300 disabled:opacity-50 dark:bg-neutral-700 dark:text-neutral-200 dark:hover:bg-neutral-600"
-              }
-            >
-              Tal til sælger
-            </button>
-            <button
-              type="button"
-              disabled={busyUserId !== null}
-              onClick={() => void stopMedlyt()}
-              className="rounded-md bg-neutral-900 px-3 py-1.5 text-white hover:bg-neutral-800 disabled:opacity-50 dark:bg-neutral-100 dark:text-neutral-900"
-            >
-              Stop medlyt
-            </button>
-          </div>
-        </div>
-      ) : null}
 
       <ul className="divide-y divide-[var(--border)] rounded-md border border-[var(--border)] bg-[var(--surface)]">
         {filtered.length === 0 ? (
@@ -235,6 +175,15 @@ export default function MedlytPage() {
                   : a.buttonTone === "ready"
                     ? "bg-amber-600 hover:bg-amber-700 text-white"
                     : "bg-neutral-200 text-neutral-500 cursor-not-allowed dark:bg-neutral-800 dark:text-neutral-500";
+            const listenLabel = isActive
+              ? listen.listening
+                ? talkOn && listen.talkReady
+                  ? "Taler til sælger"
+                  : "Medlyt aktiv"
+                : listen.negotiating
+                  ? "Forbinder…"
+                  : "Medlyt"
+              : null;
             return (
               <li key={a.userId} className="flex items-center justify-between gap-3 px-4 py-3">
                 <div className="min-w-0">
@@ -242,17 +191,37 @@ export default function MedlytPage() {
                   <div className="truncate text-xs text-[var(--muted)]">
                     {STATUS_LABEL[a.status] ?? a.status}
                     {a.campaignName ? ` · ${a.campaignName}` : ""}
+                    {listenLabel ? ` · ${listenLabel}` : ""}
                   </div>
                 </div>
                 {isActive ? (
-                  <button
-                    type="button"
-                    disabled={busy}
-                    onClick={() => void stopMedlyt()}
-                    className="shrink-0 rounded-md bg-neutral-900 px-3 py-1.5 text-sm text-white disabled:opacity-50 dark:bg-neutral-100 dark:text-neutral-900"
-                  >
-                    Stop
-                  </button>
+                  <div className="flex shrink-0 flex-wrap items-center justify-end gap-2">
+                    <button
+                      type="button"
+                      disabled={!talkBtnEnabled}
+                      onClick={() => setTalkOn((v) => !v)}
+                      title={
+                        talkOn
+                          ? "Slå fra — sælgeren hører dig ikke"
+                          : "Slå til — kun sælgeren hører dig (ikke kunden)"
+                      }
+                      className={
+                        talkOn
+                          ? "rounded-md bg-emerald-600 px-3 py-1.5 text-sm text-white hover:bg-emerald-700 disabled:opacity-50"
+                          : "rounded-md bg-neutral-200 px-3 py-1.5 text-sm text-neutral-700 hover:bg-neutral-300 disabled:opacity-50 dark:bg-neutral-700 dark:text-neutral-200 dark:hover:bg-neutral-600"
+                      }
+                    >
+                      Tal til sælger
+                    </button>
+                    <button
+                      type="button"
+                      disabled={busy}
+                      onClick={() => void stopMedlyt()}
+                      className="rounded-md bg-neutral-900 px-3 py-1.5 text-sm text-white disabled:opacity-50 dark:bg-neutral-100 dark:text-neutral-900"
+                    >
+                      Stop
+                    </button>
+                  </div>
                 ) : (
                   <button
                     type="button"

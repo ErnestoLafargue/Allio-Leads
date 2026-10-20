@@ -7,20 +7,22 @@
 
 import { useEffect, useId, useRef } from "react";
 import {
+  applyMedlytLowDelay,
+  applyMedlytLowDelaySdp,
+  applyMedlytSendLowDelay,
+  applyMedlytSpeechHint,
   attachMedlytPlayback,
   createMedlytPeerConnection,
   createSilentAudioTrack,
+  detachMedlytPlayback,
   liveAudioTrack,
+  MEDLYT_TALK_AUDIO_CONSTRAINTS,
   normalizeMedlytSdp,
   preferMedlytOpus,
   waitForIceGathering,
 } from "@/lib/medlyt-webrtc";
 import { iceCandidatesFromJson } from "@/lib/medlyt-listen-client";
-import {
-  readStoredDeviceId,
-  setAudioElementSink,
-  VOIP_STORED_SPK_KEY,
-} from "@/lib/voip-audio-devices";
+import { readStoredDeviceId, VOIP_STORED_SPK_KEY } from "@/lib/voip-audio-devices";
 
 type Props = {
   micStream: MediaStream | null;
@@ -51,6 +53,9 @@ export function MedlytPublisher({ micStream, remoteStream, enabled = true }: Pro
   const remoteSenderRef = useRef<RTCRtpSender | null>(null);
   const silentRef = useRef<{ stop: () => void } | null>(null);
   const answeringRef = useRef(false);
+  const fastMicRef = useRef<MediaStreamTrack | null>(null);
+
+  const micForAdmin = () => fastMicRef.current ?? liveAudioTrack(micRef.current);
 
   useEffect(() => {
     if (!enabled) return;
@@ -75,14 +80,14 @@ export function MedlytPublisher({ micStream, remoteStream, enabled = true }: Pro
       sessionIdRef.current = null;
       silentRef.current?.stop();
       silentRef.current = null;
-      const el = document.getElementById(coachAudioId) as HTMLAudioElement | null;
-      if (el) el.srcObject = null;
+      detachMedlytPlayback(document.getElementById(coachAudioId) as HTMLAudioElement | null);
     };
 
     const syncTracks = async () => {
-      const mic = liveAudioTrack(micRef.current);
+      const mic = micForAdmin();
       const remote = liveAudioTrack(remoteRef.current);
       if (micSenderRef.current && micSenderRef.current.track?.id !== mic?.id) {
+        applyMedlytSpeechHint(mic);
         await micSenderRef.current.replaceTrack(mic).catch(() => undefined);
       }
       if (remoteSenderRef.current && remoteSenderRef.current.track?.id !== remote?.id) {
@@ -109,7 +114,7 @@ export function MedlytPublisher({ micStream, remoteStream, enabled = true }: Pro
       if (answeredRef.current && sessionIdRef.current === s.id) return;
       if (sessionIdRef.current && sessionIdRef.current !== s.id) cleanupPc();
 
-      const mic = liveAudioTrack(micRef.current);
+      const mic = micForAdmin();
       if (!mic) return;
 
       answeringRef.current = true;
@@ -124,10 +129,9 @@ export function MedlytPublisher({ micStream, remoteStream, enabled = true }: Pro
         };
         pc.ontrack = (ev) => {
           if (ev.track.kind !== "audio") return;
+          applyMedlytLowDelay(ev.receiver);
           const el = document.getElementById(coachAudioId) as HTMLAudioElement | null;
-          attachMedlytPlayback(el, ev.track);
-          const sink = readStoredDeviceId(VOIP_STORED_SPK_KEY);
-          if (sink) void setAudioElementSink(el, sink);
+          attachMedlytPlayback(el, ev.track, readStoredDeviceId(VOIP_STORED_SPK_KEY));
         };
         pc.onconnectionstatechange = () => {
           if (pc.connectionState === "failed" || pc.connectionState === "closed") {
@@ -153,7 +157,9 @@ export function MedlytPublisher({ micStream, remoteStream, enabled = true }: Pro
           } catch {
             /* no-op */
           }
+          applyMedlytSpeechHint(mic);
           await micTx.sender.replaceTrack(mic);
+          applyMedlytSendLowDelay(micTx.sender);
         }
         const remote = liveAudioTrack(remoteRef.current);
         if (remoteTx && remoteTx !== micTx) {
@@ -173,27 +179,12 @@ export function MedlytPublisher({ micStream, remoteStream, enabled = true }: Pro
         }
 
         const answer = await pc.createAnswer();
-        await pc.setLocalDescription(answer);
-        const iceMs = await waitForIceGathering(pc);
-        const sdp = normalizeMedlytSdp(pc.localDescription?.sdp || answer.sdp || "");
-        // #region agent log
-        fetch("http://localhost:7723/ingest/7a50d2a1-e6f0-436c-8453-6828c3db5e26", {
-          method: "POST",
-          headers: { "Content-Type": "application/json", "X-Debug-Session-Id": "c1392e" },
-          body: JSON.stringify({
-            sessionId: "c1392e",
-            hypothesisId: "H-connect",
-            location: "medlyt-publisher.tsx:answer",
-            message: "seller answer ready",
-            data: {
-              mids: [...byMid.keys()],
-              hasRemote: Boolean(remote),
-              iceMs,
-            },
-            timestamp: Date.now(),
-          }),
-        }).catch(() => {});
-        // #endregion
+        const answerSdp = applyMedlytLowDelaySdp(answer.sdp || "");
+        await pc.setLocalDescription({ type: "answer", sdp: answerSdp });
+        if (micSenderRef.current) applyMedlytSendLowDelay(micSenderRef.current);
+        if (remoteSenderRef.current) applyMedlytSendLowDelay(remoteSenderRef.current);
+        await waitForIceGathering(pc);
+        const sdp = applyMedlytLowDelaySdp(pc.localDescription?.sdp || answerSdp);
 
         const res = await fetch(`/api/dialer/medlyt/listen/${s.id}`, {
           method: "PATCH",
@@ -260,9 +251,12 @@ export function MedlytPublisher({ micStream, remoteStream, enabled = true }: Pro
   }, [enabled, coachAudioId]);
 
   useEffect(() => {
-    const mic = liveAudioTrack(micStream);
+    const mic = micForAdmin();
     const remote = liveAudioTrack(remoteStream);
-    if (micSenderRef.current) void micSenderRef.current.replaceTrack(mic).catch(() => undefined);
+    if (micSenderRef.current) {
+      applyMedlytSpeechHint(mic);
+      void micSenderRef.current.replaceTrack(mic).catch(() => undefined);
+    }
     if (remoteSenderRef.current && remoteSenderRef.current !== micSenderRef.current) {
       void remoteSenderRef.current.replaceTrack(remote).catch(() => undefined);
       if (remote) {
@@ -271,6 +265,49 @@ export function MedlytPublisher({ micStream, remoteStream, enabled = true }: Pro
       }
     }
   }, [micStream, remoteStream]);
+
+  useEffect(() => {
+    if (!enabled || !micStream) return;
+    const deviceId = liveAudioTrack(micStream)?.getSettings().deviceId ?? null;
+    let cancelled = false;
+    let opened: MediaStream | null = null;
+
+    void (async () => {
+      try {
+        const stream = await navigator.mediaDevices.getUserMedia({
+          audio: {
+            ...MEDLYT_TALK_AUDIO_CONSTRAINTS,
+            ...(deviceId ? { deviceId: { exact: deviceId } } : {}),
+          },
+        });
+        if (cancelled) {
+          stream.getTracks().forEach((t) => t.stop());
+          return;
+        }
+        opened = stream;
+        const track = liveAudioTrack(stream);
+        if (!track) return;
+        applyMedlytSpeechHint(track);
+        try {
+          await track.applyConstraints(MEDLYT_TALK_AUDIO_CONSTRAINTS);
+        } catch {
+          /* nogle headsets ignorerer latency */
+        }
+        fastMicRef.current = track;
+        if (micSenderRef.current) {
+          await micSenderRef.current.replaceTrack(track).catch(() => undefined);
+        }
+      } catch {
+        fastMicRef.current = null;
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+      opened?.getTracks().forEach((t) => t.stop());
+      fastMicRef.current = null;
+    };
+  }, [enabled, micStream]);
 
   return <audio id={coachAudioId} autoPlay playsInline style={{ display: "none" }} />;
 }

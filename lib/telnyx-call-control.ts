@@ -764,31 +764,6 @@ export async function getTelnyxCredentialInfo(params: {
     const toStr = (v: unknown): string | null =>
       typeof v === "string" && v.length > 0 ? v : null;
     const connectionId = connectionIdFromTelnyxCredentialData(d);
-    // #region agent log
-    fetch("http://localhost:7723/ingest/7a50d2a1-e6f0-436c-8453-6828c3db5e26", {
-      method: "POST",
-      headers: { "Content-Type": "application/json", "X-Debug-Session-Id": "c1392e" },
-      body: JSON.stringify({
-        sessionId: "c1392e",
-        runId: "post-fix",
-        hypothesisId: "F",
-        location: "lib/telnyx-call-control.ts:getTelnyxCredentialInfo",
-        message: "credential fields",
-        data: {
-          keys: Object.keys(d).filter((k) => k !== "sip_password"),
-          hasResourceId: typeof d.resource_id === "string",
-          resourceIsConnection:
-            typeof d.resource_id === "string" && d.resource_id.startsWith("connection:"),
-          parsedConn: Boolean(connectionId),
-        },
-        timestamp: Date.now(),
-      }),
-    }).catch(() => {});
-    console.warn("[dbg-c1392e] cred-fields", {
-      hasResourceId: typeof d.resource_id === "string",
-      parsedConn: Boolean(connectionId),
-    });
-    // #endregion
     return {
       found: true,
       status: toStr(d.status) ?? undefined,

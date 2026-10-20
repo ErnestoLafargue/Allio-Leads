@@ -6,6 +6,7 @@ import { normalizePhoneToE164ForDial, stripDialFormatting } from "@/lib/phone-e1
 import { useAudioLevel } from "@/lib/use-audio-level";
 import { useCallAudioPublisher } from "@/lib/live-coach/call-audio";
 import { MedlytPublisher } from "@/app/components/medlyt-publisher";
+import { medlytSellerCaptureConstraints } from "@/lib/medlyt-webrtc";
 import {
   ensureMicPermissionAndEnumerate,
   headsetSetupBlockedReason,
@@ -895,7 +896,7 @@ export function CampaignVoipStrip({
     void (async () => {
       try {
         const stream = await navigator.mediaDevices.getUserMedia({
-          audio: { deviceId: { exact: micId } },
+          audio: medlytSellerCaptureConstraints(micId),
         });
         if (cancelled) {
           stream.getTracks().forEach((t) => t.stop());

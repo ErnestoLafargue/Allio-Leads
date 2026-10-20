@@ -7,9 +7,14 @@
 import { useCallback, useEffect, useId, useRef, useState } from "react";
 import {
   applyMedlytLowDelay,
+  applyMedlytLowDelaySdp,
+  applyMedlytSendLowDelay,
+  applyMedlytSpeechHint,
   attachMedlytPlayback,
   createMedlytPeerConnection,
+  detachMedlytPlayback,
   liveAudioTrack,
+  MEDLYT_TALK_AUDIO_CONSTRAINTS,
   normalizeMedlytSdp,
   preferMedlytOpus,
   waitForIceGathering,
@@ -90,8 +95,8 @@ export function MedlytListener({ targetUserId, stopSignal, talkOn, onStateChange
     }
     const elA = document.getElementById(audioSellerId) as HTMLAudioElement | null;
     const elB = document.getElementById(audioCustId) as HTMLAudioElement | null;
-    if (elA) elA.srcObject = null;
-    if (elB) elB.srcObject = null;
+    detachMedlytPlayback(elA);
+    detachMedlytPlayback(elB);
     if (endRemote && sid) {
       await fetch(`/api/dialer/medlyt/listen/${sid}`, {
         method: "PATCH",
@@ -115,7 +120,7 @@ export function MedlytListener({ targetUserId, stopSignal, talkOn, onStateChange
     if (sender && sender.track !== track) {
       void sender.replaceTrack(talkOn ? track : null).catch(() => undefined);
     }
-  }, [talkOn]);
+  }, [talkOn, talkReady]);
 
   useEffect(() => {
     if (!targetUserId) {
@@ -173,9 +178,10 @@ export function MedlytListener({ targetUserId, stopSignal, talkOn, onStateChange
       let talkTrack: MediaStreamTrack | null = null;
       try {
         const talkStream = await navigator.mediaDevices.getUserMedia({
-          audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true },
+          audio: MEDLYT_TALK_AUDIO_CONSTRAINTS,
         });
         talkTrack = liveAudioTrack(talkStream);
+        applyMedlytSpeechHint(talkTrack);
       } catch {
         if (!cancelled) {
           setProblem("Tillad mikrofon for at tale til sælger — lyt virker stadig.");
@@ -186,7 +192,7 @@ export function MedlytListener({ targetUserId, stopSignal, talkOn, onStateChange
         return;
       }
       if (talkTrack) {
-        talkTrack.enabled = talkOn;
+        talkTrack.enabled = false;
         talkTrackRef.current = talkTrack;
         setTalkReady(true);
       }
@@ -199,6 +205,7 @@ export function MedlytListener({ targetUserId, stopSignal, talkOn, onStateChange
       if (talkTrack) {
         await talkTx.sender.replaceTrack(talkTrack);
         talkSenderRef.current = talkTx.sender;
+        applyMedlytSendLowDelay(talkTx.sender);
       }
       preferMedlytOpus(pc);
       pc.onicecandidate = (ev) => {
@@ -232,23 +239,11 @@ export function MedlytListener({ targetUserId, stopSignal, talkOn, onStateChange
       };
 
       const offer = await pc.createOffer();
-      await pc.setLocalDescription(offer);
-      const iceMs = await waitForIceGathering(pc);
-      const sdp = normalizeMedlytSdp(pc.localDescription?.sdp || offer.sdp || "");
-      // #region agent log
-      fetch("http://localhost:7723/ingest/7a50d2a1-e6f0-436c-8453-6828c3db5e26", {
-        method: "POST",
-        headers: { "Content-Type": "application/json", "X-Debug-Session-Id": "c1392e" },
-        body: JSON.stringify({
-          sessionId: "c1392e",
-          hypothesisId: "H-connect",
-          location: "medlyt-listener.tsx:offer",
-          message: "admin offer ready",
-          data: { iceMs, hasTalk: Boolean(talkTrack) },
-          timestamp: Date.now(),
-        }),
-      }).catch(() => {});
-      // #endregion
+      const offerSdp = applyMedlytLowDelaySdp(offer.sdp || "");
+      await pc.setLocalDescription({ type: "offer", sdp: offerSdp });
+      if (talkSenderRef.current) applyMedlytSendLowDelay(talkSenderRef.current);
+      await waitForIceGathering(pc);
+      const sdp = applyMedlytLowDelaySdp(pc.localDescription?.sdp || offerSdp);
       const offerRes = await fetch(`/api/dialer/medlyt/listen/${sid}`, {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
