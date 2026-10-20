@@ -74,7 +74,7 @@ export async function POST(req: Request, { params }: Params) {
         {
           error:
             lead.status === "MEETING_BOOKED"
-              ? "Tilbagekald kan ikke planlægges på et booket møde. Skift udfaldet først."
+              ? "Tilbagekald kan kun planlægges på møder med afsluttet udfald (fx Genbooking, Afholdt, Ej mødt) — ikke på afventende møder."
               : "Tilbagekald kan ikke planlægges på dette lead.",
         },
         { status: 400 },

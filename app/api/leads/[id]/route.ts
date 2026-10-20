@@ -86,7 +86,9 @@ export async function GET(_req: Request, { params }: Params) {
       where: { id },
       include: {
         bookedByUser: { select: { id: true, name: true, username: true } },
-        campaign: { select: { id: true, name: true, fieldConfig: true } },
+        campaign: {
+          select: { id: true, name: true, fieldConfig: true, dialPhonePriority: true },
+        },
         lockedByUser: { select: { id: true, name: true, username: true } },
         callbackReservedByUser: { select: { id: true, name: true, username: true } },
       },
@@ -116,7 +118,9 @@ export async function GET(_req: Request, { params }: Params) {
         where: { id },
         include: {
           bookedByUser: { select: { id: true, name: true, username: true } },
-          campaign: { select: { id: true, name: true, fieldConfig: true } },
+          campaign: {
+          select: { id: true, name: true, fieldConfig: true, dialPhonePriority: true },
+        },
           lockedByUser: { select: { id: true, name: true, username: true } },
           callbackReservedByUser: { select: { id: true, name: true, username: true } },
         },
@@ -703,7 +707,9 @@ export async function PATCH(req: Request, { params }: Params) {
       },
       include: {
         bookedByUser: { select: { id: true, name: true, username: true } },
-        campaign: { select: { id: true, name: true, fieldConfig: true } },
+        campaign: {
+          select: { id: true, name: true, fieldConfig: true, dialPhonePriority: true },
+        },
         lockedByUser: { select: { id: true, name: true, username: true } },
         callbackReservedByUser: { select: { id: true, name: true, username: true } },
       },

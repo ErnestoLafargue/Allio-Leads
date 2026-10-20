@@ -16,10 +16,33 @@ describe("canScheduleCallbackFromLead", () => {
     ).toBe(true);
   });
 
-  it("blokerer afsluttede tilbagekald og møde booket", () => {
+  it("blokerer afsluttede tilbagekald og aktive/afventende møder", () => {
     expect(
       canScheduleCallbackFromLead({ status: "CALLBACK_SCHEDULED", callbackStatus: "DONE" }),
     ).toBe(false);
     expect(canScheduleCallbackFromLead({ status: "MEETING_BOOKED" })).toBe(false);
+    expect(
+      canScheduleCallbackFromLead({
+        status: "MEETING_BOOKED",
+        meetingOutcomeStatus: "PENDING",
+      }),
+    ).toBe(false);
+    expect(
+      canScheduleCallbackFromLead({
+        status: "MEETING_BOOKED",
+        meetingOutcomeStatus: "IN_PROGRESS",
+      }),
+    ).toBe(false);
+  });
+
+  it("tillader tilbagekald på genbook/afholdt/ej mødt m.m. — samme overalt", () => {
+    for (const meetingOutcomeStatus of ["REBOOK", "HELD", "CANCELLED", "LOST", "SALE"]) {
+      expect(
+        canScheduleCallbackFromLead({
+          status: "MEETING_BOOKED",
+          meetingOutcomeStatus,
+        }),
+      ).toBe(true);
+    }
   });
 });

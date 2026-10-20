@@ -967,7 +967,6 @@ export function CampaignVoipStrip({
    * Bruges af admin-metrics og fremtidig optimering af bridge; rydes ved idle.
    */
   useEffect(() => {
-    if (isGlobalVoip) return;
     if (!campaignId) return;
 
     if (lineStatus === "idle" || lineStatus === "error") {
@@ -1001,10 +1000,9 @@ export function CampaignVoipStrip({
     return () => {
       window.clearInterval(interval);
     };
-  }, [isGlobalVoip, lineStatus, campaignId]);
+  }, [lineStatus, campaignId]);
 
   useEffect(() => {
-    if (isGlobalVoip) return;
     return () => {
       if (!campaignId) return;
       void fetch("/api/dialer/agent/call-control", {
@@ -1014,7 +1012,7 @@ export function CampaignVoipStrip({
         credentials: "include",
       }).catch(() => {});
     };
-  }, [isGlobalVoip, campaignId]);
+  }, [campaignId]);
 
   /**
    * Ryd ugyldige valg — men kun når enhedslisten faktisk er indlæst.

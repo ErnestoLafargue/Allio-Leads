@@ -38,12 +38,52 @@ type Props = {
   onIndustry: (v: string) => void;
   custom: Record<string, string>;
   onCustom: (key: string, value: string) => void;
+  /** @deprecated Beholdt for kompatibilitet — Berig-knappen er erstattet af Hintly. */
   onVirkEnrich?: () => void;
   virkEnrichLoading?: boolean;
   virkEnrichFeedback?: string | null;
   virkNoDataFieldKeys?: string[];
   virkNoDataToken?: number;
 };
+
+function HintlyCvrButton({ cvr }: { cvr: string }) {
+  const hintlyUrl = buildHintlyLeadUrl(cvr);
+  const btnCls =
+    "inline-flex h-9 shrink-0 items-center rounded-md border-2 border-black bg-white px-1.5 shadow-sm outline-none ring-stone-400 hover:bg-stone-50 focus-visible:ring-2";
+  const logo = (
+    <Image
+      src="/enrichment/hintly.png"
+      alt=""
+      width={78}
+      height={24}
+      className="h-5 w-auto object-contain"
+      unoptimized
+    />
+  );
+  if (hintlyUrl) {
+    return (
+      <a
+        href={hintlyUrl}
+        target="_blank"
+        rel="noopener noreferrer"
+        title="Åbn kunden i Hintly"
+        aria-label="Åbn kunden i Hintly"
+        className={btnCls}
+      >
+        {logo}
+      </a>
+    );
+  }
+  return (
+    <span
+      title="Angiv CVR for at åbne Hintly"
+      aria-label="Hintly (kræver CVR)"
+      className={`${btnCls} cursor-not-allowed opacity-40`}
+    >
+      {logo}
+    </span>
+  );
+}
 
 const inputCls =
   "w-full rounded-md border border-stone-200 bg-white px-3 py-2 text-sm text-stone-900 shadow-sm outline-none ring-stone-400 focus:ring-2";
@@ -169,9 +209,6 @@ export function LeadDataLeftPanel({
   onIndustry,
   custom,
   onCustom,
-  onVirkEnrich,
-  virkEnrichLoading = false,
-  virkEnrichFeedback = null,
   virkNoDataFieldKeys = [],
   virkNoDataToken = 0,
 }: Props) {
@@ -302,24 +339,10 @@ export function LeadDataLeftPanel({
                         visible={baseValues.companyName.trim().length > 0}
                         tooltip="Søg på Google"
                       />
-                      {onVirkEnrich ? (
-                        <button
-                          type="button"
-                          onClick={onVirkEnrich}
-                          disabled={virkEnrichLoading}
-                          className="rounded-md border border-stone-300 bg-white px-2 py-1 text-[11px] font-medium text-stone-700 hover:bg-stone-50 disabled:cursor-not-allowed disabled:opacity-60"
-                        >
-                          {virkEnrichLoading ? "Beriger…" : "Berig"}
-                        </button>
-                      ) : null}
+                      <HintlyCvrButton cvr={cvr} />
                     </div>
                   ) : null}
                 </div>
-                {g === "companyName" && virkEnrichFeedback ? (
-                  <p className="mt-1 text-xs text-stone-600" role="status">
-                    {virkEnrichFeedback}
-                  </p>
-                ) : null}
               </div>
             )}
             {g === "companyName"

@@ -9,7 +9,12 @@ import { isQueueEligibleStatus, sortLeadsForQueue } from "@/lib/lead-queue";
 import { MeetingOutcomeSelect } from "@/app/components/meeting-outcome-select";
 import { LeadOutcomeStrip } from "@/app/components/lead-workspace/lead-outcome-strip";
 import { LeadKundeNoterBooking } from "@/app/components/lead-workspace/lead-kunde-noter-booking";
-import { dialNumberMenu, orderedDialPhones } from "@/lib/lead-phones";
+import {
+  dialNumberMenu,
+  normalizeDialPhonePriority,
+  orderedDialPhones,
+  type DialPhonePriority,
+} from "@/lib/lead-phones";
 import { CallbackScheduleDialog } from "@/app/components/callback-schedule-dialog";
 import { SendStandardMailDialog } from "@/app/components/send-standard-mail-dialog";
 import { LeadIdBadge } from "@/app/components/lead-id-badge";
@@ -38,6 +43,8 @@ import { VOIP_API_CONTEXT } from "@/lib/voip-api-context";
 import { useActivityRecordingPoll } from "@/lib/use-activity-recording-poll";
 import { LEAD_NAV_FALLBACK_PATH, parseLeadNavigation } from "@/lib/lead-navigation";
 import { canScheduleCallbackFromLead } from "@/lib/lead-callback-schedule";
+import { isCallbackWorkLead } from "@/lib/lead-callback-access";
+import { dialPhoneForOpenLead } from "@/lib/predictive-dial-policy";
 import {
   MEETING_TYPE_ONLINE,
   type MeetingType,
@@ -69,7 +76,12 @@ type Lead = {
   meetingType?: string;
   meetingAddress?: string;
   meetingOutcomeStatus?: string;
-  campaign: { id: string; name: string; fieldConfig: string } | null;
+  campaign: {
+    id: string;
+    name: string;
+    fieldConfig: string;
+    dialPhonePriority?: string | null;
+  } | null;
   lockedByUserId?: string | null;
   lockExpiresAt?: string | null;
   lockedByUser?: { name: string; username: string } | null;
@@ -688,8 +700,51 @@ function LeadDetailInner() {
     );
   }
 
-  const canScheduleCallback = canScheduleCallbackFromLead(lead);
+  const canScheduleCallback = canScheduleCallbackFromLead({
+    status: lead.status,
+    callbackStatus: lead.callbackStatus,
+    meetingOutcomeStatus: lead.meetingOutcomeStatus ?? meetingOutcomeStatus,
+  });
   const showNextForMeeting = status !== "MEETING_BOOKED";
+  const dialPhonePriority: DialPhonePriority = normalizeDialPhonePriority(
+    lead.campaign?.dialPhonePriority,
+  );
+  const voipLeadPhone = dialPhoneForOpenLead({ phone, privatePhone }, dialPhonePriority);
+  const voipFailoverPhone =
+    orderedDialPhones(phone, privatePhone, dialPhonePriority)[1]?.raw ?? "";
+  const voipDialMenu = dialNumberMenu(phone, privatePhone, dialPhonePriority);
+
+  async function handleUpdateLeadPhoneFromVoip(nextPhoneRaw: string) {
+    const nextPhone = nextPhoneRaw.trim();
+    const primary = orderedDialPhones(phone, privatePhone, dialPhonePriority)[0];
+    const dialingPrivate = primary?.kind === "PRIVATE";
+    if (dialingPrivate) {
+      setPrivatePhone(nextPhone);
+    } else {
+      setPhone(nextPhone);
+    }
+    try {
+      const res = await fetch(`/api/leads/${lead.id}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(dialingPrivate ? { privatePhone: nextPhone } : { phone: nextPhone }),
+      });
+      if (!res.ok) {
+        const j = await res.json().catch(() => ({}));
+        return {
+          ok: false as const,
+          message: typeof j.error === "string" ? j.error : "Kunne ikke gemme nummer på lead.",
+        };
+      }
+      const updated = (await res.json()) as Lead;
+      setLead(updated);
+      setPhone(updated.phone ?? (dialingPrivate ? phone : nextPhone));
+      setPrivatePhone(updated.privatePhone ?? (dialingPrivate ? nextPhone : privatePhone));
+      return { ok: true as const, message: "Nummer opdateret på lead." };
+    } catch {
+      return { ok: false as const, message: "Netværksfejl — kunne ikke gemme nummer." };
+    }
+  }
 
   return (
     <div className="mx-auto max-w-6xl flex min-h-[calc(100dvh-5.5rem)] flex-col gap-4 pb-4">
@@ -860,11 +915,17 @@ function LeadDetailInner() {
             <CampaignVoipStrip
               leadId={lead.id}
               campaignId={lead.campaignId}
-              leadPhone={orderedDialPhones(phone, privatePhone, "PRIVATE_FIRST")[0]?.raw ?? ""}
-              failoverPhone={orderedDialPhones(phone, privatePhone, "PRIVATE_FIRST")[1]?.raw ?? ""}
-              dialMenu={dialNumberMenu(phone, privatePhone, "PRIVATE_FIRST")}
+              leadPhone={voipLeadPhone}
+              recordPhone={dialPhoneForOpenLead(
+                { phone: lead.phone, privatePhone: lead.privatePhone },
+                dialPhonePriority,
+              )}
+              failoverPhone={voipFailoverPhone}
+              dialMenu={voipDialMenu}
               dialMode="CLICK_TO_CALL"
               autoStartCall={false}
+              isCallbackLead={isCallbackWorkLead(lead)}
+              onUpdateLeadPhone={handleUpdateLeadPhoneFromVoip}
               voipApiContext={VOIP_API_CONTEXT.GLOBAL_LEAD_PAGE}
               onVoipFailureLogged={bumpActivityReload}
               onCallEndedForActivity={schedulePollAfterCall}
