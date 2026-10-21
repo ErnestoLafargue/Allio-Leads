@@ -5,6 +5,7 @@ import { isLockedByOtherUser } from "./lead-lock";
 describe("buildCampaignLeadPatchBody", () => {
   const base = {
     companyName: "Test ApS",
+    bookingSystem: "Gecko Booking",
     phone: "12 34 56 78",
     privatePhone: "",
     email: "t@test.dk",

@@ -6,6 +6,7 @@ export type ImportPatchField =
   | "phone"
   | "email"
   | "domain"
+  | "bookingSystem"
   | "virksomhedstype"
   | "otherCustom";
 
@@ -18,6 +19,7 @@ export const IMPORT_PATCH_FIELD_OPTIONS: { id: ImportPatchField; label: string }
   { id: "phone", label: "Virksomhed Tlf" },
   { id: "email", label: "E-mail" },
   { id: "domain", label: "Domæne" },
+  { id: "bookingSystem", label: "Bookingsystem" },
   { id: "virksomhedstype", label: "Virksomhedstype" },
   { id: "otherCustom", label: "Øvrige mappede kampagnefelter" },
 ];
@@ -36,6 +38,7 @@ export type ImportPatchLeadInput = {
   id: string;
   phone: string;
   email: string;
+  bookingSystem?: string;
   customFields: string;
 };
 
@@ -44,6 +47,7 @@ export type ImportPatchIncoming = {
   email: string;
   /** Domæne fra mapping (domain/domaene) eller e-mailens host. */
   domain: string;
+  bookingSystem?: string;
   custom: Record<string, string>;
 };
 
@@ -206,6 +210,15 @@ export function buildImportPatchForLead(params: {
   if (wants.has("email") && isEmpty(lead.email) && !isEmpty(incoming.email)) {
     patch.email = incoming.email.trim();
     fieldCounts.email = 1;
+  }
+
+  if (
+    wants.has("bookingSystem") &&
+    isEmpty(lead.bookingSystem) &&
+    !isEmpty(incoming.bookingSystem)
+  ) {
+    patch.bookingSystem = (incoming.bookingSystem ?? "").trim();
+    fieldCounts.bookingSystem = 1;
   }
 
   if (wants.has("domain")) {

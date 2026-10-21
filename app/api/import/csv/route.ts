@@ -14,6 +14,7 @@ import { getUploadedBlob, uploadFilename } from "@/lib/form-upload";
 import { parseImportFile } from "@/lib/import-parse";
 import { buildNormRow } from "@/lib/import-parse-helpers";
 import { pickLeadCreateData } from "@/lib/prisma-lead-write";
+import { resolveLeadBookingSystem } from "@/lib/booking-system";
 import {
   applyColumnMapping,
   collectCustomFromRow,
@@ -129,7 +130,7 @@ export async function POST(req: Request) {
   // Only select fields we need — avoids P2022 when local/dev DB schema lags Prisma client.
   const campaign = await prisma.campaign.findUnique({
     where: { id: campaignId },
-    select: { id: true, fieldConfig: true },
+    select: { id: true, name: true, isSystemCampaign: true, fieldConfig: true },
   });
   if (!campaign) {
     return NextResponse.json({ error: "Kampagne findes ikke" }, { status: 400 });
@@ -159,6 +160,7 @@ export async function POST(req: Request) {
       notes: true,
       phone: true,
       email: true,
+      bookingSystem: true,
       customFields: true,
     },
   });
@@ -346,6 +348,7 @@ export async function POST(req: Request) {
                       phone: base.phone,
                       email: base.email,
                       domain,
+                      bookingSystem: base.bookingSystem,
                       custom,
                     },
                     patchFields,
@@ -354,6 +357,7 @@ export async function POST(req: Request) {
                     patchUpdateQueue.push({ id: lead.id, data: patch });
                     if (typeof patch.phone === "string") lead.phone = patch.phone;
                     if (typeof patch.email === "string") lead.email = patch.email;
+                    if (typeof patch.bookingSystem === "string") lead.bookingSystem = patch.bookingSystem;
                     if (typeof patch.customFields === "string") lead.customFields = patch.customFields;
                     summary.existingAttached += 1;
                     mergeFieldCounts(patchFieldCounts, fieldCounts);
@@ -448,6 +452,14 @@ export async function POST(req: Request) {
                     where: { id: existing.id },
                     data: { campaignId },
                   });
+                  // Tomt bookingsystem → fil-værdi eller den nye kampagnes standard (eksisterende værdi bevares).
+                  const attachBookingSystem = resolveLeadBookingSystem(base.bookingSystem, campaign);
+                  if (attachBookingSystem) {
+                    await prisma.lead.updateMany({
+                      where: { id: existing.id, bookingSystem: "" },
+                      data: { bookingSystem: attachBookingSystem },
+                    });
+                  }
                   cvrToLead.set(cvrNorm, { id: existing.id, campaignId, status: existing.status });
                   summary.existingAttached += 1;
                   attached = true;
@@ -469,6 +481,7 @@ export async function POST(req: Request) {
                       data: pickLeadCreateData({
                         campaignId,
                         companyName: base.companyName?.trim() || "(Uden virksomhedsnavn)",
+                        bookingSystem: resolveLeadBookingSystem(base.bookingSystem, campaign),
                         phone: base.phone,
                         privatePhone: base.privatePhone,
                         email: base.email,
@@ -520,6 +533,7 @@ export async function POST(req: Request) {
                 data: pickLeadCreateData({
                   campaignId,
                   companyName: base.companyName?.trim() || "(Uden virksomhedsnavn)",
+                  bookingSystem: resolveLeadBookingSystem(base.bookingSystem, campaign),
                   phone: base.phone,
                   privatePhone: base.privatePhone,
                   email: base.email,

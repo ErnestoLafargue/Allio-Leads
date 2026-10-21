@@ -140,6 +140,8 @@ export async function POST(req: Request, { params }: Params) {
       where: { id },
       data: {
         companyName: typeof body?.companyName === "string" ? body.companyName.trim() : lead.companyName,
+        bookingSystem:
+          typeof body?.bookingSystem === "string" ? body.bookingSystem.trim() : lead.bookingSystem,
         phone: typeof body?.phone === "string" ? body.phone.trim() : lead.phone,
         privatePhone:
           typeof body?.privatePhone === "string" ? body.privatePhone.trim() : lead.privatePhone,

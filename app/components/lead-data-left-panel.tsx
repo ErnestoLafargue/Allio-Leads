@@ -20,6 +20,8 @@ type Props = {
   fieldConfigJson: string;
   companyName: string;
   onCompanyName: (v: string) => void;
+  bookingSystem: string;
+  onBookingSystem: (v: string) => void;
   phone: string;
   onPhone: (v: string) => void;
   privatePhone: string;
@@ -191,6 +193,8 @@ export function LeadDataLeftPanel({
   fieldConfigJson,
   companyName,
   onCompanyName,
+  bookingSystem,
+  onBookingSystem,
   phone,
   onPhone,
   privatePhone,
@@ -345,6 +349,18 @@ export function LeadDataLeftPanel({
                 </div>
               </div>
             )}
+            {g === "companyName" ? (
+              <div>
+                <label className="mb-1 block text-xs font-medium text-stone-600">Bookingsystem</label>
+                <input
+                  type="text"
+                  className={inputCls}
+                  value={bookingSystem}
+                  onChange={(e) => onBookingSystem(e.target.value)}
+                  placeholder="Bookingsystem"
+                />
+              </div>
+            ) : null}
             {g === "companyName"
               ? visiblePersonFields.map((f) => {
                   if (usedCustomKeys.has(f.key)) return null;

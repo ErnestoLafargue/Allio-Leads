@@ -251,6 +251,8 @@ model Lead {
   campaign   Campaign? @relation(fields: [campaignId], references: [id], onDelete: SetNull)
 
   companyName  String
+  /// Kundens bookingsystem (fx «Gecko Booking») — standard = kampagnenavn i bookingsystem-kampagner, ellers tomt.
+  bookingSystem String @default("")
   phone        String
   /// Privat telefonnummer (fx klinikejer fra Punktum) — separat fra virksomhedsnummer (`phone`)
   privatePhone String @default("")

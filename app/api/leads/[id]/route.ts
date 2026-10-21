@@ -275,6 +275,8 @@ export async function PATCH(req: Request, { params }: Params) {
   const postalCode = filled.postalCode;
   const city = filled.city;
   const industry = typeof body?.industry === "string" ? body.industry : existing.industry;
+  const bookingSystem =
+    typeof body?.bookingSystem === "string" ? body.bookingSystem.trim() : existing.bookingSystem;
   const notes = typeof body?.notes === "string" ? body.notes : existing.notes;
   const prevNotesTrim = String(existing.notes ?? "").trim();
   const nextNotesTrim = String(notes ?? "").trim();
@@ -665,6 +667,7 @@ export async function PATCH(req: Request, { params }: Params) {
       data: {
         ...pickLeadUpdateData({
           companyName,
+          bookingSystem,
           phone,
           privatePhone,
           email,

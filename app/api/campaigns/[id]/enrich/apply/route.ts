@@ -123,6 +123,7 @@ export async function POST(req: Request, { params }: Params) {
       postalCode: true,
       city: true,
       industry: true,
+      bookingSystem: true,
       notes: true,
       customFields: true,
     },

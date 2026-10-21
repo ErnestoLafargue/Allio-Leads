@@ -55,6 +55,7 @@ type Lead = {
   id: string;
   campaignId: string | null;
   companyName: string;
+  bookingSystem?: string;
   phone: string;
   privatePhone?: string;
   email: string;
@@ -111,6 +112,7 @@ function LeadDetailInner() {
   const [lead, setLead] = useState<Lead | null>(null);
   const [forbidden, setForbidden] = useState(false);
   const [companyName, setCompanyName] = useState("");
+  const [bookingSystem, setBookingSystem] = useState("");
   const [phone, setPhone] = useState("");
   const [privatePhone, setPrivatePhone] = useState("");
   const [email, setEmail] = useState("");
@@ -192,6 +194,7 @@ function LeadDetailInner() {
       if (cancelled) return;
       setLead(data);
       setCompanyName(data.companyName);
+      setBookingSystem(data.bookingSystem ?? "");
       setPhone(data.phone);
       setPrivatePhone(data.privatePhone ?? "");
       setEmail(data.email ?? "");
@@ -396,6 +399,7 @@ function LeadDetailInner() {
     setMeetingType(type);
     const body: Record<string, unknown> = {
       companyName,
+      bookingSystem,
       phone,
       privatePhone,
       email,
@@ -478,6 +482,7 @@ function LeadDetailInner() {
     setSaving(true);
     const body: Record<string, unknown> = {
       companyName,
+      bookingSystem,
       phone,
       privatePhone,
       email,
@@ -551,6 +556,7 @@ function LeadDetailInner() {
         scheduledFor: payload.scheduledForISO,
         assignedUserId: payload.assignedUserId,
         companyName,
+        bookingSystem,
         phone,
         privatePhone,
         email,
@@ -947,6 +953,8 @@ function LeadDetailInner() {
               fieldConfigJson={lead.campaign?.fieldConfig ?? defaultCampaignFieldConfigJson()}
               companyName={companyName}
               onCompanyName={setCompanyName}
+              bookingSystem={bookingSystem}
+              onBookingSystem={setBookingSystem}
               phone={phone}
               onPhone={setPhone}
               privatePhone={privatePhone}

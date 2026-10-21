@@ -7,6 +7,7 @@ import { extractDanishPostalFromAddress, applyPostalCityFromAddressFields } from
 export type StandardMappingId =
   | "skip"
   | "companyName"
+  | "bookingSystem"
   | "phone"
   | "privatePhone"
   | "email"
@@ -21,6 +22,7 @@ export type StandardMappingId =
 export const STANDARD_MAPPING_OPTIONS: { id: StandardMappingId; label: string }[] = [
   { id: "skip", label: "Ignorer" },
   { id: "companyName", label: "Virksomhedsnavn" },
+  { id: "bookingSystem", label: "Bookingsystem" },
   { id: "phone", label: "Virksomhed Tlf" },
   { id: "privatePhone", label: "Privat Tlf" },
   { id: "notes", label: "Noter" },
@@ -93,6 +95,15 @@ export function suggestColumnMapping(columns: string[]): Record<string, string> 
       t = "custom:antal_kampagner";
     } else if (n === "egenkapital" || n === "equity" || n.includes("egenkapital")) {
       t = "custom:egenkapital";
+    } else if (
+      n.includes("bookingsystem") ||
+      n.includes("booking_system") ||
+      n.includes("booking-system") ||
+      n === "booking" ||
+      n === "bookingplatform" ||
+      n === "booking_platform"
+    ) {
+      t = "bookingSystem";
     } else if (
       n.includes("virksomhedsnavn") ||
       n.includes("firmanavn") ||
@@ -211,6 +222,9 @@ export function applyColumnMapping(
       case "companyName":
         flat.virksomhed = v;
         break;
+      case "bookingSystem":
+        flat.bookingsystem = v;
+        break;
       case "phone":
         flat.telefon = v;
         break;
@@ -299,9 +313,11 @@ export function pickBaseFromNorm(n: Record<string, string>) {
     city: cityRaw,
   });
   const industry = n["branche"] || n["industry"] || n["sektor"] || "";
+  const bookingSystem = n["bookingsystem"] || n["booking_system"] || "";
   const notes = n["noter"] || n["notes"] || n["kommentar"] || "";
   return {
     companyName: companyName.trim(),
+    bookingSystem: bookingSystem.trim(),
     phone: canonicalLeadPhoneForStorage(phone),
     privatePhone: canonicalLeadPhoneForStorage(privatePhone),
     email: email.trim(),

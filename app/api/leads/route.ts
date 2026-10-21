@@ -24,6 +24,7 @@ import {
   normalizeMeetingType,
 } from "@/lib/meeting-type";
 import { scheduleMeetingBookedRecordings } from "@/lib/telnyx-recordings-auto-sync";
+import { defaultBookingSystemForCampaign } from "@/lib/booking-system";
 
 export async function GET(req: Request) {
   const { session, response } = await requireSession();
@@ -158,6 +159,7 @@ export async function GET(req: Request) {
           ? {
               OR: [
                 { companyName: { contains: q } },
+                { bookingSystem: { contains: q } },
                 { phone: { contains: q } },
                 { email: { contains: q } },
                 { cvr: { contains: q } },
@@ -278,6 +280,10 @@ export async function POST(req: Request) {
   const postalCode = filled.postalCode;
   const city = filled.city;
   const industry = typeof body?.industry === "string" ? body.industry : "";
+  const bookingSystem =
+    typeof body?.bookingSystem === "string"
+      ? body.bookingSystem.trim()
+      : defaultBookingSystemForCampaign(campaign);
   const notes = typeof body?.notes === "string" ? body.notes : "";
   const rawStatus = typeof body?.status === "string" ? body.status.trim().toUpperCase() : "";
   const status = isLeadStatus(rawStatus) ? rawStatus : "NEW";
@@ -333,6 +339,7 @@ export async function POST(req: Request) {
     data: pickLeadCreateData({
       campaignId,
       companyName,
+      bookingSystem,
       phone,
       privatePhone,
       email,

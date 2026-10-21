@@ -61,6 +61,7 @@ import { dialPhoneForOpenLead } from "@/lib/predictive-dial-policy";
 type Lead = {
   id: string;
   companyName: string;
+  bookingSystem?: string;
   phone: string;
   privatePhone?: string;
   email: string;
@@ -363,6 +364,7 @@ export function CampaignWorkspace({
   }, [poolMode, powerPoolMode]);
 
   const [companyName, setCompanyName] = useState("");
+  const [bookingSystem, setBookingSystem] = useState("");
   const [phone, setPhone] = useState("");
   const [privatePhone, setPrivatePhone] = useState("");
   const [email, setEmail] = useState("");
@@ -482,6 +484,7 @@ export function CampaignWorkspace({
 
   const loadFormFromLead = useCallback((l: Lead) => {
     setCompanyName(l.companyName);
+    setBookingSystem(l.bookingSystem ?? "");
     setPhone(l.phone);
     setPrivatePhone(l.privatePhone ?? "");
     setEmail(l.email ?? "");
@@ -529,6 +532,7 @@ export function CampaignWorkspace({
 
   const resetFormForPowerWaiting = useCallback(() => {
     setCompanyName("");
+    setBookingSystem("");
     setPhone("");
     setPrivatePhone("");
     setEmail("");
@@ -977,6 +981,7 @@ export function CampaignWorkspace({
     const st = statusOverride ?? status;
     return {
       companyName,
+      bookingSystem,
       phone,
       privatePhone,
       email,
@@ -1431,6 +1436,7 @@ export function CampaignWorkspace({
         scheduledFor: payload.scheduledForISO,
         assignedUserId: payload.assignedUserId,
         companyName,
+        bookingSystem,
         phone,
         privatePhone,
         email,
@@ -2268,6 +2274,8 @@ export function CampaignWorkspace({
         fieldConfigJson={fieldConfigJson}
         companyName={companyName}
         onCompanyName={setCompanyName}
+        bookingSystem={bookingSystem}
+        onBookingSystem={setBookingSystem}
         phone={phone}
         onPhone={setPhone}
         privatePhone={privatePhone}

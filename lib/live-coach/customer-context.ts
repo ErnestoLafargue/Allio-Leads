@@ -7,6 +7,7 @@ import { prisma } from "@/lib/prisma";
 
 export type CustomerFacts = {
   companyName: string;
+  bookingSystem?: string;
   industry: string;
   city: string;
   campaign: string | null;
@@ -21,6 +22,7 @@ const clip = (s: string, n: number) => (s.length > n ? `${s.slice(0, n - 1)}…`
 /** Ren formatering — kun felter med indhold kommer med. */
 export function formatCustomerContext(f: CustomerFacts): string {
   const lines = [`Klinik: ${f.companyName}${f.industry ? ` (${f.industry})` : ""}${f.city ? `, ${f.city}` : ""}`];
+  if (f.bookingSystem?.trim()) lines.push(`Bookingsystem: ${f.bookingSystem.trim()}`);
   if (f.campaign) lines.push(`Kampagne: ${f.campaign}`);
   if (f.attempts > 0) lines.push(`Tidligere forsøg uden svar: ${f.attempts}`);
   if (f.notes.trim()) lines.push(`Noter: ${clip(f.notes.trim().replace(/\s+/g, " "), 300)}`);
@@ -43,6 +45,7 @@ export async function customerContext(leadId: string): Promise<string | null> {
     where: { id: leadId },
     select: {
       companyName: true,
+      bookingSystem: true,
       industry: true,
       city: true,
       notes: true,
@@ -64,6 +67,7 @@ export async function customerContext(leadId: string): Promise<string | null> {
   const text = lead
     ? formatCustomerContext({
         companyName: lead.companyName,
+        bookingSystem: lead.bookingSystem,
         industry: lead.industry,
         city: lead.city,
         campaign: lead.campaign?.name ?? null,
