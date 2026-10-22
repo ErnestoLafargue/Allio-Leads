@@ -32,6 +32,7 @@ import {
   type LeadOpenedFrom,
 } from "@/lib/lead-navigation";
 import {
+  bookingSystemFilterKey,
   COMPANY_TYPE_CUSTOM_KEY,
   EMPTY_ACTIVE_CAMPAIGN_QUEUE_VIEW,
   hasActiveQueueViewConstraints,
@@ -51,11 +52,13 @@ type CampaignLeadViewPrefs = {
   startdateEnabled: boolean;
   industryEnabled: boolean;
   companyTypeEnabled: boolean;
+  bookingSystemEnabled: boolean;
   postalFilterEnabled: boolean;
   meetingStartFrom: string;
   meetingStartTo: string;
   selectedCampaignIndustries: string[];
   selectedCompanyTypes: string[];
+  selectedBookingSystems: string[];
   dynamicSortFieldId: string;
   dynamicSortDir: "asc" | "desc";
   dynamicFromDate: string;
@@ -135,6 +138,7 @@ function readCampaignLeadViewPrefs(campaignId: string): CampaignLeadViewPrefs | 
       startdateEnabled,
       industryEnabled,
       companyTypeEnabled,
+      bookingSystemEnabled: parsed.bookingSystemEnabled === true,
       postalFilterEnabled,
       meetingStartFrom: typeof parsed.meetingStartFrom === "string" ? parsed.meetingStartFrom : "",
       meetingStartTo: typeof parsed.meetingStartTo === "string" ? parsed.meetingStartTo : "",
@@ -143,6 +147,9 @@ function readCampaignLeadViewPrefs(campaignId: string): CampaignLeadViewPrefs | 
         : [],
       selectedCompanyTypes: Array.isArray(parsed.selectedCompanyTypes)
         ? parsed.selectedCompanyTypes.filter((v): v is string => typeof v === "string")
+        : [],
+      selectedBookingSystems: Array.isArray(parsed.selectedBookingSystems)
+        ? parsed.selectedBookingSystems.filter((v): v is string => typeof v === "string")
         : [],
       dynamicSortFieldId: typeof parsed.dynamicSortFieldId === "string" ? parsed.dynamicSortFieldId : "",
       dynamicSortDir: parsed.dynamicSortDir === "desc" ? "desc" : "asc",
@@ -176,6 +183,7 @@ function clearCampaignLeadViewPrefs(campaignId: string): void {
 type LeadRow = {
   id: string;
   companyName: string;
+  bookingSystem?: string;
   phone: string;
   email?: string;
   cvr?: string;
@@ -424,6 +432,7 @@ export function LeadsBulkPanel({
   const [startdateEnabled, setStartdateEnabled] = useState(false);
   const [industryEnabled, setIndustryEnabled] = useState(false);
   const [companyTypeEnabled, setCompanyTypeEnabled] = useState(false);
+  const [bookingSystemEnabled, setBookingSystemEnabled] = useState(false);
   const [postalFilterEnabled, setPostalFilterEnabled] = useState(false);
   const [meetingStartFrom, setMeetingStartFrom] = useState(
     () => initialWorkspaceStartFilterFromStorage(campaignId).from,
@@ -435,6 +444,11 @@ export function LeadsBulkPanel({
   const [selectedCampaignIndustries, setSelectedCampaignIndustries] = useState<string[]>([]);
   const [campaignCompanyTypeOptions, setCampaignCompanyTypeOptions] = useState<string[]>([]);
   const [selectedCompanyTypes, setSelectedCompanyTypes] = useState<string[]>([]);
+  /** "" = leads uden bookingsystem. */
+  const [campaignBookingSystemOptions, setCampaignBookingSystemOptions] = useState<
+    { value: string; count: number }[]
+  >([]);
+  const [selectedBookingSystems, setSelectedBookingSystems] = useState<string[]>([]);
   const [statusFilter, setStatusFilter] = useState<"ANY" | "NO_OUTCOME" | LeadStatus>("ANY");
   const [excludeNotInterested, setExcludeNotInterested] = useState(false);
   const [dynamicSortFieldId, setDynamicSortFieldId] = useState("");
@@ -465,13 +479,16 @@ export function LeadsBulkPanel({
         setStartdateEnabled(false);
         setIndustryEnabled(false);
         setCompanyTypeEnabled(false);
+        setBookingSystemEnabled(false);
         setPostalFilterEnabled(false);
         setMeetingStartFrom("");
         setMeetingStartTo("");
         setCampaignIndustryOptions([]);
         setSelectedCampaignIndustries([]);
         setCampaignCompanyTypeOptions([]);
+        setCampaignBookingSystemOptions([]);
         setSelectedCompanyTypes([]);
+        setSelectedBookingSystems([]);
         setDynamicSortFieldId("");
         setDynamicSortDir("asc");
         setDynamicFromDate("");
@@ -510,11 +527,13 @@ export function LeadsBulkPanel({
         setStartdateEnabled(view.startdateEnabled);
         setIndustryEnabled(view.industryEnabled);
         setCompanyTypeEnabled(view.companyTypeEnabled);
+        setBookingSystemEnabled(view.bookingSystemEnabled);
         setPostalFilterEnabled(view.postalFilterEnabled);
         setMeetingStartFrom(view.meetingStartFrom);
         setMeetingStartTo(view.meetingStartTo);
         setSelectedCampaignIndustries(view.selectedCampaignIndustries);
         setSelectedCompanyTypes(view.selectedCompanyTypes);
+        setSelectedBookingSystems(view.selectedBookingSystems);
         setDynamicSortFieldId(view.dynamicSortFieldId);
         setDynamicSortDir(view.dynamicSortDir);
         setDynamicFromDate(view.dynamicFromDate);
@@ -536,11 +555,13 @@ export function LeadsBulkPanel({
           setStartdateEnabled(prefs.startdateEnabled);
           setIndustryEnabled(prefs.industryEnabled);
           setCompanyTypeEnabled(prefs.companyTypeEnabled);
+          setBookingSystemEnabled(prefs.bookingSystemEnabled);
           setPostalFilterEnabled(prefs.postalFilterEnabled);
           setMeetingStartFrom(prefs.meetingStartFrom);
           setMeetingStartTo(prefs.meetingStartTo);
           setSelectedCampaignIndustries(prefs.selectedCampaignIndustries);
           setSelectedCompanyTypes(prefs.selectedCompanyTypes);
+          setSelectedBookingSystems(prefs.selectedBookingSystems);
           setDynamicSortFieldId(prefs.dynamicSortFieldId);
           setDynamicSortDir(prefs.dynamicSortDir);
           setDynamicFromDate(prefs.dynamicFromDate);
@@ -561,9 +582,11 @@ export function LeadsBulkPanel({
           }
           setIndustryEnabled(false);
           setCompanyTypeEnabled(false);
+          setBookingSystemEnabled(false);
           setPostalFilterEnabled(false);
           setSelectedCampaignIndustries([]);
           setSelectedCompanyTypes([]);
+          setSelectedBookingSystems([]);
           setDynamicSortFieldId("");
           setDynamicSortDir("asc");
           setDynamicFromDate("");
@@ -592,6 +615,27 @@ export function LeadsBulkPanel({
       if (!cancelled) {
         setCampaignIndustryOptions(unique);
         setSelectedCampaignIndustries((prev) => prev.filter((p) => unique.includes(p)));
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [campaignId, refreshNonce]);
+
+  useEffect(() => {
+    if (!campaignId) return;
+    let cancelled = false;
+    void (async () => {
+      const res = await fetch(`/api/campaigns/${encodeURIComponent(campaignId)}/booking-systems`);
+      if (!res.ok || cancelled) return;
+      const j = (await res.json().catch(() => ({}))) as {
+        bookingSystems?: { value: string; count: number }[];
+      };
+      const options = Array.isArray(j.bookingSystems) ? j.bookingSystems : [];
+      if (!cancelled) {
+        setCampaignBookingSystemOptions(options);
+        const keys = new Set(options.map((o) => bookingSystemFilterKey(o.value)));
+        setSelectedBookingSystems((prev) => prev.filter((p) => keys.has(bookingSystemFilterKey(p))));
       }
     })();
     return () => {
@@ -802,6 +846,15 @@ export function LeadsBulkPanel({
         }
       }
 
+      if (campaignId && bookingSystemEnabled) {
+        if (selectedBookingSystems.length === 0) {
+          out = [];
+        } else {
+          const bsSelected = new Set(selectedBookingSystems.map(bookingSystemFilterKey));
+          out = out.filter((l) => bsSelected.has(bookingSystemFilterKey(l.bookingSystem)));
+        }
+      }
+
       if (campaignId && postalFilterEnabled) {
         out = out.filter((l) =>
           leadMatchesPostalRanges(effectivePostalCode(l.postalCode, l.address), postalRanges),
@@ -895,11 +948,13 @@ export function LeadsBulkPanel({
     startdateEnabled,
     industryEnabled,
     companyTypeEnabled,
+    bookingSystemEnabled,
     startDateExtensionField,
     meetingStartFrom,
     meetingStartTo,
     selectedCampaignIndustries,
     selectedCompanyTypes,
+    selectedBookingSystems,
     postalFilterEnabled,
     postalRanges,
     serverQueueNarrowing,
@@ -1250,6 +1305,59 @@ export function LeadsBulkPanel({
                 ) : null}
               </div>
 
+              {/* Bookingsystem */}
+              <div className="space-y-1 border-t border-stone-200 pt-2">
+                <label className="inline-flex items-center gap-2 text-xs font-medium text-stone-800">
+                  <input
+                    type="checkbox"
+                    checked={bookingSystemEnabled}
+                    onChange={(e) => setBookingSystemEnabled(e.target.checked)}
+                    className="rounded border-stone-300"
+                  />
+                  Bookingsystem
+                </label>
+                {bookingSystemEnabled ? (
+                  <div className="max-h-40 min-w-[16rem] overflow-auto rounded-md border border-stone-200 bg-white p-2">
+                    {campaignBookingSystemOptions.length === 0 ? (
+                      <p className="text-xs text-stone-500">Ingen leads i kampagnen endnu.</p>
+                    ) : (
+                      <div className="space-y-1">
+                        {campaignBookingSystemOptions.map((option) => {
+                          const key = bookingSystemFilterKey(option.value);
+                          const checked = selectedBookingSystems.some(
+                            (v) => bookingSystemFilterKey(v) === key,
+                          );
+                          return (
+                            <label
+                              key={key || "__none__"}
+                              className="flex items-center gap-2 text-xs text-stone-700"
+                            >
+                              <input
+                                type="checkbox"
+                                checked={checked}
+                                onChange={(e) => {
+                                  const on = e.target.checked;
+                                  setSelectedBookingSystems((prev) =>
+                                    on
+                                      ? [...prev, option.value]
+                                      : prev.filter((v) => bookingSystemFilterKey(v) !== key),
+                                  );
+                                }}
+                                className="rounded border-stone-300"
+                              />
+                              <span className={option.value ? undefined : "italic text-stone-500"}>
+                                {option.value || "Intet bookingsystem"}
+                              </span>
+                              <span className="ml-auto tabular-nums text-stone-400">{option.count}</span>
+                            </label>
+                          );
+                        })}
+                      </div>
+                    )}
+                  </div>
+                ) : null}
+              </div>
+
               {/* Postnummer */}
               <div className="space-y-1 border-t border-stone-200 pt-2">
                 <label className="inline-flex items-center gap-2 text-xs font-medium text-stone-800">
@@ -1431,6 +1539,7 @@ export function LeadsBulkPanel({
                 startdateEnabled,
                 industryEnabled,
                 companyTypeEnabled,
+                bookingSystemEnabled,
                 postalFilterEnabled,
               });
               const body: ActiveCampaignQueueViewV1 = {
@@ -1441,6 +1550,7 @@ export function LeadsBulkPanel({
                 meetingStartTo,
                 selectedCampaignIndustries,
                 selectedCompanyTypes,
+                selectedBookingSystems,
                 dynamicSortFieldId,
                 dynamicSortDir: postalFilterEnabled ? postalSortDir : dynamicSortDir,
                 dynamicFromDate,
@@ -1449,6 +1559,7 @@ export function LeadsBulkPanel({
                 startdateEnabled,
                 industryEnabled,
                 companyTypeEnabled,
+                bookingSystemEnabled,
                 postalFilterEnabled,
                 postalSortDir,
                 postalRanges,
@@ -1468,11 +1579,13 @@ export function LeadsBulkPanel({
                     startdateEnabled: body.startdateEnabled,
                     industryEnabled: body.industryEnabled,
                     companyTypeEnabled: body.companyTypeEnabled,
+                    bookingSystemEnabled: body.bookingSystemEnabled,
                     postalFilterEnabled: body.postalFilterEnabled,
                     meetingStartFrom: body.meetingStartFrom,
                     meetingStartTo: body.meetingStartTo,
                     selectedCampaignIndustries: body.selectedCampaignIndustries,
                     selectedCompanyTypes: body.selectedCompanyTypes,
+                    selectedBookingSystems: body.selectedBookingSystems,
                     dynamicSortFieldId: body.dynamicSortFieldId,
                     dynamicSortDir: body.dynamicSortDir,
                     dynamicFromDate: body.dynamicFromDate,
@@ -1510,11 +1623,13 @@ export function LeadsBulkPanel({
                 setStartdateEnabled(false);
                 setIndustryEnabled(false);
                 setCompanyTypeEnabled(false);
+                setBookingSystemEnabled(false);
                 setPostalFilterEnabled(false);
                 setMeetingStartFrom("");
                 setMeetingStartTo("");
                 setSelectedCampaignIndustries([]);
                 setSelectedCompanyTypes([]);
+                setSelectedBookingSystems([]);
                 setStatusFilter("ANY");
                 setExcludeNotInterested(false);
                 setDynamicSortFieldId("");
@@ -1544,11 +1659,13 @@ export function LeadsBulkPanel({
                   setStartdateEnabled(false);
                   setIndustryEnabled(false);
                   setCompanyTypeEnabled(false);
+                  setBookingSystemEnabled(false);
                   setPostalFilterEnabled(false);
                   setMeetingStartFrom("");
                   setMeetingStartTo("");
                   setSelectedCampaignIndustries([]);
                   setSelectedCompanyTypes([]);
+                  setSelectedBookingSystems([]);
                   setDynamicSortFieldId("");
                   setDynamicFromDate("");
                   setDynamicToDate("");
