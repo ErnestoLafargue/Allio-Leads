@@ -7,8 +7,7 @@ import { LEAD_ACTIVITY_KIND, formatPhoneForActivitySummary } from "@/lib/lead-ac
 import { normalizePhoneToE164ForDial } from "@/lib/phone-e164";
 import { dialTelnyxOutbound, getTelnyxConnectionId, pickTelnyxFromNumber } from "@/lib/telnyx-call-control";
 import { encodeDialerClientState } from "@/lib/dialer-shared";
-import { assertLeadMatchesActiveCampaignQueueOr403 } from "@/lib/active-campaign-queue";
-import { isGlobalLeadPageVoipContext, parseVoipApiContext, VOIP_API_CONTEXT } from "@/lib/voip-api-context";
+import { parseVoipApiContext, VOIP_API_CONTEXT } from "@/lib/voip-api-context";
 
 async function logCallAttempt(leadId: string, userId: string, summary: string) {
   try {
@@ -94,13 +93,8 @@ export async function POST(req: Request) {
     );
   }
 
-  if (!isGlobalLeadPageVoipContext(voipApiContext)) {
-    const queueGuard = await assertLeadMatchesActiveCampaignQueueOr403(prisma, leadId);
-    if (!queueGuard.ok) {
-      await logCallAttempt(leadId, session.user.id, `Opkald blokeret — ${queueGuard.error}`);
-      return NextResponse.json({ error: queueGuard.error }, { status: 403 });
-    }
-  }
+  // Kampagnens køfilter styrer kun hvilke leads køen udleverer — ikke om et åbent lead
+  // (tilbagekald, historik, filter ændret undervejs) må ringes op.
 
   const apiKey = process.env.TELNYX_API_KEY?.trim();
   if (!apiKey) {

@@ -1,4 +1,3 @@
-import type { PrismaClient } from "@prisma/client";
 import { parseFieldConfig, FIELD_GROUPS, findStartDateExtensionField } from "@/lib/campaign-fields";
 import { parseCustomFields } from "@/lib/custom-fields";
 import { compareLeadQueueOrder, type QueueOrderFields } from "@/lib/lead-queue";
@@ -436,45 +435,3 @@ export function filterLeadsByActiveCampaignQueueView<T extends LeadRowInput>(
  * hent udstødte rækker ét sted, kør kø-/status-logik, og til sidst: `getActiveCampaignLeads(..., rækker, fieldConfig, campaign.activeQueueFilter)`.
  */
 export const getActiveCampaignLeads = filterLeadsByActiveCampaignQueueView;
-
-/** Central guard: kampagne-gemt filter aktivt, og leadet matcher ikke. */
-export async function assertLeadMatchesActiveCampaignQueueOr403(
-  prisma: PrismaClient,
-  leadId: string,
-): Promise<{ ok: true } | { ok: false; error: string }> {
-  const lead = await prisma.lead.findUnique({
-    where: { id: leadId },
-    select: {
-      id: true,
-      campaignId: true,
-      industry: true,
-      customFields: true,
-      meetingScheduledFor: true,
-      postalCode: true,
-      address: true,
-      campaign: { select: { activeQueueFilter: true, fieldConfig: true } },
-    },
-  });
-  if (!lead?.campaignId || !lead.campaign) {
-    return { ok: true };
-  }
-  const raw = lead.campaign.activeQueueFilter;
-  const view = parseActiveCampaignQueueView(raw);
-  if (!hasActiveQueueViewConstraints(view)) {
-    return { ok: true };
-  }
-  const ok = leadMatchesActiveCampaignQueueView(
-    {
-      id: lead.id,
-      industry: lead.industry ?? "",
-      customFields: lead.customFields ?? "",
-      meetingScheduledFor: lead.meetingScheduledFor,
-      postalCode: lead.postalCode ?? "",
-      address: lead.address ?? "",
-    },
-    lead.campaign.fieldConfig ?? "{}",
-    view,
-  );
-  if (ok) return { ok: true };
-  return { ok: false, error: "Leadet matcher ikke det aktive kampagnefilter." };
-}
