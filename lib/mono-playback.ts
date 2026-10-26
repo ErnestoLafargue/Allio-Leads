@@ -37,6 +37,8 @@ export function supportsMonoPlayback(src: string): boolean {
 export type MonoPlayback = {
   /** Kobler <audio> til mix-grafen (første gang ved Afspil — kræver bruger-gesture). */
   ensure: (el: HTMLAudioElement) => void;
+  /** Start mixet igen, fx når afspilning genoptages uden om Afspil-knappen. */
+  resume: () => void;
   suspend: () => void;
   close: () => void;
 };
@@ -65,28 +67,50 @@ export function connectDualTrackToStereoSpeakers(
   merger.connect(ctx.destination);
 }
 
+/**
+ * Når <audio> er koblet til mixet, kommer lyden KUN ud gennem AudioContext'en. Stopper
+ * konteksten (browseren/OS'et suspenderer den, fx når dialerens mikrofon/WebRTC skifter
+ * lydenhed), fryser <audio> på stedet: `paused` er false, men tiden står stille. Derfor
+ * startes konteksten igen, så snart den forlader «running» uden at vi selv har pauset.
+ */
 export function createMonoPlayback(): MonoPlayback {
   let state: { ctx: AudioContext; el: HTMLAudioElement; source: MediaElementAudioSourceNode } | null =
     null;
+  let selfSuspended = false;
+  const resume = () => {
+    selfSuspended = false;
+    if (state && state.ctx.state !== "running" && state.ctx.state !== "closed") {
+      void state.ctx.resume().catch(() => {});
+    }
+  };
   return {
     ensure(el) {
       if (typeof AudioContext === "undefined") return;
       if (state?.el === el) {
-        void state.ctx.resume();
+        resume();
         return;
       }
       try {
         const ctx = state?.ctx ?? new AudioContext();
+        if (!state) {
+          ctx.addEventListener("statechange", () => {
+            const playingEl = state?.el;
+            if (selfSuspended || !playingEl || playingEl.paused || playingEl.ended) return;
+            if (ctx.state !== "running" && ctx.state !== "closed") void ctx.resume().catch(() => {});
+          });
+        }
         state?.source.disconnect();
         const source = ctx.createMediaElementSource(el);
         connectDualTrackToStereoSpeakers(ctx, source);
         state = { ctx, el, source };
-        void ctx.resume();
+        resume();
       } catch {
         // Web Audio utilgængelig — afspil som almindelig split-stereo.
       }
     },
+    resume,
     suspend() {
+      selfSuspended = true;
       void state?.ctx.suspend().catch(() => {});
     },
     close() {

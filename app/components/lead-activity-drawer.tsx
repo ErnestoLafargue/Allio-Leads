@@ -128,6 +128,15 @@ function formatActivitySummary(summary: string): string {
   return summary.replace(/^WebRTC:\s*/i, "").trim();
 }
 
+/**
+ * Aktivitets-API'et præfikser id'er (`event-<id>`). Lyd-proxyen og URL-genopretning slår
+ * op på det rå LeadActivityEvent-id — med præfikset svarer de 404.
+ */
+function recordingEventId(rowId: string | undefined): string | null {
+  if (!rowId?.startsWith("event-")) return null;
+  return rowId.slice("event-".length);
+}
+
 function hasNoteJournal(row: DrawerActivityItem): boolean {
   return !!(row.noteAdded?.trim() || row.noteRemoved?.trim());
 }
@@ -437,7 +446,7 @@ function ActivityTimelineRow({
                         afspilleren midt i afspilning — src-skift håndteres inde i afspilleren. */}
                     <LeadRecordingPlayer
                       src={row.recordingUrl}
-                      eventId={row.id}
+                      eventId={recordingEventId(row.id)}
                       durationSecondsHint={row.durationSeconds}
                       variant="default"
                     />

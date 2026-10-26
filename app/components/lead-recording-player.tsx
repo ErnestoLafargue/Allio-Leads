@@ -35,6 +35,10 @@ type Props = {
  * `playbackSrc` fryses mens der spilles, så Telnyx-sync/webhook der skifter
  * `recordingUrl` (Telnyx → Blob) ikke genstarter `<audio>` midt i — det
  * blokerede ellers `play()` uden ny bruger-gesture og stoppede efter få sekunder.
+ *
+ * En vagthund holder øje med, at tiden faktisk går, mens der spilles. Står den stille
+ * (mixet suspenderet, hentningen hængt eller forbindelsen tabt), genoptages afspilningen
+ * fra samme sted — om nødvendigt uden mix, så lyden aldrig bare stopper.
  */
 export function LeadRecordingPlayer({
   src,
@@ -53,7 +57,6 @@ export function LeadRecordingPlayer({
   );
   const [current, setCurrent] = useState(0);
   const [playing, setPlaying] = useState(false);
-  const [buffering, setBuffering] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   const playingRef = useRef(false);
@@ -61,7 +64,13 @@ export function LeadRecordingPlayer({
     playingRef.current = playing;
   }, [playing]);
 
-  const mixCapable = supportsMonoPlayback(playbackSrc);
+  /** Sat når mixet ikke kunne holdes i gang — afspil derefter uden Web Audio. */
+  const [mixFailed, setMixFailed] = useState(false);
+  const mixCapable = !mixFailed && supportsMonoPlayback(playbackSrc);
+  /** Position der skal fortsættes fra, når <audio> er genindlæst eller udskiftet. */
+  const resumeAtRef = useRef<number | null>(null);
+  const lastGoodTimeRef = useRef(0);
+  const networkRetriesRef = useRef(0);
   /**
    * Same-origin proxy (`/api/.../audio`) kræver session-cookie.
    * `crossOrigin="anonymous"` sender IKKE cookies → 401 → «Kunne ikke indlæse lydfilen».
@@ -105,7 +114,6 @@ export function LeadRecordingPlayer({
     }
     pendingSrcRef.current = null;
     setPlaybackSrc(resolvedSrc);
-    setBuffering(false);
     setError(null);
     setCurrent(0);
     if (typeof durationSecondsHint === "number" && durationSecondsHint > 0) {
@@ -120,7 +128,6 @@ export function LeadRecordingPlayer({
     if (!pending || pending === playbackSrc) return;
     pendingSrcRef.current = null;
     setPlaybackSrc(pending);
-    setBuffering(false);
     setError(null);
   }, [playbackSrc]);
 
@@ -131,12 +138,30 @@ export function LeadRecordingPlayer({
       setDuration(el.duration);
     }
     setError(null);
+    const resumeAt = resumeAtRef.current;
+    if (resumeAt != null) {
+      resumeAtRef.current = null;
+      if (resumeAt > 0) el.currentTime = resumeAt;
+      if (el.paused) {
+        void el.play().catch(() => setPlaying(false));
+      }
+    }
   }, []);
 
   const onTime = useCallback(() => {
     const el = audioRef.current;
     if (!el) return;
     setCurrent(el.currentTime);
+    if (el.currentTime > 0) lastGoodTimeRef.current = el.currentTime;
+  }, []);
+
+  /** Genindlæs filen og fortsæt fra `at` (fx efter tabt forbindelse midt i en lang fil). */
+  const reloadAt = useCallback((el: HTMLAudioElement, at: number) => {
+    resumeAtRef.current = at;
+    el.load();
+    void el.play().catch(() => {
+      /* onMeta forsøger igen, når metadata er hentet */
+    });
   }, []);
 
   const onEnded = useCallback(() => {
@@ -162,16 +187,17 @@ export function LeadRecordingPlayer({
   const onPlay = useCallback(() => {
     setPlaying(true);
     setError(null);
+    // Afspilning kan også startes uden om knappen (genoptag efter buffer, medietaster) —
+    // mixet skal altid køre, ellers står lyden stille.
+    mixRef.current?.resume();
   }, []);
 
   const onCanPlay = useCallback(() => {
-    setBuffering(false);
     setError(null);
   }, []);
 
   /** Ved buffer-hug: prøv at genoptage hvis brugeren stadig forventer afspilning. */
   const onWaitingOrStalled = useCallback(() => {
-    if (playingRef.current) setBuffering(true);
     if (!playingRef.current) return;
     const el = audioRef.current;
     if (!el || el.ended) return;
@@ -194,6 +220,13 @@ export function LeadRecordingPlayer({
   }, [src, eventId]);
 
   const onErr = useCallback(() => {
+    // Forbindelsen tabt midt i afspilning: hent igen og fortsæt fra samme sted.
+    const el = audioRef.current;
+    if (el && playingRef.current && lastGoodTimeRef.current > 0 && networkRetriesRef.current < 3) {
+      networkRetriesRef.current += 1;
+      reloadAt(el, lastGoodTimeRef.current);
+      return;
+    }
     const id = eventId?.trim();
     if (id && isVercelBlobPlaybackUrl(playbackSrc) && !recoveringRef.current) {
       recoveringRef.current = true;
@@ -208,7 +241,6 @@ export function LeadRecordingPlayer({
           if (res.ok && url && url !== playbackSrc) {
             setOverrideSrc(url);
             setError(null);
-            setBuffering(false);
             setPlaying(false);
             return;
           }
@@ -216,15 +248,68 @@ export function LeadRecordingPlayer({
           /* vis fejlen nedenfor */
         }
         setError("Kunne ikke hente lydfilen.");
-        setBuffering(false);
         setPlaying(false);
       })();
       return;
     }
     setError("Kunne ikke hente lydfilen.");
-    setBuffering(false);
     setPlaying(false);
-  }, [eventId, playbackSrc]);
+  }, [eventId, playbackSrc, reloadAt]);
+
+  /**
+   * Vagthund: mens der spilles, skal tiden gå. Står den stille med data i bufferen, er
+   * mixet gået i stå → start det igen, og hjælper det ikke, skift til afspilning uden mix
+   * (nyt <audio>, samme position). Står den stille uden data, er hentningen hængt → hent
+   * igen fra samme sted.
+   */
+  useEffect(() => {
+    if (!playing) return;
+    let lastT = -1;
+    let stuckTicks = 0;
+    const id = window.setInterval(() => {
+      const el = audioRef.current;
+      if (!el || el.paused || el.ended || el.seeking) {
+        stuckTicks = 0;
+        return;
+      }
+      const t = el.currentTime;
+      if (t !== lastT) {
+        lastT = t;
+        stuckTicks = 0;
+        networkRetriesRef.current = 0;
+        return;
+      }
+      stuckTicks += 1;
+      if (el.readyState < HTMLMediaElement.HAVE_FUTURE_DATA) {
+        if (stuckTicks >= 8) {
+          stuckTicks = 0;
+          reloadAt(el, t);
+        }
+        return;
+      }
+      if (stuckTicks === 2) {
+        mixRef.current?.resume();
+      } else if (stuckTicks >= 4 && mixRef.current) {
+        stuckTicks = 0;
+        resumeAtRef.current = t;
+        mixRef.current.close();
+        mixRef.current = null;
+        setMixFailed(true);
+      } else if (stuckTicks >= 6) {
+        stuckTicks = 0;
+        reloadAt(el, t);
+      }
+    }, 1000);
+    return () => window.clearInterval(id);
+  }, [playing, reloadAt]);
+
+  /** Efter skift til afspilning uden mix: det nye <audio> fortsætter, hvor det gamle stod. */
+  useEffect(() => {
+    if (!mixFailed) return;
+    const el = audioRef.current;
+    if (!el || resumeAtRef.current == null) return;
+    void el.play().catch(() => setPlaying(false));
+  }, [mixFailed]);
 
   const togglePlay = useCallback(() => {
     const el = audioRef.current;
@@ -298,9 +383,6 @@ export function LeadRecordingPlayer({
         <span className="min-w-[6.5rem] font-mono text-xs text-stone-700 tabular-nums">
           {formatClock(current)} / {formatClock(total > 0 ? total : durationSecondsHint ?? 0)}
         </span>
-        {buffering && !error ? (
-          <span className="text-xs text-stone-500">Henter videre…</span>
-        ) : null}
       </div>
       <div className="mt-2 flex items-center gap-2">
         <input
