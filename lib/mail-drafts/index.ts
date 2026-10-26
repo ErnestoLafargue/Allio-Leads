@@ -49,7 +49,7 @@ import { clientEditionMailDraft } from "./client-edition-mail";
 import { growthOverviewMailDraft } from "./growth-overview-mail";
 import { reactivationMailDraft } from "./reactivation-mail";
 
-export const DEFAULT_MAIL_DRAFT_ID = clientEditionMailDraft.id;
+export const DEFAULT_MAIL_DRAFT_ID = growthOverviewMailDraft.id;
 
 export const MAIL_DRAFTS: MailDraft[] = [
   { id: EMPTY_DRAFT_ID, label: "Tom mail", subject: "", message: "" },

@@ -144,7 +144,7 @@ Mere omsætning.
   color:#E5DADC;">
 Genaktivering, fastholdelse, mersalg og anmeldelser
 – fire områder, der tilsammen typisk løfter den
-årlige omsætning med omkring 17 %.
+årlige omsætning og skaber flere kunder i kalenderen.
 </p>
 
 <div style="height:1px;background:#876B75;"></div>
