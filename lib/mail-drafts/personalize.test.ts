@@ -70,3 +70,24 @@ describe("Klinik vækst mail", () => {
     expect(html).toContain("integreres direkte med jeres bookingsystem,");
   });
 });
+
+describe("Klinik vækst mail – engelsk", () => {
+  it("bruger engelsk hilsen og fallbacks", async () => {
+    const { GROWTH_OVERVIEW_EN_MESSAGE } = await import("./growth-overview-mail-en");
+    const filled = personalizeMailDraft(GROWTH_OVERVIEW_EN_MESSAGE, {
+      contactName: "Sofie",
+      companyName: "Klinik Glow",
+      bookingSystem: "Gecko Booking",
+      sender: { name: "Ernesto", email: "ernesto@local" },
+    });
+    expect(filled).toContain("Hi Sofie,");
+    expect(filled).toContain("integrates directly with Gecko Booking,");
+    expect(filled).toContain("Ernesto Frank Lafargue");
+    expect(filled).not.toContain("{{");
+
+    const empty = personalizeMailDraft(GROWTH_OVERVIEW_EN_MESSAGE, {});
+    expect(empty).toContain("Hi,");
+    expect(empty).toContain("<strong>your clinic</strong>");
+    expect(empty).toContain("integrates directly with your booking system,");
+  });
+});
