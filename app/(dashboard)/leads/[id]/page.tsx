@@ -1115,6 +1115,7 @@ function LeadDetailInner() {
         draftContext={{
           contactName: meetingContactName,
           companyName,
+          bookingSystem,
           sender: session?.user,
         }}
         saving={mailSending}
