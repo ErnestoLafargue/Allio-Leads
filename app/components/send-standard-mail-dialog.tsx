@@ -4,6 +4,7 @@ import { useEffect, useState } from "react";
 import {
   ADAM_FOCUS_DRAFT_ID,
   CLIENT_EDITION_DRAFT_ID,
+  GROWTH_OVERVIEW_DRAFT_ID,
   DEFAULT_MAIL_DRAFT_ID,
   EMPTY_DRAFT_ID,
   MAIL_DRAFTS,
@@ -50,12 +51,14 @@ export function SendStandardMailDialog({
 
   const contactName = draftContext?.contactName ?? "";
   const companyName = draftContext?.companyName ?? "";
+  const bookingSystem = draftContext?.bookingSystem ?? "";
   const senderName = draftContext?.sender?.name ?? "";
   const senderEmail = draftContext?.sender?.email ?? "";
   const personalize = (raw: string) =>
     personalizeMailDraft(raw, {
       contactName,
       companyName,
+      bookingSystem,
       sender: { name: senderName, email: senderEmail },
     });
 
@@ -69,7 +72,7 @@ export function SendStandardMailDialog({
     setMessageMode("preview");
     // personalize afhænger kun af de primitive værdier herunder.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [open, defaultTo, defaultSubject, defaultMessage, contactName, companyName, senderName, senderEmail]);
+  }, [open, defaultTo, defaultSubject, defaultMessage, contactName, companyName, bookingSystem, senderName, senderEmail]);
 
   if (!open) return null;
 
@@ -206,6 +209,7 @@ export function SendStandardMailDialog({
               <option value={EMPTY_DRAFT_ID}>Tom mail</option>
               <optgroup label="Klinikker">
                 <option value={CLIENT_EDITION_DRAFT_ID}>Klinik intro mail</option>
+                <option value={GROWTH_OVERVIEW_DRAFT_ID}>Klinik vækst mail (4 områder)</option>
                 <option value={ADAM_FOCUS_DRAFT_ID}>Adam Fokus Mail</option>
                 <option value={REACTIVATION_DRAFT_ID}>Genaktiverings mail</option>
               </optgroup>

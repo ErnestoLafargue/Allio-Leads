@@ -48,3 +48,25 @@ describe("personalizeMailDraft", () => {
     expect(html).toContain("<strong>jeres klinik</strong>");
   });
 });
+
+describe("Klinik vækst mail", () => {
+  it("indsætter bookingsystemet fra leadet", async () => {
+    const { GROWTH_OVERVIEW_MESSAGE } = await import("./growth-overview-mail");
+    const html = personalizeMailDraft(GROWTH_OVERVIEW_MESSAGE, {
+      contactName: "Sofie",
+      companyName: "Klinik Glow",
+      bookingSystem: "Gecko Booking",
+      sender: { name: "Mads Jensen", email: "mads@local" },
+    });
+    expect(html).toContain("integreres direkte med Gecko Booking,");
+    expect(html).toContain("Hej Sofie,");
+    expect(html).toContain("mailto:hej@allio.dk");
+    expect(html).not.toContain("{{");
+  });
+
+  it("falder tilbage til «jeres bookingsystem»", async () => {
+    const { GROWTH_OVERVIEW_MESSAGE } = await import("./growth-overview-mail");
+    const html = personalizeMailDraft(GROWTH_OVERVIEW_MESSAGE, {});
+    expect(html).toContain("integreres direkte med jeres bookingsystem,");
+  });
+});

@@ -4,6 +4,7 @@ export const MAIL_PLACEHOLDERS = {
   companyName: "{{KLINIKNAVN}}",
   senderName: "{{AFSENDER_NAVN}}",
   senderEmail: "{{AFSENDER_EMAIL}}",
+  bookingSystem: "{{BOOKINGSYSTEM}}",
 } as const;
 
 export type MailSenderUser = {
@@ -17,6 +18,8 @@ export type MailDraftContext = {
   contactName?: string;
   /** "Virksomhedsnavn" på leadet. */
   companyName?: string;
+  /** "Bookingsystem" på leadet, fx «Gecko Booking». */
+  bookingSystem?: string;
   sender?: MailSenderUser | null;
 };
 
@@ -61,11 +64,13 @@ function escapeHtml(v: string): string {
 export function personalizeMailDraft(message: string, ctx: MailDraftContext): string {
   const contactName = ctx.contactName?.trim() ?? "";
   const companyName = ctx.companyName?.trim() ?? "";
+  const bookingSystem = ctx.bookingSystem?.trim() ?? "";
   const values: Record<string, string> = {
     [MAIL_PLACEHOLDERS.greeting]: contactName ? `Hej ${escapeHtml(contactName)},` : "Hej,",
     [MAIL_PLACEHOLDERS.companyName]: companyName ? escapeHtml(companyName) : "jeres klinik",
     [MAIL_PLACEHOLDERS.senderName]: escapeHtml(mailSenderName(ctx.sender)),
     [MAIL_PLACEHOLDERS.senderEmail]: mailSenderEmail(ctx.sender),
+    [MAIL_PLACEHOLDERS.bookingSystem]: bookingSystem ? escapeHtml(bookingSystem) : "jeres bookingsystem",
   };
   let out = message;
   for (const [placeholder, value] of Object.entries(values)) {
