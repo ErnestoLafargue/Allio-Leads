@@ -366,3 +366,47 @@ describe("sortLeadsByActivePostalQueue", () => {
     expect(order.indexOf("low-postal-many")).toBe(order.length - 1);
   });
 });
+
+describe("bookingsystem-filter", () => {
+  const view: ActiveCampaignQueueViewV1 = {
+    ...EMPTY_ACTIVE_CAMPAIGN_QUEUE_VIEW,
+    bookingSystemEnabled: true,
+    selectedBookingSystems: ["Planway", ""],
+  };
+  const lead = (bookingSystem: string | null | undefined) => ({
+    id: "1",
+    industry: "",
+    customFields: "{}",
+    meetingScheduledFor: null,
+    bookingSystem,
+  });
+
+  it("matcher valgte systemer uanset store/små bogstaver og «intet bookingsystem»", () => {
+    expect(leadMatchesActiveCampaignQueueView(lead("planway "), "{}", view)).toBe(true);
+    expect(leadMatchesActiveCampaignQueueView(lead(""), "{}", view)).toBe(true);
+    expect(leadMatchesActiveCampaignQueueView(lead(undefined), "{}", view)).toBe(true);
+    expect(leadMatchesActiveCampaignQueueView(lead("Gecko Booking"), "{}", view)).toBe(false);
+  });
+
+  it("tom valgliste giver 0 træf og tæller som aktivt filter", () => {
+    const empty = { ...view, selectedBookingSystems: [] };
+    expect(hasActiveQueueViewConstraints(empty)).toBe(true);
+    expect(leadMatchesActiveCampaignQueueView(lead("Planway"), "{}", empty)).toBe(false);
+  });
+
+  it("gemmes og læses igen (parse)", () => {
+    const parsed = parseActiveCampaignQueueView(JSON.stringify(view));
+    expect(parsed.bookingSystemEnabled).toBe(true);
+    expect(parsed.selectedBookingSystems).toEqual(["Planway", ""]);
+    expect(parsed.filterMeetingStart).toBe(true);
+  });
+
+  it("ældre gemte views uden feltet er uændrede", () => {
+    const parsed = parseActiveCampaignQueueView(
+      JSON.stringify({ version: 1, companyTypeEnabled: false, startdateEnabled: false, industryEnabled: false }),
+    );
+    expect(parsed.bookingSystemEnabled).toBe(false);
+    expect(parsed.selectedBookingSystems).toEqual([]);
+    expect(hasActiveQueueViewConstraints(parsed)).toBe(false);
+  });
+});

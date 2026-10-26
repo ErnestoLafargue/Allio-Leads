@@ -115,13 +115,13 @@ async function fetchAllTelnyxPages(apiKey: string, path: string): Promise<Record
   }
 }
 
-async function fetchAllRecordings(apiKey: string, fromIso: string | null): Promise<TelnyxRecording[]> {
+async function fetchAllRecordings(apiKey: string, fromIso: string | null, maxPages = Infinity): Promise<TelnyxRecording[]> {
   const byId = new Map<string, TelnyxRecording>();
   for (let page = 1; ; page++) {
     const res = await listTelnyxRecordings({ apiKey, pageNumber: page, pageSize: 250, fromIso });
     if (!res.ok) throw new Error(res.message);
     for (const r of res.recordings) byId.set(r.id, r);
-    if (res.recordings.length === 0 || page >= (res.page.totalPages ?? page)) {
+    if (res.recordings.length === 0 || page >= (res.page.totalPages ?? page) || page >= maxPages) {
       return [...byId.values()];
     }
   }
@@ -131,6 +131,12 @@ export async function importCallRecordings(params: {
   apiKey: string;
   /** Kun optagelser oprettet fra dette tidspunkt (afstemning). Udeladt = alle. */
   fromIso?: string | null;
+  /**
+   * Hent i stedet de nyeste optagelser uden tidsfilter (Telnyx sorterer nyeste først): så mange
+   * sider à 250. Telnyx' created_at-filter kan i perioder udelade nye optagelser — dette gør ikke.
+   * fromIso bruges stadig til at afgrænse opkaldsforsøg ved matchning.
+   */
+  newestPages?: number;
   concurrency?: number;
   log?: (line: string) => void;
 }): Promise<CallRecordingImportStats> {
@@ -148,7 +154,9 @@ export async function importCallRecordings(params: {
   };
 
   const [recordings, connections, phoneNumbers] = await Promise.all([
-    fetchAllRecordings(params.apiKey, params.fromIso ?? null),
+    params.newestPages
+      ? fetchAllRecordings(params.apiKey, null, params.newestPages)
+      : fetchAllRecordings(params.apiKey, params.fromIso ?? null),
     fetchAllTelnyxPages(params.apiKey, "connections"),
     fetchAllTelnyxPages(params.apiKey, "phone_numbers"),
   ]);

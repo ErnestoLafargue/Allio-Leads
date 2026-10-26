@@ -30,6 +30,8 @@ export type LeadKundeNoterBookingProps = {
   fieldConfigJson: string;
   companyName: string;
   onCompanyName: (v: string) => void;
+  bookingSystem: string;
+  onBookingSystem: (v: string) => void;
   phone: string;
   onPhone: (v: string) => void;
   privatePhone: string;
@@ -73,6 +75,8 @@ export function LeadKundeNoterBooking({
   fieldConfigJson,
   companyName,
   onCompanyName,
+  bookingSystem,
+  onBookingSystem,
   phone,
   onPhone,
   privatePhone,
@@ -138,6 +142,8 @@ export function LeadKundeNoterBooking({
               fieldConfigJson={fieldConfigJson}
               companyName={companyName}
               onCompanyName={onCompanyName}
+              bookingSystem={bookingSystem}
+              onBookingSystem={onBookingSystem}
               phone={phone}
               onPhone={onPhone}
               privatePhone={privatePhone}

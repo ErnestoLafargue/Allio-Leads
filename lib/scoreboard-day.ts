@@ -6,7 +6,8 @@
  * Kilder:
  *  - Kontakter/samtaler/taletid: DialerCallLog + CALL_ATTEMPT (se leaderboard-telnyx.ts)
  *  - Møder: LeadOutcomeLog-episoder (se lead-outcome-log.ts)
- *  - Login-/dialer-tid: UserPresenceDay + UserCampaignPresenceDay (heartbeats)
+ *  - Login-/kampagnetid: UserPresenceDay + UserCampaignPresenceDay (heartbeats)
+ *  - Linjetid (ring+tale): ringSeconds + talkLineSeconds på UserCampaignPresenceDay
  */
 
 import { prisma } from "@/lib/prisma";
@@ -34,12 +35,14 @@ export type ScoreboardCampaignSlice = {
   meetings: number;
   conversations: number;
   contacts: number;
-  /** Forbundet taletid i sekunder */
+  /** Forbundet taletid i sekunder (alle connected, også under 20 s) */
   talkSeconds: number;
-  /** Tid på kampagnens arbejdsside (dialer åben) i sekunder */
+  /** Tid på kampagnens arbejdsside (dialer åben) i sekunder — skrivebordstid */
   dialerSeconds: number;
   /** true = `dialerSeconds` er estimeret fra aktivitet (dag uden heartbeat-måling) */
   dialerSecondsEstimated: boolean;
+  /** Produktiv linjetid: ring + tale på sælgerens egen linje */
+  lineSeconds: number;
   /** Gns. taletid pr. talk-baseret samtale, sekunder */
   avgConversationSeconds: number;
   /** Møder pr. samtale i procent */
@@ -61,6 +64,8 @@ export type ScoreboardUserRow = {
   dialerSeconds: number;
   /** true = `dialerSeconds` er estimeret fra aktivitet (dag uden heartbeat-måling) */
   dialerSecondsEstimated: boolean;
+  /** Produktiv linjetid: ring + tale på sælgerens egen linje (ikke estimeret bagud) */
+  lineSeconds: number;
   avgConversationSeconds: number;
   buyRatePct: number;
   campaigns: ScoreboardCampaignSlice[];
@@ -157,7 +162,7 @@ export async function computeScoreboardForDay(dayKey: string): Promise<Scoreboar
       }),
       prisma.userCampaignPresenceDay.findMany({
         where: { dayKey },
-        select: { userId: true, campaignId: true, dialerSeconds: true },
+        select: { userId: true, campaignId: true, dialerSeconds: true, ringSeconds: true, talkLineSeconds: true },
       }),
     ]);
 
@@ -268,6 +273,7 @@ export async function computeScoreboardForDay(dayKey: string): Promise<Scoreboar
       talkSeconds: 0,
       dialerSeconds: 0,
       dialerSecondsEstimated: false,
+      lineSeconds: 0,
       avgConversationSeconds: 0,
       buyRatePct: 0,
     };
@@ -299,18 +305,20 @@ export async function computeScoreboardForDay(dayKey: string): Promise<Scoreboar
       slice.contacts = cTelnyx.contacts.get(uid) ?? 0;
       slice.talkSeconds = cTelnyx.talkSeconds.get(uid) ?? 0;
       slice.avgConversationSeconds = avgSeconds(
-        slice.talkSeconds,
+        cTelnyx.qualifiedTalkSeconds.get(uid) ?? 0,
         cTelnyx.conversations.get(uid) ?? 0,
       );
       slice.buyRatePct = buyRatePct(slice.meetings, slice.conversations);
     }
   }
 
-  // Dialer-tid pr. kampagne — også for kampagner uden anden aktivitet den dag.
+  // Skrivebords- og linjetid pr. kampagne — også for kampagner uden anden aktivitet den dag.
   for (const p of campaignPresenceRows) {
-    if (p.dialerSeconds <= 0) continue;
+    const line = (p.ringSeconds ?? 0) + (p.talkLineSeconds ?? 0);
+    if (p.dialerSeconds <= 0 && line <= 0) continue;
     const slice = sliceFor(p.userId, p.campaignId);
-    slice.dialerSeconds = p.dialerSeconds;
+    if (p.dialerSeconds > 0) slice.dialerSeconds = p.dialerSeconds;
+    if (line > 0) slice.lineSeconds = line;
   }
 
   // Uden målt heartbeat-tid (dage før presence-målingen, eller kampagner hvor
@@ -379,6 +387,7 @@ export async function computeScoreboardForDay(dayKey: string): Promise<Scoreboar
       const conversations = conversationTallies.get(u.id) ?? 0;
       const contacts = telnyxTallies.contacts.get(u.id) ?? 0;
       const talkSeconds = telnyxTallies.talkSeconds.get(u.id) ?? 0;
+      const qualifiedTalkSeconds = telnyxTallies.qualifiedTalkSeconds.get(u.id) ?? 0;
       const campaignSlices = [...(slicesByUser.get(u.id)?.values() ?? [])]
         .map((s) => ({
           ...s,
@@ -398,6 +407,7 @@ export async function computeScoreboardForDay(dayKey: string): Promise<Scoreboar
       // Dialer-tid = summen af kampagne-udsnittene (målt hvor vi har heartbeats,
       // ellers estimeret) — så totalen altid stemmer med de udfoldede rækker.
       const dialerSeconds = campaignSlices.reduce((sum, s) => sum + s.dialerSeconds, 0);
+      const lineSeconds = campaignSlices.reduce((sum, s) => sum + s.lineSeconds, 0);
 
       // Man kan ikke ringe uden at være logget ind: et estimeret login-tal må
       // aldrig ligge under den (også estimerede) dialer-tid.
@@ -419,8 +429,9 @@ export async function computeScoreboardForDay(dayKey: string): Promise<Scoreboar
         dialerSecondsEstimated: campaignSlices.some(
           (s) => s.dialerSecondsEstimated && s.dialerSeconds > 0,
         ),
+        lineSeconds,
         avgConversationSeconds: avgSeconds(
-          talkSeconds,
+          qualifiedTalkSeconds,
           telnyxTallies.conversations.get(u.id) ?? 0,
         ),
         buyRatePct: buyRatePct(meetings, conversations),

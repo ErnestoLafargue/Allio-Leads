@@ -10,6 +10,7 @@ import {
   type MeetingContactFieldErrors,
 } from "@/lib/meeting-contact-validation";
 import type { LeadStatus } from "@/lib/lead-status";
+import { defaultBookingSystemForCampaign } from "@/lib/booking-system";
 import {
   MEETING_TYPE_ONLINE,
   type MeetingType,
@@ -46,6 +47,9 @@ function NewLeadPageInner() {
   const [fieldConfigJson, setFieldConfigJson] = useState("{}");
   const [campaignName, setCampaignName] = useState("");
   const [companyName, setCompanyName] = useState("");
+  const [bookingSystem, setBookingSystem] = useState("");
+  /** Sælgeren har selv skrevet i Bookingsystem — kampagneskift må ikke overskrive. */
+  const bookingSystemTouchedRef = useRef(false);
   const [phone, setPhone] = useState("");
   const [privatePhone, setPrivatePhone] = useState("");
   const [email, setEmail] = useState("");
@@ -104,6 +108,14 @@ function NewLeadPageInner() {
       const c = await res.json();
       setFieldConfigJson(c.fieldConfig ?? "{}");
       setCampaignName(c.name ?? "");
+      if (!bookingSystemTouchedRef.current) {
+        setBookingSystem(
+          defaultBookingSystemForCampaign({
+            name: typeof c.name === "string" ? c.name : "",
+            isSystemCampaign: c.isSystemCampaign === true,
+          }),
+        );
+      }
     }
     void load();
     return () => {
@@ -153,6 +165,7 @@ function NewLeadPageInner() {
     const payload = {
       campaignId,
       companyName: trimmedCompanyName,
+      bookingSystem: bookingSystem.trim(),
       phone,
       privatePhone,
       email,
@@ -318,6 +331,11 @@ function NewLeadPageInner() {
             fieldConfigJson={fieldConfigJson}
             companyName={companyName}
             onCompanyName={setCompanyName}
+            bookingSystem={bookingSystem}
+            onBookingSystem={(v) => {
+              bookingSystemTouchedRef.current = true;
+              setBookingSystem(v);
+            }}
             phone={phone}
             onPhone={setPhone}
             privatePhone={privatePhone}

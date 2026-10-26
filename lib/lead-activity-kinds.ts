@@ -24,6 +24,8 @@ export const LEAD_ACTIVITY_KIND = {
   MEETING_BOOKER_CHANGED: "MEETING_BOOKER_CHANGED",
   /** Tidligere møde arkiveret (fx ved genbooking) */
   MEETING_ARCHIVED: "MEETING_ARCHIVED",
+  /** Udgående standardmail sendt fra lead/kampagne */
+  MAIL_SENT: "MAIL_SENT",
 } as const;
 
 export type LeadActivityKind = (typeof LEAD_ACTIVITY_KIND)[keyof typeof LEAD_ACTIVITY_KIND];

@@ -94,6 +94,7 @@ export async function claimDispatchLeadBatch(
       dialFailoverPendingE164: true,
       companyName: true,
       industry: true,
+      bookingSystem: true,
       customFields: true,
       meetingScheduledFor: true,
       postalCode: true,
@@ -119,6 +120,7 @@ export async function claimDispatchLeadBatch(
       meetingScheduledFor: r.meetingScheduledFor,
       postalCode: r.postalCode ?? "",
       address: r.address ?? "",
+      bookingSystem: r.bookingSystem,
     })),
     fieldConfigJson,
     viewRaw,
@@ -137,6 +139,7 @@ export async function claimDispatchLeadBatch(
     meetingScheduledFor: r.meetingScheduledFor,
     postalCode: r.postalCode ?? "",
     address: r.address ?? "",
+    bookingSystem: r.bookingSystem,
   }));
 
   const outcomeToday = await getLeadIdsWithOutcomeLogToday(pool.map((p) => p.id));
@@ -248,6 +251,7 @@ export async function listPowerDialerCandidates(
       privatePhone: true,
       dialFailoverPendingE164: true,
       industry: true,
+      bookingSystem: true,
       customFields: true,
       meetingScheduledFor: true,
       postalCode: true,

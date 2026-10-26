@@ -235,7 +235,7 @@ export async function loadSortedNewLeadsForCampaign(opts: {
       campaign.systemCampaignType === "rebooking"
         ? {
             campaignId: campaign.id,
-            NOT: { status: { in: ["NOT_INTERESTED", "UNQUALIFIED"] } },
+            NOT: { status: { in: ["NOT_INTERESTED", "UNQUALIFIED", "DELETED"] } },
             OR: [
               { status: "MEETING_BOOKED", meetingOutcomeStatus: MEETING_OUTCOME_REBOOK },
               newInDialerPool,
@@ -264,6 +264,7 @@ export async function loadSortedNewLeadsForCampaign(opts: {
       privatePhone: true,
       meetingScheduledFor: true,
       industry: true,
+      bookingSystem: true,
       postalCode: true,
       address: true,
     },
@@ -283,6 +284,7 @@ export async function loadSortedNewLeadsForCampaign(opts: {
     meetingScheduledFor: r.meetingScheduledFor,
     postalCode: r.postalCode,
     address: r.address,
+    bookingSystem: r.bookingSystem,
     status: r.status,
     meetingOutcomeStatus: r.meetingOutcomeStatus,
     importedAt: r.importedAt,

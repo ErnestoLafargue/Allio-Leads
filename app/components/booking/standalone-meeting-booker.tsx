@@ -8,6 +8,11 @@ import { MeetingContactFields } from "@/app/components/booking/meeting-contact-f
 import { buildLeadDetailHref, KNOWN_LEAD_SOURCES } from "@/lib/lead-navigation";
 import { isMeetingNotesSufficient } from "@/lib/meeting-notes-quality";
 import { MeetingNotesRequiredDialog } from "@/app/components/meeting-notes-required-dialog";
+import {
+  MEETING_TYPE_ONLINE,
+  type MeetingType,
+} from "@/lib/meeting-type";
+import { validateMeetingContactFields } from "@/lib/meeting-contact-validation";
 
 type Props = {
   className?: string;
@@ -24,6 +29,8 @@ export function StandaloneMeetingBooker({ className = "", onBooked }: Props) {
   const [meetingContactName, setMeetingContactName] = useState("");
   const [meetingContactEmail, setMeetingContactEmail] = useState("");
   const [meetingContactPhonePrivate, setMeetingContactPhonePrivate] = useState("");
+  const [meetingType, setMeetingType] = useState<MeetingType>(MEETING_TYPE_ONLINE);
+  const [meetingAddress, setMeetingAddress] = useState("");
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [notesRequiredOpen, setNotesRequiredOpen] = useState(false);
@@ -48,16 +55,17 @@ export function StandaloneMeetingBooker({ className = "", onBooked }: Props) {
     const cn = meetingContactName.trim();
     const ce = meetingContactEmail.trim();
     const cp = meetingContactPhonePrivate.trim();
-    if (!company) {
-      setError("Udfyld virksomhedens navn.");
-      return;
-    }
-    if (!cn || !ce || !cp) {
-      setError("Udfyld navn, e-mail og privat telefon til mødekontakten.");
-      return;
-    }
-    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(ce)) {
-      setError("Ugyldig e-mail til mødekontakten.");
+    const type = detail.meetingType ?? meetingType;
+    const contactErr = validateMeetingContactFields(cn, ce, cp, company, {
+      meetingType: type,
+      meetingAddress,
+    });
+    if (contactErr) {
+      setError(
+        contactErr.address ??
+          contactErr.meetingCompany ??
+          "Udfyld navn, e-mail og privat telefon til mødekontakten.",
+      );
       return;
     }
     if (!isMeetingNotesSufficient(notes)) {
@@ -66,6 +74,7 @@ export function StandaloneMeetingBooker({ className = "", onBooked }: Props) {
     }
 
     setSubmitting(true);
+    setMeetingType(type);
     const res = await fetch("/api/meetings/book", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -75,6 +84,8 @@ export function StandaloneMeetingBooker({ className = "", onBooked }: Props) {
         meetingContactName: cn,
         meetingContactEmail: ce,
         meetingContactPhonePrivate: cp,
+        meetingType: type,
+        meetingAddress: meetingAddress.trim(),
         meetingScheduledFor: detail.localDateTimeISO,
         ...(detail.adminSkipBookingOverlap ? { adminSkipBookingOverlap: true } : {}),
       }),
@@ -121,6 +132,9 @@ export function StandaloneMeetingBooker({ className = "", onBooked }: Props) {
         onMeetingContactName={setMeetingContactName}
         onMeetingContactEmail={setMeetingContactEmail}
         onMeetingContactPhonePrivate={setMeetingContactPhonePrivate}
+        meetingType={meetingType}
+        meetingAddress={meetingAddress}
+        onMeetingAddress={setMeetingAddress}
       />
 
       <div>
@@ -136,6 +150,8 @@ export function StandaloneMeetingBooker({ className = "", onBooked }: Props) {
 
       <BookingPanel
         calendarUserId={calendarUserId}
+        meetingType={meetingType}
+        onMeetingTypeChange={setMeetingType}
         allowMeetingConfirm
         allowAdminAvailabilityOverride={isAdmin}
         isSubmitting={submitting}

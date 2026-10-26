@@ -4,6 +4,7 @@ import type { MeetingType } from "@/lib/meeting-type";
 /** Felter til PATCH /api/leads/:id fra kampagne-arbejdsformularen. */
 export type CampaignLeadFormSnapshot = {
   companyName: string;
+  bookingSystem: string;
   phone: string;
   privatePhone: string;
   email: string;
@@ -34,6 +35,7 @@ export function buildCampaignLeadPatchBody(
 ): Record<string, unknown> {
   const body: Record<string, unknown> = {
     companyName: s.companyName,
+    bookingSystem: s.bookingSystem,
     phone: s.phone,
     privatePhone: s.privatePhone,
     email: s.email,

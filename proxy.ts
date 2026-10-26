@@ -33,7 +33,7 @@ export async function proxy(request: NextRequest) {
     return NextResponse.redirect(new URL("/login", request.nextUrl.origin));
   }
   if (loggedIn && isLogin) {
-    return NextResponse.redirect(new URL("/leads", request.nextUrl.origin));
+    return NextResponse.redirect(new URL("/kampagner", request.nextUrl.origin));
   }
   return NextResponse.next();
 }

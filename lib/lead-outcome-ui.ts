@@ -8,6 +8,7 @@ export const OUTCOME_ORDER: LeadStatus[] = [
   "UNQUALIFIED",
   "MEETING_BOOKED",
   "NOT_HOME",
+  "DELETED",
 ];
 
 export function outcomeButtonClass(status: LeadStatus, active: boolean): string {
@@ -30,6 +31,8 @@ export function outcomeButtonClass(status: LeadStatus, active: boolean): string 
       return `${base} border-blue-600 bg-blue-300 text-blue-950 ring-2 ring-blue-500`;
     case "CALLBACK_SCHEDULED":
       return `${base} border-violet-600 bg-violet-300 text-violet-950 ring-2 ring-violet-500`;
+    case "DELETED":
+      return `${base} border-stone-800 bg-stone-800 text-white ring-2 ring-stone-500`;
     default:
       return `${base} border-stone-500 bg-stone-200`;
   }

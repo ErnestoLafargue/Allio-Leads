@@ -28,11 +28,19 @@ export async function POST(req: Request) {
   const leadId = typeof body?.leadId === "string" ? body.leadId.trim() : "";
   const campaignIdFromBody = typeof body?.campaignId === "string" ? body.campaignId.trim() : "";
   const isPowerSession = body?.voipApiContext === POWER_SESSION_CONTEXT;
+  const isMedlytSession = body?.voipApiContext === "medlyt_session";
   const voipApiContext = parseVoipApiContext(body);
 
   let mode: ReturnType<typeof normalizeCampaignDialMode>;
   let routingKey: string;
-  if (isPowerSession) {
+  if (isMedlytSession) {
+    if (session!.user.role !== "ADMIN") {
+      return NextResponse.json({ error: "Kun administrator" }, { status: 403 });
+    }
+    // Admin softphone til stille medlyt — ingen kampagne/lead påkrævet.
+    mode = "POWER_DIALER";
+    routingKey = sessionUserId;
+  } else if (isPowerSession) {
     if (!campaignIdFromBody) {
       return NextResponse.json({ error: "campaignId er påkrævet" }, { status: 400 });
     }
@@ -140,12 +148,12 @@ export async function POST(req: Request) {
     );
   }
 
-  if (isPowerSession && sharedFallback) {
+  if ((isPowerSession || isMedlytSession) && sharedFallback) {
     return NextResponse.json(
       {
         code: "TELNYX_PERSONAL_CREDENTIAL_REQUIRED",
         error:
-          "Power Dialer kræver en personlig Telnyx-konto til sælgeren. Provisionér under Administration → Telnyx.",
+          "Kræver en personlig Telnyx-konto. Provisionér under Administration → Telnyx.",
       },
       { status: 409 },
     );
@@ -260,8 +268,8 @@ export async function POST(req: Request) {
     );
   }
 
-  // Power Dialer: sælgerens WebRTC skal kunne ringes op via sip:gencred…@sip.telnyx.com.
-  const power = isPowerSession
+  // Power / Medlyt: WebRTC skal kunne ringes op via sip:gencred…@sip.telnyx.com.
+  const power = isPowerSession || isMedlytSession
     ? await ensurePowerDialerAgentTelnyx({ userId: sessionUserId, apiKey }).catch((err) => ({
         ok: false,
         sipUsername: null,
@@ -272,34 +280,6 @@ export async function POST(req: Request) {
   if (power && !power.ok) {
     console.error("[telnyx:webrtc-token] Power Dialer-klargøring fejlede", { message: power.message });
   }
-  // #region agent log
-  if (power) {
-    fetch("http://localhost:7723/ingest/7a50d2a1-e6f0-436c-8453-6828c3db5e26", {
-      method: "POST",
-      headers: { "Content-Type": "application/json", "X-Debug-Session-Id": "c1392e" },
-      body: JSON.stringify({
-        sessionId: "c1392e",
-        runId: "pre-fix",
-        hypothesisId: "B",
-        location: "app/api/telnyx/webrtc/token/route.ts:power",
-        message: "power klargoring",
-        data: {
-          ok: power.ok,
-          sipUriCallingEnabled: power.sipUriCallingEnabled,
-          hasSipUsername: Boolean(power.sipUsername),
-          powerMessage: power.message ?? null,
-        },
-        timestamp: Date.now(),
-      }),
-    }).catch(() => {});
-    console.warn("[dbg-c1392e] power-klargoring", {
-      ok: power.ok,
-      sipUriCallingEnabled: power.sipUriCallingEnabled,
-      hasSipUsername: Boolean(power.sipUsername),
-      powerMessage: power.message ?? null,
-    });
-  }
-  // #endregion
 
   if (token.ok && !sharedFallback && sessionUserId && telephonyCredentialId && !isPowerSession) {
     void ensureTelnyxCredentialConnectionIdCached({

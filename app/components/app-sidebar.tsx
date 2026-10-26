@@ -258,6 +258,7 @@ const SIDEBAR_SECTIONS: SidebarSection[] = [
     items: [
       { href: "/kampagner", label: "Dialer" },
       { href: "/kampagner/uddel", label: "Uddel kampagner", adminOnly: true },
+      { href: "/administration/medlyt", label: "Medlyt", adminOnly: true },
     ],
   },
   {

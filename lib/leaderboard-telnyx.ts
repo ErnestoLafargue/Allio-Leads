@@ -150,8 +150,10 @@ export type TelnyxLeaderboardTallies = {
   conversations: Map<string, number>;
   /** `${userId}\0${leadId}` for par med mindst én talk-baseret samtale — bruges til udfalds-fallback-dedup. */
   conversationPairs: Set<string>;
-  /** Samlet forbundet taletid (sekunder) pr. bruger over talk-baserede samtaler. */
+  /** Samlet forbundet taletid (sekunder) pr. bruger — alle connected sekunder, også under 20 s. */
   talkSeconds: Map<string, number>;
+  /** Taletid kun fra samtaler ≥ 20 s — bruges til gns. samtale. */
+  qualifiedTalkSeconds: Map<string, number>;
 };
 
 /**
@@ -185,7 +187,7 @@ export function tallyTelnyxLeaderboardMetrics(
     contactAttempts.push({ userId: uid, leadId: row.leadId, at: row.startedAt });
 
     const sec = dialerTalkSeconds(row);
-    if (sec !== null && sec >= LEADERBOARD_MIN_CONVERSATION_SECONDS) {
+    if (sec !== null && sec > 0) {
       const dedup = row.callSessionId?.trim() || row.callControlId;
       const pairKey = `${uid}\0${dedup}`;
       if (logConversationCounted.has(pairKey)) continue;
@@ -202,10 +204,7 @@ export function tallyTelnyxLeaderboardMetrics(
   for (const ev of activityRows) {
     if (ev.kind !== LEAD_ACTIVITY_KIND.CALL_ATTEMPT || !ev.userId) continue;
     contactAttempts.push({ userId: ev.userId, leadId: ev.leadId, at: ev.createdAt });
-    if (
-      typeof ev.durationSeconds === "number" &&
-      ev.durationSeconds >= LEADERBOARD_MIN_CONVERSATION_SECONDS
-    ) {
+    if (typeof ev.durationSeconds === "number" && ev.durationSeconds > 0) {
       conversationEvents.push({
         userId: ev.userId,
         leadId: ev.leadId,
@@ -245,13 +244,16 @@ export function tallyTelnyxLeaderboardMetrics(
   const conversations = new Map<string, number>();
   const conversationPairs = new Set<string>();
   const talkSeconds = new Map<string, number>();
+  const qualifiedTalkSeconds = new Map<string, number>();
   for (const c of collapsedConversations) {
+    talkSeconds.set(c.userId, (talkSeconds.get(c.userId) ?? 0) + c.seconds);
+    if (c.seconds < LEADERBOARD_MIN_CONVERSATION_SECONDS) continue;
     conversations.set(c.userId, (conversations.get(c.userId) ?? 0) + 1);
     conversationPairs.add(`${c.userId}\0${c.leadId}`);
-    talkSeconds.set(c.userId, (talkSeconds.get(c.userId) ?? 0) + c.seconds);
+    qualifiedTalkSeconds.set(c.userId, (qualifiedTalkSeconds.get(c.userId) ?? 0) + c.seconds);
   }
 
-  return { contacts, conversations, conversationPairs, talkSeconds };
+  return { contacts, conversations, conversationPairs, talkSeconds, qualifiedTalkSeconds };
 }
 
 /**

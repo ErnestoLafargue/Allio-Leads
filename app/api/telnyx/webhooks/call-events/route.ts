@@ -31,6 +31,7 @@ import {
   scheduleLeadRecordingSync,
   talkSecondsFromCallTimestamps,
 } from "@/lib/telnyx-recordings-auto-sync";
+import { bindAgentSessionFromTelnyxParties } from "@/lib/medlyt-bind-agent-leg";
 
 /** Sidste 2 cifre til logs — ikke fuldt nummer. */
 function maskPhoneTailForLog(raw: string | null | undefined): string {
@@ -149,6 +150,19 @@ export async function POST(req: Request) {
     return NextResponse.json({ ok: true, eventType, power: true });
   }
 
+  // Medlyt: bind sælger-session til call_control_id via SIP (to/from), så admin kan supervise.
+  if (
+    eventType === "call.initiated" ||
+    eventType === "call.answered" ||
+    eventType === "call.bridged"
+  ) {
+    await bindAgentSessionFromTelnyxParties({
+      callControlId,
+      to: payload.to,
+      from: payload.from,
+    }).catch(() => undefined);
+  }
+
   // State-transition håndtering
   switch (eventType) {
     case "call.initiated": {
@@ -175,7 +189,15 @@ export async function POST(req: Request) {
             userId: clientState.userId,
             campaignId: clientState.campaignId,
           },
-          data: { status: "talking" },
+          data: {
+            status: "talking",
+            // Bevar/sæt ben-id'er så Medlyt kan finde et supervise-mål under samtale.
+            ...(clientState.linkedCallControlId
+              ? { currentLeadCallControlId: clientState.linkedCallControlId }
+              : {}),
+            ...(callControlId ? { currentAgentCallControlId: callControlId } : {}),
+            ...(clientState.leadId ? { currentLeadId: clientState.leadId } : {}),
+          },
         });
       }
       // Click-to-call (kind=manual): ingen AMD, men agenten har eksplicit valgt at ringe
@@ -580,27 +602,23 @@ export async function POST(req: Request) {
         });
       }
 
-      // Kopiér optagelsen til Vercel Blob i baggrunden og opdatér URL når den er klar,
-      // så afspilning ikke afhænger af udløbende Telnyx-download-links.
+      // Kopiér til Vercel Blob synkront før webhook-svar — `after()` kørte ikke
+      // pålideligt på vores Node-host, så S3-URL'er (Expires=600) blev stående.
       // Skip hvis vi allerede har en Blob-kopi (undgår dubletter + URL-thrash).
       if (telnyxRecordingUrl && !existingBlobUrl) {
         const sidForBlob = sessionIdForRec;
-        after(() => {
-          void (async () => {
-            try {
-              const { playbackUrl, storedOnAllio } = await persistTelnyxRecordingToAllio({
-                telnyxMp3Url: telnyxRecordingUrl,
-                leadId,
-                callControlId,
-              });
-              if (!storedOnAllio || playbackUrl === telnyxRecordingUrl) return;
-              // Overskriv ikke hvis en anden sti allerede lagde Blob-URL ind.
-              const current = await prisma.leadActivityEvent.findFirst({
-                where: { leadId, telnyxCallLegId: callControlId },
-                select: { recordingUrl: true },
-              });
-              if (current?.recordingUrl && isVercelBlobUrl(current.recordingUrl)) return;
-
+        try {
+          const { playbackUrl, storedOnAllio } = await persistTelnyxRecordingToAllio({
+            telnyxMp3Url: telnyxRecordingUrl,
+            leadId,
+            callControlId,
+          });
+          if (storedOnAllio && playbackUrl !== telnyxRecordingUrl) {
+            const current = await prisma.leadActivityEvent.findFirst({
+              where: { leadId, telnyxCallLegId: callControlId },
+              select: { recordingUrl: true },
+            });
+            if (!(current?.recordingUrl && isVercelBlobUrl(current.recordingUrl))) {
               await prisma.leadActivityEvent.updateMany({
                 where: { leadId, telnyxCallLegId: callControlId },
                 data: { recordingUrl: playbackUrl },
@@ -619,11 +637,16 @@ export async function POST(req: Request) {
                   data: { recordingUrl: playbackUrl },
                 });
               }
-            } catch (err) {
-              console.error("[call-events] recording blob persist (after):", err);
             }
-          })();
-        });
+          } else {
+            console.warn("[call-events] recording blob persist skipped/failed", {
+              callControlIdSuffix: callControlId.length > 8 ? callControlId.slice(-8) : callControlId,
+              storedOnAllio,
+            });
+          }
+        } catch (err) {
+          console.error("[call-events] recording blob persist:", err);
+        }
       }
       break;
     }

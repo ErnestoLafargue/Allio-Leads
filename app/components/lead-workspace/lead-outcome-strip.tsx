@@ -43,6 +43,11 @@ export function LeadOutcomeStrip({
                 type="button"
                 onClick={() => onStatusChange(s)}
                 className={outcomeButtonClass(s, status === s)}
+                title={
+                  s === "DELETED"
+                    ? "Fjerner leadet fra kampagnekøen — sletter det ikke. Kommer først igen hvis du manuelt ændrer udfaldet."
+                    : undefined
+                }
               >
                 {LEAD_STATUS_LABELS[s]}
               </button>

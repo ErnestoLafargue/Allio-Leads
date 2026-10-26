@@ -1,5 +1,5 @@
 import type { LeadStatus } from "./lead-status";
-import { isLeadStatus } from "./lead-status";
+import { isDialerExcludedStatus, isLeadStatus } from "./lead-status";
 import type { CampaignDialMode } from "./dial-mode";
 import {
   MEETING_OUTCOME_REBOOK,
@@ -16,6 +16,7 @@ export const LEAD_QUEUE_ORDER: Record<LeadStatus, number> = {
   NOT_HOME: 2,
   NOT_INTERESTED: 3,
   UNQUALIFIED: 3,
+  DELETED: 3,
   MEETING_BOOKED: 4,
 };
 
@@ -30,8 +31,7 @@ export function queueRank(status: string): number {
  */
 export function isQueueEligibleStatus(status: string): boolean {
   return (
-    status !== "NOT_INTERESTED" &&
-    status !== "UNQUALIFIED" &&
+    !isDialerExcludedStatus(status) &&
     status !== "MEETING_BOOKED" &&
     status !== "VOICEMAIL" &&
     status !== "NOT_HOME" &&
@@ -41,14 +41,14 @@ export function isQueueEligibleStatus(status: string): boolean {
 
 /**
  * Genbook «Genbook møde» / reserve-next: kun «Ny» eller genbook-markeret møde (stadig booket) skal kunne trækkes som næste lead.
- * Ikke interesseret m.m. skal aldrig tilbage i opkaldskøen, men leadet forbinder på kampagne (ses i kampagne-layout).
+ * Ikke interesseret / ukvalificeret / slet m.m. skal aldrig tilbage i opkaldskøen, men leadet forbliver på kampagnen.
  */
 export function isLeadInRebookingDialerPool(row: {
   status: string;
   meetingOutcomeStatus: string | null;
 }): boolean {
   const st = String(row.status ?? "").trim().toUpperCase();
-  if (st === "NOT_INTERESTED" || st === "UNQUALIFIED") return false;
+  if (isDialerExcludedStatus(st)) return false;
   if (st === "NEW") return true;
   if (st === "MEETING_BOOKED") {
     return normalizeMeetingOutcomeStatus(row.meetingOutcomeStatus ?? "") === MEETING_OUTCOME_REBOOK;

@@ -24,6 +24,7 @@ const EXPECTED_LABELS = [
   "Email",
   "Dato for møde",
   "Møde link",
+  "Adresse",
   "Produkter",
   "Lead-Id",
   "Item-id",

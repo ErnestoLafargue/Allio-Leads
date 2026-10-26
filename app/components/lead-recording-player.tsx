@@ -1,7 +1,13 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
-import { createMonoPlayback, supportsMonoPlayback, type MonoPlayback } from "@/lib/mono-playback";
+import {
+  createMonoPlayback,
+  isVercelBlobPlaybackUrl,
+  playbackSourceForRecording,
+  supportsMonoPlayback,
+  type MonoPlayback,
+} from "@/lib/mono-playback";
 
 function formatClock(totalSeconds: number): string {
   if (!Number.isFinite(totalSeconds) || totalSeconds < 0) return "0:00";
@@ -20,12 +26,6 @@ type Props = {
   variant?: "default" | "adminInline";
 };
 
-function resolvedPlaybackUrl(src: string, eventId?: string | null): string {
-  const id = eventId?.trim();
-  if (id) return `/api/leads/call-recordings/${encodeURIComponent(id)}/audio`;
-  return src;
-}
-
 /**
  * Afspiller samtaleoptagelse med tydelig varighed, play/pause og scrub (slider).
  *
@@ -43,7 +43,8 @@ export function LeadRecordingPlayer({
   variant = "default",
 }: Props) {
   const audioRef = useRef<HTMLAudioElement | null>(null);
-  const resolvedSrc = resolvedPlaybackUrl(src, eventId);
+  const [overrideSrc, setOverrideSrc] = useState<string | null>(null);
+  const resolvedSrc = overrideSrc ?? playbackSourceForRecording(src, eventId);
   const [playbackSrc, setPlaybackSrc] = useState(resolvedSrc);
   const [duration, setDuration] = useState<number | null>(
     typeof durationSecondsHint === "number" && durationSecondsHint > 0
@@ -52,7 +53,7 @@ export function LeadRecordingPlayer({
   );
   const [current, setCurrent] = useState(0);
   const [playing, setPlaying] = useState(false);
-  const [ready, setReady] = useState(false);
+  const [buffering, setBuffering] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   const playingRef = useRef(false);
@@ -61,6 +62,13 @@ export function LeadRecordingPlayer({
   }, [playing]);
 
   const mixCapable = supportsMonoPlayback(playbackSrc);
+  /**
+   * Same-origin proxy (`/api/.../audio`) kræver session-cookie.
+   * `crossOrigin="anonymous"` sender IKKE cookies → 401 → «Kunne ikke indlæse lydfilen».
+   * CORS-attributten behøves kun for eksterne Blob-URL'er (Web Audio mix).
+   */
+  const crossOriginAttr =
+    mixCapable && !playbackSrc.startsWith("/") ? ("anonymous" as const) : undefined;
   const mixRef = useRef<MonoPlayback | null>(null);
 
   const ensureMixedPlayback = useCallback(
@@ -97,7 +105,7 @@ export function LeadRecordingPlayer({
     }
     pendingSrcRef.current = null;
     setPlaybackSrc(resolvedSrc);
-    setReady(false);
+    setBuffering(false);
     setError(null);
     setCurrent(0);
     if (typeof durationSecondsHint === "number" && durationSecondsHint > 0) {
@@ -112,7 +120,7 @@ export function LeadRecordingPlayer({
     if (!pending || pending === playbackSrc) return;
     pendingSrcRef.current = null;
     setPlaybackSrc(pending);
-    setReady(false);
+    setBuffering(false);
     setError(null);
   }, [playbackSrc]);
 
@@ -122,7 +130,6 @@ export function LeadRecordingPlayer({
     if (Number.isFinite(el.duration) && el.duration > 0) {
       setDuration(el.duration);
     }
-    setReady(true);
     setError(null);
   }, []);
 
@@ -157,8 +164,14 @@ export function LeadRecordingPlayer({
     setError(null);
   }, []);
 
+  const onCanPlay = useCallback(() => {
+    setBuffering(false);
+    setError(null);
+  }, []);
+
   /** Ved buffer-hug: prøv at genoptage hvis brugeren stadig forventer afspilning. */
   const onWaitingOrStalled = useCallback(() => {
+    if (playingRef.current) setBuffering(true);
     if (!playingRef.current) return;
     const el = audioRef.current;
     if (!el || el.ended) return;
@@ -174,11 +187,44 @@ export function LeadRecordingPlayer({
     }, 250);
   }, []);
 
+  const recoveringRef = useRef(false);
+  useEffect(() => {
+    recoveringRef.current = false;
+    setOverrideSrc(null);
+  }, [src, eventId]);
+
   const onErr = useCallback(() => {
-    setError("Kunne ikke indlæse lydfilen (tjek netværk eller om linket er udløbet).");
-    setReady(false);
+    const id = eventId?.trim();
+    if (id && isVercelBlobPlaybackUrl(playbackSrc) && !recoveringRef.current) {
+      recoveringRef.current = true;
+      void (async () => {
+        try {
+          const res = await fetch(
+            `/api/leads/call-recordings/${encodeURIComponent(id)}/audio?resolve=1`,
+            { credentials: "same-origin" },
+          );
+          const data = (await res.json()) as { url?: unknown };
+          const url = typeof data.url === "string" ? data.url : "";
+          if (res.ok && url && url !== playbackSrc) {
+            setOverrideSrc(url);
+            setError(null);
+            setBuffering(false);
+            setPlaying(false);
+            return;
+          }
+        } catch {
+          /* vis fejlen nedenfor */
+        }
+        setError("Kunne ikke hente lydfilen.");
+        setBuffering(false);
+        setPlaying(false);
+      })();
+      return;
+    }
+    setError("Kunne ikke hente lydfilen.");
+    setBuffering(false);
     setPlaying(false);
-  }, []);
+  }, [eventId, playbackSrc]);
 
   const togglePlay = useCallback(() => {
     const el = audioRef.current;
@@ -221,11 +267,12 @@ export function LeadRecordingPlayer({
         key={mixCapable ? "mixed" : "native"}
         ref={audioRef}
         src={playbackSrc}
-        crossOrigin={mixCapable ? "anonymous" : undefined}
-        preload="metadata"
+        crossOrigin={crossOriginAttr}
+        preload="none"
         className="hidden"
         onLoadedMetadata={onMeta}
         onDurationChange={onMeta}
+        onCanPlay={onCanPlay}
         onTimeUpdate={onTime}
         onEnded={onEnded}
         onPause={onPause}
@@ -251,8 +298,8 @@ export function LeadRecordingPlayer({
         <span className="min-w-[6.5rem] font-mono text-xs text-stone-700 tabular-nums">
           {formatClock(current)} / {formatClock(total > 0 ? total : durationSecondsHint ?? 0)}
         </span>
-        {!ready && !error ? (
-          <span className="text-xs text-stone-500">Indlæser lyd…</span>
+        {buffering && !error ? (
+          <span className="text-xs text-stone-500">Henter videre…</span>
         ) : null}
       </div>
       <div className="mt-2 flex items-center gap-2">

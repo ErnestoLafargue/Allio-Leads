@@ -3,8 +3,6 @@ import { requireSession } from "@/lib/api-auth";
 import { prisma } from "@/lib/prisma";
 import { encodeDialerClientState } from "@/lib/dialer-shared";
 import { sellerMayEditLead } from "@/lib/lead-lock";
-import { assertLeadMatchesActiveCampaignQueueOr403 } from "@/lib/active-campaign-queue";
-import { isGlobalLeadPageVoipContext, parseVoipApiContext } from "@/lib/voip-api-context";
 
 /**
  * POST /api/telnyx/manual-call/prepare
@@ -27,7 +25,6 @@ export async function POST(req: Request) {
 
   const body = await req.json().catch(() => null);
   const leadId = typeof body?.leadId === "string" ? body.leadId.trim() : "";
-  const voipApiContext = parseVoipApiContext(body);
   if (!leadId) {
     return NextResponse.json({ error: "leadId er påkrævet" }, { status: 400 });
   }
@@ -59,16 +56,6 @@ export async function POST(req: Request) {
       { error: "Leadet er låst af en anden bruger." },
       { status: 403 },
     );
-  }
-
-  if (!isGlobalLeadPageVoipContext(voipApiContext)) {
-    const guard = await assertLeadMatchesActiveCampaignQueueOr403(prisma, leadId);
-    if (!guard.ok) {
-      return NextResponse.json(
-        { error: guard.error },
-        { status: 403 },
-      );
-    }
   }
 
   const clientState = encodeDialerClientState({

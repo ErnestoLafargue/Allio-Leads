@@ -3,6 +3,8 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useAudioLevel } from "@/lib/use-audio-level";
 import { useCallAudioPublisher } from "@/lib/live-coach/call-audio";
+import { MedlytPublisher } from "@/app/components/medlyt-publisher";
+import { medlytSellerCaptureConstraints } from "@/lib/medlyt-webrtc";
 import {
   clearActiveDialerCampaignIfMatches,
   setActiveDialerCampaign,
@@ -63,6 +65,8 @@ type Props = {
   /** Øges af parent for at lægge det aktuelle opkald på. */
   hangupSignal: number;
   onStateChange: (state: PowerPhoneState) => void;
+  /** Aktivt Telnyx call_control_id (Medlyt / presence). */
+  onCallControlIdChange?: (callControlId: string | null) => void;
 };
 
 type TelnyxCall = {
@@ -168,6 +172,7 @@ export function PowerDialerPhone({
   leadDial = null,
   hangupSignal,
   onStateChange,
+  onCallControlIdChange,
 }: Props) {
   // --- Lydopsætning -------------------------------------------------------
   const [devices, setDevices] = useState<MediaDeviceInfo[]>([]);
@@ -287,6 +292,37 @@ export function PowerDialerPhone({
     };
   }, [campaignId, enabled, lineStatus]);
 
+  /** Rapportér WebRTC call_control_id kontinuerligt — Medlyt kan ikke bruge active_calls på credentials. */
+  const onCallControlIdChangeRef = useRef(onCallControlIdChange);
+  onCallControlIdChangeRef.current = onCallControlIdChange;
+  const lastPostedCcRef = useRef<string | null>(null);
+  useEffect(() => {
+    if (!campaignId) return;
+    const postCc = (cc: string | null) => {
+      if (cc === lastPostedCcRef.current) return;
+      lastPostedCcRef.current = cc;
+      onCallControlIdChangeRef.current?.(cc);
+      void fetch("/api/dialer/agent/call-control", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ campaignId, callControlId: cc }),
+        credentials: "include",
+      }).catch(() => {});
+    };
+    if (lineStatus === "idle") {
+      postCc(null);
+      return;
+    }
+    const tick = () => {
+      const call = activeCallRef.current;
+      const cc = call?.telnyxIDs?.telnyxCallControlId?.trim() || null;
+      if (cc) postCc(cc);
+    };
+    tick();
+    const interval = window.setInterval(tick, 1500);
+    return () => window.clearInterval(interval);
+  }, [lineStatus, campaignId]);
+
   // Auto-init: genbrug tidligere givet mikrofon-tilladelse og gemte enheder.
   useEffect(() => {
     let cancelled = false;
@@ -369,7 +405,9 @@ export function PowerDialerPhone({
     let active: MediaStream | null = null;
     void (async () => {
       try {
-        const stream = await navigator.mediaDevices.getUserMedia({ audio: { deviceId: { exact: micId } } });
+        const stream = await navigator.mediaDevices.getUserMedia({
+          audio: medlytSellerCaptureConstraints(micId),
+        });
         if (cancelled) {
           stream.getTracks().forEach((t) => t.stop());
           return;
@@ -500,28 +538,6 @@ export function PowerDialerPhone({
       const token = stateToken(call.state);
       const current = activeCallRef.current;
       const isCurrent = current === call || (current && callIdentity(current) === callIdentity(call));
-      // #region agent log
-      fetch("http://localhost:7723/ingest/7a50d2a1-e6f0-436c-8453-6828c3db5e26", {
-        method: "POST",
-        headers: { "Content-Type": "application/json", "X-Debug-Session-Id": "c1392e" },
-        body: JSON.stringify({
-          sessionId: "c1392e",
-          runId: "pre-fix",
-          hypothesisId: "C",
-          location: "app/components/power-dialer-phone.tsx:handleNotification",
-          message: "webrtc notify",
-          data: {
-            token,
-            direction: call.direction ?? null,
-            enabled: enabledRef.current,
-            hasCurrent: Boolean(current),
-            outboundIntent: outboundDialIntentRef.current,
-          },
-          timestamp: Date.now(),
-        }),
-      }).catch(() => {});
-      console.warn("[dbg-c1392e] webrtc-notify", token, call.direction ?? null, enabledRef.current);
-      // #endregion
 
       if (CLOSED_STATES.has(token)) {
         if (isCurrent) {
@@ -938,6 +954,7 @@ export function PowerDialerPhone({
       aria-label="Power Dialer telefon"
     >
       <audio ref={remoteAudioRef} id={remoteAudioId} autoPlay playsInline />
+      <MedlytPublisher micStream={micStream} remoteStream={remoteStream} />
       <div className="flex flex-wrap items-center gap-3">
         <span
           className={`inline-flex items-center gap-1.5 rounded-full border px-2.5 py-1 text-xs font-semibold ${pill.cls}`}

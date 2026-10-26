@@ -19,7 +19,12 @@ import {
 import { requireDefaultMeetingAssigneeId } from "@/lib/meeting-assignee";
 import { canonicalLeadPhoneForStorage } from "@/lib/phone-e164";
 import { applyPostalCityFromAddressFields } from "@/lib/postal-from-address";
+import {
+  MEETING_TYPE_PHYSICAL,
+  normalizeMeetingType,
+} from "@/lib/meeting-type";
 import { scheduleMeetingBookedRecordings } from "@/lib/telnyx-recordings-auto-sync";
+import { defaultBookingSystemForCampaign } from "@/lib/booking-system";
 
 export async function GET(req: Request) {
   const { session, response } = await requireSession();
@@ -154,6 +159,7 @@ export async function GET(req: Request) {
           ? {
               OR: [
                 { companyName: { contains: q } },
+                { bookingSystem: { contains: q } },
                 { phone: { contains: q } },
                 { email: { contains: q } },
                 { cvr: { contains: q } },
@@ -192,6 +198,8 @@ export async function GET(req: Request) {
         customFields: l.customFields,
         meetingScheduledFor: l.meetingScheduledFor,
         postalCode: l.postalCode ?? "",
+        address: l.address ?? "",
+        bookingSystem: l.bookingSystem,
       }));
       const narrowed = getActiveCampaignLeads(mapped, campaignFieldConfig, campaignActiveQueue);
       const allow = new Set(narrowed.map((r) => r.id));
@@ -274,6 +282,10 @@ export async function POST(req: Request) {
   const postalCode = filled.postalCode;
   const city = filled.city;
   const industry = typeof body?.industry === "string" ? body.industry : "";
+  const bookingSystem =
+    typeof body?.bookingSystem === "string"
+      ? body.bookingSystem.trim()
+      : defaultBookingSystemForCampaign(campaign);
   const notes = typeof body?.notes === "string" ? body.notes : "";
   const rawStatus = typeof body?.status === "string" ? body.status.trim().toUpperCase() : "";
   const status = isLeadStatus(rawStatus) ? rawStatus : "NEW";
@@ -289,6 +301,9 @@ export async function POST(req: Request) {
       : "";
   const meetingCompanyName =
     typeof body?.meetingCompanyName === "string" ? body.meetingCompanyName.trim() : "";
+  const meetingType = normalizeMeetingType(body?.meetingType);
+  const meetingAddress =
+    typeof body?.meetingAddress === "string" ? body.meetingAddress.trim() : "";
 
   if (meetingContactEmail.length > 0 && !meetingContactEmailValid(meetingContactEmail)) {
     return NextResponse.json({ error: "Ugyldig e-mail til mødekontakten." }, { status: 400 });
@@ -303,6 +318,12 @@ export async function POST(req: Request) {
     }
     if (!meetingCompanyName) {
       return NextResponse.json({ error: "Virksomhedsnavn til mødet er påkrævet." }, { status: 400 });
+    }
+    if (meetingType === MEETING_TYPE_PHYSICAL && !meetingAddress) {
+      return NextResponse.json(
+        { error: "Mødeadresse er påkrævet ved fysisk møde." },
+        { status: 400 },
+      );
     }
   }
 
@@ -320,6 +341,7 @@ export async function POST(req: Request) {
     data: pickLeadCreateData({
       campaignId,
       companyName,
+      bookingSystem,
       phone,
       privatePhone,
       email,
@@ -333,6 +355,8 @@ export async function POST(req: Request) {
       meetingContactEmail,
       meetingContactPhonePrivate,
       meetingCompanyName,
+      meetingType,
+      meetingAddress,
       customFields: stringifyCustomFields(custom),
       status,
       meetingScheduledFor,

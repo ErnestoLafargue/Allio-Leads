@@ -1,9 +1,11 @@
 import { copenhagenDayBoundsUtcFromDayKey } from "@/lib/copenhagen-day";
+import { intervalsForMeeting } from "@/lib/booking/availability";
 import {
   MEETING_CALENDAR_HOUR_START,
   MEETING_CALENDAR_HOURS,
   MEETING_CALENDAR_MINUTES,
 } from "@/lib/meeting-week-calendar";
+import { MEETING_TYPE_ONLINE, normalizeMeetingType } from "@/lib/meeting-type";
 
 export type BlockedTimeRow = {
   id: string;
@@ -47,7 +49,7 @@ function copenhagenPartsFromMs(ms: number): {
   return { dayKey, hour, minute };
 }
 
-function placementForIntervalOnDay(
+export function placementForIntervalOnDay(
   dayKey: string,
   startMs: number,
   endMs: number,
@@ -103,4 +105,65 @@ export function blockedSegmentsForDay(dayKey: string, rows: BlockedTimeRow[]): B
     });
   }
   return out;
+}
+
+export type TransportSegment = {
+  id: string;
+  meetingId: string;
+  title: string;
+  topPct: number;
+  heightPct: number;
+};
+
+/** Transportblokeringer for fysiske møder på en given dag (beregnet, ikke gemt). */
+export function transportSegmentsForDay(
+  dayKey: string,
+  meetings: {
+    id: string;
+    meetingScheduledFor: string | Date | null;
+    meetingType?: string | null;
+  }[],
+): TransportSegment[] {
+  const out: TransportSegment[] = [];
+  for (const m of meetings) {
+    if (!m.meetingScheduledFor) continue;
+    const type = normalizeMeetingType(m.meetingType ?? MEETING_TYPE_ONLINE);
+    const startMs = new Date(m.meetingScheduledFor).getTime();
+    if (Number.isNaN(startMs)) continue;
+    const { transports } = intervalsForMeeting(startMs, type);
+    transports.forEach((t, i) => {
+      const placement = placementForIntervalOnDay(dayKey, t.startMs, t.endMs);
+      if (!placement) return;
+      out.push({
+        id: `${m.id}-transport-${i}`,
+        meetingId: m.id,
+        title: "Transport",
+        topPct: placement.topPct,
+        heightPct: placement.heightPct,
+      });
+    });
+  }
+  return out;
+}
+
+/**
+ * Konverter Y-position i en dagskolonne til HH:mm på 15-min gitter
+ * (Europe/Copenhagen wall clock inden for kalenderens timevindue).
+ * Sidste tilladte start er 21:45 (blokering kan slutte 22:00).
+ */
+export function snapTimeFromColumnClick(
+  offsetY: number,
+  columnHeightPx: number,
+): string {
+  const ratio = Math.min(1, Math.max(0, offsetY / Math.max(columnHeightPx, 1)));
+  const totalMin = MEETING_CALENDAR_HOURS * 60;
+  const minutesFromStart = ratio * totalMin;
+  let snapped = Math.floor(minutesFromStart / 15) * 15;
+  // Timer 09–22 i gitteret → sidste tilladte blok-start 21:45 (matcher TIME_OPTIONS).
+  const maxFromStart = (21 - MEETING_CALENDAR_HOUR_START) * 60 + 45;
+  snapped = Math.min(Math.max(0, snapped), maxFromStart);
+  const hour = MEETING_CALENDAR_HOUR_START + Math.floor(snapped / 60);
+  const minute = snapped % 60;
+  const pad = (n: number) => String(n).padStart(2, "0");
+  return `${pad(hour)}:${pad(minute)}`;
 }

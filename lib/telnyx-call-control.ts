@@ -117,6 +117,22 @@ export function telnyxIdField(v: unknown): string | null {
   return null;
 }
 
+/**
+ * GET /telephony_credentials/{id} har `resource_id: "connection:…"` — ikke `connection_id`.
+ * Uden det kan vi ikke slå SIP URI-opkald til, og Power Dialer rammer aldrig sælgerens WebRTC.
+ */
+export function connectionIdFromTelnyxCredentialData(d: Record<string, unknown>): string | null {
+  const direct = telnyxIdField(d.connection_id);
+  if (direct) return direct;
+  const resource = typeof d.resource_id === "string" ? d.resource_id.trim() : "";
+  const m = /^connection:(.+)$/i.exec(resource);
+  if (m?.[1]?.trim()) return m[1].trim();
+  if (d.connection && typeof d.connection === "object") {
+    return telnyxIdField((d.connection as Record<string, unknown>).id);
+  }
+  return null;
+}
+
 function formatTelnyxError(json: unknown): string | null {
   if (!json || typeof json !== "object") return null;
   const errors = (json as { errors?: unknown }).errors;
@@ -209,7 +225,7 @@ function normalizeCredentialRecord(d: Record<string, unknown>): TelnyxCredential
     status,
     expired,
     expiresAt: toStr(d.expires_at),
-    connectionId: telnyxIdField(d.connection_id),
+    connectionId: connectionIdFromTelnyxCredentialData(d),
     tag: toStr(d.tag),
     createdAt: toStr(d.created_at),
     sipUsername: toStr(d.sip_username),
@@ -747,6 +763,7 @@ export async function getTelnyxCredentialInfo(params: {
 
     const toStr = (v: unknown): string | null =>
       typeof v === "string" && v.length > 0 ? v : null;
+    const connectionId = connectionIdFromTelnyxCredentialData(d);
     return {
       found: true,
       status: toStr(d.status) ?? undefined,
@@ -757,7 +774,7 @@ export async function getTelnyxCredentialInfo(params: {
             ? d.status.toLowerCase() === "expired"
             : undefined,
       expiresAt: toStr(d.expires_at),
-      connectionId: telnyxIdField(d.connection_id),
+      connectionId,
       sipUsername: toStr(d.sip_username),
       createdAt: toStr(d.created_at),
       updatedAt: toStr(d.updated_at),
@@ -907,6 +924,13 @@ export async function dialTelnyxOutbound(params: {
   preventDoubleBridge?: boolean;
   /// Telnyx ignorerer dial-kommandoer med samme command_id (idempotens ved dobbelte webhooks).
   commandId?: string;
+  /**
+   * Supervising Leg: tilføj dette nye ben som supervisor på et eksisterende opkald
+   * (uden conference). Se Telnyx Dial `supervise_call_control_id`.
+   */
+  superviseCallControlId?: string;
+  /** `monitor` = stille medlyt; `whisper` / `barge` til senere. */
+  supervisorRole?: "monitor" | "whisper" | "barge";
 }): Promise<DialResult> {
   const from = resolveOutboundCallFromField(params.from);
   const to = resolveOutboundCallToField(params.to);
@@ -922,6 +946,10 @@ export async function dialTelnyxOutbound(params: {
   if (params.bridgeOnAnswer) payload.bridge_on_answer = true;
   if (params.preventDoubleBridge) payload.prevent_double_bridge = true;
   if (params.commandId) payload.command_id = params.commandId;
+  if (params.superviseCallControlId) {
+    payload.supervise_call_control_id = params.superviseCallControlId;
+    payload.supervisor_role = params.supervisorRole ?? "monitor";
+  }
   if (typeof params.timeoutSecs === "number") payload.timeout_secs = params.timeoutSecs;
   if (typeof params.retryOnTimeout === "boolean") payload.retry_on_timeout = params.retryOnTimeout;
   if (typeof params.timeLimitSecs === "number") payload.time_limit_secs = params.timeLimitSecs;
@@ -1041,6 +1069,120 @@ export async function bridgeTelnyxCalls(params: {
 }
 
 /**
+ * Skift supervisor-rolle på et supervising leg midt i opkaldet.
+ * - monitor: stille medlyt (ingen hører supervisor)
+ * - whisper: kun det supervisede ben hører supervisor (brug agent-ben til salgs-coach)
+ * - barge: begge parter hører supervisor (ikke i Medlyt v1)
+ */
+export async function switchTelnyxSupervisorRole(params: {
+  apiKey: string;
+  callControlId: string;
+  role: "monitor" | "whisper" | "barge";
+  commandId?: string;
+}): Promise<ActionResult> {
+  const body: Record<string, unknown> = { role: params.role };
+  if (params.commandId) body.command_id = params.commandId;
+
+  try {
+    const res = await fetch(
+      `${TELNYX_API_BASE}/calls/${encodeURIComponent(params.callControlId)}/actions/switch_supervisor_role`,
+      {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${params.apiKey}`,
+          "Content-Type": "application/json",
+          Accept: "application/json",
+        },
+        body: JSON.stringify(body),
+      },
+    );
+    const json: unknown = await res.json().catch(() => null);
+    if (!res.ok) {
+      return {
+        ok: false,
+        status: res.status,
+        message: formatTelnyxError(json) || `Telnyx HTTP ${res.status}`,
+        telnyx: json,
+      };
+    }
+    return { ok: true, raw: json };
+  } catch (err) {
+    return {
+      ok: false,
+      status: 0,
+      message: err instanceof Error ? err.message : "Ukendt fejl ved switch_supervisor_role.",
+    };
+  }
+}
+
+export type TelnyxActiveCall = {
+  callControlId: string;
+  callSessionId: string | null;
+  clientState: string | null;
+};
+
+/** GET /v2/connections/{id}/active_calls — live ben på en connection. */
+export async function listTelnyxActiveCalls(params: {
+  apiKey: string;
+  connectionId: string;
+}): Promise<{ ok: true; calls: TelnyxActiveCall[] } | { ok: false; status: number; message: string }> {
+  try {
+    const res = await fetch(
+      `${TELNYX_API_BASE}/connections/${encodeURIComponent(params.connectionId)}/active_calls`,
+      {
+        method: "GET",
+        headers: {
+          Authorization: `Bearer ${params.apiKey}`,
+          Accept: "application/json",
+        },
+      },
+    );
+    const json: unknown = await res.json().catch(() => null);
+    if (!res.ok) {
+      return {
+        ok: false,
+        status: res.status,
+        message: formatTelnyxError(json) || `Telnyx HTTP ${res.status}`,
+      };
+    }
+    const data =
+      json && typeof json === "object" && "data" in json
+        ? (json as { data: unknown }).data
+        : null;
+    const rows = Array.isArray(data) ? data : [];
+    const calls: TelnyxActiveCall[] = [];
+    for (const row of rows) {
+      if (!row || typeof row !== "object") continue;
+      const r = row as Record<string, unknown>;
+      const cc =
+        typeof r.call_control_id === "string"
+          ? r.call_control_id
+          : typeof r.call_control_id === "number"
+            ? String(r.call_control_id)
+            : null;
+      if (!cc) continue;
+      calls.push({
+        callControlId: cc,
+        callSessionId:
+          typeof r.call_session_id === "string"
+            ? r.call_session_id
+            : typeof r.call_session_id === "number"
+              ? String(r.call_session_id)
+              : null,
+        clientState: typeof r.client_state === "string" ? r.client_state : null,
+      });
+    }
+    return { ok: true, calls };
+  } catch (err) {
+    return {
+      ok: false,
+      status: 0,
+      message: err instanceof Error ? err.message : "Ukendt fejl ved list active_calls.",
+    };
+  }
+}
+
+/**
  * Hangup et aktivt opkald. Bruges fx når AMD detekterer voicemail og vi vil afbryde.
  */
 export async function hangupTelnyxCall(params: {
@@ -1085,6 +1227,138 @@ export async function hangupTelnyxCall(params: {
       ok: false,
       status: 0,
       message: err instanceof Error ? err.message : "Ukendt fejl ved hangup.",
+    };
+  }
+}
+
+/**
+ * Læg et besvaret Call Control-ben på hold (Twilio-lignende park mens vi finder sælger).
+ */
+export async function holdTelnyxCall(params: {
+  apiKey: string;
+  callControlId: string;
+  commandId?: string;
+}): Promise<ActionResult> {
+  const body: Record<string, unknown> = {};
+  if (params.commandId) body.command_id = params.commandId;
+  try {
+    const res = await fetch(
+      `${TELNYX_API_BASE}/calls/${encodeURIComponent(params.callControlId)}/actions/hold`,
+      {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${params.apiKey}`,
+          "Content-Type": "application/json",
+          Accept: "application/json",
+        },
+        body: JSON.stringify(body),
+      },
+    );
+    if (res.status === 422) return { ok: true, raw: null };
+    const json: unknown = await res.json().catch(() => null);
+    if (!res.ok) {
+      return {
+        ok: false,
+        status: res.status,
+        message: formatTelnyxError(json) || `Telnyx HTTP ${res.status}`,
+        telnyx: json,
+      };
+    }
+    return { ok: true, raw: json };
+  } catch (err) {
+    return {
+      ok: false,
+      status: 0,
+      message: err instanceof Error ? err.message : "Ukendt fejl ved hold.",
+    };
+  }
+}
+
+/** Tag et Call Control-ben af hold før bridge til sælger. */
+export async function unholdTelnyxCall(params: {
+  apiKey: string;
+  callControlId: string;
+  commandId?: string;
+}): Promise<ActionResult> {
+  const body: Record<string, unknown> = {};
+  if (params.commandId) body.command_id = params.commandId;
+  try {
+    const res = await fetch(
+      `${TELNYX_API_BASE}/calls/${encodeURIComponent(params.callControlId)}/actions/unhold`,
+      {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${params.apiKey}`,
+          "Content-Type": "application/json",
+          Accept: "application/json",
+        },
+        body: JSON.stringify(body),
+      },
+    );
+    if (res.status === 422) return { ok: true, raw: null };
+    const json: unknown = await res.json().catch(() => null);
+    if (!res.ok) {
+      return {
+        ok: false,
+        status: res.status,
+        message: formatTelnyxError(json) || `Telnyx HTTP ${res.status}`,
+        telnyx: json,
+      };
+    }
+    return { ok: true, raw: json };
+  } catch (err) {
+    return {
+      ok: false,
+      status: 0,
+      message: err instanceof Error ? err.message : "Ukendt fejl ved unhold.",
+    };
+  }
+}
+
+/** Kort TTS til kunden mens Power Dialer finder en sælger. */
+export async function speakTelnyxCall(params: {
+  apiKey: string;
+  callControlId: string;
+  payload: string;
+  language?: string;
+  voice?: string;
+  commandId?: string;
+}): Promise<ActionResult> {
+  const body: Record<string, unknown> = {
+    payload: params.payload,
+    language: params.language ?? "da-DK",
+    voice: params.voice ?? "female",
+  };
+  if (params.commandId) body.command_id = params.commandId;
+  try {
+    const res = await fetch(
+      `${TELNYX_API_BASE}/calls/${encodeURIComponent(params.callControlId)}/actions/speak`,
+      {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${params.apiKey}`,
+          "Content-Type": "application/json",
+          Accept: "application/json",
+        },
+        body: JSON.stringify(body),
+      },
+    );
+    if (res.status === 422) return { ok: true, raw: null };
+    const json: unknown = await res.json().catch(() => null);
+    if (!res.ok) {
+      return {
+        ok: false,
+        status: res.status,
+        message: formatTelnyxError(json) || `Telnyx HTTP ${res.status}`,
+        telnyx: json,
+      };
+    }
+    return { ok: true, raw: json };
+  } catch (err) {
+    return {
+      ok: false,
+      status: 0,
+      message: err instanceof Error ? err.message : "Ukendt fejl ved speak.",
     };
   }
 }

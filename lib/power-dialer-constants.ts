@@ -8,6 +8,16 @@ export const POWER_AGENT_LEG_TIMEOUT_SECS = 12;
 /** Maks. antal sælgere et menneske-svar forsøges forbundet til (første forsøg + én retry). */
 export const POWER_AGENT_MAX_ATTEMPTS = 2;
 
+/**
+ * Hvor længe et besvaret menneske må vente (Twilio-park) på en sælger, før vi lægger på.
+ * Startes fra bridgeRequestedAt — ikke fra første mislykkede SIP-forsøg.
+ */
+export const POWER_PARK_TIMEOUT_MS = 45_000;
+
+/** Kort besked til kunden mens vi finder sælger (Telnyx speak). */
+export const POWER_PARK_COMFORT_SPEAK =
+  "Vent venligst. Du bliver snart forbundet med en medarbejder.";
+
 /** Drop-bremse: vindue og mindste stikprøve før bremsen kan slå til. */
 export const POWER_DROP_BRAKE_WINDOW_MS = 15 * 60 * 1000;
 export const POWER_DROP_BRAKE_MIN_SAMPLE = 10;

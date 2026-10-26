@@ -74,6 +74,7 @@ export function collectExportHeaders(fieldConfigJson: string): {
   const coreBeforeExt = [
     "Lead ID",
     "Virksomhedsnavn",
+    "Bookingsystem",
     "CVR",
     "Virksomhed Tlf",
     "Privat Tlf",
@@ -128,6 +129,7 @@ export function mapLeadToExportRow(
   const row: Record<string, string> = {
     "Lead ID": lead.id,
     Virksomhedsnavn: lead.companyName,
+    Bookingsystem: lead.bookingSystem ?? "",
     CVR: lead.cvr,
     "Virksomhed Tlf": lead.phone,
     "Privat Tlf": lead.privatePhone ?? "",

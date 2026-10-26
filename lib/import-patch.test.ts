@@ -178,6 +178,20 @@ describe("buildImportPatchForLead", () => {
     expect(custom.ekstra).toBeUndefined();
   });
 
+  it("udfylder tomt bookingsystem, men overskriver ikke et eksisterende", () => {
+    const incoming = { phone: "", email: "", domain: "", bookingSystem: "Planway", custom: {} };
+    const filled = buildImportPatchForLead({ lead: emptyLead, incoming, patchFields: ["bookingSystem"] });
+    expect(filled.patch).toEqual({ bookingSystem: "Planway" });
+    expect(filled.fieldCounts).toEqual({ bookingSystem: 1 });
+
+    const kept = buildImportPatchForLead({
+      lead: { ...emptyLead, bookingSystem: "Gecko Booking" },
+      incoming,
+      patchFields: ["bookingSystem"],
+    });
+    expect(kept.patch).toEqual({});
+  });
+
   it("overskriver aldrig allerede udfyldte felter", () => {
     const { patch, fieldCounts } = buildImportPatchForLead({
       lead: {

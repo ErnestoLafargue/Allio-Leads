@@ -6,6 +6,24 @@ import { startOfLocalDay, toCopenhagenDateKey, toDateKeyLocal } from "@/lib/book
 
 const WEEK_LABELS = ["Man", "Tir", "Ons", "Tor", "Fre", "Lør", "Søn"];
 
+/** ISO-8601 ugenummer (Man–Søn; uge 1 indeholder årets første torsdag) — dansk standard. */
+function isoWeekNumber(d: Date): number {
+  const t = new Date(d.getFullYear(), d.getMonth(), d.getDate());
+  t.setDate(t.getDate() + 3 - ((t.getDay() + 6) % 7));
+  const week1 = new Date(t.getFullYear(), 0, 4);
+  return (
+    1 +
+    Math.round(
+      ((t.getTime() - week1.getTime()) / 86400000 - 3 + ((week1.getDay() + 6) % 7)) / 7,
+    )
+  );
+}
+
+function weekNumberForRow(row: (Date | null)[]): number | null {
+  const anchor = row.find((c) => c != null) ?? null;
+  return anchor ? isoWeekNumber(anchor) : null;
+}
+
 function monthMatrix(year: number, monthIndex: number): (Date | null)[][] {
   const first = new Date(year, monthIndex, 1);
   const lead = (first.getDay() + 6) % 7;
@@ -75,56 +93,71 @@ export function BookingCalendar({
         </button>
       </div>
 
-      <div className="grid grid-cols-7 gap-y-1 text-center text-[11px] font-medium uppercase tracking-wide text-slate-400">
+      <div className="grid grid-cols-[repeat(7,minmax(0,1fr))_1.75rem] gap-y-1 text-center text-[11px] font-medium uppercase tracking-wide text-slate-400">
         {WEEK_LABELS.map((w) => (
           <div key={w} className="py-1">
             {w}
           </div>
         ))}
+        <div className="py-1 text-[10px] font-semibold normal-case tracking-normal text-slate-400" title="Ugenummer">
+          Uge
+        </div>
       </div>
 
       <div className="mt-1 grid flex-1 auto-rows-fr gap-y-1">
-        {grid.map((row, ri) => (
-          <div key={ri} className="grid grid-cols-7 gap-1">
-            {row.map((cell, ci) => {
-              if (!cell) {
-                return <div key={`empty-${ri}-${ci}`} className="aspect-square" />;
-              }
-              const dayStart = startOfLocalDay(cell);
-              const key = toDateKeyLocal(dayStart);
-              const past = isPastCopenhagenDayKey(toCopenhagenDateKey(dayStart));
-              const selected = selKey === key;
-              const disabled = past;
+        {grid.map((row, ri) => {
+          const weekNo = weekNumberForRow(row);
+          return (
+            <div
+              key={ri}
+              className="grid grid-cols-[repeat(7,minmax(0,1fr))_1.75rem] items-center gap-1"
+            >
+              {row.map((cell, ci) => {
+                if (!cell) {
+                  return <div key={`empty-${ri}-${ci}`} className="aspect-square" />;
+                }
+                const dayStart = startOfLocalDay(cell);
+                const key = toDateKeyLocal(dayStart);
+                const past = isPastCopenhagenDayKey(toCopenhagenDateKey(dayStart));
+                const selected = selKey === key;
+                const disabled = past;
 
-              return (
-                <button
-                  key={key}
-                  type="button"
-                  disabled={disabled}
-                  onClick={() => onSelectDate(dayStart)}
-                  className={[
-                    "relative flex aspect-square max-h-11 w-full items-center justify-center rounded-full text-sm font-medium transition",
-                    disabled
-                      ? "cursor-not-allowed text-slate-300"
-                      : "text-blue-700 hover:bg-blue-100/80",
-                    selected && !disabled
-                      ? "bg-blue-600 text-white shadow-md hover:bg-blue-600"
-                      : !disabled && !selected
-                        ? "bg-blue-50/90"
-                        : "",
-                  ]
-                    .filter(Boolean)
-                    .join(" ")}
-                >
-                  {cell.getDate()}
-                  {selected && !disabled ? (
-                    <span className="absolute bottom-1 h-1 w-1 rounded-full bg-white" aria-hidden />
-                  ) : null}
-                </button>
-              );
-            })}
-          </div>
-        ))}
+                return (
+                  <button
+                    key={key}
+                    type="button"
+                    disabled={disabled}
+                    onClick={() => onSelectDate(dayStart)}
+                    className={[
+                      "relative flex aspect-square max-h-11 w-full items-center justify-center rounded-full text-sm font-medium transition",
+                      disabled
+                        ? "cursor-not-allowed text-slate-300"
+                        : "text-blue-700 hover:bg-blue-100/80",
+                      selected && !disabled
+                        ? "bg-blue-600 text-white shadow-md hover:bg-blue-600"
+                        : !disabled && !selected
+                          ? "bg-blue-50/90"
+                          : "",
+                    ]
+                      .filter(Boolean)
+                      .join(" ")}
+                  >
+                    {cell.getDate()}
+                    {selected && !disabled ? (
+                      <span className="absolute bottom-1 h-1 w-1 rounded-full bg-white" aria-hidden />
+                    ) : null}
+                  </button>
+                );
+              })}
+              <div
+                className="flex h-full max-h-11 items-center justify-center text-[11px] font-semibold tabular-nums text-slate-500"
+                aria-label={weekNo != null ? `Uge ${weekNo}` : undefined}
+              >
+                {weekNo ?? ""}
+              </div>
+            </div>
+          );
+        })}
       </div>
     </div>
   );

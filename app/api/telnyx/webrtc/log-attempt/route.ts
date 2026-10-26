@@ -5,8 +5,7 @@ import { releaseExpiredLocksEverywhere, sellerMayEditLead } from "@/lib/lead-loc
 import { normalizeCampaignDialMode, campaignUsesVoipUi } from "@/lib/dial-mode";
 import { LEAD_ACTIVITY_KIND, formatPhoneForActivitySummary } from "@/lib/lead-activity-kinds";
 import { normalizePhoneToE164ForDial } from "@/lib/phone-e164";
-import { assertLeadMatchesActiveCampaignQueueOr403 } from "@/lib/active-campaign-queue";
-import { isGlobalLeadPageVoipContext, parseVoipApiContext, VOIP_API_CONTEXT } from "@/lib/voip-api-context";
+import { parseVoipApiContext, VOIP_API_CONTEXT } from "@/lib/voip-api-context";
 
 /**
  * Efter `client.newCall()` (WebRTC) findes intet kald til `/api/telnyx/calls/start`, så
@@ -42,13 +41,6 @@ export async function POST(req: Request) {
 
   if (!sellerMayEditLead(session.user.role, session.user.id, lead)) {
     return NextResponse.json({ error: "Leadet er låst af en anden bruger." }, { status: 403 });
-  }
-
-  if (!isGlobalLeadPageVoipContext(voipApiContext)) {
-    const guard = await assertLeadMatchesActiveCampaignQueueOr403(prisma, leadId);
-    if (!guard.ok) {
-      return NextResponse.json({ error: guard.error }, { status: 403 });
-    }
   }
 
   const e164 = toE164 ? normalizePhoneToE164ForDial(toE164) : null;

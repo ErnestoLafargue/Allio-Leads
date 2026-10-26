@@ -7,7 +7,13 @@ import { applyColumnMapping, pickBaseFromNorm, suggestColumnMapping, type Mappin
 import { buildNormRow } from "@/lib/import-parse-helpers";
 import { normalizeCVR } from "@/lib/cvr-import";
 
-const PROTECTED_STATUSES = new Set(["CALLBACK_SCHEDULED", "MEETING_BOOKED", "UNQUALIFIED", "NOT_INTERESTED"]);
+const PROTECTED_STATUSES = new Set([
+  "CALLBACK_SCHEDULED",
+  "MEETING_BOOKED",
+  "UNQUALIFIED",
+  "NOT_INTERESTED",
+  "DELETED",
+]);
 
 export async function POST(req: Request) {
   const { response } = await requireAdmin();

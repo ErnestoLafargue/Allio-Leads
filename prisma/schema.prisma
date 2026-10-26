@@ -251,6 +251,8 @@ model Lead {
   campaign   Campaign? @relation(fields: [campaignId], references: [id], onDelete: SetNull)
 
   companyName  String
+  /// Kundens bookingsystem (fx «Gecko Booking») — standard = kampagnenavn i bookingsystem-kampagner, ellers tomt.
+  bookingSystem String @default("")
   phone        String
   /// Privat telefonnummer (fx klinikejer fra Punktum) — separat fra virksomhedsnummer (`phone`)
   privatePhone String @default("")
@@ -286,6 +288,10 @@ model Lead {
   meetingContactName         String @default("")
   meetingContactEmail        String @default("")
   meetingContactPhonePrivate String @default("")
+  /// ONLINE | PHYSICAL — styrer Cal.eu (kun online) + Allio-Native ydelse
+  meetingType                String @default("ONLINE")
+  /// Mødeadresse ved fysisk møde (sendes også til Native-kunde)
+  meetingAddress             String @default("")
 
   /// PENDING | HELD | CANCELLED | REBOOK | SALE | LOST | IN_PROGRESS — kun relevant når status = MEETING_BOOKED (admin sætter udfald)
   meetingOutcomeStatus        String  @default("PENDING")
@@ -326,6 +332,11 @@ model Lead {
   /// Cal.eu booking uid + ekstern mødelink (Google Meet/Cal Video) — sættes når booking oprettes eksternt.
   calComBookingUid  String?
   calComMeetingUrl  String?
+  /// Allio-Native kunde/booking-spejl (oprettes ved mødebooking).
+  allioCustomerId   String?
+  allioBookingId    String?
+  /// Kort lås mens Allio-Native-sync kører (forhindrer webhook-echo).
+  allioNativeSyncLockUntil DateTime?
   /// Idempotens-stempler for leverancemails (sættes når mail er sendt).
   welcomeMailSentAt DateTime?
   geckoMailSentAt   DateTime?
@@ -355,6 +366,7 @@ model Lead {
   @@index([campaignId, powerDialerEligibleAfter])
   @@index([unansweredAttempts])
   @@index([campaignId, unansweredAttempts])
+  @@index([allioBookingId])
 }
 
 /// Arkiveret møde-snapshot (historik til Mine salg / provision når lead får nyt møde).
@@ -444,7 +456,7 @@ model LeadActivityEvent {
   id              String   @id @default(cuid())
   leadId          String
   userId          String?
-  /// NOTE_UPDATE | OUTCOME_SET | MEETING_OUTCOME_SET | CALLBACK_SCHEDULE | LEAD_DETAIL_OPEN | CALL_ATTEMPT | CALL_RECORDING
+  /// NOTE_UPDATE | OUTCOME_SET | MEETING_OUTCOME_SET | CALLBACK_SCHEDULE | LEAD_DETAIL_OPEN | CALL_ATTEMPT | CALL_RECORDING | MAIL_SENT
   kind            String
   /// Kort tekst til UI (fx «Marie opdaterede noterne») — aldrig fuld notetekst
   summary         String
@@ -457,12 +469,19 @@ model LeadActivityEvent {
   recordingUrl    String?
   durationSeconds Int?
   telnyxCallLegId String?
+  /// MAIL_SENT: modtager
+  mailTo          String?
+  /// MAIL_SENT: emne
+  mailSubject     String?
+  /// MAIL_SENT: brødtekst som sendt (HTML eller plain) til forhåndsvisning
+  mailBody        String?  @db.Text
   createdAt       DateTime @default(now())
 
   lead Lead  @relation(fields: [leadId], references: [id], onDelete: Cascade)
   user User? @relation(fields: [userId], references: [id], onDelete: SetNull)
 
   @@index([leadId, createdAt])
+  @@index([leadId, kind, createdAt])
 }
 
 /// Aktiv agent-session i en kampagne. Bruges af dispatcher til at finde ledige agenter
@@ -518,6 +537,24 @@ model AgentSession {
   @@index([campaignId, status, lastHeartbeat])
   @@index([userId, lastHeartbeat])
   @@index([userId, powerPool])
+}
+
+/// Browser-til-browser Medlyt: WebRTC-signalering (admin lytter til sælgerens mic + evt. remote).
+model MedlytListenSession {
+  id            String   @id @default(cuid())
+  adminUserId   String
+  targetUserId  String
+  /// requested | negotiating | live | ended
+  status        String   @default("requested")
+  offerSdp      String?  @db.Text
+  answerSdp     String?  @db.Text
+  adminIceJson  String?  @db.Text
+  sellerIceJson String?  @db.Text
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  @@index([targetUserId, status])
+  @@index([adminUserId, status])
 }
 
 /// Per-opkald log fra Telnyx. Skrives af webhook'en. Bruges af dispatcher til at vide
@@ -932,4 +969,32 @@ model AiSaelgerPrinciples {
   decidedAt    DateTime?
 
   @@index([status, version])
+}
+
+/// Optagne intervaller spejlet fra Allio-Native (fremmede bookinger + vores egne).
+/// start/end = ydelsens vindue; Leads udvider med buffer ud fra serviceIds.
+model AllioNativeOccupancy {
+  id             String   @id @default(cuid())
+  allioBookingId String   @unique
+  startDateTime  DateTime
+  endDateTime    DateTime
+  /// JSON-array af Native service UUIDs
+  serviceIds     String   @default("[]")
+  status         String   @default("confirmed")
+  source         String   @default("booking")
+  title          String   @default("")
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  @@index([startDateTime, endDateTime])
+  @@index([status])
+}
+
+/// Idempotens for Allio-Native webhook-events.
+model AllioNativeWebhookEvent {
+  id          String   @id
+  type        String
+  processedAt DateTime @default(now())
+
+  @@index([processedAt])
 }

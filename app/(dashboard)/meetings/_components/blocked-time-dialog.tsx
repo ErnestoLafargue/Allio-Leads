@@ -14,10 +14,19 @@ export type BlockedTimeDto = {
 
 type Assignee = { id: string; name: string; username: string };
 
+export type BlockedTimeCreatePrefill = {
+  /** YYYY-MM-DD (Europe/Copenhagen wall clock / lokal dato). */
+  startDate: string;
+  /** HH:mm — 15-min gitter. */
+  startTime: string;
+};
+
 type Props = {
   open: boolean;
   mode: "create" | "edit";
   initial?: BlockedTimeDto | null;
+  /** Ved create: forudfyld start (fx fra klik i kalenderen). Slut = start + 60 min. */
+  createPrefill?: BlockedTimeCreatePrefill | null;
   currentUserId: string;
   isAdmin: boolean;
   defaultUserId?: string | null;
@@ -53,6 +62,31 @@ function partsFromIso(iso: string): { date: string; time: string } {
   return { date, time: TIME_OPTIONS.includes(time) ? time : "09:00" };
 }
 
+function addOneHour(time: string): string {
+  const [hs, ms] = time.split(":").map(Number);
+  let h = (hs ?? 9) + 1;
+  const m = ms ?? 0;
+  if (h > 22 || (h === 22 && m > 0)) return "22:00";
+  const pad = (n: number) => String(n).padStart(2, "0");
+  const end = `${pad(h)}:${pad(m)}`;
+  return TIME_OPTIONS.includes(end) ? end : "22:00";
+}
+
+function rangeFromPrefill(prefill: BlockedTimeCreatePrefill): {
+  startDate: string;
+  startTime: string;
+  endDate: string;
+  endTime: string;
+} {
+  const startTime = TIME_OPTIONS.includes(prefill.startTime) ? prefill.startTime : "09:00";
+  return {
+    startDate: prefill.startDate,
+    startTime,
+    endDate: prefill.startDate,
+    endTime: addOneHour(startTime),
+  };
+}
+
 function defaultRange(): {
   startDate: string;
   startTime: string;
@@ -70,14 +104,7 @@ function defaultRange(): {
     m = 0;
   }
   const startTime = `${pad(Math.min(h, 21))}:${pad(m)}`;
-  const endH = Math.min(h + 1, 22);
-  const endTime = endH === 22 ? "22:00" : `${pad(endH)}:${pad(m)}`;
-  return {
-    startDate: date,
-    startTime: TIME_OPTIONS.includes(startTime) ? startTime : "09:00",
-    endDate: date,
-    endTime: TIME_OPTIONS.includes(endTime) ? endTime : "10:00",
-  };
+  return rangeFromPrefill({ startDate: date, startTime: TIME_OPTIONS.includes(startTime) ? startTime : "09:00" });
 }
 
 function toIso(date: string, time: string): string | null {
@@ -91,6 +118,7 @@ export function BlockedTimeDialog({
   open,
   mode,
   initial,
+  createPrefill = null,
   currentUserId,
   isAdmin,
   defaultUserId,
@@ -132,7 +160,7 @@ export function BlockedTimeDialog({
         setEndDate(e.date);
         setEndTime(e.time);
       } else {
-        const range = defaultRange();
+        const range = createPrefill ? rangeFromPrefill(createPrefill) : defaultRange();
         setStartDate(range.startDate);
         setStartTime(range.startTime);
         setEndDate(range.endDate);
@@ -143,7 +171,7 @@ export function BlockedTimeDialog({
         );
       }
     })();
-  }, [open, mode, initial, currentUserId, isAdmin, defaultUserId]);
+  }, [open, mode, initial, createPrefill, currentUserId, isAdmin, defaultUserId]);
 
   if (!open) return null;
 

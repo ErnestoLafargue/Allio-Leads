@@ -48,6 +48,7 @@ Navngiv felterne **præcis** sådan (Allio slår op via label):
 | `Status` | Kategori | Ja — default «Afventer afholdelse» |
 | `Dato for møde` | Dato | Ja |
 | `Møde link` | Link | Ja — fra Cal.eu efter booking |
+| `Adresse` | Placering (location) | Ja — kun ved fysisk møde (`meetingAddress`) |
 | `Produkter` | Kategori | Ja — default «Genaktivering» |
 | `Lead-Id` | Tekst | Ja — Allio lead ID |
 | `Item-id` | Tekst | Ja — Podio item_id |

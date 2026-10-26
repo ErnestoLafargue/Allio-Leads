@@ -1,4 +1,3 @@
-import type { PrismaClient } from "@prisma/client";
 import { parseFieldConfig, FIELD_GROUPS, findStartDateExtensionField } from "@/lib/campaign-fields";
 import { parseCustomFields } from "@/lib/custom-fields";
 import { compareLeadQueueOrder, type QueueOrderFields } from "@/lib/lead-queue";
@@ -34,6 +33,8 @@ export type ActiveCampaignQueueViewV1 = {
   selectedCampaignIndustries: string[];
   /** Valgte virksomhedstyper (`customFields.virksomhedstype`). */
   selectedCompanyTypes: string[];
+  /** Valgte bookingsystemer (`Lead.bookingSystem`); "" = leads uden bookingsystem. */
+  selectedBookingSystems: string[];
   dynamicSortFieldId: string;
   dynamicSortDir: "asc" | "desc";
   dynamicFromDate: string;
@@ -45,6 +46,8 @@ export type ActiveCampaignQueueViewV1 = {
   industryEnabled: boolean;
   /** Virksomhedstype-filter aktivt (uafhængigt af øvrige filtre). */
   companyTypeEnabled: boolean;
+  /** Bookingsystem-filter aktivt (uafhængigt af øvrige filtre). */
+  bookingSystemEnabled: boolean;
   /** Postnummer-filter aktivt (uafhængigt af startdato/branche). */
   postalFilterEnabled: boolean;
   postalSortDir: "asc" | "desc";
@@ -59,6 +62,7 @@ export const EMPTY_ACTIVE_CAMPAIGN_QUEUE_VIEW: ActiveCampaignQueueViewV1 = {
   meetingStartTo: "",
   selectedCampaignIndustries: [],
   selectedCompanyTypes: [],
+  selectedBookingSystems: [],
   dynamicSortFieldId: "",
   dynamicSortDir: "asc",
   dynamicFromDate: "",
@@ -67,6 +71,7 @@ export const EMPTY_ACTIVE_CAMPAIGN_QUEUE_VIEW: ActiveCampaignQueueViewV1 = {
   startdateEnabled: false,
   industryEnabled: false,
   companyTypeEnabled: false,
+  bookingSystemEnabled: false,
   postalFilterEnabled: false,
   postalSortDir: "asc",
   postalRanges: [{ from: "", to: "" }],
@@ -145,6 +150,19 @@ export function isCompanyTypeQueueFilterActive(
   return v.companyTypeEnabled === true;
 }
 
+/** True når bookingsystem-filteret er aktivt. */
+export function isBookingSystemQueueFilterActive(
+  v: ActiveCampaignQueueViewV1 | null | undefined,
+): boolean {
+  if (!v) return false;
+  return v.bookingSystemEnabled === true;
+}
+
+/** Sammenligningsnøgle for bookingsystem ("" = intet bookingsystem). */
+export function bookingSystemFilterKey(v: string | null | undefined): string {
+  return (v ?? "").trim().toLocaleLowerCase("da");
+}
+
 /** True når startdato-filteret er aktivt. */
 export function isStartdateQueueFilterActive(v: ActiveCampaignQueueViewV1 | null | undefined): boolean {
   if (!v) return false;
@@ -160,12 +178,13 @@ export function syncLegacyFilterFields(
   view: Pick<
     ActiveCampaignQueueViewV1,
     "startdateEnabled" | "industryEnabled" | "companyTypeEnabled" | "postalFilterEnabled"
-  >,
+  > & { bookingSystemEnabled?: boolean },
 ): Pick<ActiveCampaignQueueViewV1, "filterMeetingStart" | "campaignFilterMode"> {
   const any =
     view.startdateEnabled ||
     view.industryEnabled ||
     view.companyTypeEnabled ||
+    view.bookingSystemEnabled === true ||
     view.postalFilterEnabled;
   let campaignFilterMode: CampaignFilterMode = "startdate";
   if (view.startdateEnabled) campaignFilterMode = "startdate";
@@ -213,10 +232,12 @@ export function parseActiveCampaignQueueView(
       }
     }
 
+    const bookingSystemEnabled = o.bookingSystemEnabled === true;
     const legacy = syncLegacyFilterFields({
       startdateEnabled,
       industryEnabled,
       companyTypeEnabled,
+      bookingSystemEnabled,
       postalFilterEnabled,
     });
 
@@ -232,6 +253,9 @@ export function parseActiveCampaignQueueView(
       selectedCompanyTypes: Array.isArray(o.selectedCompanyTypes)
         ? o.selectedCompanyTypes.filter((v): v is string => typeof v === "string")
         : [],
+      selectedBookingSystems: Array.isArray(o.selectedBookingSystems)
+        ? o.selectedBookingSystems.filter((v): v is string => typeof v === "string")
+        : [],
       dynamicSortFieldId: typeof o.dynamicSortFieldId === "string" ? o.dynamicSortFieldId : "",
       dynamicSortDir: o.dynamicSortDir === "desc" ? "desc" : "asc",
       dynamicFromDate: typeof o.dynamicFromDate === "string" ? o.dynamicFromDate : "",
@@ -240,6 +264,7 @@ export function parseActiveCampaignQueueView(
       startdateEnabled,
       industryEnabled,
       companyTypeEnabled,
+      bookingSystemEnabled,
       postalFilterEnabled,
       postalSortDir: o.postalSortDir === "desc" ? "desc" : "asc",
       postalRanges: parsePostalRanges(o.postalRanges),
@@ -257,6 +282,7 @@ export function hasActiveQueueViewConstraints(v: ActiveCampaignQueueViewV1 | nul
   if (isPostalQueueFilterActive(v)) return true;
   if (isIndustryQueueFilterActive(v)) return true; // også tom liste = 0 træf
   if (isCompanyTypeQueueFilterActive(v)) return true; // også tom liste = 0 træf
+  if (isBookingSystemQueueFilterActive(v)) return true; // også tom liste = 0 træf
   if (
     isStartdateQueueFilterActive(v) &&
     (v.meetingStartFrom.trim() || v.meetingStartTo.trim())
@@ -325,6 +351,7 @@ type LeadRowInput = {
   meetingScheduledFor: Date | string | null;
   postalCode?: string | null;
   address?: string | null;
+  bookingSystem?: string | null;
 };
 
 /**
@@ -379,6 +406,12 @@ export function leadMatchesActiveCampaignQueueView(
     const normalized = raw.trim().toLocaleLowerCase("da");
     if (normalized.length === 0) return false;
     if (!selected.has(normalized)) return false;
+  }
+
+  if (isBookingSystemQueueFilterActive(view)) {
+    if (view.selectedBookingSystems.length === 0) return false;
+    const selected = new Set(view.selectedBookingSystems.map(bookingSystemFilterKey));
+    if (!selected.has(bookingSystemFilterKey(lead.bookingSystem))) return false;
   }
 
   if (view.dynamicSortFieldId.trim() && (view.dynamicFromDate.trim() || view.dynamicToDate.trim())) {
@@ -436,45 +469,3 @@ export function filterLeadsByActiveCampaignQueueView<T extends LeadRowInput>(
  * hent udstødte rækker ét sted, kør kø-/status-logik, og til sidst: `getActiveCampaignLeads(..., rækker, fieldConfig, campaign.activeQueueFilter)`.
  */
 export const getActiveCampaignLeads = filterLeadsByActiveCampaignQueueView;
-
-/** Central guard: kampagne-gemt filter aktivt, og leadet matcher ikke. */
-export async function assertLeadMatchesActiveCampaignQueueOr403(
-  prisma: PrismaClient,
-  leadId: string,
-): Promise<{ ok: true } | { ok: false; error: string }> {
-  const lead = await prisma.lead.findUnique({
-    where: { id: leadId },
-    select: {
-      id: true,
-      campaignId: true,
-      industry: true,
-      customFields: true,
-      meetingScheduledFor: true,
-      postalCode: true,
-      address: true,
-      campaign: { select: { activeQueueFilter: true, fieldConfig: true } },
-    },
-  });
-  if (!lead?.campaignId || !lead.campaign) {
-    return { ok: true };
-  }
-  const raw = lead.campaign.activeQueueFilter;
-  const view = parseActiveCampaignQueueView(raw);
-  if (!hasActiveQueueViewConstraints(view)) {
-    return { ok: true };
-  }
-  const ok = leadMatchesActiveCampaignQueueView(
-    {
-      id: lead.id,
-      industry: lead.industry ?? "",
-      customFields: lead.customFields ?? "",
-      meetingScheduledFor: lead.meetingScheduledFor,
-      postalCode: lead.postalCode ?? "",
-      address: lead.address ?? "",
-    },
-    lead.campaign.fieldConfig ?? "{}",
-    view,
-  );
-  if (ok) return { ok: true };
-  return { ok: false, error: "Leadet matcher ikke det aktive kampagnefilter." };
-}

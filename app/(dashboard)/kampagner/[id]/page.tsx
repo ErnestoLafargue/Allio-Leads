@@ -225,6 +225,7 @@ export default function RedigerKampagnePage() {
         UNQUALIFIED: 0,
         NOT_HOME: 0,
         CALLBACK_SCHEDULED: 0,
+        DELETED: 0,
       };
       const res = await fetch(
         `/api/leads?campaignId=${encodeURIComponent(id)}&outcomeStats=1`,

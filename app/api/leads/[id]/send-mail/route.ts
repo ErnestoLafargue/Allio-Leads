@@ -6,6 +6,7 @@ import { prisma } from "@/lib/prisma";
 import { requireSession } from "@/lib/api-auth";
 import { canAccessBookedMeetingNotes } from "@/lib/lead-meeting-access";
 import { canAccessCallbackLead } from "@/lib/lead-callback-access";
+import { LEAD_ACTIVITY_KIND } from "@/lib/lead-activity-kinds";
 import { embedInlineImages, htmlToPlainText } from "@/lib/mail-send/prepare-outgoing-mail";
 
 type Params = { params: Promise<{ id: string }> };
@@ -192,6 +193,25 @@ export async function POST(req: Request, { params }: Params) {
       smtpPass: pass,
       defaultMailboxName: "Sent",
     }).catch((e) => console.error("appendToSentMailbox", e));
+
+    const actorName = session.user.name?.trim() || "Bruger";
+    await prisma.leadActivityEvent
+      .create({
+        data: {
+          leadId: lead.id,
+          userId: session.user.id,
+          kind: LEAD_ACTIVITY_KIND.MAIL_SENT,
+          summary: `${actorName} sendte mail til ${to}${subject ? ` — «${subject.slice(0, 120)}»` : ""}`.slice(
+            0,
+            2000,
+          ),
+          mailTo: to.slice(0, 500),
+          mailSubject: subject.slice(0, 500),
+          /** Gem original brødtekst (før CID-embedding) så forhåndsvisning matcher det sælgeren så. */
+          mailBody: message.slice(0, 500_000),
+        },
+      })
+      .catch((e) => console.error("[send-mail] activity log failed:", e));
 
     return NextResponse.json({ ok: true, to, subject, leadId: lead.id });
   } catch (e) {

@@ -2,93 +2,15 @@ import { NextResponse } from "next/server";
 import { Prisma } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
 import { requireSession, requireAdmin } from "@/lib/api-auth";
-import { campaignWhereForUser } from "@/lib/campaign-access";
 import { defaultCampaignFieldConfigJson } from "@/lib/campaign-fields";
-import { sortCampaignsForDisplay } from "@/lib/campaign-list-sort";
-import { workableCampaignLeadsWhere } from "@/lib/campaign-workable-leads";
-import { PRESENCE_FRESH_WINDOW_MS } from "@/lib/dialer-shared";
+import { listCampaignsWithStats } from "@/lib/campaign-list-query";
 
 export async function GET() {
   const { session, response } = await requireSession();
   if (response) return response;
 
   try {
-    const rows = await prisma.campaign.findMany({
-      where: campaignWhereForUser(session!.user),
-      orderBy: { name: "asc" },
-      select: {
-        id: true,
-        name: true,
-        fieldConfig: true,
-        includeProtectedBusinesses: true,
-        includeLeadsWithoutPhone: true,
-        isSystemCampaign: true,
-        systemCampaignType: true,
-        dialMode: true,
-        createdAt: true,
-        updatedAt: true,
-        _count: {
-          select: {
-            leads: { where: workableCampaignLeadsWhere },
-          },
-        },
-      },
-    });
-
-    const campaigns = sortCampaignsForDisplay(rows);
-
-    /// Optælling af agenter online + mine genopkald pr. kampagne i parallel — best-effort.
-    /// Hvis databasen mangler kolonnerne, falder vi tilbage til 0.
-    const userId = session!.user.id;
-    const presenceCutoff = new Date(Date.now() - PRESENCE_FRESH_WINDOW_MS);
-    const ids = campaigns.map((c) => c.id);
-
-    const [agentRows, callbackRows] = await Promise.all([
-      ids.length === 0
-        ? Promise.resolve<{ campaignId: string; _count: { _all: number } }[]>([])
-        : prisma.agentSession
-            .groupBy({
-              by: ["campaignId"],
-              where: {
-                campaignId: { in: ids },
-                status: { in: ["ready", "ringing", "talking", "wrap_up"] },
-                lastHeartbeat: { gte: presenceCutoff },
-              },
-              _count: { _all: true },
-            })
-            .catch(() => []),
-      ids.length === 0
-        ? Promise.resolve<{ campaignId: string | null; _count: { _all: number } }[]>([])
-        : prisma.lead
-            .groupBy({
-              by: ["campaignId"],
-              where: {
-                campaignId: { in: ids },
-                callbackReservedByUserId: userId,
-                callbackStatus: "PENDING",
-              },
-              _count: { _all: true },
-            })
-            .catch(() => []),
-    ]);
-
-    const agentsByCampaign = new Map<string, number>();
-    for (const r of agentRows) {
-      agentsByCampaign.set(r.campaignId, r._count._all);
-    }
-    const callbacksByCampaign = new Map<string, number>();
-    for (const r of callbackRows) {
-      if (typeof r.campaignId === "string") {
-        callbacksByCampaign.set(r.campaignId, r._count._all);
-      }
-    }
-
-    const enriched = campaigns.map((c) => ({
-      ...c,
-      agentsOnline: agentsByCampaign.get(c.id) ?? 0,
-      myCallbacks: callbacksByCampaign.get(c.id) ?? 0,
-    }));
-
+    const enriched = await listCampaignsWithStats(session!.user);
     return NextResponse.json(enriched);
   } catch (e) {
     const msg = e instanceof Error ? e.message : String(e);

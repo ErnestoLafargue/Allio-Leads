@@ -9,7 +9,12 @@ import { isQueueEligibleStatus, sortLeadsForQueue } from "@/lib/lead-queue";
 import { MeetingOutcomeSelect } from "@/app/components/meeting-outcome-select";
 import { LeadOutcomeStrip } from "@/app/components/lead-workspace/lead-outcome-strip";
 import { LeadKundeNoterBooking } from "@/app/components/lead-workspace/lead-kunde-noter-booking";
-import { dialNumberMenu, orderedDialPhones } from "@/lib/lead-phones";
+import {
+  dialNumberMenu,
+  normalizeDialPhonePriority,
+  orderedDialPhones,
+  type DialPhonePriority,
+} from "@/lib/lead-phones";
 import { CallbackScheduleDialog } from "@/app/components/callback-schedule-dialog";
 import { SendStandardMailDialog } from "@/app/components/send-standard-mail-dialog";
 import { LeadIdBadge } from "@/app/components/lead-id-badge";
@@ -38,11 +43,19 @@ import { VOIP_API_CONTEXT } from "@/lib/voip-api-context";
 import { useActivityRecordingPoll } from "@/lib/use-activity-recording-poll";
 import { LEAD_NAV_FALLBACK_PATH, parseLeadNavigation } from "@/lib/lead-navigation";
 import { canScheduleCallbackFromLead } from "@/lib/lead-callback-schedule";
+import { isCallbackWorkLead } from "@/lib/lead-callback-access";
+import { dialPhoneForOpenLead } from "@/lib/predictive-dial-policy";
+import {
+  MEETING_TYPE_ONLINE,
+  type MeetingType,
+  normalizeMeetingType,
+} from "@/lib/meeting-type";
 
 type Lead = {
   id: string;
   campaignId: string | null;
   companyName: string;
+  bookingSystem?: string;
   phone: string;
   privatePhone?: string;
   email: string;
@@ -61,8 +74,15 @@ type Lead = {
   meetingContactEmail?: string;
   meetingContactPhonePrivate?: string;
   meetingCompanyName?: string;
+  meetingType?: string;
+  meetingAddress?: string;
   meetingOutcomeStatus?: string;
-  campaign: { id: string; name: string; fieldConfig: string } | null;
+  campaign: {
+    id: string;
+    name: string;
+    fieldConfig: string;
+    dialPhonePriority?: string | null;
+  } | null;
   lockedByUserId?: string | null;
   lockExpiresAt?: string | null;
   lockedByUser?: { name: string; username: string } | null;
@@ -92,6 +112,7 @@ function LeadDetailInner() {
   const [lead, setLead] = useState<Lead | null>(null);
   const [forbidden, setForbidden] = useState(false);
   const [companyName, setCompanyName] = useState("");
+  const [bookingSystem, setBookingSystem] = useState("");
   const [phone, setPhone] = useState("");
   const [privatePhone, setPrivatePhone] = useState("");
   const [email, setEmail] = useState("");
@@ -108,6 +129,8 @@ function LeadDetailInner() {
   const [meetingContactEmail, setMeetingContactEmail] = useState("");
   const [meetingContactPhonePrivate, setMeetingContactPhonePrivate] = useState("");
   const [meetingCompanyName, setMeetingCompanyName] = useState("");
+  const [meetingType, setMeetingType] = useState<MeetingType>(MEETING_TYPE_ONLINE);
+  const [meetingAddress, setMeetingAddress] = useState("");
   const [meetingContactErrors, setMeetingContactErrors] = useState<MeetingContactFieldErrors>({});
   const [meetingNotesRequiredOpen, setMeetingNotesRequiredOpen] = useState(false);
   const [meetingOutcomeStatus, setMeetingOutcomeStatus] = useState(MEETING_OUTCOME_PENDING);
@@ -171,6 +194,7 @@ function LeadDetailInner() {
       if (cancelled) return;
       setLead(data);
       setCompanyName(data.companyName);
+      setBookingSystem(data.bookingSystem ?? "");
       setPhone(data.phone);
       setPrivatePhone(data.privatePhone ?? "");
       setEmail(data.email ?? "");
@@ -199,6 +223,8 @@ function LeadDetailInner() {
       setMeetingContactEmail(data.meetingContactEmail ?? "");
       setMeetingContactPhonePrivate(data.meetingContactPhonePrivate ?? "");
       setMeetingCompanyName(data.meetingCompanyName ?? "");
+      setMeetingType(normalizeMeetingType(data.meetingType));
+      setMeetingAddress(data.meetingAddress ?? "");
       setMeetingOutcomeStatus(
         String(data.meetingOutcomeStatus ?? "").trim().toUpperCase() || MEETING_OUTCOME_PENDING,
       );
@@ -350,11 +376,13 @@ function LeadDetailInner() {
 
   async function onConfirmBookingFromPanel(detail: BookingConfirmPayload) {
     if (!lead || status !== "MEETING_BOOKED") return;
+    const type = detail.meetingType ?? meetingType;
     const contactErr = validateMeetingContactFields(
       meetingContactName,
       meetingContactEmail,
       meetingContactPhonePrivate,
       meetingCompanyName,
+      { meetingType: type, meetingAddress },
     );
     if (contactErr) {
       setMeetingContactErrors(contactErr);
@@ -368,8 +396,10 @@ function LeadDetailInner() {
     }
     setError(null);
     setSaving(true);
+    setMeetingType(type);
     const body: Record<string, unknown> = {
       companyName,
+      bookingSystem,
       phone,
       privatePhone,
       email,
@@ -386,6 +416,8 @@ function LeadDetailInner() {
       meetingContactEmail: meetingContactEmail.trim(),
       meetingContactPhonePrivate: meetingContactPhonePrivate.trim(),
       meetingCompanyName: meetingCompanyName.trim(),
+      meetingType: type,
+      meetingAddress: meetingAddress.trim(),
     };
     if (detail.adminSkipBookingOverlap) {
       body.adminSkipBookingOverlap = true;
@@ -430,10 +462,11 @@ function LeadDetailInner() {
         meetingContactEmail,
         meetingContactPhonePrivate,
         meetingCompanyName,
+        { meetingType, meetingAddress },
       );
       if (contactErr) {
         setMeetingContactErrors(contactErr);
-        setError("Du skal udfylde de tre mødekontakt-felter, før du kan gemme med udfaldet «Møde booket».");
+        setError("Du skal udfylde mødekontakt-oplysningerne, før du kan gemme med udfaldet «Møde booket».");
         return;
       }
       setMeetingContactErrors({});
@@ -449,6 +482,7 @@ function LeadDetailInner() {
     setSaving(true);
     const body: Record<string, unknown> = {
       companyName,
+      bookingSystem,
       phone,
       privatePhone,
       email,
@@ -467,6 +501,8 @@ function LeadDetailInner() {
       body.meetingContactEmail = meetingContactEmail.trim();
       body.meetingContactPhonePrivate = meetingContactPhonePrivate.trim();
       body.meetingCompanyName = meetingCompanyName.trim();
+      body.meetingType = meetingType;
+      body.meetingAddress = meetingAddress.trim();
     }
     const res = await fetch(`/api/leads/${id}`, {
       method: "PATCH",
@@ -520,6 +556,7 @@ function LeadDetailInner() {
         scheduledFor: payload.scheduledForISO,
         assignedUserId: payload.assignedUserId,
         companyName,
+        bookingSystem,
         phone,
         privatePhone,
         email,
@@ -640,6 +677,7 @@ function LeadDetailInner() {
     }
     setMailDialogOpen(false);
     setMailSuccess(`Mail sendt til ${payload.to}.`);
+    bumpActivityReload();
   }
 
   const nextLeadId =
@@ -669,8 +707,52 @@ function LeadDetailInner() {
     );
   }
 
-  const canScheduleCallback = canScheduleCallbackFromLead(lead);
+  const leadId = lead.id;
+  const canScheduleCallback = canScheduleCallbackFromLead({
+    status: lead.status,
+    callbackStatus: lead.callbackStatus,
+    meetingOutcomeStatus: lead.meetingOutcomeStatus ?? meetingOutcomeStatus,
+  });
   const showNextForMeeting = status !== "MEETING_BOOKED";
+  const dialPhonePriority: DialPhonePriority = normalizeDialPhonePriority(
+    lead.campaign?.dialPhonePriority,
+  );
+  const voipLeadPhone = dialPhoneForOpenLead({ phone, privatePhone }, dialPhonePriority);
+  const voipFailoverPhone =
+    orderedDialPhones(phone, privatePhone, dialPhonePriority)[1]?.raw ?? "";
+  const voipDialMenu = dialNumberMenu(phone, privatePhone, dialPhonePriority);
+
+  async function handleUpdateLeadPhoneFromVoip(nextPhoneRaw: string) {
+    const nextPhone = nextPhoneRaw.trim();
+    const primary = orderedDialPhones(phone, privatePhone, dialPhonePriority)[0];
+    const dialingPrivate = primary?.kind === "PRIVATE";
+    if (dialingPrivate) {
+      setPrivatePhone(nextPhone);
+    } else {
+      setPhone(nextPhone);
+    }
+    try {
+      const res = await fetch(`/api/leads/${leadId}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(dialingPrivate ? { privatePhone: nextPhone } : { phone: nextPhone }),
+      });
+      if (!res.ok) {
+        const j = await res.json().catch(() => ({}));
+        return {
+          ok: false as const,
+          message: typeof j.error === "string" ? j.error : "Kunne ikke gemme nummer på lead.",
+        };
+      }
+      const updated = (await res.json()) as Lead;
+      setLead(updated);
+      setPhone(updated.phone ?? (dialingPrivate ? phone : nextPhone));
+      setPrivatePhone(updated.privatePhone ?? (dialingPrivate ? nextPhone : privatePhone));
+      return { ok: true as const, message: "Nummer opdateret på lead." };
+    } catch {
+      return { ok: false as const, message: "Netværksfejl — kunne ikke gemme nummer." };
+    }
+  }
 
   return (
     <div className="mx-auto max-w-6xl flex min-h-[calc(100dvh-5.5rem)] flex-col gap-4 pb-4">
@@ -841,11 +923,17 @@ function LeadDetailInner() {
             <CampaignVoipStrip
               leadId={lead.id}
               campaignId={lead.campaignId}
-              leadPhone={orderedDialPhones(phone, privatePhone, "PRIVATE_FIRST")[0]?.raw ?? ""}
-              failoverPhone={orderedDialPhones(phone, privatePhone, "PRIVATE_FIRST")[1]?.raw ?? ""}
-              dialMenu={dialNumberMenu(phone, privatePhone, "PRIVATE_FIRST")}
+              leadPhone={voipLeadPhone}
+              recordPhone={dialPhoneForOpenLead(
+                { phone: lead.phone, privatePhone: lead.privatePhone },
+                dialPhonePriority,
+              )}
+              failoverPhone={voipFailoverPhone}
+              dialMenu={voipDialMenu}
               dialMode="CLICK_TO_CALL"
               autoStartCall={false}
+              isCallbackLead={isCallbackWorkLead(lead)}
+              onUpdateLeadPhone={handleUpdateLeadPhoneFromVoip}
               voipApiContext={VOIP_API_CONTEXT.GLOBAL_LEAD_PAGE}
               onVoipFailureLogged={bumpActivityReload}
               onCallEndedForActivity={schedulePollAfterCall}
@@ -865,6 +953,8 @@ function LeadDetailInner() {
               fieldConfigJson={lead.campaign?.fieldConfig ?? defaultCampaignFieldConfigJson()}
               companyName={companyName}
               onCompanyName={setCompanyName}
+              bookingSystem={bookingSystem}
+              onBookingSystem={setBookingSystem}
               phone={phone}
               onPhone={setPhone}
               privatePhone={privatePhone}
@@ -914,6 +1004,8 @@ function LeadDetailInner() {
                 meetingContactEmail,
                 meetingContactPhonePrivate,
                 meetingCompanyName,
+                meetingType,
+                meetingAddress,
                 onMeetingContactName: (v) => {
                   setMeetingContactName(v);
                   setMeetingContactErrors((prev) => ({ ...prev, name: undefined }));
@@ -930,6 +1022,10 @@ function LeadDetailInner() {
                   setMeetingCompanyName(v);
                   setMeetingContactErrors((prev) => ({ ...prev, meetingCompany: undefined }));
                 },
+                onMeetingAddress: (v) => {
+                  setMeetingAddress(v);
+                  setMeetingContactErrors((prev) => ({ ...prev, address: undefined }));
+                },
                 contactRequired: status === "MEETING_BOOKED",
                 meetingContactErrors: status === "MEETING_BOOKED" ? meetingContactErrors : undefined,
               }}
@@ -937,6 +1033,8 @@ function LeadDetailInner() {
                 campaignId: lead.campaignId ?? undefined,
                 leadId: lead.id,
                 initialMeetingLocal: status === "MEETING_BOOKED" ? meetingScheduledFor || undefined : undefined,
+                meetingType,
+                onMeetingTypeChange: setMeetingType,
                 isSubmitting: saving,
                 allowMeetingConfirm: status === "MEETING_BOOKED",
                 allowAdminAvailabilityOverride: isAdmin,

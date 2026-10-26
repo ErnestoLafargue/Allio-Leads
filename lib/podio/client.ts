@@ -127,6 +127,7 @@ type PodioField = {
   external_id: string;
   label: string;
   type: string;
+  status?: string;
   config?: { settings?: { options?: PodioCategoryOption[] } };
 };
 type PodioAppConfig = { fields: PodioField[] };
@@ -154,7 +155,10 @@ async function getAppConfig(app: PodioAppKey): Promise<PodioAppConfig> {
 
 function findFieldByLabel(config: PodioAppConfig, label: string): PodioField | null {
   const want = normalizeLabel(label);
-  return config.fields.find((f) => normalizeLabel(f.label) === want) ?? null;
+  const matches = config.fields.filter((f) => normalizeLabel(f.label) === want);
+  if (matches.length === 0) return null;
+  // Foretræk aktive felter (slettede labels kan ellers matche først).
+  return matches.find((f) => f.status !== "deleted") ?? matches[0] ?? null;
 }
 
 /** Hent felt-metadata (external_id + type) via etiket. */

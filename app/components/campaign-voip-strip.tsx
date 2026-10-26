@@ -5,6 +5,8 @@ import type { CampaignDialMode } from "@/lib/dial-mode";
 import { normalizePhoneToE164ForDial, stripDialFormatting } from "@/lib/phone-e164";
 import { useAudioLevel } from "@/lib/use-audio-level";
 import { useCallAudioPublisher } from "@/lib/live-coach/call-audio";
+import { MedlytPublisher } from "@/app/components/medlyt-publisher";
+import { medlytSellerCaptureConstraints } from "@/lib/medlyt-webrtc";
 import {
   ensureMicPermissionAndEnumerate,
   headsetSetupBlockedReason,
@@ -81,6 +83,8 @@ type Props = {
    * agentens status til server-side dispatcher (ready/ringing/talking).
    */
   onLineStatusChange?: (status: LineStatus) => void;
+  /** Aktivt Telnyx call_control_id (Medlyt / presence). */
+  onCallControlIdChange?: (callControlId: string | null) => void;
   /** Øges af parent når et aktivt opkald skal afsluttes programmatisk (fx Gem og næste). */
   hangupSignal?: number;
   /** Kaldes når `hangupSignal` er håndteret (uanset om der var aktivt opkald). */
@@ -126,7 +130,7 @@ type TelnyxCall = {
   state?: unknown;
   /// Hvor opkaldet kommer fra: outbound = vi ringede ud, inbound = vi modtog opkald (bridge fra dispatcher)
   direction?: "outbound" | "inbound";
-  options?: { destinationNumber?: string; remoteCallerName?: string };
+  options?: { destinationNumber?: string; remoteCallerName?: string; telnyxCallControlId?: string };
   /** Telnyx server-side call leg — sættes når opkallet er forbundet (Call Control). */
   telnyxIDs?: { telnyxCallControlId?: string; telnyxSessionId?: string; telnyxLegId?: string };
   cause?: string;
@@ -272,6 +276,7 @@ export function CampaignVoipStrip({
   onUpdateLeadPhone,
   unansweredTimeoutMs = 25_000,
   onLineStatusChange,
+  onCallControlIdChange,
   hangupSignal = 0,
   onHangupSignalHandled,
   onVoipFailureLogged,
@@ -891,7 +896,7 @@ export function CampaignVoipStrip({
     void (async () => {
       try {
         const stream = await navigator.mediaDevices.getUserMedia({
-          audio: { deviceId: { exact: micId } },
+          audio: medlytSellerCaptureConstraints(micId),
         });
         if (cancelled) {
           stream.getTracks().forEach((t) => t.stop());
@@ -963,49 +968,52 @@ export function CampaignVoipStrip({
   }, [leadId, voipApiContext]);
 
   /**
-   * Registrér Telnyx call_control_id for det aktive WebRTC-opkald på AgentSession.
-   * Bruges af admin-metrics og fremtidig optimering af bridge; rydes ved idle.
+   * Registrér Telnyx call_control_id kontinuerligt mens linjen er aktiv (Medlyt).
+   * Credential-connections understøtter ikke active_calls — browseren SKAL sende id'et.
    */
+  const onCallControlIdChangeRef = useRef(onCallControlIdChange);
+  onCallControlIdChangeRef.current = onCallControlIdChange;
+  const lastPostedCcRef = useRef<string | null>(null);
+
   useEffect(() => {
-    if (isGlobalVoip) return;
     if (!campaignId) return;
 
-    if (lineStatus === "idle" || lineStatus === "error") {
+    const postCc = (cc: string | null) => {
+      if (cc === lastPostedCcRef.current) return;
+      lastPostedCcRef.current = cc;
+      onCallControlIdChangeRef.current?.(cc);
       void fetch("/api/dialer/agent/call-control", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ campaignId, callControlId: null }),
+        body: JSON.stringify({ campaignId, callControlId: cc }),
         credentials: "include",
       }).catch(() => {});
+    };
+
+    if (lineStatus === "idle" || lineStatus === "error") {
+      postCc(null);
       return;
     }
 
-    let ticks = 0;
-    const interval = window.setInterval(() => {
-      ticks += 1;
+    const tick = () => {
       const call = activeCallRef.current;
-      const cc = call?.telnyxIDs?.telnyxCallControlId;
-      if (cc) {
-        void fetch("/api/dialer/agent/call-control", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ campaignId, callControlId: cc }),
-          credentials: "include",
-        }).catch(() => {});
-        window.clearInterval(interval);
-        return;
-      }
-      if (ticks >= 40) window.clearInterval(interval);
-    }, 500);
-
-    return () => {
-      window.clearInterval(interval);
+      const cc =
+        call?.telnyxIDs?.telnyxCallControlId?.trim() ||
+        (call?.options && typeof call.options === "object"
+          ? (call.options as { telnyxCallControlId?: string }).telnyxCallControlId?.trim()
+          : undefined) ||
+        null;
+      if (cc) postCc(cc);
     };
-  }, [isGlobalVoip, lineStatus, campaignId]);
+    tick();
+    const interval = window.setInterval(tick, 1500);
+    return () => window.clearInterval(interval);
+  }, [lineStatus, campaignId]);
 
   useEffect(() => {
-    if (isGlobalVoip) return;
     return () => {
+      lastPostedCcRef.current = null;
+      onCallControlIdChangeRef.current?.(null);
       if (!campaignId) return;
       void fetch("/api/dialer/agent/call-control", {
         method: "POST",
@@ -1014,7 +1022,7 @@ export function CampaignVoipStrip({
         credentials: "include",
       }).catch(() => {});
     };
-  }, [isGlobalVoip, campaignId]);
+  }, [campaignId]);
 
   /**
    * Ryd ugyldige valg — men kun når enhedslisten faktisk er indlæst.
@@ -1791,6 +1799,7 @@ export function CampaignVoipStrip({
       aria-label={standbyInboundOnly ? "VoIP standby (skjult)" : "VoIP opkald"}
     >
       <audio ref={remoteAudioRef} id={remoteAudioId} autoPlay playsInline />
+      <MedlytPublisher micStream={micMonitorStream} remoteStream={remoteStream} />
 
       <header className="flex flex-wrap items-start justify-between gap-3">
         <div className="min-w-0">

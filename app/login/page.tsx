@@ -25,7 +25,7 @@ export default function LoginPage() {
       setError("Forkert brugernavn eller adgangskode");
       return;
     }
-    router.push("/leads");
+    router.push("/kampagner");
     router.refresh();
   }
 

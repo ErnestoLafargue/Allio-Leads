@@ -16,6 +16,8 @@ export type LeadEnrichmentSource = {
   postalCode: string;
   city: string;
   industry: string;
+  /** Valgfri så ældre kald/tests uden feltet stadig typer. */
+  bookingSystem?: string;
   notes: string;
   customFields: string;
 };
@@ -33,6 +35,7 @@ type UploadAggregate = {
     postalCode: string;
     city: string;
     industry: string;
+    bookingSystem: string;
     domain: string;
   };
   custom: Record<string, string>;
@@ -225,6 +228,7 @@ export function prepareEnrichmentUpload(params: {
         postalCode: base.postalCode,
         city: base.city,
         industry: base.industry,
+        bookingSystem: base.bookingSystem,
         domain: normalized.domain?.trim() ?? "",
       },
       custom,
@@ -281,6 +285,7 @@ type LeadPatchPlan = {
     postalCode?: string;
     city?: string;
     industry?: string;
+    bookingSystem?: string;
     customFields?: string;
   };
 };
@@ -394,6 +399,7 @@ export function buildEnrichmentPreview(params: {
       applyStandard("postalCode", lead.postalCode);
       applyStandard("city", lead.city);
       applyStandard("industry", lead.industry);
+      applyStandard("bookingSystem", lead.bookingSystem ?? "");
 
       for (const [customKey, raw] of Object.entries(agg.custom)) {
         if (isTargetBlockedByMatchField(`custom:${customKey}`, matchField)) continue;

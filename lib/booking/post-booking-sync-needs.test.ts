@@ -9,6 +9,9 @@ const base = {
   meetingContactPhonePrivate: "+4512345678",
   meetingCompanyName: "Firma ApS",
   calComBookingUid: "cal-uid-1",
+  allioBookingId: "allio-booking-1",
+  meetingType: "ONLINE",
+  meetingAddress: "",
 };
 
 describe("leadNeedsPostBookingSync", () => {
@@ -34,9 +37,19 @@ describe("leadNeedsPostBookingSync", () => {
     ).toBe(true);
   });
 
-  it("returns true when cal uid mangler", () => {
+  it("returns true when cal uid mangler (online)", () => {
     expect(
       leadNeedsPostBookingSync({ ...base, calComBookingUid: null }, base),
     ).toBe(true);
+  });
+
+  it("returns false when cal uid mangler for fysisk (Cal springes over)", () => {
+    const physical = {
+      ...base,
+      meetingType: "PHYSICAL",
+      calComBookingUid: null,
+      meetingAddress: "Hovedgaden 1",
+    };
+    expect(leadNeedsPostBookingSync(physical, physical)).toBe(false);
   });
 });

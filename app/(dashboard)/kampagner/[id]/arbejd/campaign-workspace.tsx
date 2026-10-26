@@ -61,6 +61,7 @@ import { dialPhoneForOpenLead } from "@/lib/predictive-dial-policy";
 type Lead = {
   id: string;
   companyName: string;
+  bookingSystem?: string;
   phone: string;
   privatePhone?: string;
   email: string;
@@ -363,6 +364,7 @@ export function CampaignWorkspace({
   }, [poolMode, powerPoolMode]);
 
   const [companyName, setCompanyName] = useState("");
+  const [bookingSystem, setBookingSystem] = useState("");
   const [phone, setPhone] = useState("");
   const [privatePhone, setPrivatePhone] = useState("");
   const [email, setEmail] = useState("");
@@ -482,6 +484,7 @@ export function CampaignWorkspace({
 
   const loadFormFromLead = useCallback((l: Lead) => {
     setCompanyName(l.companyName);
+    setBookingSystem(l.bookingSystem ?? "");
     setPhone(l.phone);
     setPrivatePhone(l.privatePhone ?? "");
     setEmail(l.email ?? "");
@@ -529,6 +532,7 @@ export function CampaignWorkspace({
 
   const resetFormForPowerWaiting = useCallback(() => {
     setCompanyName("");
+    setBookingSystem("");
     setPhone("");
     setPrivatePhone("");
     setEmail("");
@@ -779,6 +783,8 @@ export function CampaignWorkspace({
   // VoIP-strip linje-status (bruges til at rapportere agentens dialer-presence)
   const [voipLineStatus, setVoipLineStatus] = useState<LineStatus>("idle");
   const [voipHangupSignal, setVoipHangupSignal] = useState(0);
+  /** Telnyx call_control_id fra aktiv WebRTC-linje — Medlyt / presence. */
+  const [voipCallControlId, setVoipCallControlId] = useState<string | null>(null);
 
   /**
    * Predictive: mapper voip-strip's lokale lineStatus + auto-dial-pause til presence-status.
@@ -914,10 +920,14 @@ export function CampaignWorkspace({
       ? campaignId
       : null;
 
+  const powerPresenceFastPoll =
+    powerPhone.lineStatus === "ringing" || powerPhone.lineStatus === "live";
+
   const {
     server: powerServer,
     lastDispatch: powerLastDispatch,
     error: powerPresenceError,
+    refresh: refreshPowerPresence,
     skipWrapUp,
     takeOver,
   } = usePowerDialerPresence({
@@ -927,12 +937,23 @@ export function CampaignWorkspace({
     leadOpen: Boolean(activeLead),
     lineLive: powerPhone.lineStatus === "live",
     webrtcReady: powerPhone.webrtcReady,
+    callControlId: voipCallControlId,
     onAssignedLead: handleAssignedLead,
+    // Twilio/Flex: reservation → UI med det samme. Hurtig poll mens agent-ben ringer.
+    intervalMs: powerPresenceFastPoll ? 1000 : 5000,
   });
+
+  // Åbn lead så snart serveren har reserveret (ikke først efter næste 5s-tick).
+  useEffect(() => {
+    if (!isPowerAutoDialSession) return;
+    if (powerPhone.lineStatus !== "ringing" && powerPhone.lineStatus !== "live") return;
+    refreshPowerPresence();
+  }, [isPowerAutoDialSession, powerPhone.lineStatus, refreshPowerPresence]);
 
   const { stats: dialerStats, sipReady } = useDialerPresence({
     campaignId: isAutoDialModeForPresence && campaignId ? campaignId : null,
     status: presenceStatus,
+    callControlId: voipCallControlId,
     intervalMs: 5000,
     onAssignedLead: handleAssignedLead,
     enableDispatch: false,
@@ -960,6 +981,7 @@ export function CampaignWorkspace({
     const st = statusOverride ?? status;
     return {
       companyName,
+      bookingSystem,
       phone,
       privatePhone,
       email,
@@ -1414,6 +1436,7 @@ export function CampaignWorkspace({
         scheduledFor: payload.scheduledForISO,
         assignedUserId: payload.assignedUserId,
         companyName,
+        bookingSystem,
         phone,
         privatePhone,
         email,
@@ -1581,6 +1604,7 @@ export function CampaignWorkspace({
     }
     setMailDialogOpen(false);
     setMailSuccess(`Mail sendt til ${payload.to}.`);
+    bumpVoipActivity();
   }
 
   if (loading) {
@@ -1790,6 +1814,7 @@ export function CampaignWorkspace({
             }
             hangupSignal={voipHangupSignal}
             onStateChange={setPowerPhone}
+            onCallControlIdChange={setVoipCallControlId}
           />
         </div>
       ) : null}
@@ -2218,6 +2243,7 @@ export function CampaignWorkspace({
           onUpdateLeadPhone={handleUpdateLeadPhoneFromVoip}
           unansweredTimeoutMs={25_000}
           onLineStatusChange={setVoipLineStatus}
+          onCallControlIdChange={setVoipCallControlId}
           hangupSignal={voipHangupSignal}
           onVoipFailureLogged={bumpVoipActivity}
           onCallEndedForActivity={schedulePollAfterCall}
@@ -2248,6 +2274,8 @@ export function CampaignWorkspace({
         fieldConfigJson={fieldConfigJson}
         companyName={companyName}
         onCompanyName={setCompanyName}
+        bookingSystem={bookingSystem}
+        onBookingSystem={setBookingSystem}
         phone={phone}
         onPhone={setPhone}
         privatePhone={privatePhone}
