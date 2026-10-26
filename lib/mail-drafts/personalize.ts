@@ -7,6 +7,15 @@ export const MAIL_PLACEHOLDERS = {
   bookingSystem: "{{BOOKINGSYSTEM}}",
 } as const;
 
+/** Engelske pladsholdere: samme felter, men engelske fallbacks og hilsen. */
+export const MAIL_PLACEHOLDERS_EN = {
+  greeting: "{{GREETING_EN}}",
+  companyName: "{{COMPANY_EN}}",
+  senderName: MAIL_PLACEHOLDERS.senderName,
+  senderEmail: MAIL_PLACEHOLDERS.senderEmail,
+  bookingSystem: "{{BOOKINGSYSTEM_EN}}",
+} as const;
+
 export type MailSenderUser = {
   name?: string | null;
   /** Session-mail er `${username}@local` (se auth.ts). */
@@ -71,6 +80,9 @@ export function personalizeMailDraft(message: string, ctx: MailDraftContext): st
     [MAIL_PLACEHOLDERS.senderName]: escapeHtml(mailSenderName(ctx.sender)),
     [MAIL_PLACEHOLDERS.senderEmail]: mailSenderEmail(ctx.sender),
     [MAIL_PLACEHOLDERS.bookingSystem]: bookingSystem ? escapeHtml(bookingSystem) : "jeres bookingsystem",
+    [MAIL_PLACEHOLDERS_EN.greeting]: contactName ? `Hi ${escapeHtml(contactName)},` : "Hi,",
+    [MAIL_PLACEHOLDERS_EN.companyName]: companyName ? escapeHtml(companyName) : "your clinic",
+    [MAIL_PLACEHOLDERS_EN.bookingSystem]: bookingSystem ? escapeHtml(bookingSystem) : "your booking system",
   };
   let out = message;
   for (const [placeholder, value] of Object.entries(values)) {

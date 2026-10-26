@@ -29,7 +29,15 @@ export {
 } from "./growth-overview-mail";
 
 export {
+  GROWTH_OVERVIEW_EN_DRAFT_ID,
+  GROWTH_OVERVIEW_EN_SUBJECT,
+  GROWTH_OVERVIEW_EN_MESSAGE,
+  growthOverviewEnMailDraft,
+} from "./growth-overview-mail-en";
+
+export {
   MAIL_PLACEHOLDERS,
+  MAIL_PLACEHOLDERS_EN,
   mailSenderEmail,
   mailSenderName,
   personalizeMailDraft,
@@ -47,6 +55,7 @@ export {
 import { adamFocusMailDraft } from "./adam-focus-mail";
 import { clientEditionMailDraft } from "./client-edition-mail";
 import { growthOverviewMailDraft } from "./growth-overview-mail";
+import { growthOverviewEnMailDraft } from "./growth-overview-mail-en";
 import { reactivationMailDraft } from "./reactivation-mail";
 
 export const DEFAULT_MAIL_DRAFT_ID = growthOverviewMailDraft.id;
@@ -55,6 +64,7 @@ export const MAIL_DRAFTS: MailDraft[] = [
   { id: EMPTY_DRAFT_ID, label: "Tom mail", subject: "", message: "" },
   { ...clientEditionMailDraft },
   { ...growthOverviewMailDraft },
+  { ...growthOverviewEnMailDraft },
   { ...adamFocusMailDraft },
   { ...reactivationMailDraft },
 ];
