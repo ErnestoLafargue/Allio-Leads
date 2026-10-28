@@ -149,7 +149,8 @@ export function BlockedTimeDialog({
         return;
       }
       const data = (await res.json()) as { users: Assignee[]; defaultUserId: string | null };
-      setAssignees(data.users ?? []);
+      const users = data.users ?? [];
+      setAssignees(users);
       if (mode === "edit" && initial) {
         setUserId(initial.userId);
         setTitle(initial.title);
@@ -166,9 +167,10 @@ export function BlockedTimeDialog({
         setEndDate(range.endDate);
         setEndTime(range.endTime);
         setTitle("");
-        setUserId(
-          isAdmin && defaultUserId ? defaultUserId : currentUserId,
-        );
+        // Admin: standard-mødeansvarlig. Andre: sig selv, hvis de er mødeansvarlig — ellers standarden.
+        const selfIsAssignee = users.some((u) => u.id === currentUserId);
+        const fallback = defaultUserId ?? data.defaultUserId ?? users[0]?.id ?? "";
+        setUserId(!isAdmin && selfIsAssignee ? currentUserId : fallback || currentUserId);
       }
     })();
   }, [open, mode, initial, createPrefill, currentUserId, isAdmin, defaultUserId]);
@@ -179,6 +181,10 @@ export function BlockedTimeDialog({
     setSubmitErr(null);
     const startIso = toIso(startDate, startTime);
     const endIso = toIso(endDate, endTime);
+    if (!userId) {
+      setSubmitErr("Vælg mødeansvarlig.");
+      return;
+    }
     if (!title.trim()) {
       setSubmitErr("Angiv en titel/årsag.");
       return;
@@ -235,7 +241,12 @@ export function BlockedTimeDialog({
     onSaved();
   }
 
-  const showUserSelect = isAdmin && assignees.length > 0;
+  const showUserSelect = assignees.length > 0;
+  // Ved redigering kan blokeringens ejer mangle i listen (fx uden telefonnummer) — vis den alligevel.
+  const selectOptions =
+    initial?.user && !assignees.some((u) => u.id === initial.user!.id)
+      ? [...assignees, initial.user]
+      : assignees;
 
   return (
     <div
@@ -265,15 +276,16 @@ export function BlockedTimeDialog({
               onChange={(e) => setUserId(e.target.value)}
               className="mt-1 w-full rounded-lg border border-stone-200 bg-white px-3 py-2 text-sm text-stone-900 shadow-sm outline-none ring-stone-400 focus:ring-2"
             >
-              {assignees.map((u) => (
+              {!userId ? <option value="">Vælg mødeansvarlig…</option> : null}
+              {selectOptions.map((u) => (
                 <option key={u.id} value={u.id}>
                   {u.name} ({u.username})
                 </option>
               ))}
             </select>
           </label>
-        ) : (
-          <p className="mt-4 text-xs text-stone-500">Blokering gælder din egen kalender.</p>
+        ) : loadErr ? null : (
+          <p className="mt-4 text-xs text-stone-500">Henter mødeansvarlige…</p>
         )}
 
         <label className="mt-4 block text-xs font-medium text-stone-600">

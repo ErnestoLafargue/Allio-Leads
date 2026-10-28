@@ -1,7 +1,6 @@
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { requireSession } from "@/lib/api-auth";
-import { canManageBlockedTimeForUser } from "@/lib/blocked-time-auth";
 import { listMeetingAssignableUsers } from "@/lib/meeting-assignee";
 
 function parseIsoDate(raw: string | null, label: string): Date | null {
@@ -87,20 +86,13 @@ export async function POST(req: Request) {
     return NextResponse.json({ error: "Angiv en titel/årsag." }, { status: 400 });
   }
   if (!targetUserId) {
-    return NextResponse.json({ error: "Angiv bruger." }, { status: 400 });
+    return NextResponse.json({ error: "Vælg mødeansvarlig." }, { status: 400 });
   }
   if (!start || !end) {
     return NextResponse.json({ error: "Angiv gyldig start- og sluttid." }, { status: 400 });
   }
   if (end <= start) {
     return NextResponse.json({ error: "Sluttid skal være efter starttid." }, { status: 400 });
-  }
-
-  if (!canManageBlockedTimeForUser(session!, targetUserId)) {
-    return NextResponse.json(
-      { error: "Du kan kun blokere tid på din egen kalender." },
-      { status: 403 },
-    );
   }
 
   const assignees = await listMeetingAssignableUsers();
