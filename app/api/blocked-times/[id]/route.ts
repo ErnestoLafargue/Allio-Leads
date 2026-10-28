@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { requireSession } from "@/lib/api-auth";
-import { canDeleteBlockedTime, canManageBlockedTimeForUser } from "@/lib/blocked-time-auth";
+import { canDeleteBlockedTime, canEditBlockedTime } from "@/lib/blocked-time-auth";
 import { listMeetingAssignableUsers } from "@/lib/meeting-assignee";
 
 type Params = { params: Promise<{ id: string }> };
@@ -48,17 +48,8 @@ export async function PATCH(req: Request, { params }: Params) {
     return NextResponse.json({ error: "Sluttid skal være efter starttid." }, { status: 400 });
   }
 
-  if (
-    !canManageBlockedTimeForUser(session!, existing.userId) &&
-    !canManageBlockedTimeForUser(session!, targetUserId)
-  ) {
+  if (!canEditBlockedTime(session!, existing)) {
     return NextResponse.json({ error: "Ingen adgang til at redigere denne blokering." }, { status: 403 });
-  }
-  if (!canManageBlockedTimeForUser(session!, targetUserId)) {
-    return NextResponse.json(
-      { error: "Du kan kun blokere tid på din egen kalender." },
-      { status: 403 },
-    );
   }
 
   const assignees = await listMeetingAssignableUsers();
