@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   filterMeetingsInWeek,
+  getIsoWeekNumberDa,
   layoutMeetingColumns,
   meetingPlacement,
   parseWeekStartParam,
@@ -52,5 +53,24 @@ describe("meeting-week-calendar", () => {
     const monday = startOfWeekMondayDayKey();
     expect(parseWeekStartParam("invalid")).toBe(monday);
     expect(parseWeekStartParam(monday)).toBe(monday);
+  });
+});
+
+describe("getIsoWeekNumberDa", () => {
+  it.each([
+    ["2026-10-26", 44],
+    ["2026-10-28", 44],
+    ["2026-10-19", 43],
+    ["2026-03-30", 14],
+    ["2025-12-29", 1],
+    ["2026-01-05", 2],
+    ["2026-12-28", 53],
+    ["2027-01-04", 1],
+    ["2020-12-28", 53],
+    ["2021-01-03", 53],
+    ["2021-01-04", 1],
+    ["2024-12-30", 1],
+  ])("%s er uge %i", (dayKey, week) => {
+    expect(getIsoWeekNumberDa(dayKey)).toBe(week);
   });
 });
