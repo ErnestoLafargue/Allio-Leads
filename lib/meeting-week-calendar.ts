@@ -113,20 +113,18 @@ export function formatWeekColumnHeaderDa(dayKey: string): { weekday: string; day
   return { weekday, dayMonth };
 }
 
+/**
+ * ISO 8601-ugenummer (dansk standard: uger starter mandag, uge 1 indeholder årets første torsdag).
+ * Regnes rent på kalenderdatoen i UTC, så sommertid ikke kan flytte resultatet.
+ */
 export function getIsoWeekNumberDa(dayKey: string): number {
-  const { start } = copenhagenDayBoundsUtcFromDayKey(dayKey);
-  const fmt = new Intl.DateTimeFormat("da-DK", {
-    timeZone: TZ,
-    week: "isoWeek",
-  } as Intl.DateTimeFormatOptions);
-  const parts = fmt.formatToParts(start);
-  const w = parts.find((p) => (p.type as string) === "week")?.value;
-  if (w) return parseInt(w, 10);
-  const thursday = addDaysToDayKey(dayKey, 3);
-  const { y } = parseDayKey(thursday);
-  const jan4 = copenhagenDayBoundsUtcFromDayKey(`${y}-01-04`).start;
-  const diff = start.getTime() - jan4.getTime();
-  return 1 + Math.floor(diff / (7 * 86_400_000));
+  const { y, m, d } = parseDayKey(dayKey);
+  const date = new Date(Date.UTC(y, m - 1, d));
+  const isoWeekday = date.getUTCDay() || 7;
+  // Torsdagen i samme uge afgør, hvilket år ugen tilhører.
+  date.setUTCDate(date.getUTCDate() + 4 - isoWeekday);
+  const yearStart = Date.UTC(date.getUTCFullYear(), 0, 1);
+  return Math.ceil(((date.getTime() - yearStart) / 86_400_000 + 1) / 7);
 }
 
 export function formatTimeDa(iso: string | Date): string {
