@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { runRecordingsBackfill } from "@/lib/telnyx-recordings-backfill";
+import { archiveTelnyxRecordings } from "@/lib/call-recording-archive";
 import { syncMissingRecordingsBatch } from "@/lib/telnyx-recordings-auto-sync";
 
 /**
@@ -10,6 +11,9 @@ import { syncMissingRecordingsBatch } from "@/lib/telnyx-recordings-auto-sync";
  * gemmer deres optagelser i Allio, før Telnyx sletter dem. Den kører derfor hvert 10. minut
  * (`?hours=6`) og om natten med 72 timer, som også kører målrettet sync for leads med møde
  * booket / lange samtaler uden lydfil.
+ *
+ * Først kører lydarkivet: alle optagelser ≥ 20 s kopieres til Blob (ældste først), uanset
+ * om de kan kobles til et lead — så vi aldrig mister en lydfil, hvis Telnyx sletter den.
  */
 export async function GET(req: Request) {
   const auth = req.headers.get("authorization")?.trim() ?? "";
@@ -34,6 +38,16 @@ export async function GET(req: Request) {
   const fromIso = new Date(startedAt - hoursBack * 3600000).toISOString();
   const runMissingSync = hoursBack >= 24;
 
+  let archive: Awaited<ReturnType<typeof archiveTelnyxRecordings>> | null = null;
+  try {
+    archive = await archiveTelnyxRecordings({ apiKey, deadlineAt: startedAt + 25_000 });
+  } catch (err) {
+    console.error(
+      "[cron:telnyx-recordings-backfill] lydarkiv fejlede:",
+      err instanceof Error ? err.message : err,
+    );
+  }
+
   try {
     const out = await runRecordingsBackfill({
       apiKey,
@@ -44,7 +58,7 @@ export async function GET(req: Request) {
       toIso: null,
       dryRun: false,
       copyToBlob: true,
-      deadlineAt: startedAt + (runMissingSync ? 35_000 : 50_000),
+      deadlineAt: startedAt + (runMissingSync ? 40_000 : 50_000),
     });
 
     if (!out.ok) {
@@ -67,6 +81,7 @@ export async function GET(req: Request) {
     return NextResponse.json({
       ok: true,
       hoursBack,
+      archive,
       result: out.result,
       missingSync,
     });

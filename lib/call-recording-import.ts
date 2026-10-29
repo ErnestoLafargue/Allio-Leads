@@ -99,7 +99,7 @@ async function mapWithConcurrency<T, R>(
 }
 
 /** Alle sider af en Telnyx-liste (fx `connections`, `phone_numbers`). */
-async function fetchAllTelnyxPages(apiKey: string, path: string): Promise<Record<string, unknown>[]> {
+export async function fetchAllTelnyxPages(apiKey: string, path: string): Promise<Record<string, unknown>[]> {
   const out: Record<string, unknown>[] = [];
   for (let page = 1; ; page++) {
     const qs = new URLSearchParams({ "page[number]": String(page), "page[size]": "250" });
@@ -421,10 +421,10 @@ export async function importCallRecordings(params: {
       leadMatch: l.leadMatch,
       campaignId: l.dialerCampaignId ?? (l.leadId ? campaignIdByLead.get(l.leadId) ?? null : null),
       activityEventId: l.activity?.id ?? null,
-      playbackUrl:
-        l.activity?.recordingUrl && isVercelBlobUrl(l.activity.recordingUrl)
-          ? l.activity.recordingUrl
-          : null,
+      // Aldrig null: en eksisterende URL kan være lydarkivets backup (lib/call-recording-archive.ts).
+      ...(l.activity?.recordingUrl && isVercelBlobUrl(l.activity.recordingUrl)
+        ? { playbackUrl: l.activity.recordingUrl }
+        : {}),
       outcomeStatus: outcome?.status ?? null,
       outcomeAt: outcome?.createdAt ?? null,
     };

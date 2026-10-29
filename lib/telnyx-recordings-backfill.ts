@@ -398,9 +398,21 @@ async function processOneRecording(
       ? existing.recordingUrl
       : null;
 
+  // Lydarkivet (lib/call-recording-archive.ts) har måske allerede en kopi — genbrug den.
+  const archived = existingBlobUrl
+    ? null
+    : await prisma.callRecording.findUnique({
+        where: { telnyxRecordingId: rec.id },
+        select: { playbackUrl: true },
+      });
+  const archiveUrl =
+    archived?.playbackUrl && isVercelBlobUrl(archived.playbackUrl) ? archived.playbackUrl : null;
+
   let playbackUrl = playbackSourceUrl;
   if (existingBlobUrl) {
     playbackUrl = existingBlobUrl;
+  } else if (archiveUrl) {
+    playbackUrl = archiveUrl;
   } else if (options.copyToBlob && rec.mp3Url) {
     // Forsøg at kopiere lyden til Vercel Blob så afspilning ikke afhænger af
     // udløbende Telnyx-download-links (samme persist som live-flowet).
