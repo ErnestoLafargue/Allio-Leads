@@ -277,7 +277,8 @@ export async function archiveTelnyxRecordings(params: {
   };
 
   for (let i = 0; i < todo.length; i += ARCHIVE_CONCURRENCY) {
-    if (params.deadlineAt && Date.now() > params.deadlineAt) {
+    // Mindst én omgang pr. kørsel, så arkivet altid kommer videre.
+    if (i > 0 && params.deadlineAt && Date.now() > params.deadlineAt) {
       stats.remaining = todo.length - i;
       break;
     }

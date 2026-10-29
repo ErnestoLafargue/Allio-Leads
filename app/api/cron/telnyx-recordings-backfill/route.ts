@@ -40,7 +40,11 @@ export async function GET(req: Request) {
 
   let archive: Awaited<ReturnType<typeof archiveTelnyxRecordings>> | null = null;
   try {
-    archive = await archiveTelnyxRecordings({ apiKey, deadlineAt: startedAt + 25_000 });
+    // Listen fra Telnyx tager alene ~15 s, så arkivet skal have god tid (maxDuration 300 s).
+    archive = await archiveTelnyxRecordings({
+      apiKey,
+      deadlineAt: startedAt + (runMissingSync ? 150_000 : 200_000),
+    });
   } catch (err) {
     console.error(
       "[cron:telnyx-recordings-backfill] lydarkiv fejlede:",
@@ -58,7 +62,7 @@ export async function GET(req: Request) {
       toIso: null,
       dryRun: false,
       copyToBlob: true,
-      deadlineAt: startedAt + (runMissingSync ? 40_000 : 50_000),
+      deadlineAt: startedAt + (runMissingSync ? 200_000 : 260_000),
     });
 
     if (!out.ok) {
@@ -92,4 +96,4 @@ export async function GET(req: Request) {
 }
 
 export const runtime = "nodejs";
-export const maxDuration = 60;
+export const maxDuration = 300;
