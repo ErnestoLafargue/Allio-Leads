@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 import {
   ADAM_FOCUS_DRAFT_ID,
+  BUSINESS_CARD_DRAFT_ID,
   CLIENT_EDITION_DRAFT_ID,
   GROWTH_OVERVIEW_DRAFT_ID,
   GROWTH_OVERVIEW_EN_DRAFT_ID,
@@ -212,6 +213,7 @@ export function SendStandardMailDialog({
                 <option value={CLIENT_EDITION_DRAFT_ID}>Klinik intro mail</option>
                 <option value={GROWTH_OVERVIEW_DRAFT_ID}>Klinik vækst mail (4 områder)</option>
                 <option value={GROWTH_OVERVIEW_EN_DRAFT_ID}>Klinik vækst mail – engelsk</option>
+                <option value={BUSINESS_CARD_DRAFT_ID}>Visitkort mail (kort tak + kontakt)</option>
                 <option value={ADAM_FOCUS_DRAFT_ID}>Adam Fokus Mail</option>
                 <option value={REACTIVATION_DRAFT_ID}>Genaktiverings mail</option>
               </optgroup>

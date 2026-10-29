@@ -70,10 +70,18 @@ function escapeHtml(v: string): string {
     .replace(/"/g, "&quot;");
 }
 
+/** Feltværdier som «Ingen booking fundet» eller «Ukendt» betyder, at bookingsystemet ikke kendes. */
+function knownBookingSystem(raw: string | undefined): string {
+  const v = raw?.trim() ?? "";
+  if (!v) return "";
+  if (/^(ingen|ukendt|unknown|none|n\/?a|-+|—|\?)(?=\s|$)/i.test(v) || /ikke\s+fundet|not\s+found/i.test(v)) return "";
+  return v;
+}
+
 export function personalizeMailDraft(message: string, ctx: MailDraftContext): string {
   const contactName = ctx.contactName?.trim() ?? "";
   const companyName = ctx.companyName?.trim() ?? "";
-  const bookingSystem = ctx.bookingSystem?.trim() ?? "";
+  const bookingSystem = knownBookingSystem(ctx.bookingSystem);
   const values: Record<string, string> = {
     [MAIL_PLACEHOLDERS.greeting]: contactName ? `Hej ${escapeHtml(contactName)},` : "Hej,",
     [MAIL_PLACEHOLDERS.companyName]: companyName ? escapeHtml(companyName) : "jeres klinik",
