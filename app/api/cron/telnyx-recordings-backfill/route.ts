@@ -3,9 +3,13 @@ import { runRecordingsBackfill } from "@/lib/telnyx-recordings-backfill";
 import { syncMissingRecordingsBatch } from "@/lib/telnyx-recordings-auto-sync";
 
 /**
- * Periodisk indhentning af nylige Telnyx-optagelser (API-backfill) som supplement
- * til webhooks — idempotent opdatering af CALL_RECORDING / DialerCallLog.
- * Kører også målrettet sync for leads med møde booket / lange samtaler uden lydfil.
+ * Periodisk indhentning af nylige Telnyx-optagelser (API-backfill) — idempotent opdatering
+ * af CALL_RECORDING / DialerCallLog og kopi til Vercel Blob.
+ *
+ * Sælgernes WebRTC-forbindelser sender ingen webhooks, så denne cron er det eneste, der
+ * gemmer deres optagelser i Allio, før Telnyx sletter dem. Den kører derfor hvert 10. minut
+ * (`?hours=6`) og om natten med 72 timer, som også kører målrettet sync for leads med møde
+ * booket / lange samtaler uden lydfil.
  */
 export async function GET(req: Request) {
   const auth = req.headers.get("authorization")?.trim() ?? "";
@@ -24,19 +28,23 @@ export async function GET(req: Request) {
     );
   }
 
-  const hoursBack = 72;
-  const fromIso = new Date(Date.now() - hoursBack * 3600000).toISOString();
+  const startedAt = Date.now();
+  const hoursParam = Number(new URL(req.url).searchParams.get("hours"));
+  const hoursBack = Number.isFinite(hoursParam) && hoursParam > 0 ? Math.min(hoursParam, 24 * 14) : 72;
+  const fromIso = new Date(startedAt - hoursBack * 3600000).toISOString();
+  const runMissingSync = hoursBack >= 24;
 
   try {
     const out = await runRecordingsBackfill({
       apiKey,
       startPage: 1,
       pageSize: 100,
-      maxPages: 4,
+      maxPages: 20,
       fromIso,
       toIso: null,
       dryRun: false,
       copyToBlob: true,
+      deadlineAt: startedAt + (runMissingSync ? 35_000 : 50_000),
     });
 
     if (!out.ok) {
@@ -48,7 +56,7 @@ export async function GET(req: Request) {
 
     let missingSync: Awaited<ReturnType<typeof syncMissingRecordingsBatch>> | null = null;
     try {
-      missingSync = await syncMissingRecordingsBatch({ limit: 20 });
+      if (runMissingSync) missingSync = await syncMissingRecordingsBatch({ limit: 20 });
     } catch (err) {
       console.error(
         "[cron:telnyx-recordings-backfill] missing-sync failed:",
