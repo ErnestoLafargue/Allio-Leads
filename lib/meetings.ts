@@ -31,7 +31,16 @@ export async function getMeetings(type: MeetingsType, options: GetMeetingsOption
   return prisma.lead.findMany({
     where,
     orderBy: { meetingScheduledFor: "asc" },
-    include: {
+    // Kun de felter møde-listen/-kalenderen viser — ikke noter, customFields m.m. pr. lead.
+    select: {
+      id: true,
+      companyName: true,
+      meetingContactName: true,
+      phone: true,
+      meetingBookedAt: true,
+      meetingScheduledFor: true,
+      meetingType: true,
+      meetingOutcomeStatus: true,
       bookedByUser: { select: { id: true, name: true, username: true } },
       assignedUser: { select: { id: true, name: true, username: true, phone: true } },
       campaign: { select: { id: true, name: true, systemCampaignType: true } },
@@ -39,24 +48,4 @@ export async function getMeetings(type: MeetingsType, options: GetMeetingsOption
   });
 }
 
-/** Antal dage hvor admin må ændre udfaldet efter selve mødetidspunktet (ikke booking-tidspunktet). */
-export const MEETING_OUTCOME_LOCK_DAYS = 30;
-
-/**
- * True hvis udfaldet er låst, fordi selve mødetiden ligger mere end MEETING_OUTCOME_LOCK_DAYS dage tilbage.
- * Bemærk: bygger på meetingScheduledFor (mødet) — IKKE meetingBookedAt (bookingen).
- * Et møde må altså gerne være booket for længe siden; det er kun selve mødedatoens alder, der låser udfaldet.
- * Bruges både på server (input-validering i PATCH) og klient (deaktiveret select + tooltip).
- */
-export function isMeetingOutcomeLocked(
-  meetingScheduledFor: Date | string | null | undefined,
-  now: Date = new Date(),
-): boolean {
-  if (!meetingScheduledFor) return false;
-  const scheduled =
-    meetingScheduledFor instanceof Date ? meetingScheduledFor : new Date(meetingScheduledFor);
-  if (Number.isNaN(scheduled.getTime())) return false;
-  const cutoff = now.getTime() - MEETING_OUTCOME_LOCK_DAYS * 86_400_000;
-  return scheduled.getTime() < cutoff;
-}
-
+export { isMeetingOutcomeLocked, MEETING_OUTCOME_LOCK_DAYS } from "@/lib/meeting-outcome-lock";

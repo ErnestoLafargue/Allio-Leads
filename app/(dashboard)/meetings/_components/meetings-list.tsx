@@ -22,7 +22,7 @@ import {
   MEETING_OUTCOME_LABELS,
   MEETING_OUTCOME_PENDING,
 } from "@/lib/meeting-outcome";
-import { isMeetingOutcomeLocked, MEETING_OUTCOME_LOCK_DAYS } from "@/lib/meetings";
+import { isMeetingOutcomeLocked, MEETING_OUTCOME_LOCK_DAYS } from "@/lib/meeting-outcome-lock";
 import {
   buildLeadDetailHref,
   KNOWN_LEAD_SOURCES,
@@ -74,7 +74,8 @@ export function MeetingsList({ type }: { type: "upcoming" | "past" }) {
     type === "upcoming" && searchParams.get("view")?.trim().toLowerCase() === "calendar"
       ? "calendar"
       : "list";
-  const weekStartDayKey = parseWeekStartParam(searchParams.get("weekStart"));
+  const weekStartParam = searchParams.get("weekStart");
+  const weekStartDayKey = useMemo(() => parseWeekStartParam(weekStartParam), [weekStartParam]);
 
   const upcomingOpenedFrom = useMemo(
     () =>

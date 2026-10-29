@@ -79,15 +79,17 @@ function meetingCardSurfaceClass(raw?: string | null): string {
   return "border-amber-200/90 bg-amber-50/95 text-amber-950";
 }
 
+const UTC_YMD_FMT = new Intl.DateTimeFormat("en-CA", {
+  timeZone: "UTC",
+  year: "numeric",
+  month: "2-digit",
+  day: "2-digit",
+});
+
 function addDaysToDayKey(dayKey: string, delta: number): string {
   const [y, m, d] = dayKey.split("-").map(Number);
   const ms = Date.UTC(y, m - 1, d) + delta * 86_400_000;
-  return new Intl.DateTimeFormat("en-CA", {
-    timeZone: "UTC",
-    year: "numeric",
-    month: "2-digit",
-    day: "2-digit",
-  }).format(new Date(ms));
+  return UTC_YMD_FMT.format(new Date(ms));
 }
 
 function MeetingCard({
