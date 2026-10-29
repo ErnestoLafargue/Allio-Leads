@@ -35,6 +35,14 @@ type Props = {
  * `playbackSrc` fryses mens der spilles, så Telnyx-sync/webhook der skifter
  * `recordingUrl` (Telnyx → Blob) ikke genstarter `<audio>` midt i — det
  * blokerede ellers `play()` uden ny bruger-gesture og stoppede efter få sekunder.
+ *
+ * En vagthund holder øje med, at tiden faktisk går, mens der spilles. Står den stille
+ * (mixet suspenderet, hentningen hængt eller forbindelsen tabt), genoptages afspilningen
+ * fra samme sted — om nødvendigt uden mix, så lyden aldrig bare stopper.
+ *
+ * Kun Pause-knappen må stoppe afspilningen. Bluetooth-headsets (fx EPOS IMPACT 1060) skifter
+ * lydprofil, når mikrofonen er i brug, og så sender macOS/Chrome en pause efter få sekunder.
+ * Den slags pauser genoptages straks, og headsettets medietaster ignoreres.
  */
 export function LeadRecordingPlayer({
   src,
@@ -53,7 +61,6 @@ export function LeadRecordingPlayer({
   );
   const [current, setCurrent] = useState(0);
   const [playing, setPlaying] = useState(false);
-  const [buffering, setBuffering] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   const playingRef = useRef(false);
@@ -61,7 +68,16 @@ export function LeadRecordingPlayer({
     playingRef.current = playing;
   }, [playing]);
 
-  const mixCapable = supportsMonoPlayback(playbackSrc);
+  /** Sat når mixet ikke kunne holdes i gang — afspil derefter uden Web Audio. */
+  const [mixFailed, setMixFailed] = useState(false);
+  const mixCapable = !mixFailed && supportsMonoPlayback(playbackSrc);
+  /** Position der skal fortsættes fra, når <audio> er genindlæst eller udskiftet. */
+  const resumeAtRef = useRef<number | null>(null);
+  const lastGoodTimeRef = useRef(0);
+  const networkRetriesRef = useRef(0);
+  /** Sat når brugeren selv trykker Pause — alle andre pauser genoptages. */
+  const userPausedRef = useRef(true);
+  const autoResumesRef = useRef<number[]>([]);
   /**
    * Same-origin proxy (`/api/.../audio`) kræver session-cookie.
    * `crossOrigin="anonymous"` sender IKKE cookies → 401 → «Kunne ikke indlæse lydfilen».
@@ -105,7 +121,6 @@ export function LeadRecordingPlayer({
     }
     pendingSrcRef.current = null;
     setPlaybackSrc(resolvedSrc);
-    setBuffering(false);
     setError(null);
     setCurrent(0);
     if (typeof durationSecondsHint === "number" && durationSecondsHint > 0) {
@@ -120,7 +135,6 @@ export function LeadRecordingPlayer({
     if (!pending || pending === playbackSrc) return;
     pendingSrcRef.current = null;
     setPlaybackSrc(pending);
-    setBuffering(false);
     setError(null);
   }, [playbackSrc]);
 
@@ -131,15 +145,34 @@ export function LeadRecordingPlayer({
       setDuration(el.duration);
     }
     setError(null);
+    const resumeAt = resumeAtRef.current;
+    if (resumeAt != null) {
+      resumeAtRef.current = null;
+      if (resumeAt > 0) el.currentTime = resumeAt;
+      if (el.paused) {
+        void el.play().catch(() => setPlaying(false));
+      }
+    }
   }, []);
 
   const onTime = useCallback(() => {
     const el = audioRef.current;
     if (!el) return;
     setCurrent(el.currentTime);
+    if (el.currentTime > 0) lastGoodTimeRef.current = el.currentTime;
+  }, []);
+
+  /** Genindlæs filen og fortsæt fra `at` (fx efter tabt forbindelse midt i en lang fil). */
+  const reloadAt = useCallback((el: HTMLAudioElement, at: number) => {
+    resumeAtRef.current = at;
+    el.load();
+    void el.play().catch(() => {
+      /* onMeta forsøger igen, når metadata er hentet */
+    });
   }, []);
 
   const onEnded = useCallback(() => {
+    userPausedRef.current = true;
     setPlaying(false);
     setCurrent(0);
     const el = audioRef.current;
@@ -148,30 +181,53 @@ export function LeadRecordingPlayer({
     applyPendingSrc();
   }, [applyPendingSrc, suspendMixedPlayback]);
 
+  const stopAfterPause = useCallback(() => {
+    setPlaying(false);
+    suspendMixedPlayback();
+    applyPendingSrc();
+  }, [applyPendingSrc, suspendMixedPlayback]);
+
   const onPause = useCallback(() => {
     const el = audioRef.current;
     // Ignorér midlertidig pause under seek/buffer — kun sync når elementet
     // faktisk er stoppet (ikke ended, som håndteres i onEnded).
-    if (el && !el.ended && el.paused) {
-      setPlaying(false);
-      suspendMixedPlayback();
-      applyPendingSrc();
+    if (!el || el.ended || !el.paused) return;
+    if (userPausedRef.current || !playingRef.current) {
+      stopAfterPause();
+      return;
     }
-  }, [applyPendingSrc, suspendMixedPlayback]);
+    // Pause udefra (headset/OS/browser): fortsæt. Kun hvis den bliver ved med at
+    // pause igen med det samme, giver vi op, så vi ikke kæmper mod brugeren.
+    const now = Date.now();
+    const recent = autoResumesRef.current.filter((t) => now - t < 5000);
+    if (recent.length >= 4) {
+      autoResumesRef.current = [];
+      stopAfterPause();
+      return;
+    }
+    autoResumesRef.current = [...recent, now];
+    window.setTimeout(() => {
+      const a = audioRef.current;
+      if (!a || !a.paused || a.ended || userPausedRef.current) return;
+      mixRef.current?.resume();
+      void a.play().catch(() => stopAfterPause());
+    }, 300);
+  }, [stopAfterPause]);
 
   const onPlay = useCallback(() => {
     setPlaying(true);
     setError(null);
+    // Afspilning kan også startes uden om knappen (genoptag efter buffer, medietaster) —
+    // mixet skal altid køre, ellers står lyden stille.
+    mixRef.current?.resume();
   }, []);
 
   const onCanPlay = useCallback(() => {
-    setBuffering(false);
     setError(null);
   }, []);
 
   /** Ved buffer-hug: prøv at genoptage hvis brugeren stadig forventer afspilning. */
   const onWaitingOrStalled = useCallback(() => {
-    if (playingRef.current) setBuffering(true);
     if (!playingRef.current) return;
     const el = audioRef.current;
     if (!el || el.ended) return;
@@ -194,6 +250,13 @@ export function LeadRecordingPlayer({
   }, [src, eventId]);
 
   const onErr = useCallback(() => {
+    // Forbindelsen tabt midt i afspilning: hent igen og fortsæt fra samme sted.
+    const el = audioRef.current;
+    if (el && playingRef.current && lastGoodTimeRef.current > 0 && networkRetriesRef.current < 3) {
+      networkRetriesRef.current += 1;
+      reloadAt(el, lastGoodTimeRef.current);
+      return;
+    }
     const id = eventId?.trim();
     if (id && isVercelBlobPlaybackUrl(playbackSrc) && !recoveringRef.current) {
       recoveringRef.current = true;
@@ -208,7 +271,6 @@ export function LeadRecordingPlayer({
           if (res.ok && url && url !== playbackSrc) {
             setOverrideSrc(url);
             setError(null);
-            setBuffering(false);
             setPlaying(false);
             return;
           }
@@ -216,23 +278,105 @@ export function LeadRecordingPlayer({
           /* vis fejlen nedenfor */
         }
         setError("Kunne ikke hente lydfilen.");
-        setBuffering(false);
         setPlaying(false);
       })();
       return;
     }
     setError("Kunne ikke hente lydfilen.");
-    setBuffering(false);
     setPlaying(false);
-  }, [eventId, playbackSrc]);
+  }, [eventId, playbackSrc, reloadAt]);
+
+  /**
+   * Vagthund: mens der spilles, skal tiden gå. Står den stille med data i bufferen, er
+   * mixet gået i stå → start det igen, og hjælper det ikke, skift til afspilning uden mix
+   * (nyt <audio>, samme position). Står den stille uden data, er hentningen hængt → hent
+   * igen fra samme sted.
+   */
+  useEffect(() => {
+    if (!playing) return;
+    let lastT = -1;
+    let stuckTicks = 0;
+    const id = window.setInterval(() => {
+      const el = audioRef.current;
+      if (!el || el.paused || el.ended || el.seeking) {
+        stuckTicks = 0;
+        return;
+      }
+      const t = el.currentTime;
+      if (t !== lastT) {
+        lastT = t;
+        stuckTicks = 0;
+        networkRetriesRef.current = 0;
+        return;
+      }
+      stuckTicks += 1;
+      if (el.readyState < HTMLMediaElement.HAVE_FUTURE_DATA) {
+        if (stuckTicks >= 8) {
+          stuckTicks = 0;
+          reloadAt(el, t);
+        }
+        return;
+      }
+      if (stuckTicks === 2) {
+        mixRef.current?.resume();
+      } else if (stuckTicks >= 4 && mixRef.current) {
+        stuckTicks = 0;
+        resumeAtRef.current = t;
+        mixRef.current.close();
+        mixRef.current = null;
+        setMixFailed(true);
+      } else if (stuckTicks >= 6) {
+        stuckTicks = 0;
+        reloadAt(el, t);
+      }
+    }, 1000);
+    return () => window.clearInterval(id);
+  }, [playing, reloadAt]);
+
+  /** Efter skift til afspilning uden mix: det nye <audio> fortsætter, hvor det gamle stod. */
+  useEffect(() => {
+    if (!mixFailed) return;
+    const el = audioRef.current;
+    if (!el || resumeAtRef.current == null) return;
+    void el.play().catch(() => setPlaying(false));
+  }, [mixFailed]);
+
+  /** Headsettets/tastaturets medietaster må ikke pause — kun Pause-knappen. */
+  useEffect(() => {
+    if (!playing || typeof navigator === "undefined" || !("mediaSession" in navigator)) return;
+    const ms = navigator.mediaSession;
+    const keepPlaying = () => {
+      const a = audioRef.current;
+      if (a?.paused && !a.ended) void a.play().catch(() => {});
+    };
+    try {
+      ms.setActionHandler("pause", keepPlaying);
+      ms.setActionHandler("stop", keepPlaying);
+      ms.setActionHandler("play", keepPlaying);
+    } catch {
+      /* handler ikke understøttet */
+    }
+    return () => {
+      for (const action of ["pause", "stop", "play"] as const) {
+        try {
+          ms.setActionHandler(action, null);
+        } catch {
+          /* ignore */
+        }
+      }
+    };
+  }, [playing]);
 
   const togglePlay = useCallback(() => {
     const el = audioRef.current;
     if (!el) return;
     if (playing) {
+      userPausedRef.current = true;
       void el.pause();
       setPlaying(false);
     } else {
+      userPausedRef.current = false;
+      autoResumesRef.current = [];
       ensureMixedPlayback(el);
       void el.play().then(
         () => setPlaying(true),
@@ -298,9 +442,6 @@ export function LeadRecordingPlayer({
         <span className="min-w-[6.5rem] font-mono text-xs text-stone-700 tabular-nums">
           {formatClock(current)} / {formatClock(total > 0 ? total : durationSecondsHint ?? 0)}
         </span>
-        {buffering && !error ? (
-          <span className="text-xs text-stone-500">Henter videre…</span>
-        ) : null}
       </div>
       <div className="mt-2 flex items-center gap-2">
         <input

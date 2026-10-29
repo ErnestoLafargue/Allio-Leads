@@ -33,6 +33,10 @@ export type TelnyxRecording = {
   toNumber: string | null;
   /** ISO af created_at (eller recording_started_at som fallback). */
   createdAtIso: string | null;
+  /** Hvornår optagelsen startede (UTC). */
+  startedAt: Date | null;
+  /** Telnyx-forbindelsen — for manuelle opkald sælgerens credential connection. */
+  connectionId: string | null;
   raw: Record<string, unknown>;
 };
 
@@ -43,6 +47,14 @@ function asString(v: unknown): string | null {
 /** True hvis URL'en peger på vores egen kopi i Vercel Blob. */
 export function isVercelBlobUrl(url: string): boolean {
   return url.includes(".blob.vercel-storage.com/");
+}
+
+/** Telnyx' `created_at` mangler tidszone (UTC); `recording_*_at` har `Z`. */
+function asUtcDate(v: unknown): Date | null {
+  const s = asString(v);
+  if (!s) return null;
+  const d = new Date(/(Z|[+-]\d\d:?\d\d)$/.test(s) ? s : `${s}Z`);
+  return Number.isNaN(d.getTime()) ? null : d;
 }
 
 function asNumber(v: unknown): number | null {
@@ -83,6 +95,8 @@ function normalizeRecording(d: Record<string, unknown>): TelnyxRecording | null 
       asString(d.created_at) ??
       asString(d.recording_started_at) ??
       asString(d.recording_ended_at),
+    startedAt: asUtcDate(d.recording_started_at) ?? asUtcDate(d.created_at),
+    connectionId: asString(d.connection_id),
     raw: d,
   };
 }
@@ -232,6 +246,7 @@ async function findLeadIdForRecording(rec: TelnyxRecording): Promise<{
     | "call_control_log"
     | "call_session_log"
     | "bridge"
+    | "call_attempt"
     | "phone_match"
     | "none";
 }> {
@@ -245,6 +260,7 @@ async function findLeadIdForRecording(rec: TelnyxRecording): Promise<{
     };
   }
 
+  const connectionAgentUserId = await agentUserIdForConnection(rec.connectionId);
   const resolved = await resolveLeadContextForTelnyxRecording({
     callControlId: rec.callControlId,
     callSessionId: rec.callSessionId,
@@ -252,19 +268,22 @@ async function findLeadIdForRecording(rec: TelnyxRecording): Promise<{
     clientStateUserId: cs?.v === 1 ? cs.userId ?? null : null,
     fromNumber: rec.fromNumber,
     toNumber: rec.toNumber,
+    startedAt: rec.startedAt,
+    agentUserId: connectionAgentUserId,
   });
 
   if (!resolved.leadId) {
-    return { leadId: null, campaignId: null, agentUserId: null, source: "none" };
+    return { leadId: null, campaignId: null, agentUserId: connectionAgentUserId, source: "none" };
   }
 
   const sourceMap: Record<
     string,
-    "call_control_log" | "call_session_log" | "bridge" | "phone_match" | "none"
+    "call_control_log" | "call_session_log" | "bridge" | "call_attempt" | "phone_match" | "none"
   > = {
     call_control: "call_control_log",
     call_session: "call_session_log",
     bridge: "bridge",
+    call_attempt: "call_attempt",
     phone: "phone_match",
     none: "none",
     client_state: "none",
@@ -279,9 +298,19 @@ async function findLeadIdForRecording(rec: TelnyxRecording): Promise<{
   return {
     leadId: resolved.leadId,
     campaignId: leadRow?.campaignId ?? null,
-    agentUserId: resolved.agentUserId,
+    agentUserId: resolved.agentUserId ?? connectionAgentUserId,
     source,
   };
+}
+
+/** Manuelle opkald går via sælgerens egen credential connection i Telnyx. */
+async function agentUserIdForConnection(connectionId: string | null): Promise<string | null> {
+  if (!connectionId) return null;
+  const u = await prisma.user.findFirst({
+    where: { telnyxCredentialConnectionId: connectionId },
+    select: { id: true },
+  });
+  return u?.id ?? null;
 }
 
 type LocatedLead = Awaited<ReturnType<typeof findLeadIdForRecording>>;
@@ -369,9 +398,21 @@ async function processOneRecording(
       ? existing.recordingUrl
       : null;
 
+  // Lydarkivet (lib/call-recording-archive.ts) har måske allerede en kopi — genbrug den.
+  const archived = existingBlobUrl
+    ? null
+    : await prisma.callRecording.findUnique({
+        where: { telnyxRecordingId: rec.id },
+        select: { playbackUrl: true },
+      });
+  const archiveUrl =
+    archived?.playbackUrl && isVercelBlobUrl(archived.playbackUrl) ? archived.playbackUrl : null;
+
   let playbackUrl = playbackSourceUrl;
   if (existingBlobUrl) {
     playbackUrl = existingBlobUrl;
+  } else if (archiveUrl) {
+    playbackUrl = archiveUrl;
   } else if (options.copyToBlob && rec.mp3Url) {
     // Forsøg at kopiere lyden til Vercel Blob så afspilning ikke afhænger af
     // udløbende Telnyx-download-links (samme persist som live-flowet).
@@ -455,6 +496,24 @@ async function processOneRecording(
   }
 }
 
+function recordingLegIds(rec: TelnyxRecording): string[] {
+  return [`rec:${rec.id}`, ...(rec.callControlId ? [rec.callControlId] : [])];
+}
+
+/** Leg-id'er på siden, der allerede ligger som Blob-kopi på et lead — dem springer den globale backfill over. */
+async function legIdsWithAllioCopy(recs: readonly TelnyxRecording[]): Promise<Set<string>> {
+  const legIds = recs.flatMap(recordingLegIds);
+  if (legIds.length === 0) return new Set();
+  const rows = await prisma.leadActivityEvent.findMany({
+    where: {
+      telnyxCallLegId: { in: legIds },
+      recordingUrl: { contains: ".blob.vercel-storage.com/" },
+    },
+    select: { telnyxCallLegId: true },
+  });
+  return new Set(rows.map((r) => r.telnyxCallLegId!));
+}
+
 export type BackfillRunResult = {
   stats: BackfillStats;
   /** Næste sidetal at hente — null når alle sider er behandlet i dette kald. */
@@ -481,6 +540,8 @@ export async function runRecordingsBackfill(params: {
   toIso?: string | null;
   dryRun?: boolean;
   copyToBlob?: boolean;
+  /** Stop (og returnér nextPage) når dette tidspunkt (ms) er passeret — så cron ikke timer ud. */
+  deadlineAt?: number;
 }): Promise<{ ok: true; result: BackfillRunResult } | { ok: false; status: number; message: string }> {
   const stats = emptyStats();
   const pageSize = params.pageSize ?? 100;
@@ -503,8 +564,26 @@ export async function runRecordingsBackfill(params: {
     pagesProcessed += 1;
     lastTotalPages = list.page.totalPages ?? lastTotalPages;
 
+    const copied = params.dryRun ? new Set<string>() : await legIdsWithAllioCopy(list.recordings);
     for (const rec of list.recordings) {
+      if (params.deadlineAt && Date.now() > params.deadlineAt) {
+        return {
+          ok: true,
+          result: {
+            stats,
+            nextPage: page,
+            pagesProcessed,
+            totalPages: lastTotalPages,
+            nextSessionBatchStart: null,
+            totalSessions: 0,
+          },
+        };
+      }
       try {
+        if (recordingLegIds(rec).some((id) => copied.has(id))) {
+          stats.scanned += 1;
+          continue;
+        }
         await processOneRecording(
           rec,
           {
@@ -587,11 +666,18 @@ export async function runRecordingsBackfillForLead(params: {
 
   const lead = await prisma.lead.findUnique({
     where: { id: params.leadId },
-    select: { phone: true },
+    select: { phone: true, privatePhone: true },
   });
   if (!lead) {
     return { ok: false, status: 404, message: "Lead ikke fundet." };
   }
+  const leadNumbers = [
+    ...new Set(
+      [lead.phone, lead.privatePhone]
+        .map((p) => normalizePhoneToE164ForDial(p ?? ""))
+        .filter((n): n is string => n !== null),
+    ),
+  ];
 
   const sessionGroups = await prisma.dialerCallLog.groupBy({
     by: ["callSessionId"],
@@ -645,8 +731,7 @@ export async function runRecordingsBackfillForLead(params: {
   }
 
   const includePhoneFilters = params.includePhoneFilters !== false;
-  const e164 = normalizePhoneToE164ForDial(lead.phone ?? "");
-  if (includePhoneFilters && e164) {
+  for (const e164 of includePhoneFilters ? leadNumbers : []) {
     for (const filterTo of [true, false] as const) {
       let page = 1;
       for (let i = 0; i < maxPhonePages; i++) {
@@ -673,17 +758,36 @@ export async function runRecordingsBackfillForLead(params: {
     }
   }
 
-  const sorted = Array.from(byId.values()).sort((a, b) => {
-    const ta = a.createdAtIso ? Date.parse(a.createdAtIso) : 0;
-    const tb = b.createdAtIso ? Date.parse(b.createdAtIso) : 0;
-    return tb - ta;
-  });
+  const sorted = Array.from(byId.values()).sort(
+    (a, b) => (b.startedAt?.getTime() ?? 0) - (a.startedAt?.getTime() ?? 0),
+  );
+
+  const numberSet = new Set(leadNumbers);
+  const isCallToThisLead = (rec: TelnyxRecording) =>
+    [rec.toNumber, rec.fromNumber].some((n) => {
+      const e = normalizePhoneToE164ForDial(n ?? "");
+      return e !== null && numberSet.has(e);
+    });
 
   for (const rec of sorted) {
     stats.scanned += 1;
     try {
-      const located = await findLeadIdForRecording(rec);
-      if (!located.leadId || located.leadId !== params.leadId) continue;
+      let located = await findLeadIdForRecording(rec);
+      if (located.leadId !== params.leadId) {
+        // Et opkald til leadets eget nummer hører altid med — også når nummeret findes på
+        // flere leads (samme virksomhed i flere kampagner) og koblingen ikke er entydig.
+        if (!isCallToThisLead(rec)) continue;
+        const campaign = await prisma.lead.findUnique({
+          where: { id: params.leadId },
+          select: { campaignId: true },
+        });
+        located = {
+          leadId: params.leadId,
+          campaignId: campaign?.campaignId ?? null,
+          agentUserId: located.agentUserId,
+          source: "phone_match",
+        };
+      }
       await processOneRecording(
         rec,
         {
