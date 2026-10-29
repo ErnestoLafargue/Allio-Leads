@@ -3,7 +3,7 @@
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
 import { useSession } from "next-auth/react";
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   BlockedTimeDialog,
   type BlockedTimeCreatePrefill,
@@ -133,21 +133,32 @@ export function MeetingsList({ type }: { type: "upcoming" | "past" }) {
 
   const title = useMemo(() => (type === "upcoming" ? "Kommende møder" : "Tidligere møder"), [type]);
 
+  const loadSeqRef = useRef(0);
   const load = useCallback(async () => {
+    const seq = ++loadSeqRef.current;
     setLoading(true);
     const params = new URLSearchParams({ type });
     if (type === "past" && activeOnlyPast) params.set("activeOnly", "true");
+    if (type === "upcoming" && viewMode === "calendar") {
+      // Kalenderen viser hele den valgte uge — også møder fra før i dag.
+      const keys = weekDayKeys(weekStartDayKey);
+      params.set("from", copenhagenDayBoundsUtcFromDayKey(keys[0]!).start.toISOString());
+      params.set("to", copenhagenDayBoundsUtcFromDayKey(keys[6]!).end.toISOString());
+    }
     const res = await fetch(`/api/meetings?${params.toString()}`);
+    // Ignorér svar fra en ældre forespørgsel (fx ved hurtigt ugeskift).
+    if (seq !== loadSeqRef.current) return;
     if (!res.ok) {
       setError("Kunne ikke hente møder");
       setLoading(false);
       return;
     }
     const data = (await res.json()) as MeetingRow[];
+    if (seq !== loadSeqRef.current) return;
     setRows(data);
     setLoading(false);
     setError(null);
-  }, [type, activeOnlyPast]);
+  }, [type, activeOnlyPast, viewMode, weekStartDayKey]);
 
   useEffect(() => {
     void load();
@@ -328,7 +339,9 @@ export function MeetingsList({ type }: { type: "upcoming" | "past" }) {
           <h1 className="text-xl font-semibold text-stone-900">{title}</h1>
           <p className="mt-1 text-sm text-stone-600">
             {type === "upcoming"
-              ? "Viser alle møder fra i dag og frem."
+              ? viewMode === "calendar"
+                ? "Viser alle møder i den valgte uge — også dem før i dag."
+                : "Viser alle møder fra i dag og frem."
               : activeOnlyPast
                 ? "Viser kun tidligere møder hvor leadet stadig har status Møde booket."
                 : `Viser alle tidligere møder uanset lead-status. Udfald kan ændres så længe mødetidspunktet er inden for ${MEETING_OUTCOME_LOCK_DAYS} dage.`}

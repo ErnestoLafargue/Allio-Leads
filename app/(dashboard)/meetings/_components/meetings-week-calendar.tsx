@@ -2,7 +2,11 @@
 
 import Link from "next/link";
 import { useMemo } from "react";
-import { meetingOutcomeBadgeClass } from "@/lib/meeting-outcome";
+import {
+  MEETING_OUTCOME_SALE,
+  meetingOutcomeBadgeClass,
+  normalizeMeetingOutcomeStatus,
+} from "@/lib/meeting-outcome";
 import type { LeadOpenedFrom } from "@/lib/lead-navigation";
 import { buildLeadDetailHref } from "@/lib/lead-navigation";
 import {
@@ -71,6 +75,10 @@ function meetingContactDisplayName(meeting: MeetingCalendarRow): string {
 }
 
 function meetingCardSurfaceClass(raw?: string | null): string {
+  // Salg: tydeligt grøn, så det skiller sig ud fra «Afholdt» (lysegrøn) og «Afventende» (lyseblå).
+  if (normalizeMeetingOutcomeStatus(raw) === MEETING_OUTCOME_SALE) {
+    return "border-emerald-500 bg-emerald-300 text-emerald-950";
+  }
   const badge = meetingOutcomeBadgeClass(raw);
   if (badge.includes("emerald")) return "border-emerald-200/90 bg-emerald-50/95 text-emerald-950";
   if (badge.includes("red-600")) return "border-red-700/90 bg-red-600 text-white";

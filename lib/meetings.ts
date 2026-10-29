@@ -9,6 +9,11 @@ type GetMeetingsOptions = {
    * Default (false/undefined) viser alle leads med en tidligere mødetid.
    */
   activeOnly?: boolean;
+  /**
+   * Kalender-visningen: alle møder med mødetid i [from, to) — både tidligere og kommende —
+   * uanset `type`, så tidligere møder i ugen stadig vises.
+   */
+  range?: { from: Date; to: Date };
 };
 
 export async function getMeetings(type: MeetingsType, options: GetMeetingsOptions = {}) {
@@ -22,7 +27,9 @@ export async function getMeetings(type: MeetingsType, options: GetMeetingsOption
         : { not: null };
 
   const where: Record<string, unknown> = {
-    meetingScheduledFor: meetingScheduledForClause,
+    meetingScheduledFor: options.range
+      ? { gte: options.range.from, lt: options.range.to }
+      : meetingScheduledForClause,
   };
   if (type === "past" && options.activeOnly === true) {
     where.status = "MEETING_BOOKED";
