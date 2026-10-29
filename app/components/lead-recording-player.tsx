@@ -39,6 +39,10 @@ type Props = {
  * En vagthund holder øje med, at tiden faktisk går, mens der spilles. Står den stille
  * (mixet suspenderet, hentningen hængt eller forbindelsen tabt), genoptages afspilningen
  * fra samme sted — om nødvendigt uden mix, så lyden aldrig bare stopper.
+ *
+ * Kun Pause-knappen må stoppe afspilningen. Bluetooth-headsets (fx EPOS IMPACT 1060) skifter
+ * lydprofil, når mikrofonen er i brug, og så sender macOS/Chrome en pause efter få sekunder.
+ * Den slags pauser genoptages straks, og headsettets medietaster ignoreres.
  */
 export function LeadRecordingPlayer({
   src,
@@ -71,6 +75,9 @@ export function LeadRecordingPlayer({
   const resumeAtRef = useRef<number | null>(null);
   const lastGoodTimeRef = useRef(0);
   const networkRetriesRef = useRef(0);
+  /** Sat når brugeren selv trykker Pause — alle andre pauser genoptages. */
+  const userPausedRef = useRef(true);
+  const autoResumesRef = useRef<number[]>([]);
   /**
    * Same-origin proxy (`/api/.../audio`) kræver session-cookie.
    * `crossOrigin="anonymous"` sender IKKE cookies → 401 → «Kunne ikke indlæse lydfilen».
@@ -165,6 +172,7 @@ export function LeadRecordingPlayer({
   }, []);
 
   const onEnded = useCallback(() => {
+    userPausedRef.current = true;
     setPlaying(false);
     setCurrent(0);
     const el = audioRef.current;
@@ -173,16 +181,38 @@ export function LeadRecordingPlayer({
     applyPendingSrc();
   }, [applyPendingSrc, suspendMixedPlayback]);
 
+  const stopAfterPause = useCallback(() => {
+    setPlaying(false);
+    suspendMixedPlayback();
+    applyPendingSrc();
+  }, [applyPendingSrc, suspendMixedPlayback]);
+
   const onPause = useCallback(() => {
     const el = audioRef.current;
     // Ignorér midlertidig pause under seek/buffer — kun sync når elementet
     // faktisk er stoppet (ikke ended, som håndteres i onEnded).
-    if (el && !el.ended && el.paused) {
-      setPlaying(false);
-      suspendMixedPlayback();
-      applyPendingSrc();
+    if (!el || el.ended || !el.paused) return;
+    if (userPausedRef.current || !playingRef.current) {
+      stopAfterPause();
+      return;
     }
-  }, [applyPendingSrc, suspendMixedPlayback]);
+    // Pause udefra (headset/OS/browser): fortsæt. Kun hvis den bliver ved med at
+    // pause igen med det samme, giver vi op, så vi ikke kæmper mod brugeren.
+    const now = Date.now();
+    const recent = autoResumesRef.current.filter((t) => now - t < 5000);
+    if (recent.length >= 4) {
+      autoResumesRef.current = [];
+      stopAfterPause();
+      return;
+    }
+    autoResumesRef.current = [...recent, now];
+    window.setTimeout(() => {
+      const a = audioRef.current;
+      if (!a || !a.paused || a.ended || userPausedRef.current) return;
+      mixRef.current?.resume();
+      void a.play().catch(() => stopAfterPause());
+    }, 300);
+  }, [stopAfterPause]);
 
   const onPlay = useCallback(() => {
     setPlaying(true);
@@ -311,13 +341,42 @@ export function LeadRecordingPlayer({
     void el.play().catch(() => setPlaying(false));
   }, [mixFailed]);
 
+  /** Headsettets/tastaturets medietaster må ikke pause — kun Pause-knappen. */
+  useEffect(() => {
+    if (!playing || typeof navigator === "undefined" || !("mediaSession" in navigator)) return;
+    const ms = navigator.mediaSession;
+    const keepPlaying = () => {
+      const a = audioRef.current;
+      if (a?.paused && !a.ended) void a.play().catch(() => {});
+    };
+    try {
+      ms.setActionHandler("pause", keepPlaying);
+      ms.setActionHandler("stop", keepPlaying);
+      ms.setActionHandler("play", keepPlaying);
+    } catch {
+      /* handler ikke understøttet */
+    }
+    return () => {
+      for (const action of ["pause", "stop", "play"] as const) {
+        try {
+          ms.setActionHandler(action, null);
+        } catch {
+          /* ignore */
+        }
+      }
+    };
+  }, [playing]);
+
   const togglePlay = useCallback(() => {
     const el = audioRef.current;
     if (!el) return;
     if (playing) {
+      userPausedRef.current = true;
       void el.pause();
       setPlaying(false);
     } else {
+      userPausedRef.current = false;
+      autoResumesRef.current = [];
       ensureMixedPlayback(el);
       void el.play().then(
         () => setPlaying(true),
