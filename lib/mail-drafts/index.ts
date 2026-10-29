@@ -36,6 +36,13 @@ export {
 } from "./growth-overview-mail-en";
 
 export {
+  BUSINESS_CARD_DRAFT_ID,
+  BUSINESS_CARD_SUBJECT,
+  BUSINESS_CARD_MESSAGE,
+  businessCardMailDraft,
+} from "./business-card-mail";
+
+export {
   MAIL_PLACEHOLDERS,
   MAIL_PLACEHOLDERS_EN,
   mailSenderEmail,
@@ -53,6 +60,7 @@ export {
 } from "./reactivation-mail";
 
 import { adamFocusMailDraft } from "./adam-focus-mail";
+import { businessCardMailDraft } from "./business-card-mail";
 import { clientEditionMailDraft } from "./client-edition-mail";
 import { growthOverviewMailDraft } from "./growth-overview-mail";
 import { growthOverviewEnMailDraft } from "./growth-overview-mail-en";
@@ -65,6 +73,7 @@ export const MAIL_DRAFTS: MailDraft[] = [
   { ...clientEditionMailDraft },
   { ...growthOverviewMailDraft },
   { ...growthOverviewEnMailDraft },
+  { ...businessCardMailDraft },
   { ...adamFocusMailDraft },
   { ...reactivationMailDraft },
 ];

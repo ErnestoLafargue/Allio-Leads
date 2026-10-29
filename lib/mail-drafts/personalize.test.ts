@@ -91,3 +91,39 @@ describe("Klinik vækst mail – engelsk", () => {
     expect(empty).toContain("integrates directly with your booking system,");
   });
 });
+
+describe("bookingsystem uden reel værdi", () => {
+  it.each(["Ingen booking fundet", "ingen", "Ukendt", "-", "—", "N/A", "Not found"])("«%s» giver fallback", async (raw) => {
+    const { GROWTH_OVERVIEW_MESSAGE } = await import("./growth-overview-mail");
+    const html = personalizeMailDraft(GROWTH_OVERVIEW_MESSAGE, { bookingSystem: raw });
+    expect(html).toContain("integreres direkte med jeres bookingsystem,");
+  });
+
+  it("beholder rigtige systemnavne", async () => {
+    const { GROWTH_OVERVIEW_MESSAGE } = await import("./growth-overview-mail");
+    for (const name of ["Onlinebooq", "Ingenio Booking", "EasyPractice"]) {
+      expect(personalizeMailDraft(GROWTH_OVERVIEW_MESSAGE, { bookingSystem: name })).toContain(
+        `integreres direkte med ${name},`,
+      );
+    }
+  });
+});
+
+describe("Visitkort mail", () => {
+  it("udfylder afsender og kliniknavn", async () => {
+    const { BUSINESS_CARD_MESSAGE } = await import("./business-card-mail");
+    const html = personalizeMailDraft(BUSINESS_CARD_MESSAGE, {
+      contactName: "Sofie",
+      companyName: "ORA Clinic",
+      sender: { name: "Mads Jensen", email: "mads@local" },
+    });
+    expect(html).toContain("Hej Sofie,");
+    expect(html).toContain("<strong>ORA Clinic</strong>");
+    expect(html).toContain("Mads Jensen");
+    expect(html).toContain("mailto:hej@allio.dk");
+    expect(html).not.toContain("{{");
+    // Visitkortet taler om effekten uden tal (telefonnummeret undtaget).
+    const { htmlToPlainText } = await import("@/lib/mail-send/prepare-outgoing-mail");
+    expect(htmlToPlainText(html).replace("+45 53 57 70 20", "")).not.toMatch(/\d/);
+  });
+});
