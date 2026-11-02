@@ -23,7 +23,9 @@ import {
   describeVoipStartupFailure,
   detectPredictiveOutcomeFromCall,
   type PredictiveAutoOutcome,
+  VOIP_ERROR_FALLBACK,
 } from "@/lib/voip-call-messages";
+import { TELNYX_NO_BALANCE_TEXT } from "@/lib/telnyx-balance";
 import { decideClosedNotification } from "@/lib/voip-closed-decision";
 import { type VoipApiContext, VOIP_API_CONTEXT } from "@/lib/voip-api-context";
 import {
@@ -481,8 +483,27 @@ export function CampaignVoipStrip({
 
   const reportVoipFailure = useCallback(
     (userText: string, technical: string) => {
+      if (userText !== VOIP_ERROR_FALLBACK) {
+        pushVoipToast(userText);
+        void logVoipFailureToServer(userText, technical);
+        return;
+      }
+      // Generisk fejl: tjek om årsagen er, at Telnyx-saldoen er brugt op.
       pushVoipToast(userText);
-      void logVoipFailureToServer(userText, technical);
+      void (async () => {
+        let text = userText;
+        try {
+          const res = await fetch("/api/telnyx/webrtc/balance", { credentials: "same-origin" });
+          const json = (await res.json().catch(() => null)) as { exhausted?: boolean | null } | null;
+          if (json?.exhausted === true) {
+            text = TELNYX_NO_BALANCE_TEXT;
+            pushVoipToast(text);
+          }
+        } catch {
+          /* saldo-tjek må ikke blokere */
+        }
+        void logVoipFailureToServer(text, technical);
+      })();
     },
     [logVoipFailureToServer, pushVoipToast],
   );
