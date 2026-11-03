@@ -16,6 +16,9 @@ function formatClock(totalSeconds: number): string {
   return `${m}:${s.toString().padStart(2, "0")}`;
 }
 
+const SPEEDS = [1, 1.5, 2] as const;
+type Speed = (typeof SPEEDS)[number];
+
 type Props = {
   src: string;
   /** LeadActivityEvent-id — afspilles via same-origin, så dual-track kan mixes. */
@@ -62,6 +65,8 @@ export function LeadRecordingPlayer({
   const [current, setCurrent] = useState(0);
   const [playing, setPlaying] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [speed, setSpeed] = useState<Speed>(1);
+  const speedRef = useRef<Speed>(1);
 
   const playingRef = useRef(false);
   useEffect(() => {
@@ -138,9 +143,21 @@ export function LeadRecordingPlayer({
     setError(null);
   }, [playbackSrc]);
 
+  /** Afspilningshastighed — sættes igen, når <audio> genindlæses eller udskiftes (load() nulstiller den). */
+  const applySpeed = useCallback((el: HTMLAudioElement) => {
+    el.defaultPlaybackRate = speedRef.current;
+    el.playbackRate = speedRef.current;
+  }, []);
+
+  useEffect(() => {
+    speedRef.current = speed;
+    if (audioRef.current) applySpeed(audioRef.current);
+  }, [speed, playbackSrc, mixCapable, applySpeed]);
+
   const onMeta = useCallback(() => {
     const el = audioRef.current;
     if (!el) return;
+    applySpeed(el);
     if (Number.isFinite(el.duration) && el.duration > 0) {
       setDuration(el.duration);
     }
@@ -153,7 +170,7 @@ export function LeadRecordingPlayer({
         void el.play().catch(() => setPlaying(false));
       }
     }
-  }, []);
+  }, [applySpeed]);
 
   const onTime = useCallback(() => {
     const el = audioRef.current;
@@ -215,12 +232,13 @@ export function LeadRecordingPlayer({
   }, [stopAfterPause]);
 
   const onPlay = useCallback(() => {
+    if (audioRef.current) applySpeed(audioRef.current);
     setPlaying(true);
     setError(null);
     // Afspilning kan også startes uden om knappen (genoptag efter buffer, medietaster) —
     // mixet skal altid køre, ellers står lyden stille.
     mixRef.current?.resume();
-  }, []);
+  }, [applySpeed]);
 
   const onCanPlay = useCallback(() => {
     setError(null);
@@ -442,6 +460,19 @@ export function LeadRecordingPlayer({
         <span className="min-w-[6.5rem] font-mono text-xs text-stone-700 tabular-nums">
           {formatClock(current)} / {formatClock(total > 0 ? total : durationSecondsHint ?? 0)}
         </span>
+        <div className="ml-auto inline-flex overflow-hidden rounded-md border border-stone-300" role="group" aria-label="Hastighed">
+          {SPEEDS.map((v) => (
+            <button
+              key={v}
+              type="button"
+              onClick={() => setSpeed(v)}
+              aria-pressed={speed === v}
+              className={`h-7 px-2 text-xs font-semibold tabular-nums ${speed === v ? "bg-stone-800 text-white" : "bg-white text-stone-700 hover:bg-stone-100"}`}
+            >
+              x{String(v).replace(".", ",")}
+            </button>
+          ))}
+        </div>
       </div>
       <div className="mt-2 flex items-center gap-2">
         <input
