@@ -9,4 +9,4 @@ set -a
 . ./.env.local
 . "./$ENV_DB_FILE"
 set +a
-exec npx tsx --tsconfig tsconfig.json scripts/worker.ts --interval-min "${WORKER_INTERVAL_MIN:-10}"
+exec npx tsx --tsconfig tsconfig.json scripts/worker.ts --interval-min "${WORKER_INTERVAL_MIN:-10}" --transcribe-limit "${WORKER_TRANSCRIBE_LIMIT:-60}"
