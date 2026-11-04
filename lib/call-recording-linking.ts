@@ -23,7 +23,10 @@ export const INITIAL_PIPELINE_STATUSES: ReadonlySet<string> = new Set(
   Object.values(CALL_RECORDING_PIPELINE),
 );
 
-/** Udfald der betyder, at der ikke var nogen samtale at analysere. */
+/** Optagelser på mindst så mange sekunder transskriberes altid, uanset udfald (Ernestos krav 4/11-2026). */
+export const ALWAYS_TRANSCRIBE_SECONDS = 40;
+
+/** Udfald der betyder, at der ikke var nogen samtale at analysere (gælder kun under ALWAYS_TRANSCRIBE_SECONDS). */
 const NO_CONVERSATION_OUTCOMES: ReadonlySet<string> = new Set(["VOICEMAIL", "NOT_HOME"]);
 
 export type CallDirection = "outbound" | "inbound" | "unknown";
@@ -143,6 +146,7 @@ export function initialPipelineStatus(
 ): string {
   if (isDuplicate) return CALL_RECORDING_PIPELINE.SKIPPED_DUPLICATE;
   if (durationSeconds < MIN_ANALYZE_SECONDS) return CALL_RECORDING_PIPELINE.SKIPPED_SHORT;
+  if (durationSeconds >= ALWAYS_TRANSCRIBE_SECONDS) return CALL_RECORDING_PIPELINE.NEW;
   if (outcomeStatus && NO_CONVERSATION_OUTCOMES.has(outcomeStatus)) {
     return CALL_RECORDING_PIPELINE.SKIPPED_NO_CONVERSATION;
   }

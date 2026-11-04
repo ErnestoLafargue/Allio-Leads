@@ -24,6 +24,7 @@ import { convertRecordings } from "@/lib/recording-convert";
 import { generateWeeklyScriptViaApi } from "@/lib/sales-scripts/generate";
 import { isoWeekKey } from "@/lib/sales-scripts/publish";
 import { MIN_GROUP } from "@/lib/scripts-traening/insights";
+import { ALWAYS_TRANSCRIBE_SECONDS } from "@/lib/call-recording-linking";
 
 function arg(flag: string): string | null {
   const i = process.argv.indexOf(flag);
@@ -187,7 +188,7 @@ async function main() {
     sonioxBudget: Number(process.env.SONIOX_MONTHLY_BUDGET_USD ?? 5),
     analyzeLimit: Number(arg("--analyze-limit") ?? 20),
     transcribeLimit: Number(arg("--transcribe-limit") ?? 20),
-    minSeconds: Number(process.env.WORKER_MIN_SECONDS ?? 45),
+    minSeconds: Number(process.env.WORKER_MIN_SECONDS ?? ALWAYS_TRANSCRIBE_SECONDS),
     analyzeIds: arg("--analyze-ids")?.split(",").filter(Boolean) ?? null,
     weekly: !has("--no-weekly"),
     convertLimit: Number(arg("--convert-limit") ?? 200),

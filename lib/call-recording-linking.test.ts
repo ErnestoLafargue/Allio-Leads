@@ -187,10 +187,13 @@ describe("pickCallOutcome", () => {
 describe("initialPipelineStatus", () => {
   it("springer korte optagelser og samtaler uden kontakt over", () => {
     expect(initialPipelineStatus(9, "MEETING_BOOKED")).toBe(CALL_RECORDING_PIPELINE.SKIPPED_SHORT);
-    expect(initialPipelineStatus(40, "VOICEMAIL")).toBe(
+    expect(initialPipelineStatus(39, "VOICEMAIL")).toBe(
       CALL_RECORDING_PIPELINE.SKIPPED_NO_CONVERSATION,
     );
     expect(initialPipelineStatus(40, null)).toBe(CALL_RECORDING_PIPELINE.NEW);
+    // Fra 40 sek. transskriberes alt — også «ikke hjemme» og voicemail.
+    expect(initialPipelineStatus(40, "VOICEMAIL")).toBe(CALL_RECORDING_PIPELINE.NEW);
+    expect(initialPipelineStatus(90, "NOT_HOME")).toBe(CALL_RECORDING_PIPELINE.NEW);
     expect(initialPipelineStatus(300, "MEETING_BOOKED")).toBe(CALL_RECORDING_PIPELINE.NEW);
   });
 
