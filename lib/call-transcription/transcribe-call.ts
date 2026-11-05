@@ -44,17 +44,48 @@ function countLanguages(tokens: readonly SonioxToken[], into: Record<string, num
   for (const t of tokens) if (t.language) into[t.language] = (into[t.language] ?? 0) + 1;
 }
 
+/**
+ * Lyden hentes fra Telnyx; har Telnyx slettet optagelsen (HTTP 404), bruges Allios egen kopi
+ * (lydarkivet i `playbackUrl` eller lead-aktivitetens `recordingUrl`).
+ */
+async function fetchRecordingAudio(
+  rec: { telnyxRecordingId: string; playbackUrl: string | null; activityEventId: string | null },
+  telnyxApiKey: string,
+): Promise<Buffer> {
+  try {
+    return await fetchTelnyxRecordingMp3(telnyxApiKey, rec.telnyxRecordingId);
+  } catch (err) {
+    if (!/HTTP 404/.test(err instanceof Error ? err.message : String(err))) throw err;
+    const activity = rec.activityEventId
+      ? await prisma.leadActivityEvent.findUnique({ where: { id: rec.activityEventId }, select: { recordingUrl: true } })
+      : null;
+    for (const url of [rec.playbackUrl, activity?.recordingUrl]) {
+      if (!url?.startsWith("https://")) continue;
+      const res = await fetch(url);
+      if (res.ok) return Buffer.from(await res.arrayBuffer());
+    }
+    throw err;
+  }
+}
+
 export async function transcribeCallRecording(
   callRecordingId: string,
   keys: { telnyxApiKey: string; sonioxApiKey: string },
 ): Promise<TranscribeOutcome> {
   const rec = await prisma.callRecording.findUniqueOrThrow({
     where: { id: callRecordingId },
-    select: { id: true, telnyxRecordingId: true, direction: true, agent: { select: { name: true } } },
+    select: {
+      id: true,
+      telnyxRecordingId: true,
+      direction: true,
+      playbackUrl: true,
+      activityEventId: true,
+      agent: { select: { name: true } },
+    },
   });
   const agentName = rec.agent?.name?.trim() || null;
   const terms = ["Allio", ...(agentName ? [agentName] : [])];
-  const mp3 = await fetchTelnyxRecordingMp3(keys.telnyxApiKey, rec.telnyxRecordingId);
+  const mp3 = await fetchRecordingAudio(rec, keys.telnyxApiKey);
 
   return withTempDir(async (dir) => {
     const file = path.join(dir, "call.mp3");
