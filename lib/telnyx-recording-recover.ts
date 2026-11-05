@@ -140,8 +140,26 @@ async function blobUrlReachable(url: string): Promise<boolean> {
 }
 
 /**
+ * Lydarkivets kopi (CallRecording.playbackUrl) af samme Telnyx-optagelse — så skal filen
+ * ikke hentes fra Telnyx og lægges i Blob igen, før afspilningen kan starte.
+ */
+async function archivedPlaybackUrl(telnyxCallLegId: string | null): Promise<string | null> {
+  const leg = telnyxCallLegId?.trim();
+  if (!leg) return null;
+  const row = await prisma.callRecording.findFirst({
+    where: leg.startsWith("rec:")
+      ? { telnyxRecordingId: leg.slice(4) }
+      : { telnyxCallControlId: leg },
+    select: { playbackUrl: true },
+  });
+  const url = row?.playbackUrl?.trim() ?? "";
+  if (!isVercelBlobUrl(url) || !(await blobUrlReachable(url))) return null;
+  return url;
+}
+
+/**
  * URL browseren kan åbne direkte. En levende Blob-kopi bruges som den er.
- * Ellers hentes filen fra Telnyx igen og lægges i Blob.
+ * Ellers hentes filen fra lydarkivet, eller fra Telnyx, som så lægges i Blob.
  */
 export async function resolvePlayableRecordingUrl(params: {
   eventId: string;
@@ -151,6 +169,14 @@ export async function resolvePlayableRecordingUrl(params: {
 }): Promise<string | null> {
   const current = params.recordingUrl.trim();
   if (isVercelBlobUrl(current) && (await blobUrlReachable(current))) return current;
+  const archived = await archivedPlaybackUrl(params.telnyxCallLegId);
+  if (archived) {
+    await prisma.leadActivityEvent.update({
+      where: { id: params.eventId },
+      data: { recordingUrl: archived },
+    });
+    return archived;
+  }
   const recovered = await recoverLeadActivityRecording(params);
   const next = recovered?.playbackUrl?.trim() ?? "";
   return next || null;
