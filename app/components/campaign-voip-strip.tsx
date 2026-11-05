@@ -6,7 +6,7 @@ import { normalizePhoneToE164ForDial, stripDialFormatting } from "@/lib/phone-e1
 import { useAudioLevel } from "@/lib/use-audio-level";
 import { useCallAudioPublisher } from "@/lib/live-coach/call-audio";
 import { MedlytPublisher } from "@/app/components/medlyt-publisher";
-import { medlytSellerCaptureConstraints } from "@/lib/medlyt-webrtc";
+import { isLiveMicStream, useLiveMicStream } from "@/lib/use-live-mic-stream";
 import {
   ensureMicPermissionAndEnumerate,
   headsetSetupBlockedReason,
@@ -382,8 +382,9 @@ export function CampaignVoipStrip({
    * Bruges både til niveau-måling og som localStream på Telnyx-newCall
    * (vi sender en klon ind, så SDK'en springer sin egen getUserMedia over).
    * Klonen kan SDK'en stoppe når opkaldet ender uden at påvirke originalen.
+   * Genåbnes af sig selv, hvis headsettet kobler fra og sporet dør.
    */
-  const [micMonitorStream, setMicMonitorStream] = useState<MediaStream | null>(null);
+  const micMonitorStream = useLiveMicStream(permissionDone, micId);
 
   const clientRef = useRef<TelnyxClient | null>(null);
   const activeCallRef = useRef<TelnyxCall | null>(null);
@@ -899,40 +900,6 @@ export function CampaignVoipStrip({
     })();
     return () => {
       cancelled = true;
-    };
-  }, [permissionDone, micId]);
-
-  /**
-   * Persistent mikrofon-stream — kører hele tiden så længe permission + micId
-   * er sat. Bruges til niveau-måling, og en klon sendes til Telnyx newCall så
-   * SDK'en undgår sin egen getUserMedia (sparer 100-300 ms på opkaldsstart).
-   */
-  useEffect(() => {
-    if (!permissionDone || !micId) {
-      setMicMonitorStream(null);
-      return;
-    }
-    let cancelled = false;
-    let active: MediaStream | null = null;
-    void (async () => {
-      try {
-        const stream = await navigator.mediaDevices.getUserMedia({
-          audio: medlytSellerCaptureConstraints(micId),
-        });
-        if (cancelled) {
-          stream.getTracks().forEach((t) => t.stop());
-          return;
-        }
-        active = stream;
-        setMicMonitorStream(stream);
-      } catch {
-        if (!cancelled) setMicMonitorStream(null);
-      }
-    })();
-    return () => {
-      cancelled = true;
-      if (active) active.getTracks().forEach((t) => t.stop());
-      setMicMonitorStream(null);
     };
   }, [permissionDone, micId]);
 
@@ -1585,7 +1552,8 @@ export function CampaignVoipStrip({
       // Genbrug pre-warmet mic-stream → SDK'en springer sin getUserMedia over
       // og medie-pathen er klar med det samme. Klonen ejes af SDK'en (stoppes
       // når opkaldet ender), originalen lever videre til niveau-måling.
-      if (micMonitorStream) {
+      // En død stream (headsettet koblede fra) giver et opkald uden mikrofon — så henter SDK'en selv.
+      if (isLiveMicStream(micMonitorStream)) {
         callOptions.localStream = micMonitorStream.clone();
       } else {
         callOptions.micId = micId;

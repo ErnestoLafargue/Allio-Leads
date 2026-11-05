@@ -4,7 +4,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useAudioLevel } from "@/lib/use-audio-level";
 import { useCallAudioPublisher } from "@/lib/live-coach/call-audio";
 import { MedlytPublisher } from "@/app/components/medlyt-publisher";
-import { medlytSellerCaptureConstraints } from "@/lib/medlyt-webrtc";
+import { isLiveMicStream, useLiveMicStream } from "@/lib/use-live-mic-stream";
 import {
   clearActiveDialerCampaignIfMatches,
   setActiveDialerCampaign,
@@ -185,7 +185,8 @@ export function PowerDialerPhone({
   const [verifyError, setVerifyError] = useState<string | null>(null);
   const [manualHeadsetConfirm, setManualHeadsetConfirm] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
-  const [micStream, setMicStream] = useState<MediaStream | null>(null);
+  /** Genåbnes af sig selv, hvis headsettet kobler fra og sporet dør. */
+  const micStream = useLiveMicStream(permissionDone, micId);
 
   // --- Nummerfelt når lead er åbent ---------------------------------------
   const [activeDialPhone, setActiveDialPhone] = useState(() => (leadDial?.leadPhone || "").trim());
@@ -397,35 +398,6 @@ export function PowerDialerPhone({
   }, [permissionDone, micId]);
 
   useEffect(() => {
-    if (!permissionDone || !micId) {
-      setMicStream(null);
-      return;
-    }
-    let cancelled = false;
-    let active: MediaStream | null = null;
-    void (async () => {
-      try {
-        const stream = await navigator.mediaDevices.getUserMedia({
-          audio: medlytSellerCaptureConstraints(micId),
-        });
-        if (cancelled) {
-          stream.getTracks().forEach((t) => t.stop());
-          return;
-        }
-        active = stream;
-        setMicStream(stream);
-      } catch {
-        if (!cancelled) setMicStream(null);
-      }
-    })();
-    return () => {
-      cancelled = true;
-      active?.getTracks().forEach((t) => t.stop());
-      setMicStream(null);
-    };
-  }, [permissionDone, micId]);
-
-  useEffect(() => {
     void setAudioElementSink(remoteAudioRef.current, speakerId);
   }, [speakerId]);
 
@@ -511,7 +483,7 @@ export function PowerDialerPhone({
       if (speakerIdRef.current) opts.speakerId = speakerIdRef.current;
       // Genbrug den allerede åbne mic-stream — undgå ekstra getUserMedia med exact-deviceId
       // som ofte fejler, mens monitor-streamen kører (OverconstrainedError → tavs/afbrudt bridge).
-      if (micStreamRef.current) {
+      if (isLiveMicStream(micStreamRef.current)) {
         try {
           opts.localStream = micStreamRef.current.clone();
         } catch {
@@ -845,7 +817,7 @@ export function PowerDialerPhone({
         remoteElement: remoteAudioId,
       };
       if (speakerId) callOptions.speakerId = speakerId;
-      if (micStream) callOptions.localStream = micStream.clone();
+      if (isLiveMicStream(micStream)) callOptions.localStream = micStream.clone();
       else if (micId) callOptions.micId = micId;
       if (clientState) callOptions.clientState = clientState;
 
