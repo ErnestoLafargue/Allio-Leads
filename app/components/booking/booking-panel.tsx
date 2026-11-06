@@ -4,10 +4,6 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { BookingCalendar } from "@/app/components/booking/booking-calendar";
 import { BookingTimeSlots } from "@/app/components/booking/booking-time-slots";
 import type { CopenhagenBookingSlotWithAvailability } from "@/lib/booking/availability";
-import {
-  meetingDurationMinutes,
-  transportBufferMinutes,
-} from "@/lib/booking/meeting-type-buffers";
 import { startOfLocalDay, toCopenhagenDateKey } from "@/lib/booking/mock-availability";
 import {
   MEETING_TYPE_ONLINE,
@@ -72,13 +68,12 @@ export function BookingPanel({
   const [resolvedCalendarUserId, setResolvedCalendarUserId] = useState<string | undefined>(
     calendarUserIdProp,
   );
+  // Nye bookinger starter som fysisk møde.
   const [internalMeetingType, setInternalMeetingType] = useState<MeetingType>(() =>
-    normalizeMeetingType(meetingTypeProp),
+    normalizeMeetingType(meetingTypeProp ?? MEETING_TYPE_PHYSICAL),
   );
   const meetingType =
     meetingTypeProp !== undefined ? normalizeMeetingType(meetingTypeProp) : internalMeetingType;
-  const durationMin = meetingDurationMinutes(meetingType);
-  const transportMin = transportBufferMinutes(meetingType);
 
   function setMeetingType(next: MeetingType) {
     if (next === meetingType) return;
@@ -286,8 +281,8 @@ export function BookingPanel({
         <div className="flex flex-col gap-2 sm:flex-row">
           {(
             [
-              [MEETING_TYPE_ONLINE, meetingTypeLabel(MEETING_TYPE_ONLINE)],
               [MEETING_TYPE_PHYSICAL, meetingTypeLabel(MEETING_TYPE_PHYSICAL)],
+              [MEETING_TYPE_ONLINE, meetingTypeLabel(MEETING_TYPE_ONLINE)],
             ] as const
           ).map(([value, label]) => {
             const active = meetingType === value;
@@ -309,24 +304,28 @@ export function BookingPanel({
             );
           })}
         </div>
-        <p className="mt-3 text-xs text-slate-600">
-          {meetingType === MEETING_TYPE_PHYSICAL ? (
-            <>
-              Fysisk: <strong>{durationMin} min</strong> +{" "}
-              <strong>{transportMin} min transport</strong> før og efter. Udfyld mødeadresse i det
-              grønne felt. Podio + Allio-Native (uden Cal.eu).
-            </>
-          ) : (
-            <>
-              Online: <strong>{durationMin} min</strong>. Cal.eu sender invitation/Meet-link. Podio +
-              Allio-Native.
-            </>
-          )}
-          {!adminAvailabilityOverride || !allowAdminAvailabilityOverride
-            ? " Optagne tider er skjult."
-            : null}
-        </p>
       </div>
+
+      {allowAdminAvailabilityOverride ? (
+        <div className="mb-5">
+          <button
+            type="button"
+            aria-pressed={adminAvailabilityOverride}
+            onClick={() => setAdminAvailabilityOverride((v) => !v)}
+            className={[
+              "w-full rounded-lg border px-3 py-2 text-left text-xs font-semibold shadow-sm transition sm:text-sm",
+              adminAvailabilityOverride
+                ? "border-amber-600 bg-amber-100 text-amber-950 ring-2 ring-amber-400/60"
+                : "border-slate-200 bg-white text-slate-800 hover:border-slate-300 hover:bg-slate-50",
+            ].join(" ")}
+          >
+            Overskrid
+            <span className="mt-0.5 block font-normal text-slate-600">
+              Vis alle tider inkl. optagne — book alligevel som admin (varighed/transport gælder stadig for det nye møde).
+            </span>
+          </button>
+        </div>
+      ) : null}
 
       <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-slate-500">
         2. Dato og tid
@@ -362,26 +361,6 @@ export function BookingPanel({
         />
       </div>
 
-      {allowAdminAvailabilityOverride ? (
-        <div className="mt-6">
-          <button
-            type="button"
-            aria-pressed={adminAvailabilityOverride}
-            onClick={() => setAdminAvailabilityOverride((v) => !v)}
-            className={[
-              "w-full rounded-lg border px-3 py-2 text-left text-xs font-semibold shadow-sm transition sm:text-sm",
-              adminAvailabilityOverride
-                ? "border-amber-600 bg-amber-100 text-amber-950 ring-2 ring-amber-400/60"
-                : "border-slate-200 bg-white text-slate-800 hover:border-slate-300 hover:bg-slate-50",
-            ].join(" ")}
-          >
-            Overskrid
-            <span className="mt-0.5 block font-normal text-slate-600">
-              Vis alle tider inkl. optagne — book alligevel som admin (varighed/transport gælder stadig for det nye møde).
-            </span>
-          </button>
-        </div>
-      ) : null}
 
       <div className="mt-6 flex flex-col items-stretch gap-2 border-t border-slate-100 pt-4 sm:flex-row sm:items-center sm:justify-end">
         {!allowMeetingConfirm ? (
@@ -390,14 +369,6 @@ export function BookingPanel({
           </p>
         ) : null}
         <div className="order-1 flex w-full flex-col gap-2 sm:order-2 sm:w-auto sm:flex-row sm:gap-3">
-          <a
-            href="https://calendly.com/victor-allio/onboarding"
-            target="_blank"
-            rel="noopener noreferrer"
-            className="inline-flex items-center justify-center rounded-xl border border-slate-200 bg-white px-5 py-2.5 text-center text-sm font-semibold text-slate-800 shadow-sm transition hover:bg-slate-50"
-          >
-            Calendly
-          </a>
           <button
             type="button"
             disabled={!canConfirm}

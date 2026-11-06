@@ -46,7 +46,7 @@ import { canScheduleCallbackFromLead } from "@/lib/lead-callback-schedule";
 import { isCallbackWorkLead } from "@/lib/lead-callback-access";
 import { DIALER_AUTO_PAUSED_KEY, DIALER_START_PATH, markDialerPauseExit } from "@/lib/dialer-pause-exit";
 import {
-  MEETING_TYPE_ONLINE,
+  MEETING_TYPE_PHYSICAL,
   type MeetingType,
   normalizeMeetingType,
 } from "@/lib/meeting-type";
@@ -383,7 +383,7 @@ export function CampaignWorkspace({
   const [meetingContactEmail, setMeetingContactEmail] = useState("");
   const [meetingContactPhonePrivate, setMeetingContactPhonePrivate] = useState("");
   const [meetingCompanyName, setMeetingCompanyName] = useState("");
-  const [meetingType, setMeetingType] = useState<MeetingType>(MEETING_TYPE_ONLINE);
+  const [meetingType, setMeetingType] = useState<MeetingType>(MEETING_TYPE_PHYSICAL);
   const [meetingAddress, setMeetingAddress] = useState("");
   const [meetingContactErrors, setMeetingContactErrors] = useState<MeetingContactFieldErrors>({});
   const [meetingNotesRequiredOpen, setMeetingNotesRequiredOpen] = useState(false);
@@ -519,7 +519,10 @@ export function CampaignWorkspace({
     setMeetingContactEmail(l.meetingContactEmail ?? "");
     setMeetingContactPhonePrivate(l.meetingContactPhonePrivate ?? "");
     setMeetingCompanyName(l.meetingCompanyName ?? "");
-    setMeetingType(normalizeMeetingType(l.meetingType));
+    // Uden booket møde starter vi på fysisk møde; ellers vises mødets egen type.
+    setMeetingType(
+      l.meetingScheduledFor ? normalizeMeetingType(l.meetingType) : MEETING_TYPE_PHYSICAL,
+    );
     setMeetingAddress(l.meetingAddress ?? "");
   }, [campaignSystemType]);
 

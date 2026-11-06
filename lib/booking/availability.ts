@@ -9,6 +9,7 @@ import {
 } from "@/lib/meeting-outcome";
 import {
   MEETING_TYPE_ONLINE,
+  MEETING_TYPE_PHYSICAL,
   type MeetingType,
   normalizeMeetingType,
 } from "@/lib/meeting-type";
@@ -23,8 +24,38 @@ export const BOOKING_MEETING_BLOCK_AFTER_MIN = 60;
 /** @deprecated */
 export const BOOKING_MEETING_BLOCK_MIN = BOOKING_MEETING_BLOCK_AFTER_MIN;
 
-/** Arbejdsvindue: 09:00–22:00 (22 ekskl.) */
-export const BOOKING_DAY_WINDOW = { startH: 9, endH: 22 } as const;
+/** Starttider pr. mødetype (minutter efter lokal midnat, begge ender inkl.). */
+export type BookingStartWindow = { firstStartMin: number; lastStartMin: number; stepMin: number };
+
+/** Fysisk: start 09:00–17:00 hver halve time. */
+export const PHYSICAL_BOOKING_WINDOW: BookingStartWindow = {
+  firstStartMin: 9 * 60,
+  lastStartMin: 17 * 60,
+  stepMin: 30,
+};
+
+/** Online: start 09:00–17:45 hvert kvarter (dagen slutter 18). */
+export const ONLINE_BOOKING_WINDOW: BookingStartWindow = {
+  firstStartMin: 9 * 60,
+  lastStartMin: 17 * 60 + 45,
+  stepMin: BOOKING_SLOT_STEP_MIN,
+};
+
+/** Fysiske møder pr. dag, som ledige tider altid skal efterlade plads til. */
+export const PHYSICAL_MEETINGS_PER_DAY_TARGET = 3;
+
+export function bookingWindowForMeetingType(type: MeetingType | string): BookingStartWindow {
+  return normalizeMeetingType(type) === MEETING_TYPE_PHYSICAL
+    ? PHYSICAL_BOOKING_WINDOW
+    : ONLINE_BOOKING_WINDOW;
+}
+
+/** Lørdag/søndag (dayKey YYYY-MM-DD) — der bookes ikke møder i weekenden. */
+export function isWeekendDayKey(dayKey: string): boolean {
+  const [y, m, d] = dayKey.split("-").map((x) => parseInt(x, 10));
+  const weekday = new Date(Date.UTC(y, m - 1, d)).getUTCDay();
+  return weekday === 0 || weekday === 6;
+}
 
 export type TimeBlockMs = { startMs: number; endMs: number };
 
@@ -93,8 +124,10 @@ export function softBlocksForMeeting(startMs: number, type: MeetingType | string
 
 /**
  * Kan vi booke et møde af typen `proposedType` på `proposedStart`?
- * - Møde-body må ikke overlappe hard (møde+transport+manuel).
- * - Egen transport må ikke overlappe soft (møde+manuel); transport↔transport er OK.
+ * - Møde-body må ikke overlappe hard (møde+transport+manuel blokering).
+ * - Egen transport må ikke overlappe soft (andres møde-body); transport↔transport er OK.
+ * - Manuel blokering er hard, ikke soft — transport må gerne overlappe en blokering,
+ *   så fysisk møde kan starte når blokeringen slutter.
  */
 export function canBookMeetingAt(
   proposedStartMs: number,
@@ -253,51 +286,107 @@ export function getCopenhagenBookingSlotsWithAvailability(
   return getCopenhagenBookingSlotsForMeetingType(dayKey, MEETING_TYPE_ONLINE, occupied, occupied);
 }
 
+const COPENHAGEN_YMD_HM_FMT = new Intl.DateTimeFormat("en-CA", {
+  timeZone: "Europe/Copenhagen",
+  year: "numeric",
+  month: "2-digit",
+  day: "2-digit",
+  hour: "2-digit",
+  minute: "2-digit",
+  hour12: false,
+});
+
+/** Starttider (UTC-ms + «HH:MM») i mødetypens vindue for dagen — passerede tider i dag udeladt. */
+function candidateStartsForDay(dayKey: string, window: BookingStartWindow): CopenhagenBookingSlot[] {
+  const { start } = copenhagenDayBoundsUtcFromDayKey(dayKey);
+  const dayEnd = start.getTime() + 24 * 60 * 60 * 1000;
+  const now = Date.now();
+  const isToday = dayKey === copenhagenDayKey();
+  const out: CopenhagenBookingSlot[] = [];
+
+  // Midnat og sommertidsskift ligger på hele timer, så gitteret fra midnat rammer altid :00/:15/:30/:45.
+  for (let ms = start.getTime(); ms < dayEnd; ms += window.stepMin * 60 * 1000) {
+    const parts = COPENHAGEN_YMD_HM_FMT.formatToParts(new Date(ms));
+    const part = (type: string) => parts.find((p) => p.type === type)!.value;
+    if (`${part("year")}-${part("month")}-${part("day")}` !== dayKey) continue;
+
+    const h = parseInt(part("hour"), 10) % 24;
+    const m = parseInt(part("minute"), 10);
+    const minuteOfDay = h * 60 + m;
+    if (minuteOfDay < window.firstStartMin || minuteOfDay > window.lastStartMin) continue;
+    if (isToday && ms < now) continue;
+
+    out.push({ time: `${String(h).padStart(2, "0")}:${String(m).padStart(2, "0")}`, utcMs: ms });
+  }
+  return out;
+}
+
+/**
+ * Hvor mange ekstra fysiske møder kan der maksimalt lægges ind blandt `startsMs` (sorteret)?
+ * Grådig «tidligst mulige» er optimal, fordi alle fysiske møder er lige lange.
+ */
+export function maxAdditionalPhysicalMeetings(
+  startsMs: number[],
+  hardBlocks: TimeBlockMs[],
+  softBlocks: TimeBlockMs[],
+): number {
+  const hard = [...hardBlocks];
+  const soft = [...softBlocks];
+  let count = 0;
+  for (const ms of startsMs) {
+    if (!canBookMeetingAt(ms, MEETING_TYPE_PHYSICAL, hard, soft)) continue;
+    count++;
+    hard.push(...hardBlocksForMeeting(ms, MEETING_TYPE_PHYSICAL));
+    soft.push(...softBlocksForMeeting(ms, MEETING_TYPE_PHYSICAL));
+  }
+  return count;
+}
+
+export type BookingSlotsOptions = {
+  /** Fysiske møder der allerede er booket på dagen (tæller med i målet på 3). */
+  physicalMeetingsBookedOnDay?: number;
+};
+
 /**
  * Ledige slots for en given mødetype med hard/soft-blokke.
+ *
+ * Fysisk: dynamiske tider — en tid er kun ledig, hvis dagen bagefter stadig kan nå
+ * PHYSICAL_MEETINGS_PER_DAY_TARGET fysiske møder (eller så mange som overhovedet kan nås).
+ * Fx tom dag: alle 09:00–17:00. Booket 12:30: kun 09:00–10:00 og 15:00–17:00.
  */
 export function getCopenhagenBookingSlotsForMeetingType(
   dayKey: string,
   meetingType: MeetingType | string,
   hardBlocks: TimeBlockMs[],
   softBlocks: TimeBlockMs[],
+  opts: BookingSlotsOptions = {},
 ): CopenhagenBookingSlotWithAvailability[] {
-  if (isPastCopenhagenDayKey(dayKey)) return [];
+  if (isPastCopenhagenDayKey(dayKey) || isWeekendDayKey(dayKey)) return [];
 
-  const { start } = copenhagenDayBoundsUtcFromDayKey(dayKey);
-  const dayEnd = new Date(start.getTime() + 24 * 60 * 60 * 1000);
-  const now = Date.now();
-  const todayKey = copenhagenDayKey();
-  const isToday = dayKey === todayKey;
+  const type = normalizeMeetingType(meetingType);
+  const candidates = candidateStartsForDay(dayKey, bookingWindowForMeetingType(type));
+  const withBasic = candidates.map((s) => ({
+    ...s,
+    available: canBookMeetingAt(s.utcMs, type, hardBlocks, softBlocks),
+  }));
+  if (type !== MEETING_TYPE_PHYSICAL) return withBasic;
 
-  const out: CopenhagenBookingSlotWithAvailability[] = [];
+  const startsMs = candidates.map((s) => s.utcMs);
+  const booked = Math.max(0, opts.physicalMeetingsBookedOnDay ?? 0);
+  const stillWanted = Math.max(0, PHYSICAL_MEETINGS_PER_DAY_TARGET - booked);
+  const required = Math.min(
+    stillWanted,
+    maxAdditionalPhysicalMeetings(startsMs, hardBlocks, softBlocks),
+  );
+  if (required <= 1) return withBasic;
 
-  for (let ms = start.getTime(); ms < dayEnd.getTime(); ms += 60 * 1000) {
-    const d = new Date(ms);
-    const parts = new Intl.DateTimeFormat("en-CA", {
-      timeZone: "Europe/Copenhagen",
-      year: "numeric",
-      month: "2-digit",
-      day: "2-digit",
-      hour: "2-digit",
-      minute: "2-digit",
-      hour12: false,
-    }).formatToParts(d);
-    const dk = `${parts.find((p) => p.type === "year")!.value}-${parts.find((p) => p.type === "month")!.value}-${parts.find((p) => p.type === "day")!.value}`;
-    if (dk !== dayKey) continue;
-
-    const h = parseInt(parts.find((p) => p.type === "hour")!.value, 10);
-    const m = parseInt(parts.find((p) => p.type === "minute")!.value, 10);
-    if (h < BOOKING_DAY_WINDOW.startH || h >= BOOKING_DAY_WINDOW.endH) continue;
-    if (m % BOOKING_SLOT_STEP_MIN !== 0) continue;
-
-    if (isToday && ms < now) continue;
-
-    const time = `${String(h).padStart(2, "0")}:${String(m).padStart(2, "0")}`;
-    const available = canBookMeetingAt(ms, meetingType, hardBlocks, softBlocks);
-    out.push({ time, utcMs: ms, available });
-  }
-  return out;
+  return withBasic.map((s) => {
+    if (!s.available) return s;
+    const hard = [...hardBlocks, ...hardBlocksForMeeting(s.utcMs, type)];
+    const soft = [...softBlocks, ...softBlocksForMeeting(s.utcMs, type)];
+    const reachable = 1 + maxAdditionalPhysicalMeetings(startsMs, hard, soft);
+    return reachable >= required ? s : { ...s, available: false };
+  });
 }
 
 export function getAvailableCopenhagenBookingSlots(
@@ -361,13 +450,14 @@ export function findBlockedTimeConflict(
   const startMs = proposedStart.getTime();
   if (Number.isNaN(startMs)) return null;
   const manual = occupiedBlocksFromBlockedTimes(blockedRows);
-  const { meeting, transports } = intervalsForMeeting(startMs, meetingType);
+  const { meeting } = intervalsForMeeting(startMs, meetingType);
+  // Kun møde-body mod manuel blokering — transport må gerne overlappe blokeringen.
   for (const row of blockedRows) {
     const blockStart = new Date(row.startDateTime).getTime();
     const blockEnd = new Date(row.endDateTime).getTime();
     if (Number.isNaN(blockStart) || Number.isNaN(blockEnd) || blockEnd <= blockStart) continue;
     const block = { startMs: blockStart, endMs: blockEnd };
-    if (blockOverlaps(meeting, block) || transports.some((t) => blockOverlaps(t, block))) {
+    if (blockOverlaps(meeting, block)) {
       return { id: row.id, title: row.title.trim() || "Blokeret" };
     }
   }

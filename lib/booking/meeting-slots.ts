@@ -16,7 +16,12 @@ import {
   parseServiceIdsJson,
 } from "@/lib/allio-native/service-buffers";
 import { MEETING_OUTCOME_PENDING } from "@/lib/meeting-outcome";
-import { MEETING_TYPE_ONLINE, type MeetingType, normalizeMeetingType } from "@/lib/meeting-type";
+import {
+  MEETING_TYPE_ONLINE,
+  MEETING_TYPE_PHYSICAL,
+  type MeetingType,
+  normalizeMeetingType,
+} from "@/lib/meeting-type";
 
 export type GetAvailableMeetingSlotsOpts = {
   excludeLeadId?: string;
@@ -78,6 +83,9 @@ export async function getAvailableMeetingSlots(
   const resolveType = (raw: string | null | undefined) =>
     meetingTypeForServiceIds(parseServiceIdsJson(raw));
 
+  // Manuel blokering er hard (møde-body må ikke ligge i blokken), men ikke soft:
+  // transport før/efter fysisk møde må gerne løbe ind i/ud af en manuel blokering,
+  // så et fysisk møde kan starte præcis når blokeringen slutter (fx blok 11–13 → start 13:00).
   const manual = occupiedBlocksFromBlockedTimes(blockedRows);
   const hardBlocks = [
     ...occupiedBlocksFromScheduledMeetings(localOnlyLeads),
@@ -86,11 +94,25 @@ export async function getAvailableMeetingSlots(
   ];
   const softBlocks = [
     ...softOccupiedBlocksFromScheduledMeetings(localOnlyLeads),
-    ...manual,
     ...softOccupiedBlocksFromNativeOccupancy(nativeRows, resolveType),
   ];
 
-  return getCopenhagenBookingSlotsForMeetingType(dayKey, meetingType, hardBlocks, softBlocks);
+  // Fysiske møder der starter på dagen — tæller med i målet om 3 fysiske møder pr. dag.
+  const startsOnDay = (d: Date | null) =>
+    d != null && d.getTime() >= start.getTime() && d.getTime() < end.getTime();
+  const physicalMeetingsBookedOnDay =
+    localOnlyLeads.filter(
+      (l) =>
+        startsOnDay(l.meetingScheduledFor) &&
+        normalizeMeetingType(l.meetingType) === MEETING_TYPE_PHYSICAL,
+    ).length +
+    nativeRows.filter(
+      (r) => startsOnDay(r.startDateTime) && resolveType(r.serviceIds) === MEETING_TYPE_PHYSICAL,
+    ).length;
+
+  return getCopenhagenBookingSlotsForMeetingType(dayKey, meetingType, hardBlocks, softBlocks, {
+    physicalMeetingsBookedOnDay,
+  });
 }
 
 /** Hent manuelle blokeringer der overlapper et foreslået møde (body + transport). */

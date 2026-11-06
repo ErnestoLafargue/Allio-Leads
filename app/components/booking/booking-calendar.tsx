@@ -4,7 +4,9 @@ import { useMemo } from "react";
 import { isPastCopenhagenDayKey } from "@/lib/booking/availability";
 import { startOfLocalDay, toCopenhagenDateKey, toDateKeyLocal } from "@/lib/booking/mock-availability";
 
-const WEEK_LABELS = ["Man", "Tir", "Ons", "Tor", "Fre", "Lør", "Søn"];
+/** Kun hverdage — der bookes ikke møder lørdag/søndag. */
+const WEEK_LABELS = ["Man", "Tir", "Ons", "Tor", "Fre"];
+const WEEKDAYS = WEEK_LABELS.length;
 
 /** ISO-8601 ugenummer (Man–Søn; uge 1 indeholder årets første torsdag) — dansk standard. */
 function isoWeekNumber(d: Date): number {
@@ -36,7 +38,9 @@ function monthMatrix(year: number, monthIndex: number): (Date | null)[][] {
   while (cells.length % 7 !== 0) cells.push(null);
   const rows: (Date | null)[][] = [];
   for (let i = 0; i < cells.length; i += 7) {
-    rows.push(cells.slice(i, i + 7));
+    const weekdays = cells.slice(i, i + WEEKDAYS);
+    // Uge hvor måneden kun rammer weekenden (fx 1. er en lørdag) — ingen hverdage at vise.
+    if (weekdays.some((c) => c != null)) rows.push(weekdays);
   }
   return rows;
 }
@@ -72,7 +76,7 @@ export function BookingCalendar({
   }
 
   return (
-    <div className="flex min-w-0 flex-1 flex-col">
+    <div className="flex min-w-0 flex-1 flex-col lg:w-1/3 lg:flex-none">
       <div className="mb-4 flex items-center justify-between gap-2">
         <button
           type="button"
@@ -93,7 +97,7 @@ export function BookingCalendar({
         </button>
       </div>
 
-      <div className="grid grid-cols-[repeat(7,minmax(0,1fr))_1.75rem] gap-y-1 text-center text-[11px] font-medium uppercase tracking-wide text-slate-400">
+      <div className="grid grid-cols-[repeat(5,minmax(0,1fr))_1.75rem] gap-y-1 text-center text-[11px] font-medium uppercase tracking-wide text-slate-400">
         {WEEK_LABELS.map((w) => (
           <div key={w} className="py-1">
             {w}
@@ -110,11 +114,11 @@ export function BookingCalendar({
           return (
             <div
               key={ri}
-              className="grid grid-cols-[repeat(7,minmax(0,1fr))_1.75rem] items-center gap-1"
+              className="grid grid-cols-[repeat(5,minmax(0,1fr))_1.75rem] items-center gap-1"
             >
               {row.map((cell, ci) => {
                 if (!cell) {
-                  return <div key={`empty-${ri}-${ci}`} className="aspect-square" />;
+                  return <div key={`empty-${ri}-${ci}`} className="mx-auto aspect-square w-full max-w-14" />;
                 }
                 const dayStart = startOfLocalDay(cell);
                 const key = toDateKeyLocal(dayStart);
@@ -129,7 +133,7 @@ export function BookingCalendar({
                     disabled={disabled}
                     onClick={() => onSelectDate(dayStart)}
                     className={[
-                      "relative flex aspect-square max-h-11 w-full items-center justify-center rounded-full text-sm font-medium transition",
+                      "relative mx-auto flex aspect-square w-full max-w-14 items-center justify-center rounded-full text-sm font-medium transition",
                       disabled
                         ? "cursor-not-allowed text-slate-300"
                         : "text-blue-700 hover:bg-blue-100/80",
@@ -150,7 +154,7 @@ export function BookingCalendar({
                 );
               })}
               <div
-                className="flex h-full max-h-11 items-center justify-center text-[11px] font-semibold tabular-nums text-slate-500"
+                className="flex h-full max-h-14 items-center justify-center text-[11px] font-semibold tabular-nums text-slate-500"
                 aria-label={weekNo != null ? `Uge ${weekNo}` : undefined}
               >
                 {weekNo ?? ""}
