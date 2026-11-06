@@ -229,25 +229,12 @@ export async function PATCH(req: Request, { params }: Params) {
 
   const sendToRebooking = body?.sendToRebooking === true;
 
-  let adminBookedByUserId: string | undefined;
+  // «Booket af» er altid den bruger, der bookede mødet — kan ikke ændres bagefter.
   if (body && "bookedByUserId" in body) {
-    if (session!.user.role !== "ADMIN") {
-      return NextResponse.json({ error: "Kun administrator kan ændre sælger på mødet." }, { status: 403 });
-    }
-    if (typeof body.bookedByUserId !== "string" || !body.bookedByUserId.trim()) {
-      return NextResponse.json({ error: "Ugyldig sælger." }, { status: 400 });
-    }
-    if (!existing.meetingBookedAt) {
-      return NextResponse.json({ error: "Leadet har ikke et booket møde." }, { status: 400 });
-    }
-    const assignee = await prisma.user.findUnique({
-      where: { id: body.bookedByUserId.trim() },
-      select: { id: true },
-    });
-    if (!assignee) {
-      return NextResponse.json({ error: "Brugeren findes ikke." }, { status: 400 });
-    }
-    adminBookedByUserId = assignee.id;
+    return NextResponse.json(
+      { error: "Booket af kan ikke ændres — mødet er knyttet til den bruger, der bookede det." },
+      { status: 400 },
+    );
   }
 
   const companyName =
@@ -416,10 +403,7 @@ export async function PATCH(req: Request, { params }: Params) {
         meetingCommissionDayKey = copenhagenDayKey(meetingBookedAt);
       }
     }
-  } else if (
-    adminMeetingOutcome !== undefined ||
-    adminBookedByUserId !== undefined
-  ) {
+  } else if (adminMeetingOutcome !== undefined) {
     meetingBookedAt = existing.meetingBookedAt;
     meetingScheduledFor = existing.meetingScheduledFor;
     bookedByUserId = existing.bookedByUserId;
@@ -485,10 +469,6 @@ export async function PATCH(req: Request, { params }: Params) {
       );
     }
     meetingOutcomeStatus = adminMeetingOutcome;
-  }
-
-  if (adminBookedByUserId !== undefined) {
-    bookedByUserId = adminBookedByUserId;
   }
 
   const meetingTimeChangedForOverlap =
@@ -572,8 +552,7 @@ export async function PATCH(req: Request, { params }: Params) {
   const clearLeadLock = status !== "NEW";
 
   let bookedFromRebookingCampaign = existing.bookedFromRebookingCampaign ?? false;
-  const isAdminMeetingOnlyPatch =
-    adminMeetingOutcome !== undefined || adminBookedByUserId !== undefined;
+  const isAdminMeetingOnlyPatch = adminMeetingOutcome !== undefined;
   if (status !== "MEETING_BOOKED") {
     if (!isAdminMeetingOnlyPatch) {
       bookedFromRebookingCampaign = false;
@@ -586,10 +565,6 @@ export async function PATCH(req: Request, { params }: Params) {
   const finalMeetingOutcomeNorm = normalizeMeetingOutcomeStatus(meetingOutcomeStatus);
   const logMeetingOutcomeActivity =
     adminMeetingOutcome !== undefined && prevMeetingOutcomeNorm !== finalMeetingOutcomeNorm;
-
-  const prevBookedByUserId = existing.bookedByUserId;
-  const logBookerChangedActivity =
-    adminBookedByUserId !== undefined && prevBookedByUserId !== bookedByUserId;
 
   let logSentToRebooking = false;
   let adminOutcomeRouting: Awaited<ReturnType<typeof resolveAdminMeetingOutcomeRouting>> | null =
@@ -774,29 +749,6 @@ export async function PATCH(req: Request, { params }: Params) {
       });
     }
 
-    if (logBookerChangedActivity) {
-      const actor = await tx.user.findUnique({
-        where: { id: userId },
-        select: { name: true },
-      });
-      const label = actor?.name?.trim() || "Bruger";
-      const prevUser = prevBookedByUserId
-        ? await tx.user.findUnique({ where: { id: prevBookedByUserId }, select: { name: true } })
-        : null;
-      const nextUser = bookedByUserId
-        ? await tx.user.findUnique({ where: { id: bookedByUserId }, select: { name: true } })
-        : null;
-      const fromName = prevUser?.name?.trim() || "—";
-      const toName = nextUser?.name?.trim() || "—";
-      await tx.leadActivityEvent.create({
-        data: {
-          leadId: id,
-          userId,
-          kind: LEAD_ACTIVITY_KIND.MEETING_BOOKER_CHANGED,
-          summary: `${label} ændrede sælger fra ${fromName} til ${toName}`,
-        },
-      });
-    }
 
     return updated;
   });

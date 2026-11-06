@@ -51,12 +51,6 @@ type Assignee = {
   phone: string | null;
 };
 
-type SellerOption = {
-  id: string;
-  name: string;
-  username: string;
-};
-
 function outcomeLabel(raw?: string | null) {
   const k = String(raw ?? "").trim().toUpperCase() || MEETING_OUTCOME_PENDING;
   return MEETING_OUTCOME_LABELS[k] ?? MEETING_OUTCOME_LABELS[MEETING_OUTCOME_PENDING];
@@ -112,9 +106,6 @@ export function MeetingsList({ type }: { type: "upcoming" | "past" }) {
   const [defaultAssigneeId, setDefaultAssigneeId] = useState<string | null>(null);
   const [savingAssigneeById, setSavingAssigneeById] = useState<Record<string, boolean>>({});
   const [savedHintById, setSavedHintById] = useState<Record<string, boolean>>({});
-  const [savingSellerById, setSavingSellerById] = useState<Record<string, boolean>>({});
-  const [savedSellerHintById, setSavedSellerHintById] = useState<Record<string, boolean>>({});
-  const [sellers, setSellers] = useState<SellerOption[]>([]);
   const [noShowDialog, setNoShowDialog] = useState<{ leadId: string } | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -215,21 +206,6 @@ export function MeetingsList({ type }: { type: "upcoming" | "past" }) {
   }
 
   useEffect(() => {
-    if (!isAdmin) return;
-    let cancelled = false;
-    async function loadSellers() {
-      const res = await fetch("/api/users/for-assignment");
-      if (!res.ok) return;
-      const data = (await res.json()) as SellerOption[];
-      if (!cancelled) setSellers(Array.isArray(data) ? data : []);
-    }
-    void loadSellers();
-    return () => {
-      cancelled = true;
-    };
-  }, [isAdmin]);
-
-  useEffect(() => {
     if (type !== "upcoming") return;
     let cancelled = false;
     async function loadAssignees() {
@@ -277,28 +253,6 @@ export function MeetingsList({ type }: { type: "upcoming" | "past" }) {
       return;
     }
     void patchOutcome(id, value);
-  }
-
-  async function patchSeller(id: string, bookedByUserId: string) {
-    setSavingSellerById((prev) => ({ ...prev, [id]: true }));
-    setSavedSellerHintById((prev) => ({ ...prev, [id]: false }));
-    const res = await fetch(`/api/leads/${id}`, {
-      method: "PATCH",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ bookedByUserId }),
-    });
-    setSavingSellerById((prev) => ({ ...prev, [id]: false }));
-    if (!res.ok) {
-      const j = await res.json().catch(() => ({}));
-      setError(typeof j.error === "string" ? j.error : "Kunne ikke gemme sælger");
-      return;
-    }
-    setError(null);
-    await load();
-    setSavedSellerHintById((prev) => ({ ...prev, [id]: true }));
-    window.setTimeout(() => {
-      setSavedSellerHintById((prev) => ({ ...prev, [id]: false }));
-    }, 1200);
   }
 
   async function patchAssignee(id: string, assignedUserId: string) {
@@ -539,34 +493,8 @@ export function MeetingsList({ type }: { type: "upcoming" | "past" }) {
                     {m.meetingScheduledFor ? new Date(m.meetingScheduledFor).toLocaleString("da-DK") : "—"}
                   </td>
                   <td className="px-4 py-3 text-stone-700">
-                    {isAdmin && type === "past" && sellers.length > 0 ? (
-                      <div className="flex items-center gap-2">
-                        <select
-                          value={m.bookedByUser?.id ?? ""}
-                          onChange={(e) => void patchSeller(m.id, e.target.value)}
-                          disabled={savingSellerById[m.id] || !m.bookedByUser?.id}
-                          className="rounded-md border border-stone-300 bg-white px-2.5 py-1.5 text-xs font-medium text-stone-800 shadow-sm outline-none ring-stone-400 focus:ring-2 disabled:opacity-60"
-                        >
-                          {!m.bookedByUser?.id ? (
-                            <option value="" disabled>
-                              —
-                            </option>
-                          ) : null}
-                          {sellers.map((u) => (
-                            <option key={u.id} value={u.id}>
-                              {u.name}
-                            </option>
-                          ))}
-                        </select>
-                        {savedSellerHintById[m.id] ? (
-                          <span className="text-xs text-emerald-700">Gemt</span>
-                        ) : null}
-                      </div>
-                    ) : m.bookedByUser ? (
-                      `${m.bookedByUser.name}`
-                    ) : (
-                      "—"
-                    )}
+                    {/* Altid den bruger, der bookede mødet — kan ikke ændres. */}
+                    {m.bookedByUser?.name ?? "—"}
                   </td>
                   <td className="px-4 py-3">
                     <div className="flex flex-wrap items-center gap-1.5">
