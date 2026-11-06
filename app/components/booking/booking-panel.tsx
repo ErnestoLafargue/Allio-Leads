@@ -3,8 +3,24 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { BookingCalendar } from "@/app/components/booking/booking-calendar";
 import { BookingTimeSlots } from "@/app/components/booking/booking-time-slots";
-import type { CopenhagenBookingSlotWithAvailability } from "@/lib/booking/availability";
-import { startOfLocalDay, toCopenhagenDateKey } from "@/lib/booking/mock-availability";
+import {
+  isBeyondBookingHorizon,
+  lastBookableDayKey,
+  PHYSICAL_MEETINGS_PER_DAY_FLEX,
+  PHYSICAL_MEETINGS_PER_DAY_STANDARD,
+  type CopenhagenBookingSlotWithAvailability,
+} from "@/lib/booking/availability";
+import { DAY_PART_GROUPS, FOUR_MEETING_GROUPS } from "@/lib/booking/day-parts";
+import {
+  PHYSICAL_CLOSED_ISO_WEEKDAYS,
+  physicalDayRuleMessage,
+  type PhysicalDayRule,
+} from "@/lib/booking/weekday-rules";
+import {
+  startOfLocalDay,
+  toCopenhagenDateKey,
+  toDateKeyLocal,
+} from "@/lib/booking/mock-availability";
 import {
   MEETING_TYPE_ONLINE,
   MEETING_TYPE_PHYSICAL,
@@ -12,6 +28,8 @@ import {
   meetingTypeLabel,
   normalizeMeetingType,
 } from "@/lib/meeting-type";
+
+const NO_DAY_KEYS: ReadonlySet<string> = new Set();
 
 export type BookingConfirmPayload = {
   dateKey: string;
@@ -65,6 +83,20 @@ export function BookingPanel({
   const [slotOptions, setSlotOptions] = useState<CopenhagenBookingSlotWithAvailability[]>([]);
   const [slotsLoading, setSlotsLoading] = useState(false);
   const [adminAvailabilityOverride, setAdminAvailabilityOverride] = useState(false);
+  /** «Overskrid» (alle): fysiske tider med plads til 3 møder i stedet for de faste 4-møde-tider. */
+  const [flexTimes, setFlexTimes] = useState(false);
+  /** Ugedagsregel for fysiske møder på valgt dag (fra API). */
+  const [dayRule, setDayRule] = useState<PhysicalDayRule | null>(null);
+  // Nyt lead → tilbage til de faste 4-møde-tider (nulstilles under render, ikke i en effect).
+  const [flexLeadId, setFlexLeadId] = useState(leadId);
+  if (flexLeadId !== leadId) {
+    setFlexLeadId(leadId);
+    setFlexTimes(false);
+  }
+  const adminOverrideActive = allowAdminAvailabilityOverride && adminAvailabilityOverride;
+  // Uden admin kan der kun bookes til og med fredag 3 uger efter denne uge.
+  const bookingHorizonDayKey = useMemo(() => lastBookableDayKey(), []);
+
   const [resolvedCalendarUserId, setResolvedCalendarUserId] = useState<string | undefined>(
     calendarUserIdProp,
   );
@@ -74,6 +106,71 @@ export function BookingPanel({
   );
   const meetingType =
     meetingTypeProp !== undefined ? normalizeMeetingType(meetingTypeProp) : internalMeetingType;
+
+  // Kalenderoverblik for den viste måned: åbne onsdage (fysisk) og fyldte dage (rød cirkel).
+  // Onsdage er låst for fysiske møder, indtil torsdag og fredag samme uge hver har mindst 3 møder.
+  const wednesdayLockActive = meetingType === MEETING_TYPE_PHYSICAL && !adminOverrideActive;
+  const monthKey = toDateKeyLocal(monthAnchor).slice(0, 7);
+  const overviewKey = [
+    monthKey,
+    meetingType,
+    flexTimes ? PHYSICAL_MEETINGS_PER_DAY_FLEX : PHYSICAL_MEETINGS_PER_DAY_STANDARD,
+    adminOverrideActive ? "admin" : "",
+    resolvedCalendarUserId ?? "",
+    leadId ?? "",
+  ].join("|");
+  const [monthOverview, setMonthOverview] = useState<{
+    key: string;
+    openWednesdays: Set<string>;
+    fullDays: Set<string>;
+  } | null>(null);
+  useEffect(() => {
+    if (!resolvedCalendarUserId) return;
+    let cancelled = false;
+    const [y, m] = monthKey.split("-").map((x) => parseInt(x, 10));
+    const qs = new URLSearchParams({
+      from: toDateKeyLocal(new Date(y, m - 1, 1)),
+      to: toDateKeyLocal(new Date(y, m, 0)),
+      userId: resolvedCalendarUserId,
+      meetingType,
+      physicalTarget: String(
+        flexTimes ? PHYSICAL_MEETINGS_PER_DAY_FLEX : PHYSICAL_MEETINGS_PER_DAY_STANDARD,
+      ),
+    });
+    if (leadId) qs.set("excludeLeadId", leadId);
+    if (adminOverrideActive) qs.set("adminOverride", "1");
+    void (async () => {
+      const res = await fetch(`/api/booking/month-overview?${qs}`);
+      const data = res.ok
+        ? ((await res.json()) as { openWednesdays?: string[]; fullDays?: string[] })
+        : {};
+      if (!cancelled) {
+        setMonthOverview({
+          key: overviewKey,
+          openWednesdays: new Set(data.openWednesdays ?? []),
+          fullDays: new Set(data.fullDays ?? []),
+        });
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [
+    overviewKey,
+    monthKey,
+    meetingType,
+    flexTimes,
+    adminOverrideActive,
+    resolvedCalendarUserId,
+    leadId,
+    initialMeetingLocal,
+  ]);
+  const currentOverview = monthOverview?.key === overviewKey ? monthOverview : null;
+  // Indtil svaret for den viste måned er hentet, er alle onsdage låst.
+  const openWednesdayKeys = wednesdayLockActive
+    ? (currentOverview?.openWednesdays ?? NO_DAY_KEYS)
+    : undefined;
+  const fullDayKeys = currentOverview?.fullDays ?? NO_DAY_KEYS;
 
   function setMeetingType(next: MeetingType) {
     if (next === meetingType) return;
@@ -141,13 +238,21 @@ export function BookingPanel({
         meetingType,
       });
       if (leadId) qs.set("excludeLeadId", leadId);
+      if (allowAdminAvailabilityOverride && adminAvailabilityOverride) qs.set("adminOverride", "1");
+      qs.set(
+        "physicalTarget",
+        String(flexTimes ? PHYSICAL_MEETINGS_PER_DAY_FLEX : PHYSICAL_MEETINGS_PER_DAY_STANDARD),
+      );
       const res = await fetch(`/api/booking/availability?${qs}`);
       let allSlots: CopenhagenBookingSlotWithAvailability[] = [];
+      let rule: PhysicalDayRule | null = null;
       if (res.ok) {
         const payload = (await res.json()) as {
           slots?: CopenhagenBookingSlotWithAvailability[];
+          dayRule?: PhysicalDayRule | null;
         };
         allSlots = Array.isArray(payload.slots) ? payload.slots : [];
+        rule = payload.dayRule ?? null;
       }
       const display =
         allowAdminAvailabilityOverride && adminAvailabilityOverride
@@ -155,6 +260,7 @@ export function BookingPanel({
           : allSlots.filter((s) => s.available);
       if (!cancelled) {
         setSlotOptions(display);
+        setDayRule(rule);
         setSlotsLoading(false);
       }
     })();
@@ -168,6 +274,7 @@ export function BookingPanel({
     allowAdminAvailabilityOverride,
     adminAvailabilityOverride,
     meetingType,
+    flexTimes,
   ]);
 
   useEffect(() => {
@@ -306,24 +413,42 @@ export function BookingPanel({
         </div>
       </div>
 
-      {allowAdminAvailabilityOverride ? (
-        <div className="mb-5">
-          <button
-            type="button"
-            aria-pressed={adminAvailabilityOverride}
-            onClick={() => setAdminAvailabilityOverride((v) => !v)}
-            className={[
-              "w-full rounded-lg border px-3 py-2 text-left text-xs font-semibold shadow-sm transition sm:text-sm",
-              adminAvailabilityOverride
-                ? "border-amber-600 bg-amber-100 text-amber-950 ring-2 ring-amber-400/60"
-                : "border-slate-200 bg-white text-slate-800 hover:border-slate-300 hover:bg-slate-50",
-            ].join(" ")}
-          >
-            Overskrid
-            <span className="mt-0.5 block font-normal text-slate-600">
-              Vis alle tider inkl. optagne — book alligevel som admin (varighed/transport gælder stadig for det nye møde).
-            </span>
-          </button>
+      {meetingType === MEETING_TYPE_PHYSICAL || allowAdminAvailabilityOverride ? (
+        <div className="mb-5 flex flex-col gap-2">
+          {meetingType === MEETING_TYPE_PHYSICAL ? (
+            <button
+              type="button"
+              aria-pressed={flexTimes}
+              onClick={() => {
+                setSelectedSlot(null);
+                setFlexTimes((v) => !v);
+              }}
+              className={[
+                "w-full rounded-lg border px-3 py-2 text-left text-xs font-semibold shadow-sm transition sm:text-sm",
+                flexTimes
+                  ? "border-amber-600 bg-amber-100 text-amber-950 ring-2 ring-amber-400/60"
+                  : "border-slate-200 bg-white text-slate-800 hover:border-slate-300 hover:bg-slate-50",
+              ].join(" ")}
+            >
+              Overskrid
+              <span className="mt-0.5 block font-normal text-slate-600">
+                {flexTimes
+                  ? "Flere tider: alle tider der stadig giver plads til 3 fysiske møder den dag. Tryk igen for de faste 4-møde-tider."
+                  : "Standard: faste tider med plads til 4 fysiske møder. Tryk for flere tider (plads til 3 møder)."}
+              </span>
+            </button>
+          ) : null}
+          {allowAdminAvailabilityOverride ? (
+            <label className="flex cursor-pointer items-center gap-2 text-xs text-slate-600">
+              <input
+                type="checkbox"
+                checked={adminAvailabilityOverride}
+                onChange={(e) => setAdminAvailabilityOverride(e.target.checked)}
+                className="h-4 w-4 rounded border-slate-300 accent-amber-600"
+              />
+              Admin: vis optagne tider, book alligevel, længere end 3 uger frem og alle hverdage
+            </label>
+          ) : null}
         </div>
       ) : null}
 
@@ -346,6 +471,14 @@ export function BookingPanel({
           }}
           selectedDate={selectedDate}
           onSelectDate={onSelectDate}
+          lastBookableDayKey={adminOverrideActive ? null : bookingHorizonDayKey}
+          closedIsoWeekdays={
+            meetingType === MEETING_TYPE_PHYSICAL && !adminOverrideActive
+              ? PHYSICAL_CLOSED_ISO_WEEKDAYS
+              : undefined
+          }
+          openWednesdayKeys={openWednesdayKeys}
+          fullDayKeys={fullDayKeys}
         />
 
         <BookingTimeSlots
@@ -358,6 +491,21 @@ export function BookingPanel({
           dateLabel={dateLabel}
           loading={slotsLoading}
           allowSelectBusySlots={allowAdminAvailabilityOverride && adminAvailabilityOverride}
+          groups={
+            meetingType === MEETING_TYPE_PHYSICAL && !flexTimes ? FOUR_MEETING_GROUPS : DAY_PART_GROUPS
+          }
+          emptyMessage={
+            !selectedDate
+              ? "Vælg en dato i kalenderen."
+              : !adminOverrideActive && isBeyondBookingHorizon(toCopenhagenDateKey(selectedDate))
+                ? "Datoen ligger længere frem end 3 uger efter denne uge — kun admin kan booke den."
+                : !adminOverrideActive &&
+                    meetingType === MEETING_TYPE_PHYSICAL &&
+                    dayRule &&
+                    (dayRule.status === "SALES_DAY" || dayRule.status === "WEDNESDAY_LOCKED")
+                  ? (physicalDayRuleMessage(dayRule) ?? undefined)
+                  : undefined
+          }
         />
       </div>
 

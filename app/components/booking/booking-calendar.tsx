@@ -51,6 +51,14 @@ export type BookingCalendarProps = {
   onMonthChange: (nextMonthStart: Date) => void;
   selectedDate: Date | null;
   onSelectDate: (day: Date) => void;
+  /** Sidste dag der kan vælges (YYYY-MM-DD, København) — null/undefined = ingen grænse. */
+  lastBookableDayKey?: string | null;
+  /** ISO-ugedage (man=1 …) der ikke kan vælges, fx salgsdage for fysiske møder. */
+  closedIsoWeekdays?: readonly number[];
+  /** Hvis sat: kun onsdage i sættet kan vælges (fysiske møder — tor+fre skal være næsten fyldt). */
+  openWednesdayKeys?: ReadonlySet<string>;
+  /** Dage uden ledige tider — kan stadig vælges, men vises med lys rød cirkel. */
+  fullDayKeys?: ReadonlySet<string>;
 };
 
 export function BookingCalendar({
@@ -58,6 +66,10 @@ export function BookingCalendar({
   onMonthChange,
   selectedDate,
   onSelectDate,
+  lastBookableDayKey,
+  closedIsoWeekdays,
+  openWednesdayKeys,
+  fullDayKeys,
 }: BookingCalendarProps) {
   const y = monthAnchor.getFullYear();
   const m = monthAnchor.getMonth();
@@ -122,9 +134,15 @@ export function BookingCalendar({
                 }
                 const dayStart = startOfLocalDay(cell);
                 const key = toDateKeyLocal(dayStart);
-                const past = isPastCopenhagenDayKey(toCopenhagenDateKey(dayStart));
+                const cphKey = toCopenhagenDateKey(dayStart);
+                const past = isPastCopenhagenDayKey(cphKey);
+                const beyondHorizon = lastBookableDayKey != null && cphKey > lastBookableDayKey;
+                const closedWeekday = closedIsoWeekdays?.includes(ci + 1) ?? false;
+                const lockedWednesday =
+                  ci + 1 === 3 && openWednesdayKeys != null && !openWednesdayKeys.has(cphKey);
                 const selected = selKey === key;
-                const disabled = past;
+                const disabled = past || beyondHorizon || closedWeekday || lockedWednesday;
+                const full = !disabled && (fullDayKeys?.has(cphKey) ?? false);
 
                 return (
                   <button
@@ -132,15 +150,32 @@ export function BookingCalendar({
                     type="button"
                     disabled={disabled}
                     onClick={() => onSelectDate(dayStart)}
+                    title={
+                      closedWeekday
+                        ? "Salgsdag — ingen fysiske møder"
+                        : lockedWednesday
+                          ? "Onsdag åbner, når torsdag og fredag har mindst 3 fysiske møder hver"
+                          : full
+                            ? "Ingen ledige tider"
+                        : beyondHorizon
+                          ? "Kan kun bookes af admin (længere end 3 uger frem)"
+                          : undefined
+                    }
                     className={[
                       "relative mx-auto flex aspect-square w-full max-w-14 items-center justify-center rounded-full text-sm font-medium transition",
                       disabled
                         ? "cursor-not-allowed text-slate-300"
-                        : "text-blue-700 hover:bg-blue-100/80",
+                        : full
+                          ? "text-red-700 hover:bg-red-200/60"
+                          : "text-blue-700 hover:bg-blue-100/80",
                       selected && !disabled
-                        ? "bg-blue-600 text-white shadow-md hover:bg-blue-600"
+                        ? full
+                          ? "bg-red-400/35 text-red-800 shadow-md ring-2 ring-red-300/70 hover:bg-red-400/35"
+                          : "bg-blue-600 text-white shadow-md hover:bg-blue-600"
                         : !disabled && !selected
-                          ? "bg-blue-50/90"
+                          ? full
+                            ? "bg-red-100/70"
+                            : "bg-blue-50/90"
                           : "",
                     ]
                       .filter(Boolean)
@@ -148,7 +183,13 @@ export function BookingCalendar({
                   >
                     {cell.getDate()}
                     {selected && !disabled ? (
-                      <span className="absolute bottom-1 h-1 w-1 rounded-full bg-white" aria-hidden />
+                      <span
+                        className={[
+                          "absolute bottom-1 h-1 w-1 rounded-full",
+                          full ? "bg-red-700" : "bg-white",
+                        ].join(" ")}
+                        aria-hidden
+                      />
                     ) : null}
                   </button>
                 );

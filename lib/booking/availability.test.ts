@@ -4,6 +4,8 @@ import {
   findBlockedTimeConflict,
   findBookingTimeConflict,
   getCopenhagenBookingSlotsForMeetingType,
+  isBeyondBookingHorizon,
+  lastBookableDayKey,
   hardBlocksForMeeting,
   intervalsForMeeting,
   isSlotStartBlocked,
@@ -271,11 +273,12 @@ describe("fysiske møder — dynamiske tider med plads til 3 møder", () => {
     const [h, m] = hhmm.split(":").map(Number);
     return Date.UTC(2027, 0, 13, h - 1, m);
   };
-  const ledige = (hard: number[] = []) => {
+  const ledige = (hard: number[] = [], physicalMeetingsTarget = 3) => {
     const hardBlocks = hard.flatMap((ms) => hardBlocksForMeeting(ms, "PHYSICAL"));
     const softBlocks = hard.flatMap((ms) => softBlocksForMeeting(ms, "PHYSICAL"));
     return getCopenhagenBookingSlotsForMeetingType(DAY, "PHYSICAL", hardBlocks, softBlocks, {
       physicalMeetingsBookedOnDay: hard.length,
+      physicalMeetingsTarget,
     })
       .filter((s) => s.available)
       .map((s) => s.time);
@@ -326,6 +329,38 @@ describe("fysiske møder — dynamiske tider med plads til 3 møder", () => {
     expect(ledige([at("11:00")])).toEqual(["13:30", "14:00", "14:30", "16:00", "16:30", "17:00"]);
   });
 
+  describe("standard: plads til 4 møder", () => {
+    it("tom dag: 2 tider pr. møde — 09:00/09:30, 11:30/12:00, 14:00/14:30, 16:30/17:00", () => {
+      expect(ledige([], 4)).toEqual([
+        "09:00",
+        "09:30",
+        "11:30",
+        "12:00",
+        "14:00",
+        "14:30",
+        "16:30",
+        "17:00",
+      ]);
+    });
+
+    it("booket 09:00: resten kan stadig rykkes ½ time", () => {
+      expect(ledige([at("09:00")], 4)).toEqual(["11:30", "12:00", "14:00", "14:30", "16:30", "17:00"]);
+    });
+
+    it("booket 09:30: resten låses til 12:00, 14:30 og 17:00", () => {
+      expect(ledige([at("09:30")], 4)).toEqual(["12:00", "14:30", "17:00"]);
+    });
+
+    it("booket 12:00: møde 1 kan være 09:00/09:30, resten 14:30 og 17:00", () => {
+      expect(ledige([at("12:00")], 4)).toEqual(["09:00", "09:30", "14:30", "17:00"]);
+    });
+
+    it("kan 4 ikke længere nås (booket 10:00), vises tider der holder 3 mulige", () => {
+      expect(ledige([at("10:00")], 4)).toEqual(ledige([at("10:00")], 3));
+      expect(ledige([at("10:00")], 4)[0]).toBe("12:30");
+    });
+  });
+
   it("weekend giver ingen tider", () => {
     expect(getCopenhagenBookingSlotsForMeetingType("2027-01-16", "PHYSICAL", [], [])).toEqual([]);
     expect(getCopenhagenBookingSlotsForMeetingType("2027-01-17", "ONLINE", [], [])).toEqual([]);
@@ -336,5 +371,28 @@ describe("fysiske møder — dynamiske tider med plads til 3 møder", () => {
     expect(slots[0].time).toBe("09:00");
     expect(slots.at(-1)?.time).toBe("17:45");
     expect(slots).toHaveLength(36);
+  });
+});
+
+describe("bookinggrænse: denne uge + 3 uger frem til fredag", () => {
+  it("fre 6/11 → sidste dag fre 27/11", () => {
+    expect(lastBookableDayKey("2026-11-06")).toBe("2026-11-27");
+  });
+
+  it("søn 8/11 (stadig uge 45) → fre 27/11", () => {
+    expect(lastBookableDayKey("2026-11-08")).toBe("2026-11-27");
+  });
+
+  it("man 9/11 (uge 46) → fre 4/12 — rykker en uge hver mandag", () => {
+    expect(lastBookableDayKey("2026-11-09")).toBe("2026-12-04");
+  });
+
+  it("over årsskifte: tor 24/12 → fre 15/1", () => {
+    expect(lastBookableDayKey("2026-12-24")).toBe("2027-01-15");
+  });
+
+  it("27/11 er med, 30/11 er låst", () => {
+    expect(isBeyondBookingHorizon("2026-11-27", "2026-11-06")).toBe(false);
+    expect(isBeyondBookingHorizon("2026-11-30", "2026-11-06")).toBe(true);
   });
 });

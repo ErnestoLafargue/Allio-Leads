@@ -1,7 +1,11 @@
 "use client";
 
 import { useMemo } from "react";
-import { BOOKING_DAY_PARTS, bookingDayPartForTime } from "@/lib/booking/day-parts";
+import {
+  DAY_PART_GROUPS,
+  bookingGroupKeyForTime,
+  type BookingTimeGroup,
+} from "@/lib/booking/day-parts";
 
 export type BookingTimeSlotEntry = { time: string; busy?: boolean };
 
@@ -14,6 +18,10 @@ export type TimeSlotsProps = {
   loading?: boolean;
   /** Admin: optagne tider kan vælges */
   allowSelectBusySlots?: boolean;
+  /** Grupperne tiderne vises i (standard Morgen/Middag/Eftermiddag). */
+  groups?: BookingTimeGroup[];
+  /** Vises i stedet for grupperne (fx når ingen dato er valgt). */
+  emptyMessage?: string;
 };
 
 function formatSlotLabel(isoLike: string): string {
@@ -30,14 +38,16 @@ export function BookingTimeSlots({
   dateLabel,
   loading = false,
   allowSelectBusySlots = false,
+  groups: groupDefs = DAY_PART_GROUPS,
+  emptyMessage,
 }: TimeSlotsProps) {
   const groups = useMemo(
     () =>
-      BOOKING_DAY_PARTS.map((part) => ({
-        ...part,
-        entries: slots.filter((s) => bookingDayPartForTime(s.time) === part.key),
+      groupDefs.map((group) => ({
+        ...group,
+        entries: slots.filter((s) => bookingGroupKeyForTime(s.time, groupDefs) === group.key),
       })),
-    [slots],
+    [slots, groupDefs],
   );
 
   return (
@@ -46,10 +56,8 @@ export function BookingTimeSlots({
       <div className="max-h-[min(420px,60vh)] min-h-0 flex-1 space-y-4 overflow-y-auto pr-1">
         {loading ? (
           <p className="text-sm text-slate-500">Henter ledige tider…</p>
-        ) : slots.length === 0 ? (
-          <p className="text-sm text-slate-500">
-            Ingen ledige tider denne dag (eller dagen er passeret).
-          </p>
+        ) : emptyMessage ? (
+          <p className="text-sm text-slate-500">{emptyMessage}</p>
         ) : (
           groups.map((group) => (
             <div key={group.key}>

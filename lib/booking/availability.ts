@@ -41,8 +41,18 @@ export const ONLINE_BOOKING_WINDOW: BookingStartWindow = {
   stepMin: BOOKING_SLOT_STEP_MIN,
 };
 
-/** Fysiske møder pr. dag, som ledige tider altid skal efterlade plads til. */
-export const PHYSICAL_MEETINGS_PER_DAY_TARGET = 3;
+/**
+ * Fysiske møder pr. dag, som ledige tider skal efterlade plads til.
+ * Standard 4 (09:00 · 11:30 · 14:00 · 16:30, hver kan rykkes ½ time) — «Overskrid» giver 3 og flere tider.
+ */
+export const PHYSICAL_MEETINGS_PER_DAY_STANDARD = 4;
+export const PHYSICAL_MEETINGS_PER_DAY_FLEX = 3;
+
+export function normalizePhysicalMeetingsTarget(value: unknown): number {
+  return Number(value) === PHYSICAL_MEETINGS_PER_DAY_FLEX
+    ? PHYSICAL_MEETINGS_PER_DAY_FLEX
+    : PHYSICAL_MEETINGS_PER_DAY_STANDARD;
+}
 
 export function bookingWindowForMeetingType(type: MeetingType | string): BookingStartWindow {
   return normalizeMeetingType(type) === MEETING_TYPE_PHYSICAL
@@ -275,6 +285,26 @@ export function isPastCopenhagenDayKey(dayKey: string): boolean {
   return dayKey < today;
 }
 
+/** Hele uger frem efter indeværende uge, der kan bookes i (uden admin). */
+export const BOOKING_HORIZON_WEEKS = 3;
+
+/**
+ * Sidste dag der kan bookes uden admin: fredag i ugen BOOKING_HORIZON_WEEKS uger efter indeværende uge.
+ * Fx fre 6/11 (uge 45) → fre 27/11 (uge 48). Vinduet rykker én uge hver mandag.
+ */
+export function lastBookableDayKey(todayKey: string = copenhagenDayKey()): string {
+  const [y, m, d] = todayKey.split("-").map((x) => parseInt(x, 10));
+  const today = new Date(Date.UTC(y, m - 1, d));
+  const isoWeekday = ((today.getUTCDay() + 6) % 7) + 1; // man=1 … søn=7
+  const friday = new Date(today);
+  friday.setUTCDate(today.getUTCDate() + (5 - isoWeekday) + 7 * BOOKING_HORIZON_WEEKS);
+  return friday.toISOString().slice(0, 10);
+}
+
+export function isBeyondBookingHorizon(dayKey: string, todayKey?: string): boolean {
+  return dayKey > lastBookableDayKey(todayKey);
+}
+
 /**
  * Alle 15-min starttider — tilgængelighed via hard-blokke (start inde i blok).
  * Foretræk getCopenhagenBookingSlotsForMeetingType når mødetype er kendt.
@@ -345,14 +375,19 @@ export function maxAdditionalPhysicalMeetings(
 export type BookingSlotsOptions = {
   /** Fysiske møder der allerede er booket på dagen (tæller med i målet på 3). */
   physicalMeetingsBookedOnDay?: number;
+  /** Mål for fysiske møder pr. dag (4 standard, 3 ved «Overskrid»). */
+  physicalMeetingsTarget?: number;
+  /** Tidligste start (minutter efter midnat), fx onsdag fra 14:00. */
+  earliestStartMin?: number;
 };
 
 /**
  * Ledige slots for en given mødetype med hard/soft-blokke.
  *
  * Fysisk: dynamiske tider — en tid er kun ledig, hvis dagen bagefter stadig kan nå
- * PHYSICAL_MEETINGS_PER_DAY_TARGET fysiske møder (eller så mange som overhovedet kan nås).
- * Fx tom dag: alle 09:00–17:00. Booket 12:30: kun 09:00–10:00 og 15:00–17:00.
+ * målet for fysiske møder (eller så mange som overhovedet kan nås).
+ * Mål 4, tom dag: 09:00/09:30 · 11:30/12:00 · 14:00/14:30 · 16:30/17:00.
+ * Mål 3, tom dag: alle 09:00–17:00. Booket 12:30: kun 09:00–10:00 og 15:00–17:00.
  */
 export function getCopenhagenBookingSlotsForMeetingType(
   dayKey: string,
@@ -364,7 +399,12 @@ export function getCopenhagenBookingSlotsForMeetingType(
   if (isPastCopenhagenDayKey(dayKey) || isWeekendDayKey(dayKey)) return [];
 
   const type = normalizeMeetingType(meetingType);
-  const candidates = candidateStartsForDay(dayKey, bookingWindowForMeetingType(type));
+  const baseWindow = bookingWindowForMeetingType(type);
+  const window =
+    opts.earliestStartMin != null
+      ? { ...baseWindow, firstStartMin: Math.max(baseWindow.firstStartMin, opts.earliestStartMin) }
+      : baseWindow;
+  const candidates = candidateStartsForDay(dayKey, window);
   const withBasic = candidates.map((s) => ({
     ...s,
     available: canBookMeetingAt(s.utcMs, type, hardBlocks, softBlocks),
@@ -373,7 +413,8 @@ export function getCopenhagenBookingSlotsForMeetingType(
 
   const startsMs = candidates.map((s) => s.utcMs);
   const booked = Math.max(0, opts.physicalMeetingsBookedOnDay ?? 0);
-  const stillWanted = Math.max(0, PHYSICAL_MEETINGS_PER_DAY_TARGET - booked);
+  const target = opts.physicalMeetingsTarget ?? PHYSICAL_MEETINGS_PER_DAY_STANDARD;
+  const stillWanted = Math.max(0, target - booked);
   const required = Math.min(
     stillWanted,
     maxAdditionalPhysicalMeetings(startsMs, hardBlocks, softBlocks),
