@@ -31,7 +31,12 @@ export type CampaignLeadFormSnapshot = {
  */
 export function buildCampaignLeadPatchBody(
   s: CampaignLeadFormSnapshot,
-  opts?: { meetingScheduledForISO?: string; adminSkipBookingOverlap?: boolean },
+  opts?: {
+    meetingScheduledForISO?: string;
+    adminSkipBookingOverlap?: boolean;
+    /** Sælgeren tidsvælgeren viste («Tildeles: …»). */
+    preferredSellerId?: string;
+  },
 ): Record<string, unknown> {
   const body: Record<string, unknown> = {
     companyName: s.companyName,
@@ -61,6 +66,9 @@ export function buildCampaignLeadPatchBody(
     if (s.meetingAddress !== undefined) body.meetingAddress = s.meetingAddress.trim();
     if (opts?.adminSkipBookingOverlap) {
       body.adminSkipBookingOverlap = true;
+    }
+    if (opts?.preferredSellerId) {
+      body.preferredSellerId = opts.preferredSellerId;
     }
   }
   return body;

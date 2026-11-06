@@ -33,13 +33,7 @@ import {
   leadMeetingRecordCreateInput,
 } from "@/lib/lead-meeting-archive";
 import { releaseExpiredLocksEverywhere, sellerMayEditLead } from "@/lib/lead-lock";
-import { blockedTimeConflictMessage } from "@/lib/booking/availability";
-import {
-  meetingDurationMinutes,
-  transportBufferMinutes,
-} from "@/lib/booking/meeting-type-buffers";
-import { findBlockedTimeConflictInDb } from "@/lib/booking/meeting-slots";
-import { findLeadBookingOverlapInDb } from "@/lib/booking/overlap-db";
+import { NO_SELLER_AVAILABLE_MESSAGE, pickSellerForBooking } from "@/lib/booking/meeting-slots";
 import { getDefaultMeetingAssigneeId } from "@/lib/meeting-assignee";
 import { LEAD_ACTIVITY_KIND } from "@/lib/lead-activity-kinds";
 import { logNoteUpdateSession } from "@/lib/note-activity";
@@ -500,45 +494,32 @@ export async function PATCH(req: Request, { params }: Params) {
   const meetingTimeChangedForOverlap =
     !existing.meetingScheduledFor ||
     existing.meetingScheduledFor.getTime() !== meetingScheduledFor?.getTime();
+  // Første booking eller ny tid: vælg kørende sælger (prioritet) med plads — samme fordeling som
+  // tidsvælgeren; panelets «Tildeles: …» (preferredSellerId) bruges, hvis han stadig har plads.
+  let assignedUserIdForBooking: string | undefined;
   if (
     status === "MEETING_BOOKED" &&
     meetingScheduledFor &&
     meetingTimeChangedForOverlap &&
-    normalizeMeetingOutcomeStatus(meetingOutcomeStatus) !== MEETING_OUTCOME_CANCELLED &&
-    !adminSkipBookingOverlap
+    normalizeMeetingOutcomeStatus(meetingOutcomeStatus) !== MEETING_OUTCOME_CANCELLED
   ) {
-    const durationMin = meetingDurationMinutes(meetingType);
-    const transportMin = transportBufferMinutes(meetingType);
-    const overlap = await findLeadBookingOverlapInDb(meetingScheduledFor, {
+    const preferredSellerId =
+      typeof body?.preferredSellerId === "string" && body.preferredSellerId.trim()
+        ? body.preferredSellerId.trim()
+        : existing.assignedUserId;
+    const sellerId = await pickSellerForBooking(meetingScheduledFor, {
       excludeLeadId: id,
       meetingType,
+      preferredSellerId,
+      adminOverride: session!.user.role === "ADMIN",
     });
-    if (overlap) {
-      const transportHint =
-        transportMin > 0
-          ? ` Fysisk møde er ${durationMin} min + ${transportMin} min transport før/efter.`
-          : ` Onlinemøde er ${durationMin} min.`;
-      return NextResponse.json(
-        {
-          error: `Det valgte tidspunkt overlapper et andet møde.${transportHint} Vælg et andet tidspunkt.`,
-        },
-        { status: 409 },
-      );
-    }
-    const calendarUserId =
-      existing.assignedUserId ?? (await getDefaultMeetingAssigneeId());
-    if (calendarUserId) {
-      const blocked = await findBlockedTimeConflictInDb(
-        calendarUserId,
-        meetingScheduledFor,
-        meetingType,
-      );
-      if (blocked) {
-        return NextResponse.json(
-          { error: blockedTimeConflictMessage(blocked.title) },
-          { status: 409 },
-        );
-      }
+    if (sellerId) {
+      assignedUserIdForBooking = sellerId;
+    } else if (adminSkipBookingOverlap) {
+      assignedUserIdForBooking =
+        preferredSellerId ?? (await getDefaultMeetingAssigneeId()) ?? undefined;
+    } else {
+      return NextResponse.json({ error: NO_SELLER_AVAILABLE_MESSAGE }, { status: 409 });
     }
   }
 
@@ -691,6 +672,7 @@ export async function PATCH(req: Request, { params }: Params) {
           meetingOutcomeStatus,
           meetingCommissionDayKey,
           bookedFromRebookingCampaign,
+          assignedUserId: assignedUserIdForBooking,
           voicemailMarkedAt,
           notHomeMarkedAt,
           callbackScheduledFor,

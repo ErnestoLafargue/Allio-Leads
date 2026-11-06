@@ -8,6 +8,8 @@ export type EditableUser = {
   name: string;
   phone: string | null;
   role: string;
+  /** Kørende sælger: har kalender og kan få tildelt møder. */
+  isDrivingSeller?: boolean;
   createdAt: string;
 };
 
@@ -67,6 +69,7 @@ export function EditUserModal({
   const [name, setName] = useState("");
   const [role, setRole] = useState<"ADMIN" | "SELLER">("SELLER");
   const [phone, setPhone] = useState("");
+  const [isDrivingSeller, setIsDrivingSeller] = useState(false);
   const [password, setPassword] = useState("");
   const [saving, setSaving] = useState(false);
   const [deleting, setDeleting] = useState(false);
@@ -79,11 +82,12 @@ export function EditUserModal({
       setName(user.name);
       setRole(user.role === "ADMIN" ? "ADMIN" : "SELLER");
       setPhone(user.phone ?? "");
+      setIsDrivingSeller(Boolean(user.isDrivingSeller));
       setPassword("");
       setError(null);
       setDeleteConfirm(false);
     }
-  }, [open, user?.id, user?.username, user?.name, user?.phone, user?.role]);
+  }, [open, user?.id, user?.username, user?.name, user?.phone, user?.role, user?.isDrivingSeller]);
 
   if (!open || !user) return null;
 
@@ -94,11 +98,12 @@ export function EditUserModal({
     e.preventDefault();
     setError(null);
     setSaving(true);
-    const body: Record<string, string> = {
+    const body: Record<string, string | boolean> = {
       username: username.trim().toLowerCase(),
       name: name.trim(),
       role,
       phone: phone.trim(),
+      isDrivingSeller,
     };
     const pw = password.trim();
     if (pw) {
@@ -225,6 +230,20 @@ export function EditUserModal({
                     className="mt-1.5 w-full rounded-lg border border-stone-200 px-3 py-2 text-sm text-stone-900 shadow-sm outline-none ring-stone-400 focus:ring-2"
                   />
                 </div>
+                <label className="flex cursor-pointer items-start gap-2.5">
+                  <input
+                    type="checkbox"
+                    checked={isDrivingSeller}
+                    onChange={(e) => setIsDrivingSeller(e.target.checked)}
+                    className="mt-0.5 h-4 w-4 rounded border-stone-300"
+                  />
+                  <span className="text-sm text-stone-700">
+                    <span className="font-medium">Kørende sælger</span>
+                    <span className="block text-xs text-stone-500">
+                      Får kalender og kan få tildelt møder. Prioritet styres under Administration → Booking.
+                    </span>
+                  </span>
+                </label>
               </div>
             </section>
 

@@ -11,13 +11,8 @@ import {
   shouldLogOutcomeForLeaderboard,
 } from "@/lib/lead-outcome-log";
 import { isLockedByOtherUser, releaseExpiredLocksEverywhere } from "@/lib/lead-lock";
-import {
-  blockedTimeConflictMessage,
-  findBookingTimeConflict,
-} from "@/lib/booking/availability";
-import { findBlockedTimeConflictInDb } from "@/lib/booking/meeting-slots";
-import { findLeadBookingOverlapInDb } from "@/lib/booking/overlap-db";
-import { getDefaultMeetingAssigneeId } from "@/lib/meeting-assignee";
+import { findBookingTimeConflict } from "@/lib/booking/availability";
+import { NO_SELLER_AVAILABLE_MESSAGE, pickSellerForBooking } from "@/lib/booking/meeting-slots";
 import { campaignIdForBookedMeetingOutcome } from "@/lib/meeting-campaign-routing";
 import { ensureStandardCampaignId } from "@/lib/ensure-system-campaigns";
 import { normalizeMeetingType } from "@/lib/meeting-type";
@@ -175,37 +170,21 @@ export async function POST(req: Request) {
           proposals.push({ id: u.id, start: sf });
         }
       }
-      const defaultAssigneeId = await getDefaultMeetingAssigneeId();
+      // Hver booking får en kørende sælger (prioritet) med plads — ellers afvises hele opdateringen.
       for (const p of proposals) {
         const existing = existingRows.find((r) => r.id === p.id);
         const meetingType = normalizeMeetingType(existing?.meetingType);
-        const clash = await findLeadBookingOverlapInDb(p.start, {
-          excludeLeadIds: idList,
+        const sellerId = await pickSellerForBooking(p.start, {
+          excludeLeadId: p.id,
           meetingType,
+          preferredSellerId: existing?.assignedUserId,
+          adminOverride: session!.user.role === "ADMIN",
         });
-        if (clash) {
-          return NextResponse.json(
-            {
-              error:
-                "Mindst ét tidspunkt overlapper et eksisterende møde (varighed/transport). Vælg andre tider.",
-            },
-            { status: 409 },
-          );
+        if (!sellerId) {
+          return NextResponse.json({ error: NO_SELLER_AVAILABLE_MESSAGE }, { status: 409 });
         }
-        const calendarUserId = existing?.assignedUserId ?? defaultAssigneeId;
-        if (calendarUserId) {
-          const blocked = await findBlockedTimeConflictInDb(
-            calendarUserId,
-            p.start,
-            meetingType,
-          );
-          if (blocked) {
-            return NextResponse.json(
-              { error: blockedTimeConflictMessage(blocked.title) },
-              { status: 409 },
-            );
-          }
-        }
+        const u = updates.find((x) => x.id === p.id);
+        if (u) u.data.assignedUserId = sellerId;
       }
       for (let i = 0; i < proposals.length; i++) {
         const a = proposals[i]!;

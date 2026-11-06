@@ -1007,6 +1007,8 @@ export function CampaignWorkspace({
   }
   const getFormSnapshotRef = useRef(getFormSnapshot);
   getFormSnapshotRef.current = getFormSnapshot;
+  /** Sælgeren tidsvælgeren viste ved «Bekræft booking» — sendes med, mens bookingen gemmes. */
+  const preferredSellerIdRef = useRef<string | undefined>(undefined);
 
   async function saveLead(
     l: Lead,
@@ -1016,6 +1018,7 @@ export function CampaignWorkspace({
     const body = buildCampaignLeadPatchBody(getFormSnapshot(), {
       meetingScheduledForISO,
       adminSkipBookingOverlap,
+      preferredSellerId: preferredSellerIdRef.current,
     });
     const res = await fetch(`/api/leads/${l.id}`, {
       method: "PATCH",
@@ -1472,7 +1475,12 @@ export function CampaignWorkspace({
 
   async function onConfirmBookingFromPanel(detail: BookingConfirmPayload) {
     if (!activeLead || status !== "MEETING_BOOKED") return;
-    await onNext(detail.localDateTimeISO, detail.adminSkipBookingOverlap);
+    preferredSellerIdRef.current = detail.preferredSellerId;
+    try {
+      await onNext(detail.localDateTimeISO, detail.adminSkipBookingOverlap);
+    } finally {
+      preferredSellerIdRef.current = undefined;
+    }
   }
 
   async function onVirkEnrich() {

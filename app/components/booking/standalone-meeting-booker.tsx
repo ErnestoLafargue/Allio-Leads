@@ -88,6 +88,7 @@ export function StandaloneMeetingBooker({ className = "", onBooked }: Props) {
         meetingAddress: meetingAddress.trim(),
         meetingScheduledFor: detail.localDateTimeISO,
         ...(detail.adminSkipBookingOverlap ? { adminSkipBookingOverlap: true } : {}),
+        ...(detail.preferredSellerId ? { preferredSellerId: detail.preferredSellerId } : {}),
       }),
     });
     setSubmitting(false);

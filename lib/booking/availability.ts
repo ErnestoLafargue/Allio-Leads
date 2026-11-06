@@ -292,17 +292,24 @@ export const BOOKING_HORIZON_WEEKS = 3;
  * Sidste dag der kan bookes uden admin: fredag i ugen BOOKING_HORIZON_WEEKS uger efter indeværende uge.
  * Fx fre 6/11 (uge 45) → fre 27/11 (uge 48). Vinduet rykker én uge hver mandag.
  */
-export function lastBookableDayKey(todayKey: string = copenhagenDayKey()): string {
+export function lastBookableDayKey(
+  todayKey: string = copenhagenDayKey(),
+  horizonWeeks: number = BOOKING_HORIZON_WEEKS,
+): string {
   const [y, m, d] = todayKey.split("-").map((x) => parseInt(x, 10));
   const today = new Date(Date.UTC(y, m - 1, d));
   const isoWeekday = ((today.getUTCDay() + 6) % 7) + 1; // man=1 … søn=7
   const friday = new Date(today);
-  friday.setUTCDate(today.getUTCDate() + (5 - isoWeekday) + 7 * BOOKING_HORIZON_WEEKS);
+  friday.setUTCDate(today.getUTCDate() + (5 - isoWeekday) + 7 * horizonWeeks);
   return friday.toISOString().slice(0, 10);
 }
 
-export function isBeyondBookingHorizon(dayKey: string, todayKey?: string): boolean {
-  return dayKey > lastBookableDayKey(todayKey);
+export function isBeyondBookingHorizon(
+  dayKey: string,
+  todayKey?: string,
+  horizonWeeks?: number,
+): boolean {
+  return dayKey > lastBookableDayKey(todayKey, horizonWeeks);
 }
 
 /**

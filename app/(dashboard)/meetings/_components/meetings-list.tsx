@@ -412,6 +412,7 @@ export function MeetingsList({ type }: { type: "upcoming" | "past" }) {
         <>
           <MeetingsWeekCalendar
             rows={rows}
+            sellers={assignees}
             blockedTimes={blockedTimes}
             weekStartDayKey={weekStartDayKey}
             loading={loading}
@@ -456,11 +457,11 @@ export function MeetingsList({ type }: { type: "upcoming" | "past" }) {
           <thead className="border-b border-stone-200 bg-stone-50 text-stone-600">
             <tr>
               <th className="px-4 py-3 font-medium">Virksomhed</th>
+              <th className="px-4 py-3 font-medium">Mødekontakt</th>
               <th className="px-4 py-3 font-medium">Telefon</th>
               <th className="px-4 py-3 font-medium">Tildelt til</th>
               <th className="px-4 py-3 font-medium">Mødetid</th>
-              <th className="px-4 py-3 font-medium">Booket</th>
-              <th className="px-4 py-3 font-medium">Sælger</th>
+              <th className="px-4 py-3 font-medium">Booket af</th>
               <th className="px-4 py-3 font-medium">Udfald</th>
               {isAdmin && <th className="px-4 py-3 font-medium">Admin</th>}
             </tr>
@@ -503,44 +504,39 @@ export function MeetingsList({ type }: { type: "upcoming" | "past" }) {
                       </span>
                     )}
                   </td>
+                  <td className="px-4 py-3 text-stone-800">{m.meetingContactName?.trim() || "—"}</td>
                   <td className="px-4 py-3 text-stone-700">{m.phone}</td>
                   <td className="px-4 py-3 text-stone-700">
                     {type === "upcoming" ? (
                       assignees.length > 0 ? (
                         <div className="flex items-center gap-2">
                           <select
-                            value={m.assignedUser?.id ?? defaultAssigneeId ?? ""}
+                            value={m.assignedUser?.id ?? ""}
                             onChange={(e) => void patchAssignee(m.id, e.target.value)}
-                            disabled={savingAssigneeById[m.id]}
+                            disabled={savingAssigneeById[m.id] || !isAdmin}
+                            title={isAdmin ? undefined : "Kun administrator kan ændre tildelingen"}
                             className="rounded-md border border-stone-300 bg-white px-2.5 py-1.5 text-xs font-medium text-stone-800 shadow-sm outline-none ring-stone-400 focus:ring-2 disabled:opacity-60"
                           >
-                            {!m.assignedUser?.id && !defaultAssigneeId ? (
-                              <option value="" disabled>
-                                Vælg ansvarlig
-                              </option>
-                            ) : null}
+                            <option value="">Ingen tildelt</option>
                             {assignees.map((u) => (
                               <option key={u.id} value={u.id}>
-                                {u.name} ({u.username})
+                                {u.name}
                               </option>
                             ))}
                           </select>
                           {savedHintById[m.id] ? <span className="text-xs text-emerald-700">Gemt</span> : null}
                         </div>
                       ) : (
-                        <span className="text-xs text-stone-500">Ingen brugere med telefonnummer</span>
+                        <span className="text-xs text-stone-500">Ingen kørende sælgere</span>
                       )
                     ) : m.assignedUser ? (
-                      `${m.assignedUser.name} (${m.assignedUser.username})`
+                      m.assignedUser.name
                     ) : (
                       "—"
                     )}
                   </td>
-                  <td className="px-4 py-3 text-stone-800">
+                  <td className="whitespace-nowrap px-4 py-3 text-stone-800">
                     {m.meetingScheduledFor ? new Date(m.meetingScheduledFor).toLocaleString("da-DK") : "—"}
-                  </td>
-                  <td className="px-4 py-3 text-stone-600">
-                    {m.meetingBookedAt ? new Date(m.meetingBookedAt).toLocaleString("da-DK") : "—"}
                   </td>
                   <td className="px-4 py-3 text-stone-700">
                     {isAdmin && type === "past" && sellers.length > 0 ? (

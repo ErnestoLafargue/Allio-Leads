@@ -4,7 +4,6 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { BookingCalendar } from "@/app/components/booking/booking-calendar";
 import { BookingTimeSlots } from "@/app/components/booking/booking-time-slots";
 import {
-  isBeyondBookingHorizon,
   lastBookableDayKey,
   PHYSICAL_MEETINGS_PER_DAY_FLEX,
   PHYSICAL_MEETINGS_PER_DAY_STANDARD,
@@ -43,7 +42,12 @@ export type BookingConfirmPayload = {
    * Kun administrator: spring overlap-tjek over (mødeblok-minutter før/efter). Det nye møde får stadig sin egen blok i systemet.
    */
   adminSkipBookingOverlap?: boolean;
+  /** Den kørende sælger tiden blev vist til («Tildeles: …») — serveren bruger ham, hvis han stadig har plads. */
+  preferredSellerId?: string;
 };
+
+/** Ledig tid fra API'et — med den sælger tiden tildeles. */
+type PanelSlot = CopenhagenBookingSlotWithAvailability & { sellerId?: string | null };
 
 export type BookingPanelProps = {
   campaignId?: string;
@@ -79,8 +83,9 @@ export function BookingPanel({
     return new Date(n.getFullYear(), n.getMonth(), 1);
   });
   const [selectedDate, setSelectedDate] = useState<Date | null>(null);
-  const [selectedSlot, setSelectedSlot] = useState<CopenhagenBookingSlotWithAvailability | null>(null);
-  const [slotOptions, setSlotOptions] = useState<CopenhagenBookingSlotWithAvailability[]>([]);
+  const [selectedSlot, setSelectedSlot] = useState<PanelSlot | null>(null);
+  const [slotOptions, setSlotOptions] = useState<PanelSlot[]>([]);
+  const [sellerNames, setSellerNames] = useState<Record<string, string>>({});
   const [slotsLoading, setSlotsLoading] = useState(false);
   const [adminAvailabilityOverride, setAdminAvailabilityOverride] = useState(false);
   /** «Overskrid» (alle): fysiske tider med plads til 3 møder i stedet for de faste 4-møde-tider. */
@@ -95,7 +100,8 @@ export function BookingPanel({
   }
   const adminOverrideActive = allowAdminAvailabilityOverride && adminAvailabilityOverride;
   // Uden admin kan der kun bookes til og med fredag 3 uger efter denne uge.
-  const bookingHorizonDayKey = useMemo(() => lastBookableDayKey(), []);
+  // Standard indtil serveren har svaret (grænsen kan ændres på Administration → Booking).
+  const defaultHorizonDayKey = useMemo(() => lastBookableDayKey(), []);
 
   const [resolvedCalendarUserId, setResolvedCalendarUserId] = useState<string | undefined>(
     calendarUserIdProp,
@@ -123,6 +129,7 @@ export function BookingPanel({
     key: string;
     openWednesdays: Set<string>;
     fullDays: Set<string>;
+    lastBookableDayKey: string | null;
   } | null>(null);
   useEffect(() => {
     if (!resolvedCalendarUserId) return;
@@ -142,13 +149,18 @@ export function BookingPanel({
     void (async () => {
       const res = await fetch(`/api/booking/month-overview?${qs}`);
       const data = res.ok
-        ? ((await res.json()) as { openWednesdays?: string[]; fullDays?: string[] })
+        ? ((await res.json()) as {
+            openWednesdays?: string[];
+            fullDays?: string[];
+            lastBookableDayKey?: string;
+          })
         : {};
       if (!cancelled) {
         setMonthOverview({
           key: overviewKey,
           openWednesdays: new Set(data.openWednesdays ?? []),
           fullDays: new Set(data.fullDays ?? []),
+          lastBookableDayKey: data.lastBookableDayKey ?? null,
         });
       }
     })();
@@ -171,6 +183,7 @@ export function BookingPanel({
     ? (currentOverview?.openWednesdays ?? NO_DAY_KEYS)
     : undefined;
   const fullDayKeys = currentOverview?.fullDays ?? NO_DAY_KEYS;
+  const bookingHorizonDayKey = currentOverview?.lastBookableDayKey ?? defaultHorizonDayKey;
 
   function setMeetingType(next: MeetingType) {
     if (next === meetingType) return;
@@ -244,15 +257,18 @@ export function BookingPanel({
         String(flexTimes ? PHYSICAL_MEETINGS_PER_DAY_FLEX : PHYSICAL_MEETINGS_PER_DAY_STANDARD),
       );
       const res = await fetch(`/api/booking/availability?${qs}`);
-      let allSlots: CopenhagenBookingSlotWithAvailability[] = [];
+      let allSlots: PanelSlot[] = [];
       let rule: PhysicalDayRule | null = null;
+      let names: Record<string, string> = {};
       if (res.ok) {
         const payload = (await res.json()) as {
-          slots?: CopenhagenBookingSlotWithAvailability[];
+          slots?: PanelSlot[];
           dayRule?: PhysicalDayRule | null;
+          sellers?: { id: string; name: string }[];
         };
         allSlots = Array.isArray(payload.slots) ? payload.slots : [];
         rule = payload.dayRule ?? null;
+        names = Object.fromEntries((payload.sellers ?? []).map((s) => [s.id, s.name]));
       }
       const display =
         allowAdminAvailabilityOverride && adminAvailabilityOverride
@@ -261,6 +277,7 @@ export function BookingPanel({
       if (!cancelled) {
         setSlotOptions(display);
         setDayRule(rule);
+        setSellerNames(names);
         setSlotsLoading(false);
       }
     })();
@@ -359,6 +376,7 @@ export function BookingPanel({
       leadId,
       meetingType,
       ...(adminSkipBookingOverlap ? { adminSkipBookingOverlap: true } : {}),
+      ...(selectedSlot.sellerId ? { preferredSellerId: selectedSlot.sellerId } : {}),
     };
 
     await onConfirmBooking?.(payload);
@@ -497,7 +515,7 @@ export function BookingPanel({
           emptyMessage={
             !selectedDate
               ? "Vælg en dato i kalenderen."
-              : !adminOverrideActive && isBeyondBookingHorizon(toCopenhagenDateKey(selectedDate))
+              : !adminOverrideActive && toCopenhagenDateKey(selectedDate) > bookingHorizonDayKey
                 ? "Datoen ligger længere frem end 3 uger efter denne uge — kun admin kan booke den."
                 : !adminOverrideActive &&
                     meetingType === MEETING_TYPE_PHYSICAL &&
@@ -516,7 +534,12 @@ export function BookingPanel({
             Vælg udfaldet <strong>Møde booket</strong> for at gemme tidspunktet på leadet.
           </p>
         ) : null}
-        <div className="order-1 flex w-full flex-col gap-2 sm:order-2 sm:w-auto sm:flex-row sm:gap-3">
+        <div className="order-1 flex w-full flex-col gap-2 sm:order-2 sm:w-auto sm:flex-row sm:items-center sm:gap-3">
+          {selectedSlot?.sellerId && sellerNames[selectedSlot.sellerId] ? (
+            <p className="text-center text-sm text-slate-600 sm:text-right">
+              Tildeles: <strong className="text-slate-900">{sellerNames[selectedSlot.sellerId]}</strong>
+            </p>
+          ) : null}
           <button
             type="button"
             disabled={!canConfirm}

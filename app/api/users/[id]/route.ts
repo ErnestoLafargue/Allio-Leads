@@ -3,6 +3,7 @@ import bcrypt from "bcryptjs";
 import { prisma } from "@/lib/prisma";
 import { requireAdmin } from "@/lib/api-auth";
 import { normalizePhoneToE164ForDial } from "@/lib/phone-e164";
+import { drivingSellerUpdate } from "@/lib/driving-seller";
 
 type Params = { params: Promise<{ id: string }> };
 
@@ -12,6 +13,7 @@ const selectPublic = {
   name: true,
   phone: true,
   role: true,
+  isDrivingSeller: true,
   createdAt: true,
 } as const;
 
@@ -26,6 +28,7 @@ export async function PATCH(req: Request, { params }: Params) {
   const passwordRaw = typeof body?.password === "string" ? body.password : undefined;
   const phoneRaw = typeof body?.phone === "string" ? body.phone.trim() : undefined;
   const roleBody = body?.role === "ADMIN" || body?.role === "SELLER" ? body.role : undefined;
+  const drivingBody = typeof body?.isDrivingSeller === "boolean" ? body.isDrivingSeller : undefined;
 
   const existing = await prisma.user.findUnique({ where: { id } });
   if (!existing) {
@@ -41,7 +44,9 @@ export async function PATCH(req: Request, { params }: Params) {
   const hasPhone = phoneRaw !== undefined;
   const normalizedPhone = hasPhone ? (phoneRaw ? normalizePhoneToE164ForDial(phoneRaw) : null) : undefined;
 
-  if (!hasUsername && !hasName && !hasPassword && !roleChanged && !hasPhone) {
+  const drivingChanged = drivingBody !== undefined && drivingBody !== existing.isDrivingSeller;
+
+  if (!hasUsername && !hasName && !hasPassword && !roleChanged && !hasPhone && !drivingChanged) {
     return NextResponse.json({ error: "Intet at opdatere" }, { status: 400 });
   }
   if (hasPhone && phoneRaw && !normalizedPhone) {
@@ -91,6 +96,7 @@ export async function PATCH(req: Request, { params }: Params) {
       ...(passwordHash ? { passwordHash } : {}),
       ...(roleChanged ? { role: nextRole } : {}),
       ...(hasPhone ? { phone: normalizedPhone ?? null } : {}),
+      ...(drivingChanged ? await drivingSellerUpdate(drivingBody!, existing) : {}),
     },
     select: selectPublic,
   });

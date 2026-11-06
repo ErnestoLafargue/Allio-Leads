@@ -33,6 +33,15 @@ model User {
   /// Sat når SIP URI-opkald (`internal`) er slået til på brugerens credential connection (krav for at Power Dialer kan ringe WebRTC op).
   telnyxSipUriCallingEnabledAt DateTime?
 
+  /// Kørende sælger: har kalender og kan få tildelt fysiske/online kundemøder.
+  isDrivingSeller       Boolean @default(false)
+  /// Rækkefølge ved automatisk tildeling (1 fyldes først). Kun relevant for kørende sælgere.
+  sellerPriority        Int?
+  /// Podio «Sælger»-element (item_id) — null = find automatisk på fornavn.
+  podioSellerItemId     Int?
+  /// Allio-Native medarbejder-id (employee_id) — bookinger/occupancy knyttes til sælgeren.
+  allioNativeEmployeeId String?
+
   bookedMeetings            Lead[]                    @relation("LeadBookedBy")
   archivedMeetingRecords    LeadMeetingRecord[]       @relation("LeadMeetingRecordBookedBy")
   assignedMeetings          Lead[]                    @relation("LeadMeetingAssignedTo")
@@ -980,6 +989,8 @@ model AllioNativeOccupancy {
   endDateTime    DateTime
   /// JSON-array af Native service UUIDs
   serviceIds     String   @default("[]")
+  /// Allio-Native employee_id — knytter optaget tid til en kørende sælger (null = standard-sælger).
+  employeeId     String?
   status         String   @default("confirmed")
   source         String   @default("booking")
   title          String   @default("")

@@ -66,7 +66,9 @@ export function thursdayFridayOfWeek(wednesdayKey: string): { thursday: string; 
 export function physicalDayRule(
   dayKey: string,
   counts?: { thursday: number; friday: number },
+  rules: { opensAtMeetingsPerDay?: number; earliestStartMin?: number } = {},
 ): PhysicalDayRule {
+  const opensAt = rules.opensAtMeetingsPerDay ?? WEDNESDAY_OPENS_AT_MEETINGS_PER_DAY;
   const wd = isoWeekdayOfDayKey(dayKey);
   if (wd >= 6) return { status: "WEEKEND" };
   if ((PHYSICAL_CLOSED_ISO_WEEKDAYS as readonly number[]).includes(wd)) {
@@ -76,15 +78,13 @@ export function physicalDayRule(
 
   const thursdayCount = counts?.thursday ?? 0;
   const fridayCount = counts?.friday ?? 0;
-  const open =
-    thursdayCount >= WEDNESDAY_OPENS_AT_MEETINGS_PER_DAY &&
-    fridayCount >= WEDNESDAY_OPENS_AT_MEETINGS_PER_DAY;
+  const open = thursdayCount >= opensAt && fridayCount >= opensAt;
   return open
     ? {
         status: "WEDNESDAY_AFTERNOON",
         thursdayCount,
         fridayCount,
-        earliestStartMin: WEDNESDAY_EARLIEST_START_MIN,
+        earliestStartMin: rules.earliestStartMin ?? WEDNESDAY_EARLIEST_START_MIN,
       }
     : { status: "WEDNESDAY_LOCKED", thursdayCount, fridayCount };
 }

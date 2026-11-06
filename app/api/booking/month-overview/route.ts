@@ -2,7 +2,6 @@ import { NextResponse } from "next/server";
 import { requireSession } from "@/lib/api-auth";
 import { normalizePhysicalMeetingsTarget } from "@/lib/booking/availability";
 import { getMonthBookingOverview } from "@/lib/booking/meeting-slots";
-import { getDefaultMeetingAssigneeId } from "@/lib/meeting-assignee";
 import { normalizeMeetingType } from "@/lib/meeting-type";
 
 const DAY_KEY = /^\d{4}-\d{2}-\d{2}$/;
@@ -10,8 +9,8 @@ const DAY_KEY = /^\d{4}-\d{2}-\d{2}$/;
 const MAX_RANGE_DAYS = 62;
 
 /**
- * GET ?from=YYYY-MM-DD&to=YYYY-MM-DD&userId=&excludeLeadId=&meetingType=&physicalTarget=4|3&adminOverride=1
- * Kalender-overblik: åbne onsdage (fysisk) og fyldte dage uden ledige tider.
+ * GET ?from=YYYY-MM-DD&to=YYYY-MM-DD&excludeLeadId=&meetingType=&physicalTarget=4|3&adminOverride=1
+ * Kalender-overblik på tværs af kørende sælgere: åbne onsdage (fysisk) og fyldte dage uden ledige tider.
  * adminOverride (kun admin): ignorer ugedagsregler og 3-ugers-grænsen.
  */
 export async function GET(req: Request) {
@@ -34,14 +33,9 @@ export async function GET(req: Request) {
     return NextResponse.json({ error: `Højst ${MAX_RANGE_DAYS} dage pr. kald` }, { status: 400 });
   }
 
-  const userId = searchParams.get("userId")?.trim() || (await getDefaultMeetingAssigneeId()) || undefined;
-  if (!userId) {
-    return NextResponse.json({ error: "Ingen standard mødeansvarlig — angiv userId." }, { status: 400 });
-  }
-
   try {
     return NextResponse.json(
-      await getMonthBookingOverview(userId, from, to, {
+      await getMonthBookingOverview(from, to, {
         excludeLeadId,
         meetingType,
         physicalMeetingsTarget,

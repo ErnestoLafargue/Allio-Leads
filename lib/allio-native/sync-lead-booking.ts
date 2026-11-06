@@ -75,6 +75,7 @@ export async function ensureAllioNativeBookingForLead(
       cvr: true,
       allioCustomerId: true,
       allioBookingId: true,
+      assignedUser: { select: { allioNativeEmployeeId: true } },
     },
   });
   if (!lead || lead.status !== "MEETING_BOOKED") return { skipped: true };
@@ -128,7 +129,8 @@ export async function ensureAllioNativeBookingForLead(
         .filter(Boolean)
         .join("\n"),
     );
-    const employeeId = allioEmployeeId();
+    // Mødet lægges i den tildelte sælgers kalender i Allio-Native (ellers standard-medarbejderen).
+    const employeeId = lead.assignedUser?.allioNativeEmployeeId?.trim() || allioEmployeeId();
 
     if (lead.allioBookingId) {
       const updated = await updateBooking(lead.allioBookingId, {

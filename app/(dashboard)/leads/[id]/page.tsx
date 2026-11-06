@@ -425,6 +425,9 @@ function LeadDetailInner() {
     if (detail.adminSkipBookingOverlap) {
       body.adminSkipBookingOverlap = true;
     }
+    if (detail.preferredSellerId) {
+      body.preferredSellerId = detail.preferredSellerId;
+    }
     const res = await fetch(`/api/leads/${id}`, {
       method: "PATCH",
       headers: { "Content-Type": "application/json" },
