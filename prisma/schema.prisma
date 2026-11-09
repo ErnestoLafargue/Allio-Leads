@@ -59,6 +59,7 @@ model User {
 
   agentSessions  AgentSession[]
   dialerCallLogs DialerCallLog[]
+  flowZoneTasks  FlowZoneTask[]
   callRecordings CallRecording[]
 
   /// Interne opgaver (ticketsystem)
@@ -1008,4 +1009,18 @@ model AllioNativeWebhookEvent {
   processedAt DateTime @default(now())
 
   @@index([processedAt])
+}
+
+/// En opgave i brugerens FlowZone (dagsplanlægning i tidszoner). Opgaven gemmes som FlowZones eget
+/// opgaveobjekt i `data`, så planlæggeren kan udvikle sig uden en migration for hvert felt.
+model FlowZoneTask {
+  /// FlowZones eget opgave-id (oprettes i browseren, unikt pr. bruger)
+  id        String
+  userId    String
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  data      Json
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@id([userId, id])
 }
