@@ -11,6 +11,7 @@ import { LeadOutcomeStrip } from "@/app/components/lead-workspace/lead-outcome-s
 import { LeadKundeNoterBooking } from "@/app/components/lead-workspace/lead-kunde-noter-booking";
 import {
   dialNumberMenu,
+  phoneExtensionDialPhones,
   normalizeDialPhonePriority,
   orderedDialPhones,
   type DialPhonePriority,
@@ -726,7 +727,12 @@ function LeadDetailInner() {
   const voipLeadPhone = dialPhoneForOpenLead({ phone, privatePhone }, dialPhonePriority);
   const voipFailoverPhone =
     orderedDialPhones(phone, privatePhone, dialPhonePriority)[1]?.raw ?? "";
-  const voipDialMenu = dialNumberMenu(phone, privatePhone, dialPhonePriority);
+  const voipDialMenu = dialNumberMenu(
+    phone,
+    privatePhone,
+    dialPhonePriority,
+    phoneExtensionDialPhones(lead.campaign?.fieldConfig, custom),
+  );
 
   async function handleUpdateLeadPhoneFromVoip(nextPhoneRaw: string) {
     const nextPhone = nextPhoneRaw.trim();

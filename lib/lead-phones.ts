@@ -3,6 +3,7 @@ import {
   isFixedPersonExtensionKey,
   type CampaignExtraField,
   type CampaignFieldConfig,
+  parseFieldConfig,
   resolveFixedPersonFieldKeys,
 } from "@/lib/campaign-fields";
 import { hasLeadPhone } from "@/lib/lead-phone-filter";
@@ -83,7 +84,8 @@ export function orderedDialPhones(
 }
 
 export type DialNumberMenuItem = {
-  kind: DialPhoneKind;
+  /** EXTRA = kampagnefelt under «Telefonnummer», fx «Telefon nummer 2». */
+  kind: DialPhoneKind | "EXTRA";
   raw: string;
   /** Tekst i rullemenuen, fx "Virksomhed · +4536179018". */
   label: string;
@@ -98,21 +100,52 @@ export function dialNumberMenuItemLabel(kind: DialPhoneKind, raw: string): strin
   return `${DIAL_NUMBER_KIND_LABEL[kind]} · ${raw}`;
 }
 
+/** Ekstra opkaldsnummer fra et kampagnefelt (label = feltets navn). */
+export type ExtraDialPhone = { label: string; raw: string };
+
+/**
+ * Kampagnefelter under «Telefonnummer» (fx «Telefon nummer 2»), hvis værdien er et gyldigt
+ * nummer. Felter som «Kontakt person 1» med et navn springes over.
+ */
+export function phoneExtensionDialPhones(
+  fieldConfigJson: string | null | undefined,
+  custom: Record<string, string> | null | undefined,
+): ExtraDialPhone[] {
+  const fields = parseFieldConfig(fieldConfigJson).extensions.phone ?? [];
+  return fields.flatMap((f) => {
+    const raw = String(custom?.[f.key] ?? "").trim();
+    if (!raw || !normalizePhoneToE164ForDial(raw)) return [];
+    return [{ label: f.label.trim() || f.key, raw }];
+  });
+}
+
 /**
  * Numre sælgeren kan vælge i opkaldsfeltet.
  * Ét unikt nummer giver én række (feltet forbliver et almindeligt felt).
- * To forskellige numre giver en rullemenu.
+ * To forskellige numre giver en rullemenu. Ekstra numre fra kampagnefelter kommer efter
+ * leadets egne; samme nummer vises kun én gang.
  */
 export function dialNumberMenu(
   phone: string,
   privatePhone?: string | null,
   priority: DialPhonePriority = DIAL_PHONE_PRIORITY_DEFAULT,
+  extraPhones: readonly ExtraDialPhone[] = [],
 ): DialNumberMenuItem[] {
-  return orderedDialPhones(phone, privatePhone, priority).map((target) => ({
-    kind: target.kind,
-    raw: target.raw,
-    label: dialNumberMenuItemLabel(target.kind, target.raw),
-  }));
+  const items: DialNumberMenuItem[] = orderedDialPhones(phone, privatePhone, priority).map(
+    (target) => ({
+      kind: target.kind,
+      raw: target.raw,
+      label: dialNumberMenuItemLabel(target.kind, target.raw),
+    }),
+  );
+  const seen = new Set(items.map((item) => phoneDigitsForMatch(item.raw)));
+  for (const extra of extraPhones) {
+    const digits = phoneDigitsForMatch(extra.raw);
+    if (!digits || seen.has(digits)) continue;
+    seen.add(digits);
+    items.push({ kind: "EXTRA", raw: extra.raw, label: `${extra.label} · ${extra.raw}` });
+  }
+  return items;
 }
 
 export function showsDialNumberMenu(items: readonly { raw: string }[]): boolean {

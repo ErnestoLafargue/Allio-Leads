@@ -52,6 +52,7 @@ import {
 } from "@/lib/meeting-type";
 import {
   dialNumberMenu,
+  phoneExtensionDialPhones,
   normalizeDialPhonePriority,
   orderedDialPhones,
   type DialPhonePriority,
@@ -1818,7 +1819,12 @@ export function CampaignWorkspace({
                 ? {
                     leadId: current.id,
                     leadPhone: dialPhoneForOpenLead({ phone, privatePhone }, dialPhonePriority),
-                    dialMenu: dialNumberMenu(phone, privatePhone, dialPhonePriority),
+                    dialMenu: dialNumberMenu(
+                      phone,
+                      privatePhone,
+                      dialPhonePriority,
+                      phoneExtensionDialPhones(fieldConfigJson, custom),
+                    ),
                     onUpdateLeadPhone: handleUpdateLeadPhoneFromVoip,
                   }
                 : null
@@ -2231,7 +2237,12 @@ export function CampaignWorkspace({
           leadPhone={dialPhoneForOpenLead({ phone, privatePhone }, dialPhonePriority)}
           recordPhone={dialPhoneForOpenLead(current, dialPhonePriority)}
           failoverPhone={orderedDialPhones(phone, privatePhone, dialPhonePriority)[1]?.raw ?? ""}
-          dialMenu={dialNumberMenu(phone, privatePhone, dialPhonePriority)}
+          dialMenu={dialNumberMenu(
+            phone,
+            privatePhone,
+            dialPhonePriority,
+            phoneExtensionDialPhones(fieldConfigJson, custom),
+          )}
           dialMode={campaignDialMode}
           autoStartCall={voipAutoStart}
           isCallbackLead={isCallbackWorkLead(current)}

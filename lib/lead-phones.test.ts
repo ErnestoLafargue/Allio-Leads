@@ -1,6 +1,8 @@
 import { describe, expect, it } from "vitest";
 import {
+  dialNumberMenu,
   nextDialPhoneAfterFailure,
+  phoneExtensionDialPhones,
   orderedDialPhones,
   pickPowerDialTarget,
   primaryDialPhone,
@@ -136,5 +138,48 @@ describe("visiblePersonExtensionFields", () => {
         cfg,
       ),
     ).toEqual([{ key: "stifter", label: "Stifter" }]);
+  });
+});
+
+describe("Telefon nummer 2 i opkaldsmenuen", () => {
+  const fieldConfig = JSON.stringify({
+    extensions: {
+      phone: [
+        { key: "kontakt_person_1", label: "Kontakt person 1" },
+        { key: "telefon_nummer_2", label: "Telefon nummer 2" },
+        { key: "kontakt_person_2", label: "Kontakt person 2" },
+      ],
+    },
+  });
+  const custom = {
+    kontakt_person_1: "Official",
+    telefon_nummer_2: " +4551335000",
+    kontakt_person_2: "Morten Helge Hansen",
+  };
+
+  it("tager kun felter under Telefonnummer, der indeholder et gyldigt nummer", () => {
+    expect(phoneExtensionDialPhones(fieldConfig, custom)).toEqual([
+      { label: "Telefon nummer 2", raw: "+4551335000" },
+    ]);
+  });
+
+  it("nyt nummer i Telefon nummer 2 giver en rullemenu med begge numre", () => {
+    const menu = dialNumberMenu("+4527240451", "", "PRIVATE_FIRST", phoneExtensionDialPhones(fieldConfig, custom));
+    expect(menu.map((m) => m.label)).toEqual([
+      "Virksomhed · +4527240451",
+      "Telefon nummer 2 · +4551335000",
+    ]);
+  });
+
+  it("samme nummer som virksomhed/privat vises kun én gang", () => {
+    const menu = dialNumberMenu("+4551335000", "", "PRIVATE_FIRST", [
+      { label: "Telefon nummer 2", raw: "51 33 50 00" },
+    ]);
+    expect(menu).toHaveLength(1);
+  });
+
+  it("tomt felt eller kampagne uden telefonfelter ændrer intet", () => {
+    expect(phoneExtensionDialPhones(fieldConfig, { telefon_nummer_2: "" })).toEqual([]);
+    expect(phoneExtensionDialPhones("{}", custom)).toEqual([]);
   });
 });
