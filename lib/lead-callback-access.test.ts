@@ -1,9 +1,8 @@
 import { describe, expect, it } from "vitest";
 import {
-  callbackReservedForOtherUserMessage,
-  canAccessCallbackLead,
   isCallbackReservedForOtherUser,
   isCallbackWorkLead,
+  keepsCallbackOnSave,
   notCallbackReservedForOtherUserWhere,
 } from "./lead-callback-access";
 import { makeLead, matchesWhere } from "./test-helpers/in-memory-lead-db";
@@ -20,7 +19,7 @@ describe("isCallbackWorkLead", () => {
 
 const callbackForA = { status: "CALLBACK_SCHEDULED", callbackReservedByUserId: "user-a" };
 
-describe("isCallbackReservedForOtherUser (dialeren)", () => {
+describe("isCallbackReservedForOtherUser (automatisk udlevering)", () => {
   it("ejeren får sit eget tilbagekald", () => {
     expect(isCallbackReservedForOtherUser("user-a", callbackForA)).toBe(false);
   });
@@ -29,7 +28,7 @@ describe("isCallbackReservedForOtherUser (dialeren)", () => {
     expect(isCallbackReservedForOtherUser("user-b", callbackForA)).toBe(true);
   });
 
-  it("tilbagekald uden tildelt (slettet bruger) tilhører ingen i dialeren", () => {
+  it("tilbagekald uden tildelt (slettet bruger) udleveres ikke automatisk til nogen", () => {
     const orphan = { status: "CALLBACK_SCHEDULED", callbackReservedByUserId: null };
     expect(isCallbackReservedForOtherUser("user-a", orphan)).toBe(true);
   });
@@ -43,14 +42,25 @@ describe("isCallbackReservedForOtherUser (dialeren)", () => {
   });
 });
 
-describe("canAccessCallbackLead (lead-side og gem)", () => {
-  it("admin-undtagelse: admin kan bevidst åbne en andens tilbagekald på lead-siden", () => {
-    expect(canAccessCallbackLead("ADMIN", "admin-1", callbackForA)).toBe(true);
+describe("keepsCallbackOnSave", () => {
+  it("en anden, der gemmer med «Ny», fjerner ikke ejerens tilbagekald", () => {
+    expect(keepsCallbackOnSave("user-b", callbackForA, "NEW")).toBe(true);
   });
 
-  it("sælger kan kun åbne sit eget tilbagekald", () => {
-    expect(canAccessCallbackLead("SELLER", "user-a", callbackForA)).toBe(true);
-    expect(canAccessCallbackLead("SELLER", "user-b", callbackForA)).toBe(false);
+  it("et rigtigt udfald afslutter tilbagekaldet — også fra en anden", () => {
+    for (const status of ["VOICEMAIL", "NOT_HOME", "NOT_INTERESTED", "MEETING_BOOKED"]) {
+      expect(keepsCallbackOnSave("user-b", callbackForA, status)).toBe(false);
+    }
+  });
+
+  it("ejeren kan selv afslutte med «Ny» som før", () => {
+    expect(keepsCallbackOnSave("user-a", callbackForA, "NEW")).toBe(false);
+  });
+
+  it("gælder kun leads med aktivt tilbagekald", () => {
+    expect(keepsCallbackOnSave("user-b", { status: "VOICEMAIL", callbackReservedByUserId: null }, "NEW")).toBe(
+      false,
+    );
   });
 });
 
@@ -70,13 +80,5 @@ describe("notCallbackReservedForOtherUserWhere", () => {
         );
       }
     }
-  });
-});
-
-describe("callbackReservedForOtherUserMessage", () => {
-  it("nævner ejeren ved navn og falder tilbage til «en anden sælger»", () => {
-    expect(callbackReservedForOtherUserMessage("Hannibal")).toContain("hos Hannibal");
-    expect(callbackReservedForOtherUserMessage(null)).toContain("hos en anden sælger");
-    expect(callbackReservedForOtherUserMessage("  ")).toContain("hos en anden sælger");
   });
 });

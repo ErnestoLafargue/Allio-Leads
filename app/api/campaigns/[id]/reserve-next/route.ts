@@ -7,7 +7,6 @@ import { parseWorkspaceStartDateFilterFromRequestBody } from "@/lib/workspace-st
 import { userCanAccessCampaign } from "@/lib/campaign-access";
 import {
   campaignReserveSelect,
-  explainCallbackReservedForOtherUser,
   reserveNextNewLeadFromCampaign,
   reserveNextPendingCallback,
   tryReserveLead,
@@ -82,12 +81,8 @@ export async function POST(req: Request, { params }: Params) {
         if (explicitLead) {
           await releaseLeadLock(prisma, explicitLeadId, userId);
         }
-        const callbackError = await explainCallbackReservedForOtherUser({
-          leadId: explicitLeadId,
-          userId,
-        });
         return NextResponse.json(
-          { error: callbackError ?? "Kunne ikke åbne det valgte lead.", lead: null },
+          { error: "Kunne ikke åbne det valgte lead.", lead: null },
           { status: 409 },
         );
       }

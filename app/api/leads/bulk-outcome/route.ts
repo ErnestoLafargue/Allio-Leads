@@ -11,7 +11,7 @@ import {
   shouldLogOutcomeForLeaderboard,
 } from "@/lib/lead-outcome-log";
 import { isLockedByOtherUser, releaseExpiredLocksEverywhere } from "@/lib/lead-lock";
-import { canAccessCallbackLead } from "@/lib/lead-callback-access";
+import { keepsCallbackOnSave } from "@/lib/lead-callback-access";
 import { findBookingTimeConflict } from "@/lib/booking/availability";
 import { NO_SELLER_AVAILABLE_MESSAGE, pickSellerForBooking } from "@/lib/booking/meeting-slots";
 import { campaignIdForBookedMeetingOutcome } from "@/lib/meeting-campaign-routing";
@@ -84,13 +84,13 @@ export async function POST(req: Request) {
 
     const now = new Date();
     for (const existing of existingRows) {
-      // Samme regel som PATCH /api/leads/[id]: kun den tildelte eller admin må flytte et tilbagekald.
-      if (!canAccessCallbackLead(session!.user.role, userId, existing)) {
+      // Samme regel som PATCH /api/leads/[id]: «Ny» fjerner ikke en andens tilbagekald.
+      if (keepsCallbackOnSave(userId, existing, status)) {
         return NextResponse.json(
           {
-            error: `Leadet «${existing.companyName}» har et planlagt tilbagekald hos en anden sælger.`,
+            error: `Leadet «${existing.companyName}» har et planlagt tilbagekald hos en anden sælger — vælg et rigtigt udfald, eller lad det være.`,
           },
-          { status: 403 },
+          { status: 409 },
         );
       }
       if (isLockedByOtherUser(existing, userId, now)) {

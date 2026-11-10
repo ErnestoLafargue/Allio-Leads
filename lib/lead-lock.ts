@@ -62,8 +62,8 @@ export function isLockedByOtherUser(
 
 export type LeadLockOpts = {
   /**
-   * Admin på lead-siden må bevidst låse et lead med en andens aktive tilbagekald (oprydning/flyt).
-   * Dialeren sætter den aldrig.
+   * Bevidst åbning (lead-siden, søgning, klik på leadet) må låse et lead med en andens aktive
+   * tilbagekald. Dialerens automatiske udlevering (kø, «næste lead», Power, Predictive) sætter den aldrig.
    */
   allowOtherUsersCallback?: boolean;
 };

@@ -10,7 +10,6 @@ import { LEAD_ACTIVITY_KIND } from "@/lib/lead-activity-kinds";
 import { normalizeCampaignDialMode } from "@/lib/dial-mode";
 import {
   campaignReserveSelect,
-  explainCallbackReservedForOtherUser,
   loadSortedNewLeadsForCampaign,
   reserveNextNewLeadFromCampaign,
   reserveNextPendingCallback,
@@ -97,12 +96,8 @@ export async function POST(req: Request) {
       if (preferCid) {
         await releaseLeadLock(prisma, explicitLeadId, userId);
       }
-      const callbackError = await explainCallbackReservedForOtherUser({
-        leadId: explicitLeadId,
-        userId,
-      });
       return NextResponse.json(
-        { error: callbackError ?? "Kunne ikke åbne det valgte lead.", lead: null },
+        { error: "Kunne ikke åbne det valgte lead.", lead: null },
         { status: 409 },
       );
     }

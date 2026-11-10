@@ -2,7 +2,6 @@ import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { requireSession } from "@/lib/api-auth";
 import { canAccessBookedMeetingNotes } from "@/lib/lead-meeting-access";
-import { canAccessCallbackLead } from "@/lib/lead-callback-access";
 import { mergeBackfillStats, runRecordingsBackfillForLead } from "@/lib/telnyx-recordings-backfill";
 import type { BackfillStats } from "@/lib/telnyx-recordings-backfill";
 
@@ -35,9 +34,6 @@ export async function POST(req: Request, { params }: Params) {
   });
   if (!lead) return NextResponse.json({ error: "Ikke fundet" }, { status: 404 });
 
-  if (!canAccessCallbackLead(session.user.role, session.user.id, lead)) {
-    return NextResponse.json({ error: "Ingen adgang." }, { status: 403 });
-  }
   if (!canAccessBookedMeetingNotes(session.user.role, session.user.id, lead)) {
     return NextResponse.json({ error: "Ingen adgang." }, { status: 403 });
   }

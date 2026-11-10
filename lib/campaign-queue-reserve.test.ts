@@ -9,7 +9,6 @@ vi.mock("@/lib/prisma", async () => {
 
 import { applyLeadCooldownResets } from "./lead-cooldown";
 import {
-  explainCallbackReservedForOtherUser,
   reserveNextNewLeadFromCampaign,
   reserveNextPendingCallback,
   tryReserveLead,
@@ -105,33 +104,24 @@ describe("tilbagekald er låst til ejeren i dialeren", () => {
     expect(mem.lead("cb").lockedByUserId).toBeNull();
   });
 
-  it("klik i liste/historik (explicitLeadId): en anden sælger afvises med en klar besked", async () => {
-    const got = await tryReserveLead({
-      db,
-      leadId: "cb",
-      userId: "user-b",
-      now: new Date(),
-      systemCampaignType: null,
-      explicitOpen: true,
+  it("søgning/klik på leadet (explicitLeadId): alle kan bevidst åbne en andens tilbagekald", async () => {
+    for (const userId of ["user-b", "admin-1"]) {
+      const got = await tryReserveLead({
+        db,
+        leadId: "cb",
+        userId,
+        now: new Date(),
+        systemCampaignType: null,
+        explicitOpen: true,
+      });
+      expect(got?.notes, userId).toBe("Hannibals noter");
+      mem.lead("cb").lockedByUserId = null;
+    }
+    // Åbningen ændrer ikke, hvem tilbagekaldet tilhører.
+    expect(mem.lead("cb")).toMatchObject({
+      status: "CALLBACK_SCHEDULED",
+      callbackReservedByUserId: "user-a",
     });
-    expect(got).toBeNull();
-    expect(mem.lead("cb").lockedByUserId).toBeNull();
-    expect(mem.visits).toHaveLength(0);
-    expect(await explainCallbackReservedForOtherUser({ db, leadId: "cb", userId: "user-b" })).toContain(
-      "hos Hannibal",
-    );
-  });
-
-  it("ingen admin-undtagelse i dialeren: admin får heller ikke en andens tilbagekald", async () => {
-    const got = await tryReserveLead({
-      db,
-      leadId: "cb",
-      userId: "admin-1",
-      now: new Date(),
-      systemCampaignType: null,
-      explicitOpen: true,
-    });
-    expect(got).toBeNull();
   });
 
   it("ejeren kan altid åbne sit eget tilbagekald (også før tid)", async () => {
@@ -144,7 +134,6 @@ describe("tilbagekald er låst til ejeren i dialeren", () => {
       explicitOpen: true,
     });
     expect(got?.notes).toBe("Hannibals noter");
-    expect(await explainCallbackReservedForOtherUser({ db, leadId: "cb", userId: "user-a" })).toBeNull();
   });
 
   it("låsen ophører, når udfaldet flyttes væk fra tilbagekald", async () => {
@@ -159,7 +148,7 @@ describe("tilbagekald er låst til ejeren i dialeren", () => {
     expect((await pressNextLead("user-b"))?.id).toBe("cb");
   });
 
-  it("race: bliver leadet en andens tilbagekald mellem lås og læsning, slippes låsen igen", async () => {
+  it("race i køen: bliver leadet en andens tilbagekald mellem lås og læsning, slippes låsen igen", async () => {
     const original = mem.db.lead.findUnique;
     mem.db.lead.findUnique = async (args) => {
       // Admin planlægger tilbagekald til A i samme øjeblik, som B låser leadet.
@@ -176,7 +165,6 @@ describe("tilbagekald er låst til ejeren i dialeren", () => {
         userId: "user-b",
         now: new Date(),
         systemCampaignType: null,
-        explicitOpen: true,
       });
       expect(got).toBeNull();
       expect(mem.lead("new").lockedByUserId).toBeNull();

@@ -4,7 +4,6 @@ import { prisma } from "@/lib/prisma";
 import { parseCustomFields, stringifyCustomFields } from "@/lib/custom-fields";
 import { fetchVirkCompanyByCvr, mapVirkParticipantsToLeadFields } from "@/lib/virk-enrichment";
 import { canAccessBookedMeetingNotes } from "@/lib/lead-meeting-access";
-import { canAccessCallbackLead } from "@/lib/lead-callback-access";
 import { sellerMayEditLead } from "@/lib/lead-lock";
 import { normalizeCVR } from "@/lib/cvr-import";
 import { parseFieldConfig, resolveFixedPersonFieldKeys } from "@/lib/campaign-fields";
@@ -23,9 +22,6 @@ export async function POST(req: Request, { params }: Params) {
   if (!lead) return NextResponse.json({ error: "Ikke fundet" }, { status: 404 });
 
   if (!canAccessBookedMeetingNotes(session.user.role, session.user.id, lead)) {
-    return NextResponse.json({ error: "Du har ikke adgang til at berige dette lead." }, { status: 403 });
-  }
-  if (!canAccessCallbackLead(session.user.role, session.user.id, lead)) {
     return NextResponse.json({ error: "Du har ikke adgang til at berige dette lead." }, { status: 403 });
   }
   if (!sellerMayEditLead(session.user.role, session.user.id, lead)) {

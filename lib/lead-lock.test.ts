@@ -110,10 +110,10 @@ describe("tryAcquireLeadLock — tilbagekaldslås", () => {
     expect(await tryAcquireLeadLock(db, "cb", "user-a", now)).toBe(false);
   });
 
-  it("admin-undtagelse kun med allowOtherUsersCallback (lead-siden)", async () => {
-    expect(await tryAcquireLeadLock(db, "cb", "admin-1", now)).toBe(false);
+  it("bevidst åbning (allowOtherUsersCallback) må låse en andens tilbagekald", async () => {
+    expect(await tryAcquireLeadLock(db, "cb", "user-b", now)).toBe(false);
     expect(
-      await tryAcquireLeadLock(db, "cb", "admin-1", now, { allowOtherUsersCallback: true }),
+      await tryAcquireLeadLock(db, "cb", "user-b", now, { allowOtherUsersCallback: true }),
     ).toBe(true);
   });
 

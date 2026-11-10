@@ -11,7 +11,7 @@ import {
 } from "@/lib/lead-outcome-log";
 import { shouldIncrementUnansweredAttempts } from "@/lib/lead-attempts";
 import { canAccessBookedMeetingNotes } from "@/lib/lead-meeting-access";
-import { canAccessCallbackLead } from "@/lib/lead-callback-access";
+import { keepsCallbackOnSave } from "@/lib/lead-callback-access";
 import { copenhagenDayKey } from "@/lib/copenhagen-day";
 import {
   MEETING_OUTCOME_CANCELLED,
@@ -89,15 +89,6 @@ export async function GET(_req: Request, { params }: Params) {
       },
     });
     if (!lead) return NextResponse.json({ error: "Ikke fundet" }, { status: 404 });
-    if (!canAccessCallbackLead(session.user.role, session.user.id, lead)) {
-      return NextResponse.json(
-        {
-          error:
-            "Dette lead er reserveret til et planlagt callback for en anden sælger. Du kan ikke åbne det.",
-        },
-        { status: 403 },
-      );
-    }
     if (!canAccessBookedMeetingNotes(session.user.role, session.user.id, lead)) {
       return NextResponse.json(
         {
@@ -171,16 +162,6 @@ export async function PATCH(req: Request, { params }: Params) {
       {
         error:
           "Kun den sælger der har booket mødet (eller en administrator) kan redigere dette bookede møde.",
-      },
-      { status: 403 },
-    );
-  }
-
-  if (!canAccessCallbackLead(session.user.role, userId, existing)) {
-    return NextResponse.json(
-      {
-        error:
-          "Dette lead er reserveret til et planlagt callback for en anden sælger. Du kan ikke redigere det.",
       },
       { status: 403 },
     );
@@ -289,10 +270,16 @@ export async function PATCH(req: Request, { params }: Params) {
   // Tidligere afviste vi alle CALLBACK_SCHEDULED → andet udfald-PATCHes med 409.
   // Cleanup-blokken nedenfor (callbackScheduledFor m.fl. = null når status skifter
   // væk fra CALLBACK_SCHEDULED) håndterer overgangen atomisk i samme transaction,
-  // og adgang er allerede dækket af canAccessCallbackLead + sellerMayEditLead
-  // ovenfor — så agenten kan gemme et nyt udfald direkte uden et separat afslut-
-  // tilbagekald-kald først. Det eksplicitte /api/leads/[id]/callback endpoint
-  // bevares til kalender/listevue-flowet.
+  // og låsen er dækket af sellerMayEditLead ovenfor — så agenten kan gemme et nyt
+  // udfald direkte uden et separat afslut-tilbagekald-kald først. Det eksplicitte
+  // /api/leads/[id]/callback endpoint bevares til kalender/listevue-flowet.
+  //
+  // Alle må åbne og gemme på en andens tilbagekald (fx fundet via søgning), men et gem
+  // med «Ny» (formularens standard på et tilbagekald) fjerner ikke ejerens tilbagekald —
+  // kun et rigtigt udfald (voicemail, møde booket osv.) gør.
+  if (keepsCallbackOnSave(userId, existing, status)) {
+    status = "CALLBACK_SCHEDULED";
+  }
 
   let meetingBookedAt = existing.meetingBookedAt;
   let meetingScheduledFor = existing.meetingScheduledFor;

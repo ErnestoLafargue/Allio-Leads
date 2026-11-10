@@ -2,7 +2,6 @@ import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { requireSession } from "@/lib/api-auth";
 import { canAccessBookedMeetingNotes } from "@/lib/lead-meeting-access";
-import { canAccessCallbackLead } from "@/lib/lead-callback-access";
 import { LEAD_ACTIVITY_KIND } from "@/lib/lead-activity-kinds";
 import { isLeadStatus, LEAD_STATUS_LABELS, type LeadStatus } from "@/lib/lead-status";
 import { normalizeLeaderboardOutcomeStatus } from "@/lib/lead-outcome-log";
@@ -77,12 +76,6 @@ export async function GET(_req: Request, { params }: Params) {
     });
     if (!lead) return NextResponse.json({ error: "Ikke fundet" }, { status: 404 });
 
-    if (!canAccessCallbackLead(session.user.role, session.user.id, lead)) {
-      return NextResponse.json(
-        { error: "Du har ikke adgang til dette leads aktivitet." },
-        { status: 403 },
-      );
-    }
     if (!canAccessBookedMeetingNotes(session.user.role, session.user.id, lead)) {
       return NextResponse.json(
         { error: "Du har ikke adgang til dette leads aktivitet." },
