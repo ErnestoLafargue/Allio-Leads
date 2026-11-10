@@ -313,6 +313,20 @@ async function agentUserIdForConnection(connectionId: string | null): Promise<st
   return u?.id ?? null;
 }
 
+/**
+ * Er aktivitetens tidspunkt forkert i forhold til samtalens start? Live-flowet logger ved
+ * opkaldets slut, så samtalens varighed + 5 minutter accepteres.
+ */
+export function recordingEventDateOff(
+  eventAt: Date,
+  callStartedAt: Date | null,
+  durationSeconds: number | null,
+): boolean {
+  if (!callStartedAt) return false;
+  const toleranceMs = ((durationSeconds ?? 0) + 5 * 60) * 1000;
+  return Math.abs(eventAt.getTime() - callStartedAt.getTime()) > toleranceMs;
+}
+
 type LocatedLead = Awaited<ReturnType<typeof findLeadIdForRecording>>;
 
 async function processOneRecording(
@@ -381,8 +395,13 @@ async function processOneRecording(
 
   const existing = await prisma.leadActivityEvent.findFirst({
     where: { leadId: located.leadId, telnyxCallLegId: idempotencyLegId },
-    select: { id: true, recordingUrl: true, durationSeconds: true, summary: true, userId: true },
+    select: { id: true, recordingUrl: true, durationSeconds: true, summary: true, userId: true, createdAt: true },
   });
+
+  // Aktiviteten dateres til samtalens start — ikke til hentetidspunktet. Ellers står gamle
+  // samtaler (fx fra «Hent manglende optagelser») som «i dag» i tidslinjen.
+  const callAt = rec.startedAt;
+  const dateOff = (d: Date) => recordingEventDateOff(d, callAt, durationSeconds);
 
   if (options.dryRun) {
     if (existing) stats.updated += 1;
@@ -444,10 +463,14 @@ async function processOneRecording(
     if (existingBlobUrl && existing.recordingUrl === playbackUrl && durationUnchanged) {
       // URL og varighed er uændrede, men sælgeren kan mangle. Uden userId viser
       // Lydfiler ingen rækker, når man filtrerer på brugeren.
-      if (located.agentUserId && existing.userId !== located.agentUserId) {
+      const fixUser = Boolean(located.agentUserId && existing.userId !== located.agentUserId);
+      if (fixUser || dateOff(existing.createdAt)) {
         await prisma.leadActivityEvent.update({
           where: { id: existing.id },
-          data: { userId: located.agentUserId },
+          data: {
+            ...(fixUser ? { userId: located.agentUserId } : {}),
+            ...(dateOff(existing.createdAt) && callAt ? { createdAt: callAt } : {}),
+          },
         });
       }
       return;
@@ -459,6 +482,7 @@ async function processOneRecording(
         recordingUrl: playbackUrl,
         durationSeconds: durationSeconds ?? existing.durationSeconds,
         userId: located.agentUserId ?? existing.userId,
+        ...(dateOff(existing.createdAt) && callAt ? { createdAt: callAt } : {}),
       },
     });
     stats.updated += 1;
@@ -472,6 +496,7 @@ async function processOneRecording(
         recordingUrl: playbackUrl,
         durationSeconds,
         telnyxCallLegId: idempotencyLegId,
+        ...(callAt ? { createdAt: callAt } : {}),
       },
     });
     stats.created += 1;
