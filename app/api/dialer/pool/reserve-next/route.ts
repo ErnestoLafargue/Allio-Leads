@@ -3,9 +3,11 @@ import { prisma } from "@/lib/prisma";
 import { requireSession } from "@/lib/api-auth";
 import { applyLeadCooldownResets } from "@/lib/lead-cooldown";
 import { releaseExpiredLocksEverywhere, releaseLeadLock } from "@/lib/lead-lock";
-import { dialPoolCampaignIdsForUser } from "@/lib/campaign-access";
+import { dialPoolCampaignIdsForUser, orderDialPoolRoundRobin } from "@/lib/campaign-access";
+import { copenhagenDayBoundsUtc } from "@/lib/copenhagen-day";
+import { orderDialPoolCampaignsByDeficit } from "@/lib/dial-pool-weighting";
+import { LEAD_ACTIVITY_KIND } from "@/lib/lead-activity-kinds";
 import { normalizeCampaignDialMode } from "@/lib/dial-mode";
-import { compareLeadQueueOrder } from "@/lib/lead-queue";
 import {
   campaignReserveSelect,
   loadSortedNewLeadsForCampaign,
@@ -17,8 +19,11 @@ import {
 /**
  * Reserver næste lead fra «Ring alle tildelte»-puljen.
  * Pulje = CampaignAssignment + CLICK_TO_CALL|PREDICTIVE (ingen admin-bypass).
- * Default: færrest kontaktforsøg først på tværs af tildelte kampagner; ældst sidste
- * forsøg ved lige. Hver kampagnes activeQueueFilter gælder.
+ * Kampagnerne vægtes efter forsøg på deres næste lead (se lib/dial-pool-weighting.ts):
+ * færrest forsøg ringes mest, men alle får mindst 5 %. Næste kampagne er den, der ligger
+ * længst under sin andel af sælgerens opkald i dag; round-robin via afterCampaignId ved
+ * lige. Inden for hver kampagne: færrest kontaktforsøg først. Hver kampagnes
+ * activeQueueFilter gælder.
  */
 export async function POST(req: Request) {
   const { session, response } = await requireSession();
@@ -31,7 +36,6 @@ export async function POST(req: Request) {
   const excludeLeadId = typeof body?.excludeLeadId === "string" ? body.excludeLeadId.trim() : "";
   const afterCampaignId =
     typeof body?.afterCampaignId === "string" ? body.afterCampaignId.trim() : "";
-  void afterCampaignId;
   const rawExcludeLeadIds: unknown[] = Array.isArray(body?.excludeLeadIds) ? body.excludeLeadIds : [];
   const excludeLeadIds = rawExcludeLeadIds
     .filter((v: unknown): v is string => typeof v === "string")
@@ -146,37 +150,46 @@ export async function POST(req: Request) {
       }
     }
 
-    const queued = (
-      await Promise.all(
-        campaigns.map((camp) =>
-          loadSortedNewLeadsForCampaign({
-            now,
-            campaign: camp,
-            workspaceStartFilter: null,
-          }),
-        ),
-      )
-    ).flat();
-    if (campaigns.length > 1) {
-      queued.sort(compareLeadQueueOrder);
-    }
+    const queues = await Promise.all(
+      campaigns.map((camp) =>
+        loadSortedNewLeadsForCampaign({
+          now,
+          campaign: camp,
+          workspaceStartFilter: null,
+        }),
+      ),
+    );
+    const queueByCampaign = new Map(campaigns.map((c, i) => [c.id, queues[i]] as const));
 
-    for (const row of queued) {
-      if (excludedLeadSet.has(row.id)) continue;
-      const camp = byId.get(row.campaignId);
+    const candidates = campaigns.flatMap((c) => {
+      const next = (queueByCampaign.get(c.id) ?? []).find((r) => !excludedLeadSet.has(r.id));
+      return next ? [{ id: c.id, nextLeadAttempts: next.unansweredAttempts ?? 0 }] : [];
+    });
+    const callsToday = await callsTodayByCampaign(userId, candidates.map((c) => c.id), now);
+    const campaignOrder = orderDialPoolCampaignsByDeficit(
+      candidates,
+      callsToday,
+      orderDialPoolRoundRobin(poolIds, afterCampaignId || null),
+    );
+
+    for (const campaignId of campaignOrder) {
+      const camp = byId.get(campaignId);
       if (!camp) continue;
-      const got = await tryReserveLead({
-        userId,
-        now,
-        leadId: row.id,
-        systemCampaignType: camp.systemCampaignType,
-      });
-      if (got) {
-        return NextResponse.json({
-          lead: got,
-          campaignId: camp.id,
-          dialMode: normalizeCampaignDialMode(camp.dialMode),
+      for (const row of queueByCampaign.get(campaignId) ?? []) {
+        if (excludedLeadSet.has(row.id)) continue;
+        const got = await tryReserveLead({
+          userId,
+          now,
+          leadId: row.id,
+          systemCampaignType: camp.systemCampaignType,
         });
+        if (got) {
+          return NextResponse.json({
+            lead: got,
+            campaignId: camp.id,
+            dialMode: normalizeCampaignDialMode(camp.dialMode),
+          });
+        }
       }
     }
 
@@ -200,4 +213,28 @@ export async function POST(req: Request) {
       { status: 500 },
     );
   }
+}
+
+/**
+ * Sælgerens opkaldsforsøg i dag pr. kampagne. Går via leads ringet til i dag (indeks på
+ * campaignId/status/lastDialAttemptAt), så der ikke skannes hele aktivitetsloggen.
+ */
+async function callsTodayByCampaign(
+  userId: string,
+  campaignIds: string[],
+  now: Date,
+): Promise<Map<string, number>> {
+  if (campaignIds.length === 0) return new Map();
+  const { start } = copenhagenDayBoundsUtc(now);
+  const rows = await prisma.$queryRaw<{ campaignId: string; n: number }[]>`
+    SELECT l."campaignId", COUNT(*)::int AS n
+    FROM "Lead" l
+    JOIN "LeadActivityEvent" e ON e."leadId" = l.id
+    WHERE l."campaignId" = ANY(${campaignIds})
+      AND l."lastDialAttemptAt" >= ${start}
+      AND e.kind = ${LEAD_ACTIVITY_KIND.CALL_ATTEMPT}
+      AND e."createdAt" >= ${start}
+      AND e."userId" = ${userId}
+    GROUP BY l."campaignId"`;
+  return new Map(rows.map((r) => [r.campaignId, r.n]));
 }
