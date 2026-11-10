@@ -8,7 +8,13 @@ import {
   MEETING_OUTCOME_SALE,
   normalizeMeetingOutcomeStatus,
 } from "@/lib/meeting-outcome";
-import { getItem, readCategoryValue } from "@/lib/podio/client";
+import {
+  getItem,
+  readAppRelationItemIds,
+  readCategoryValue,
+  type PodioItem,
+} from "@/lib/podio/client";
+import { findDrivingSellerByPodioItemId } from "@/lib/podio/sellers";
 import {
   MOEDE_FIELDS,
   normalizeMoedeStatus,
@@ -109,6 +115,39 @@ async function applySaleOutcome(leadId: string): Promise<boolean> {
 }
 
 /** Anvend Podio Møder-item status på tilknyttet Allio-lead. */
+/**
+ * Podio → Allio: «Sælger» ændret i Podio flytter mødet til den kørende sælger.
+ * Et tomt felt ignoreres — ældre møder har aldrig fået Sælger sat, og «Ingen tildelt» styres i Allio.
+ */
+async function applySellerFromPodio(item: PodioItem, leadId: string): Promise<void> {
+  try {
+    const [podioSellerItemId] = readAppRelationItemIds(item, MOEDE_FIELDS.saelger);
+    if (!podioSellerItemId) return;
+    const sellerId = await findDrivingSellerByPodioItemId(podioSellerItemId);
+    if (!sellerId) return;
+    const lead = await prisma.lead.findUnique({
+      where: { id: leadId },
+      select: { status: true, assignedUserId: true },
+    });
+    if (!lead || lead.status !== "MEETING_BOOKED" || lead.assignedUserId === sellerId) return;
+    const updated = await prisma.lead.update({
+      where: { id: leadId },
+      data: { assignedUserId: sellerId },
+      select: { assignedUser: { select: { name: true } } },
+    });
+    await prisma.leadActivityEvent.create({
+      data: {
+        leadId,
+        userId: null,
+        kind: LEAD_ACTIVITY_KIND.MEETING_ASSIGNEE_SET,
+        summary: `Møde tildelt til ${updated.assignedUser?.name ?? "sælger"} i Podio.`,
+      },
+    });
+  } catch (err) {
+    console.error("[podio] Sælger fra Podio fejlede:", err instanceof Error ? err.message : err);
+  }
+}
+
 export async function applyMoederItemUpdate(itemId: number): Promise<MoederItemUpdateResult> {
   const item = await getItem("moeder", itemId);
   if (!item) {
@@ -126,6 +165,8 @@ export async function applyMoederItemUpdate(itemId: number): Promise<MoederItemU
   if (!leadId) {
     return { ok: true, ignored: "no lead", itemId, status: statusRaw };
   }
+
+  await applySellerFromPodio(item, leadId);
 
   if (statusKey === "genbook") {
     const moved = await moveLeadToRebooking(leadId);

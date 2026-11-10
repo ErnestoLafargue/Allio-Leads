@@ -11,6 +11,7 @@ import { LeadOutcomeStrip } from "@/app/components/lead-workspace/lead-outcome-s
 import { LeadKundeNoterBooking } from "@/app/components/lead-workspace/lead-kunde-noter-booking";
 import {
   dialNumberMenu,
+  phoneExtensionDialPhones,
   normalizeDialPhonePriority,
   orderedDialPhones,
   type DialPhonePriority,
@@ -46,7 +47,7 @@ import { canScheduleCallbackFromLead } from "@/lib/lead-callback-schedule";
 import { isCallbackWorkLead } from "@/lib/lead-callback-access";
 import { dialPhoneForOpenLead } from "@/lib/predictive-dial-policy";
 import {
-  MEETING_TYPE_ONLINE,
+  MEETING_TYPE_PHYSICAL,
   type MeetingType,
   normalizeMeetingType,
 } from "@/lib/meeting-type";
@@ -129,7 +130,7 @@ function LeadDetailInner() {
   const [meetingContactEmail, setMeetingContactEmail] = useState("");
   const [meetingContactPhonePrivate, setMeetingContactPhonePrivate] = useState("");
   const [meetingCompanyName, setMeetingCompanyName] = useState("");
-  const [meetingType, setMeetingType] = useState<MeetingType>(MEETING_TYPE_ONLINE);
+  const [meetingType, setMeetingType] = useState<MeetingType>(MEETING_TYPE_PHYSICAL);
   const [meetingAddress, setMeetingAddress] = useState("");
   const [meetingContactErrors, setMeetingContactErrors] = useState<MeetingContactFieldErrors>({});
   const [meetingNotesRequiredOpen, setMeetingNotesRequiredOpen] = useState(false);
@@ -223,7 +224,10 @@ function LeadDetailInner() {
       setMeetingContactEmail(data.meetingContactEmail ?? "");
       setMeetingContactPhonePrivate(data.meetingContactPhonePrivate ?? "");
       setMeetingCompanyName(data.meetingCompanyName ?? "");
-      setMeetingType(normalizeMeetingType(data.meetingType));
+      // Uden booket møde starter vi på fysisk møde; ellers vises mødets egen type.
+      setMeetingType(
+        data.meetingScheduledFor ? normalizeMeetingType(data.meetingType) : MEETING_TYPE_PHYSICAL,
+      );
       setMeetingAddress(data.meetingAddress ?? "");
       setMeetingOutcomeStatus(
         String(data.meetingOutcomeStatus ?? "").trim().toUpperCase() || MEETING_OUTCOME_PENDING,
@@ -421,6 +425,9 @@ function LeadDetailInner() {
     };
     if (detail.adminSkipBookingOverlap) {
       body.adminSkipBookingOverlap = true;
+    }
+    if (detail.preferredSellerId) {
+      body.preferredSellerId = detail.preferredSellerId;
     }
     const res = await fetch(`/api/leads/${id}`, {
       method: "PATCH",
@@ -720,7 +727,12 @@ function LeadDetailInner() {
   const voipLeadPhone = dialPhoneForOpenLead({ phone, privatePhone }, dialPhonePriority);
   const voipFailoverPhone =
     orderedDialPhones(phone, privatePhone, dialPhonePriority)[1]?.raw ?? "";
-  const voipDialMenu = dialNumberMenu(phone, privatePhone, dialPhonePriority);
+  const voipDialMenu = dialNumberMenu(
+    phone,
+    privatePhone,
+    dialPhonePriority,
+    phoneExtensionDialPhones(lead.campaign?.fieldConfig, custom),
+  );
 
   async function handleUpdateLeadPhoneFromVoip(nextPhoneRaw: string) {
     const nextPhone = nextPhoneRaw.trim();

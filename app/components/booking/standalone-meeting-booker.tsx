@@ -9,7 +9,7 @@ import { buildLeadDetailHref, KNOWN_LEAD_SOURCES } from "@/lib/lead-navigation";
 import { isMeetingNotesSufficient } from "@/lib/meeting-notes-quality";
 import { MeetingNotesRequiredDialog } from "@/app/components/meeting-notes-required-dialog";
 import {
-  MEETING_TYPE_ONLINE,
+  MEETING_TYPE_PHYSICAL,
   type MeetingType,
 } from "@/lib/meeting-type";
 import { validateMeetingContactFields } from "@/lib/meeting-contact-validation";
@@ -29,7 +29,7 @@ export function StandaloneMeetingBooker({ className = "", onBooked }: Props) {
   const [meetingContactName, setMeetingContactName] = useState("");
   const [meetingContactEmail, setMeetingContactEmail] = useState("");
   const [meetingContactPhonePrivate, setMeetingContactPhonePrivate] = useState("");
-  const [meetingType, setMeetingType] = useState<MeetingType>(MEETING_TYPE_ONLINE);
+  const [meetingType, setMeetingType] = useState<MeetingType>(MEETING_TYPE_PHYSICAL);
   const [meetingAddress, setMeetingAddress] = useState("");
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -88,6 +88,7 @@ export function StandaloneMeetingBooker({ className = "", onBooked }: Props) {
         meetingAddress: meetingAddress.trim(),
         meetingScheduledFor: detail.localDateTimeISO,
         ...(detail.adminSkipBookingOverlap ? { adminSkipBookingOverlap: true } : {}),
+        ...(detail.preferredSellerId ? { preferredSellerId: detail.preferredSellerId } : {}),
       }),
     });
     setSubmitting(false);

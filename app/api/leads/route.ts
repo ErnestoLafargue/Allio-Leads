@@ -17,6 +17,7 @@ import {
   parseActiveCampaignQueueView,
 } from "@/lib/active-campaign-queue";
 import { requireDefaultMeetingAssigneeId } from "@/lib/meeting-assignee";
+import { pickSellerForBooking } from "@/lib/booking/meeting-slots";
 import { canonicalLeadPhoneForStorage } from "@/lib/phone-e164";
 import { applyPostalCityFromAddressFields } from "@/lib/postal-from-address";
 import {
@@ -334,8 +335,17 @@ export async function POST(req: Request) {
     }
   }
 
+  // Kørende sælger (prioritet) med plads på tidspunktet — ellers sælger nr. 1.
+  const preferredSellerId =
+    typeof body?.preferredSellerId === "string" && body.preferredSellerId.trim()
+      ? body.preferredSellerId.trim()
+      : null;
   const defaultAssigneeId =
-    status === "MEETING_BOOKED" ? await requireDefaultMeetingAssigneeId() : null;
+    status === "MEETING_BOOKED"
+      ? ((meetingScheduledFor
+          ? await pickSellerForBooking(meetingScheduledFor, { meetingType, preferredSellerId })
+          : null) ?? (await requireDefaultMeetingAssigneeId()))
+      : null;
 
   const lead = await prisma.lead.create({
     data: pickLeadCreateData({

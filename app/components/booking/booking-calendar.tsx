@@ -4,7 +4,9 @@ import { useMemo } from "react";
 import { isPastCopenhagenDayKey } from "@/lib/booking/availability";
 import { startOfLocalDay, toCopenhagenDateKey, toDateKeyLocal } from "@/lib/booking/mock-availability";
 
-const WEEK_LABELS = ["Man", "Tir", "Ons", "Tor", "Fre", "Lør", "Søn"];
+/** Kun hverdage — der bookes ikke møder lørdag/søndag. */
+const WEEK_LABELS = ["Man", "Tir", "Ons", "Tor", "Fre"];
+const WEEKDAYS = WEEK_LABELS.length;
 
 /** ISO-8601 ugenummer (Man–Søn; uge 1 indeholder årets første torsdag) — dansk standard. */
 function isoWeekNumber(d: Date): number {
@@ -36,7 +38,9 @@ function monthMatrix(year: number, monthIndex: number): (Date | null)[][] {
   while (cells.length % 7 !== 0) cells.push(null);
   const rows: (Date | null)[][] = [];
   for (let i = 0; i < cells.length; i += 7) {
-    rows.push(cells.slice(i, i + 7));
+    const weekdays = cells.slice(i, i + WEEKDAYS);
+    // Uge hvor måneden kun rammer weekenden (fx 1. er en lørdag) — ingen hverdage at vise.
+    if (weekdays.some((c) => c != null)) rows.push(weekdays);
   }
   return rows;
 }
@@ -47,6 +51,14 @@ export type BookingCalendarProps = {
   onMonthChange: (nextMonthStart: Date) => void;
   selectedDate: Date | null;
   onSelectDate: (day: Date) => void;
+  /** Sidste dag der kan vælges (YYYY-MM-DD, København) — null/undefined = ingen grænse. */
+  lastBookableDayKey?: string | null;
+  /** ISO-ugedage (man=1 …) der ikke kan vælges, fx salgsdage for fysiske møder. */
+  closedIsoWeekdays?: readonly number[];
+  /** Hvis sat: kun onsdage i sættet kan vælges (fysiske møder — tor+fre skal være næsten fyldt). */
+  openWednesdayKeys?: ReadonlySet<string>;
+  /** Dage uden ledige tider — kan stadig vælges, men vises med lys rød cirkel. */
+  fullDayKeys?: ReadonlySet<string>;
 };
 
 export function BookingCalendar({
@@ -54,6 +66,10 @@ export function BookingCalendar({
   onMonthChange,
   selectedDate,
   onSelectDate,
+  lastBookableDayKey,
+  closedIsoWeekdays,
+  openWednesdayKeys,
+  fullDayKeys,
 }: BookingCalendarProps) {
   const y = monthAnchor.getFullYear();
   const m = monthAnchor.getMonth();
@@ -72,7 +88,7 @@ export function BookingCalendar({
   }
 
   return (
-    <div className="flex min-w-0 flex-1 flex-col">
+    <div className="flex min-w-0 flex-1 flex-col lg:w-1/3 lg:flex-none">
       <div className="mb-4 flex items-center justify-between gap-2">
         <button
           type="button"
@@ -93,7 +109,7 @@ export function BookingCalendar({
         </button>
       </div>
 
-      <div className="grid grid-cols-[repeat(7,minmax(0,1fr))_1.75rem] gap-y-1 text-center text-[11px] font-medium uppercase tracking-wide text-slate-400">
+      <div className="grid grid-cols-[repeat(5,minmax(0,1fr))_1.75rem] gap-y-1 text-center text-[11px] font-medium uppercase tracking-wide text-slate-400">
         {WEEK_LABELS.map((w) => (
           <div key={w} className="py-1">
             {w}
@@ -110,17 +126,23 @@ export function BookingCalendar({
           return (
             <div
               key={ri}
-              className="grid grid-cols-[repeat(7,minmax(0,1fr))_1.75rem] items-center gap-1"
+              className="grid grid-cols-[repeat(5,minmax(0,1fr))_1.75rem] items-center gap-1"
             >
               {row.map((cell, ci) => {
                 if (!cell) {
-                  return <div key={`empty-${ri}-${ci}`} className="aspect-square" />;
+                  return <div key={`empty-${ri}-${ci}`} className="mx-auto aspect-square w-full max-w-14" />;
                 }
                 const dayStart = startOfLocalDay(cell);
                 const key = toDateKeyLocal(dayStart);
-                const past = isPastCopenhagenDayKey(toCopenhagenDateKey(dayStart));
+                const cphKey = toCopenhagenDateKey(dayStart);
+                const past = isPastCopenhagenDayKey(cphKey);
+                const beyondHorizon = lastBookableDayKey != null && cphKey > lastBookableDayKey;
+                const closedWeekday = closedIsoWeekdays?.includes(ci + 1) ?? false;
+                const lockedWednesday =
+                  ci + 1 === 3 && openWednesdayKeys != null && !openWednesdayKeys.has(cphKey);
                 const selected = selKey === key;
-                const disabled = past;
+                const disabled = past || beyondHorizon || closedWeekday || lockedWednesday;
+                const full = !disabled && (fullDayKeys?.has(cphKey) ?? false);
 
                 return (
                   <button
@@ -128,15 +150,32 @@ export function BookingCalendar({
                     type="button"
                     disabled={disabled}
                     onClick={() => onSelectDate(dayStart)}
+                    title={
+                      closedWeekday
+                        ? "Salgsdag — ingen fysiske møder"
+                        : lockedWednesday
+                          ? "Onsdag åbner, når torsdag og fredag har mindst 3 fysiske møder hver"
+                          : full
+                            ? "Ingen ledige tider"
+                        : beyondHorizon
+                          ? "Kan kun bookes af admin (længere end 3 uger frem)"
+                          : undefined
+                    }
                     className={[
-                      "relative flex aspect-square max-h-11 w-full items-center justify-center rounded-full text-sm font-medium transition",
+                      "relative mx-auto flex aspect-square w-full max-w-14 items-center justify-center rounded-full text-sm font-medium transition",
                       disabled
                         ? "cursor-not-allowed text-slate-300"
-                        : "text-blue-700 hover:bg-blue-100/80",
+                        : full
+                          ? "text-red-700 hover:bg-red-200/60"
+                          : "text-blue-700 hover:bg-blue-100/80",
                       selected && !disabled
-                        ? "bg-blue-600 text-white shadow-md hover:bg-blue-600"
+                        ? full
+                          ? "bg-red-400/35 text-red-800 shadow-md ring-2 ring-red-300/70 hover:bg-red-400/35"
+                          : "bg-blue-600 text-white shadow-md hover:bg-blue-600"
                         : !disabled && !selected
-                          ? "bg-blue-50/90"
+                          ? full
+                            ? "bg-red-100/70"
+                            : "bg-blue-50/90"
                           : "",
                     ]
                       .filter(Boolean)
@@ -144,13 +183,19 @@ export function BookingCalendar({
                   >
                     {cell.getDate()}
                     {selected && !disabled ? (
-                      <span className="absolute bottom-1 h-1 w-1 rounded-full bg-white" aria-hidden />
+                      <span
+                        className={[
+                          "absolute bottom-1 h-1 w-1 rounded-full",
+                          full ? "bg-red-700" : "bg-white",
+                        ].join(" ")}
+                        aria-hidden
+                      />
                     ) : null}
                   </button>
                 );
               })}
               <div
-                className="flex h-full max-h-11 items-center justify-center text-[11px] font-semibold tabular-nums text-slate-500"
+                className="flex h-full max-h-14 items-center justify-center text-[11px] font-semibold tabular-nums text-slate-500"
                 aria-label={weekNo != null ? `Uge ${weekNo}` : undefined}
               >
                 {weekNo ?? ""}

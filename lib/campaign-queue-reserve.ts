@@ -6,6 +6,7 @@ import { filterLeadsByCampaignPhoneSetting } from "@/lib/lead-phone-filter";
 import { isLeadInRebookingDialerPool, type QueueOrderFields } from "@/lib/lead-queue";
 import { MEETING_OUTCOME_REBOOK, normalizeMeetingOutcomeStatus } from "@/lib/meeting-outcome";
 import { releaseLeadLock, tryAcquireLeadLock } from "@/lib/lead-lock";
+import { isCallbackReservedForOtherUser } from "@/lib/lead-callback-access";
 import {
   filterLeadsByWorkspaceStartDate,
   type WorkspaceStartDateFilterState,
@@ -60,18 +61,30 @@ export type TryReserveLeadOpts = {
   /**
    * Bruger har valgt dette lead eksplicit (klik i listen / leadId i URL).
    * Spring kø-krav over, så voicemail m.m. ikke erstattes af næste «Ny».
+   * Gælder også en andens aktive tilbagekald (bevidst åbning, fx fra søgning eller historik).
    */
   explicitOpen?: boolean;
 };
 
-/** Lock + validate + visit history. Returns lead or null. */
+/**
+ * Lock + validate + visit history. Returns lead or null.
+ * Automatisk udlevering (uden `explicitOpen`): et lead med aktivt tilbagekald hos en anden bruger
+ * afvises allerede i låsens UPDATE (atomisk) — for alle roller.
+ */
 export async function tryReserveLead(opts: TryReserveLeadOpts): Promise<ReservedLead | null> {
   const db = opts.db ?? defaultPrisma;
   const { leadId, userId, now, systemCampaignType, explicitOpen } = opts;
-  const ok = await tryAcquireLeadLock(db, leadId, userId, now);
+  const ok = await tryAcquireLeadLock(db, leadId, userId, now, {
+    allowOtherUsersCallback: explicitOpen === true,
+  });
   if (!ok) return null;
   const lead = await findReservedLead(db, leadId);
   if (!lead) return null;
+  // Lead kan være sat til en andens tilbagekald mellem lås og læsning (fx af admin).
+  if (!explicitOpen && isCallbackReservedForOtherUser(userId, lead)) {
+    await releaseLeadLock(db, leadId, userId);
+    return null;
+  }
 
   const isCallbackCandidate =
     lead.status === "CALLBACK_SCHEDULED" &&

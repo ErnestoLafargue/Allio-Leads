@@ -11,7 +11,7 @@ import {
 } from "@/lib/lead-outcome-log";
 import { shouldIncrementUnansweredAttempts } from "@/lib/lead-attempts";
 import { canAccessBookedMeetingNotes } from "@/lib/lead-meeting-access";
-import { canAccessCallbackLead } from "@/lib/lead-callback-access";
+import { keepsCallbackOnSave } from "@/lib/lead-callback-access";
 import { copenhagenDayKey } from "@/lib/copenhagen-day";
 import {
   MEETING_OUTCOME_CANCELLED,
@@ -33,13 +33,7 @@ import {
   leadMeetingRecordCreateInput,
 } from "@/lib/lead-meeting-archive";
 import { releaseExpiredLocksEverywhere, sellerMayEditLead } from "@/lib/lead-lock";
-import { blockedTimeConflictMessage } from "@/lib/booking/availability";
-import {
-  meetingDurationMinutes,
-  transportBufferMinutes,
-} from "@/lib/booking/meeting-type-buffers";
-import { findBlockedTimeConflictInDb } from "@/lib/booking/meeting-slots";
-import { findLeadBookingOverlapInDb } from "@/lib/booking/overlap-db";
+import { NO_SELLER_AVAILABLE_MESSAGE, pickSellerForBooking } from "@/lib/booking/meeting-slots";
 import { getDefaultMeetingAssigneeId } from "@/lib/meeting-assignee";
 import { LEAD_ACTIVITY_KIND } from "@/lib/lead-activity-kinds";
 import { logNoteUpdateSession } from "@/lib/note-activity";
@@ -95,15 +89,6 @@ export async function GET(_req: Request, { params }: Params) {
       },
     });
     if (!lead) return NextResponse.json({ error: "Ikke fundet" }, { status: 404 });
-    if (!canAccessCallbackLead(session.user.role, session.user.id, lead)) {
-      return NextResponse.json(
-        {
-          error:
-            "Dette lead er reserveret til et planlagt callback for en anden sælger. Du kan ikke åbne det.",
-        },
-        { status: 403 },
-      );
-    }
     if (!canAccessBookedMeetingNotes(session.user.role, session.user.id, lead)) {
       return NextResponse.json(
         {
@@ -182,16 +167,6 @@ export async function PATCH(req: Request, { params }: Params) {
     );
   }
 
-  if (!canAccessCallbackLead(session.user.role, userId, existing)) {
-    return NextResponse.json(
-      {
-        error:
-          "Dette lead er reserveret til et planlagt callback for en anden sælger. Du kan ikke redigere det.",
-      },
-      { status: 403 },
-    );
-  }
-
   if (!sellerMayEditLead(session.user.role, userId, existing)) {
     return NextResponse.json(
       {
@@ -235,25 +210,12 @@ export async function PATCH(req: Request, { params }: Params) {
 
   const sendToRebooking = body?.sendToRebooking === true;
 
-  let adminBookedByUserId: string | undefined;
+  // «Booket af» er altid den bruger, der bookede mødet — kan ikke ændres bagefter.
   if (body && "bookedByUserId" in body) {
-    if (session!.user.role !== "ADMIN") {
-      return NextResponse.json({ error: "Kun administrator kan ændre sælger på mødet." }, { status: 403 });
-    }
-    if (typeof body.bookedByUserId !== "string" || !body.bookedByUserId.trim()) {
-      return NextResponse.json({ error: "Ugyldig sælger." }, { status: 400 });
-    }
-    if (!existing.meetingBookedAt) {
-      return NextResponse.json({ error: "Leadet har ikke et booket møde." }, { status: 400 });
-    }
-    const assignee = await prisma.user.findUnique({
-      where: { id: body.bookedByUserId.trim() },
-      select: { id: true },
-    });
-    if (!assignee) {
-      return NextResponse.json({ error: "Brugeren findes ikke." }, { status: 400 });
-    }
-    adminBookedByUserId = assignee.id;
+    return NextResponse.json(
+      { error: "Booket af kan ikke ændres — mødet er knyttet til den bruger, der bookede det." },
+      { status: 400 },
+    );
   }
 
   const companyName =
@@ -308,10 +270,16 @@ export async function PATCH(req: Request, { params }: Params) {
   // Tidligere afviste vi alle CALLBACK_SCHEDULED → andet udfald-PATCHes med 409.
   // Cleanup-blokken nedenfor (callbackScheduledFor m.fl. = null når status skifter
   // væk fra CALLBACK_SCHEDULED) håndterer overgangen atomisk i samme transaction,
-  // og adgang er allerede dækket af canAccessCallbackLead + sellerMayEditLead
-  // ovenfor — så agenten kan gemme et nyt udfald direkte uden et separat afslut-
-  // tilbagekald-kald først. Det eksplicitte /api/leads/[id]/callback endpoint
-  // bevares til kalender/listevue-flowet.
+  // og låsen er dækket af sellerMayEditLead ovenfor — så agenten kan gemme et nyt
+  // udfald direkte uden et separat afslut-tilbagekald-kald først. Det eksplicitte
+  // /api/leads/[id]/callback endpoint bevares til kalender/listevue-flowet.
+  //
+  // Alle må åbne og gemme på en andens tilbagekald (fx fundet via søgning), men et gem
+  // med «Ny» (formularens standard på et tilbagekald) fjerner ikke ejerens tilbagekald —
+  // kun et rigtigt udfald (voicemail, møde booket osv.) gør.
+  if (keepsCallbackOnSave(userId, existing, status)) {
+    status = "CALLBACK_SCHEDULED";
+  }
 
   let meetingBookedAt = existing.meetingBookedAt;
   let meetingScheduledFor = existing.meetingScheduledFor;
@@ -422,10 +390,7 @@ export async function PATCH(req: Request, { params }: Params) {
         meetingCommissionDayKey = copenhagenDayKey(meetingBookedAt);
       }
     }
-  } else if (
-    adminMeetingOutcome !== undefined ||
-    adminBookedByUserId !== undefined
-  ) {
+  } else if (adminMeetingOutcome !== undefined) {
     meetingBookedAt = existing.meetingBookedAt;
     meetingScheduledFor = existing.meetingScheduledFor;
     bookedByUserId = existing.bookedByUserId;
@@ -493,52 +458,35 @@ export async function PATCH(req: Request, { params }: Params) {
     meetingOutcomeStatus = adminMeetingOutcome;
   }
 
-  if (adminBookedByUserId !== undefined) {
-    bookedByUserId = adminBookedByUserId;
-  }
-
   const meetingTimeChangedForOverlap =
     !existing.meetingScheduledFor ||
     existing.meetingScheduledFor.getTime() !== meetingScheduledFor?.getTime();
+  // Første booking eller ny tid: vælg kørende sælger (prioritet) med plads — samme fordeling som
+  // tidsvælgeren; panelets «Tildeles: …» (preferredSellerId) bruges, hvis han stadig har plads.
+  let assignedUserIdForBooking: string | undefined;
   if (
     status === "MEETING_BOOKED" &&
     meetingScheduledFor &&
     meetingTimeChangedForOverlap &&
-    normalizeMeetingOutcomeStatus(meetingOutcomeStatus) !== MEETING_OUTCOME_CANCELLED &&
-    !adminSkipBookingOverlap
+    normalizeMeetingOutcomeStatus(meetingOutcomeStatus) !== MEETING_OUTCOME_CANCELLED
   ) {
-    const durationMin = meetingDurationMinutes(meetingType);
-    const transportMin = transportBufferMinutes(meetingType);
-    const overlap = await findLeadBookingOverlapInDb(meetingScheduledFor, {
+    const preferredSellerId =
+      typeof body?.preferredSellerId === "string" && body.preferredSellerId.trim()
+        ? body.preferredSellerId.trim()
+        : existing.assignedUserId;
+    const sellerId = await pickSellerForBooking(meetingScheduledFor, {
       excludeLeadId: id,
       meetingType,
+      preferredSellerId,
+      adminOverride: session!.user.role === "ADMIN",
     });
-    if (overlap) {
-      const transportHint =
-        transportMin > 0
-          ? ` Fysisk møde er ${durationMin} min + ${transportMin} min transport før/efter.`
-          : ` Onlinemøde er ${durationMin} min.`;
-      return NextResponse.json(
-        {
-          error: `Det valgte tidspunkt overlapper et andet møde.${transportHint} Vælg et andet tidspunkt.`,
-        },
-        { status: 409 },
-      );
-    }
-    const calendarUserId =
-      existing.assignedUserId ?? (await getDefaultMeetingAssigneeId());
-    if (calendarUserId) {
-      const blocked = await findBlockedTimeConflictInDb(
-        calendarUserId,
-        meetingScheduledFor,
-        meetingType,
-      );
-      if (blocked) {
-        return NextResponse.json(
-          { error: blockedTimeConflictMessage(blocked.title) },
-          { status: 409 },
-        );
-      }
+    if (sellerId) {
+      assignedUserIdForBooking = sellerId;
+    } else if (adminSkipBookingOverlap) {
+      assignedUserIdForBooking =
+        preferredSellerId ?? (await getDefaultMeetingAssigneeId()) ?? undefined;
+    } else {
+      return NextResponse.json({ error: NO_SELLER_AVAILABLE_MESSAGE }, { status: 409 });
     }
   }
 
@@ -591,8 +539,7 @@ export async function PATCH(req: Request, { params }: Params) {
   const clearLeadLock = status !== "NEW";
 
   let bookedFromRebookingCampaign = existing.bookedFromRebookingCampaign ?? false;
-  const isAdminMeetingOnlyPatch =
-    adminMeetingOutcome !== undefined || adminBookedByUserId !== undefined;
+  const isAdminMeetingOnlyPatch = adminMeetingOutcome !== undefined;
   if (status !== "MEETING_BOOKED") {
     if (!isAdminMeetingOnlyPatch) {
       bookedFromRebookingCampaign = false;
@@ -605,10 +552,6 @@ export async function PATCH(req: Request, { params }: Params) {
   const finalMeetingOutcomeNorm = normalizeMeetingOutcomeStatus(meetingOutcomeStatus);
   const logMeetingOutcomeActivity =
     adminMeetingOutcome !== undefined && prevMeetingOutcomeNorm !== finalMeetingOutcomeNorm;
-
-  const prevBookedByUserId = existing.bookedByUserId;
-  const logBookerChangedActivity =
-    adminBookedByUserId !== undefined && prevBookedByUserId !== bookedByUserId;
 
   let logSentToRebooking = false;
   let adminOutcomeRouting: Awaited<ReturnType<typeof resolveAdminMeetingOutcomeRouting>> | null =
@@ -691,6 +634,7 @@ export async function PATCH(req: Request, { params }: Params) {
           meetingOutcomeStatus,
           meetingCommissionDayKey,
           bookedFromRebookingCampaign,
+          assignedUserId: assignedUserIdForBooking,
           voicemailMarkedAt,
           notHomeMarkedAt,
           callbackScheduledFor,
@@ -792,29 +736,6 @@ export async function PATCH(req: Request, { params }: Params) {
       });
     }
 
-    if (logBookerChangedActivity) {
-      const actor = await tx.user.findUnique({
-        where: { id: userId },
-        select: { name: true },
-      });
-      const label = actor?.name?.trim() || "Bruger";
-      const prevUser = prevBookedByUserId
-        ? await tx.user.findUnique({ where: { id: prevBookedByUserId }, select: { name: true } })
-        : null;
-      const nextUser = bookedByUserId
-        ? await tx.user.findUnique({ where: { id: bookedByUserId }, select: { name: true } })
-        : null;
-      const fromName = prevUser?.name?.trim() || "—";
-      const toName = nextUser?.name?.trim() || "—";
-      await tx.leadActivityEvent.create({
-        data: {
-          leadId: id,
-          userId,
-          kind: LEAD_ACTIVITY_KIND.MEETING_BOOKER_CHANGED,
-          summary: `${label} ændrede sælger fra ${fromName} til ${toName}`,
-        },
-      });
-    }
 
     return updated;
   });

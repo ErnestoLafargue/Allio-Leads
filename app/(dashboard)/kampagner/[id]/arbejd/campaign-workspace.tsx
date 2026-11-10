@@ -46,12 +46,13 @@ import { canScheduleCallbackFromLead } from "@/lib/lead-callback-schedule";
 import { isCallbackWorkLead } from "@/lib/lead-callback-access";
 import { DIALER_AUTO_PAUSED_KEY, DIALER_START_PATH, markDialerPauseExit } from "@/lib/dialer-pause-exit";
 import {
-  MEETING_TYPE_ONLINE,
+  MEETING_TYPE_PHYSICAL,
   type MeetingType,
   normalizeMeetingType,
 } from "@/lib/meeting-type";
 import {
   dialNumberMenu,
+  phoneExtensionDialPhones,
   normalizeDialPhonePriority,
   orderedDialPhones,
   type DialPhonePriority,
@@ -383,7 +384,7 @@ export function CampaignWorkspace({
   const [meetingContactEmail, setMeetingContactEmail] = useState("");
   const [meetingContactPhonePrivate, setMeetingContactPhonePrivate] = useState("");
   const [meetingCompanyName, setMeetingCompanyName] = useState("");
-  const [meetingType, setMeetingType] = useState<MeetingType>(MEETING_TYPE_ONLINE);
+  const [meetingType, setMeetingType] = useState<MeetingType>(MEETING_TYPE_PHYSICAL);
   const [meetingAddress, setMeetingAddress] = useState("");
   const [meetingContactErrors, setMeetingContactErrors] = useState<MeetingContactFieldErrors>({});
   const [meetingNotesRequiredOpen, setMeetingNotesRequiredOpen] = useState(false);
@@ -519,7 +520,10 @@ export function CampaignWorkspace({
     setMeetingContactEmail(l.meetingContactEmail ?? "");
     setMeetingContactPhonePrivate(l.meetingContactPhonePrivate ?? "");
     setMeetingCompanyName(l.meetingCompanyName ?? "");
-    setMeetingType(normalizeMeetingType(l.meetingType));
+    // Uden booket møde starter vi på fysisk møde; ellers vises mødets egen type.
+    setMeetingType(
+      l.meetingScheduledFor ? normalizeMeetingType(l.meetingType) : MEETING_TYPE_PHYSICAL,
+    );
     setMeetingAddress(l.meetingAddress ?? "");
   }, [campaignSystemType]);
 
@@ -1004,6 +1008,8 @@ export function CampaignWorkspace({
   }
   const getFormSnapshotRef = useRef(getFormSnapshot);
   getFormSnapshotRef.current = getFormSnapshot;
+  /** Sælgeren tidsvælgeren viste ved «Bekræft booking» — sendes med, mens bookingen gemmes. */
+  const preferredSellerIdRef = useRef<string | undefined>(undefined);
 
   async function saveLead(
     l: Lead,
@@ -1013,6 +1019,7 @@ export function CampaignWorkspace({
     const body = buildCampaignLeadPatchBody(getFormSnapshot(), {
       meetingScheduledForISO,
       adminSkipBookingOverlap,
+      preferredSellerId: preferredSellerIdRef.current,
     });
     const res = await fetch(`/api/leads/${l.id}`, {
       method: "PATCH",
@@ -1469,7 +1476,12 @@ export function CampaignWorkspace({
 
   async function onConfirmBookingFromPanel(detail: BookingConfirmPayload) {
     if (!activeLead || status !== "MEETING_BOOKED") return;
-    await onNext(detail.localDateTimeISO, detail.adminSkipBookingOverlap);
+    preferredSellerIdRef.current = detail.preferredSellerId;
+    try {
+      await onNext(detail.localDateTimeISO, detail.adminSkipBookingOverlap);
+    } finally {
+      preferredSellerIdRef.current = undefined;
+    }
   }
 
   async function onVirkEnrich() {
@@ -1807,7 +1819,12 @@ export function CampaignWorkspace({
                 ? {
                     leadId: current.id,
                     leadPhone: dialPhoneForOpenLead({ phone, privatePhone }, dialPhonePriority),
-                    dialMenu: dialNumberMenu(phone, privatePhone, dialPhonePriority),
+                    dialMenu: dialNumberMenu(
+                      phone,
+                      privatePhone,
+                      dialPhonePriority,
+                      phoneExtensionDialPhones(fieldConfigJson, custom),
+                    ),
                     onUpdateLeadPhone: handleUpdateLeadPhoneFromVoip,
                   }
                 : null
@@ -2220,7 +2237,12 @@ export function CampaignWorkspace({
           leadPhone={dialPhoneForOpenLead({ phone, privatePhone }, dialPhonePriority)}
           recordPhone={dialPhoneForOpenLead(current, dialPhonePriority)}
           failoverPhone={orderedDialPhones(phone, privatePhone, dialPhonePriority)[1]?.raw ?? ""}
-          dialMenu={dialNumberMenu(phone, privatePhone, dialPhonePriority)}
+          dialMenu={dialNumberMenu(
+            phone,
+            privatePhone,
+            dialPhonePriority,
+            phoneExtensionDialPhones(fieldConfigJson, custom),
+          )}
           dialMode={campaignDialMode}
           autoStartCall={voipAutoStart}
           isCallbackLead={isCallbackWorkLead(current)}

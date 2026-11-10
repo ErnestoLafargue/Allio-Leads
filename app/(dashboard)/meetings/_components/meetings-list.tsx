@@ -3,7 +3,7 @@
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
 import { useSession } from "next-auth/react";
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   BlockedTimeDialog,
   type BlockedTimeCreatePrefill,
@@ -22,7 +22,7 @@ import {
   MEETING_OUTCOME_LABELS,
   MEETING_OUTCOME_PENDING,
 } from "@/lib/meeting-outcome";
-import { isMeetingOutcomeLocked, MEETING_OUTCOME_LOCK_DAYS } from "@/lib/meetings";
+import { isMeetingOutcomeLocked, MEETING_OUTCOME_LOCK_DAYS } from "@/lib/meeting-outcome-lock";
 import {
   buildLeadDetailHref,
   KNOWN_LEAD_SOURCES,
@@ -51,12 +51,6 @@ type Assignee = {
   phone: string | null;
 };
 
-type SellerOption = {
-  id: string;
-  name: string;
-  username: string;
-};
-
 function outcomeLabel(raw?: string | null) {
   const k = String(raw ?? "").trim().toUpperCase() || MEETING_OUTCOME_PENDING;
   return MEETING_OUTCOME_LABELS[k] ?? MEETING_OUTCOME_LABELS[MEETING_OUTCOME_PENDING];
@@ -74,7 +68,8 @@ export function MeetingsList({ type }: { type: "upcoming" | "past" }) {
     type === "upcoming" && searchParams.get("view")?.trim().toLowerCase() === "calendar"
       ? "calendar"
       : "list";
-  const weekStartDayKey = parseWeekStartParam(searchParams.get("weekStart"));
+  const weekStartParam = searchParams.get("weekStart");
+  const weekStartDayKey = useMemo(() => parseWeekStartParam(weekStartParam), [weekStartParam]);
 
   const upcomingOpenedFrom = useMemo(
     () =>
@@ -111,9 +106,6 @@ export function MeetingsList({ type }: { type: "upcoming" | "past" }) {
   const [defaultAssigneeId, setDefaultAssigneeId] = useState<string | null>(null);
   const [savingAssigneeById, setSavingAssigneeById] = useState<Record<string, boolean>>({});
   const [savedHintById, setSavedHintById] = useState<Record<string, boolean>>({});
-  const [savingSellerById, setSavingSellerById] = useState<Record<string, boolean>>({});
-  const [savedSellerHintById, setSavedSellerHintById] = useState<Record<string, boolean>>({});
-  const [sellers, setSellers] = useState<SellerOption[]>([]);
   const [noShowDialog, setNoShowDialog] = useState<{ leadId: string } | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -132,21 +124,32 @@ export function MeetingsList({ type }: { type: "upcoming" | "past" }) {
 
   const title = useMemo(() => (type === "upcoming" ? "Kommende møder" : "Tidligere møder"), [type]);
 
+  const loadSeqRef = useRef(0);
   const load = useCallback(async () => {
+    const seq = ++loadSeqRef.current;
     setLoading(true);
     const params = new URLSearchParams({ type });
     if (type === "past" && activeOnlyPast) params.set("activeOnly", "true");
+    if (type === "upcoming" && viewMode === "calendar") {
+      // Kalenderen viser hele den valgte uge — også møder fra før i dag.
+      const keys = weekDayKeys(weekStartDayKey);
+      params.set("from", copenhagenDayBoundsUtcFromDayKey(keys[0]!).start.toISOString());
+      params.set("to", copenhagenDayBoundsUtcFromDayKey(keys[6]!).end.toISOString());
+    }
     const res = await fetch(`/api/meetings?${params.toString()}`);
+    // Ignorér svar fra en ældre forespørgsel (fx ved hurtigt ugeskift).
+    if (seq !== loadSeqRef.current) return;
     if (!res.ok) {
       setError("Kunne ikke hente møder");
       setLoading(false);
       return;
     }
     const data = (await res.json()) as MeetingRow[];
+    if (seq !== loadSeqRef.current) return;
     setRows(data);
     setLoading(false);
     setError(null);
-  }, [type, activeOnlyPast]);
+  }, [type, activeOnlyPast, viewMode, weekStartDayKey]);
 
   useEffect(() => {
     void load();
@@ -203,21 +206,6 @@ export function MeetingsList({ type }: { type: "upcoming" | "past" }) {
   }
 
   useEffect(() => {
-    if (!isAdmin) return;
-    let cancelled = false;
-    async function loadSellers() {
-      const res = await fetch("/api/users/for-assignment");
-      if (!res.ok) return;
-      const data = (await res.json()) as SellerOption[];
-      if (!cancelled) setSellers(Array.isArray(data) ? data : []);
-    }
-    void loadSellers();
-    return () => {
-      cancelled = true;
-    };
-  }, [isAdmin]);
-
-  useEffect(() => {
     if (type !== "upcoming") return;
     let cancelled = false;
     async function loadAssignees() {
@@ -267,28 +255,6 @@ export function MeetingsList({ type }: { type: "upcoming" | "past" }) {
     void patchOutcome(id, value);
   }
 
-  async function patchSeller(id: string, bookedByUserId: string) {
-    setSavingSellerById((prev) => ({ ...prev, [id]: true }));
-    setSavedSellerHintById((prev) => ({ ...prev, [id]: false }));
-    const res = await fetch(`/api/leads/${id}`, {
-      method: "PATCH",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ bookedByUserId }),
-    });
-    setSavingSellerById((prev) => ({ ...prev, [id]: false }));
-    if (!res.ok) {
-      const j = await res.json().catch(() => ({}));
-      setError(typeof j.error === "string" ? j.error : "Kunne ikke gemme sælger");
-      return;
-    }
-    setError(null);
-    await load();
-    setSavedSellerHintById((prev) => ({ ...prev, [id]: true }));
-    window.setTimeout(() => {
-      setSavedSellerHintById((prev) => ({ ...prev, [id]: false }));
-    }, 1200);
-  }
-
   async function patchAssignee(id: string, assignedUserId: string) {
     setSavingAssigneeById((prev) => ({ ...prev, [id]: true }));
     setSavedHintById((prev) => ({ ...prev, [id]: false }));
@@ -327,7 +293,9 @@ export function MeetingsList({ type }: { type: "upcoming" | "past" }) {
           <h1 className="text-xl font-semibold text-stone-900">{title}</h1>
           <p className="mt-1 text-sm text-stone-600">
             {type === "upcoming"
-              ? "Viser alle møder fra i dag og frem."
+              ? viewMode === "calendar"
+                ? "Viser alle møder i den valgte uge — også dem før i dag."
+                : "Viser alle møder fra i dag og frem."
               : activeOnlyPast
                 ? "Viser kun tidligere møder hvor leadet stadig har status Møde booket."
                 : `Viser alle tidligere møder uanset lead-status. Udfald kan ændres så længe mødetidspunktet er inden for ${MEETING_OUTCOME_LOCK_DAYS} dage.`}
@@ -398,6 +366,7 @@ export function MeetingsList({ type }: { type: "upcoming" | "past" }) {
         <>
           <MeetingsWeekCalendar
             rows={rows}
+            sellers={assignees}
             blockedTimes={blockedTimes}
             weekStartDayKey={weekStartDayKey}
             loading={loading}
@@ -442,11 +411,11 @@ export function MeetingsList({ type }: { type: "upcoming" | "past" }) {
           <thead className="border-b border-stone-200 bg-stone-50 text-stone-600">
             <tr>
               <th className="px-4 py-3 font-medium">Virksomhed</th>
+              <th className="px-4 py-3 font-medium">Mødekontakt</th>
               <th className="px-4 py-3 font-medium">Telefon</th>
               <th className="px-4 py-3 font-medium">Tildelt til</th>
               <th className="px-4 py-3 font-medium">Mødetid</th>
-              <th className="px-4 py-3 font-medium">Booket</th>
-              <th className="px-4 py-3 font-medium">Sælger</th>
+              <th className="px-4 py-3 font-medium">Booket af</th>
               <th className="px-4 py-3 font-medium">Udfald</th>
               {isAdmin && <th className="px-4 py-3 font-medium">Admin</th>}
             </tr>
@@ -489,74 +458,43 @@ export function MeetingsList({ type }: { type: "upcoming" | "past" }) {
                       </span>
                     )}
                   </td>
+                  <td className="px-4 py-3 text-stone-800">{m.meetingContactName?.trim() || "—"}</td>
                   <td className="px-4 py-3 text-stone-700">{m.phone}</td>
                   <td className="px-4 py-3 text-stone-700">
                     {type === "upcoming" ? (
                       assignees.length > 0 ? (
                         <div className="flex items-center gap-2">
                           <select
-                            value={m.assignedUser?.id ?? defaultAssigneeId ?? ""}
+                            value={m.assignedUser?.id ?? ""}
                             onChange={(e) => void patchAssignee(m.id, e.target.value)}
-                            disabled={savingAssigneeById[m.id]}
+                            disabled={savingAssigneeById[m.id] || !isAdmin}
+                            title={isAdmin ? undefined : "Kun administrator kan ændre tildelingen"}
                             className="rounded-md border border-stone-300 bg-white px-2.5 py-1.5 text-xs font-medium text-stone-800 shadow-sm outline-none ring-stone-400 focus:ring-2 disabled:opacity-60"
                           >
-                            {!m.assignedUser?.id && !defaultAssigneeId ? (
-                              <option value="" disabled>
-                                Vælg ansvarlig
-                              </option>
-                            ) : null}
+                            <option value="">Ingen tildelt</option>
                             {assignees.map((u) => (
                               <option key={u.id} value={u.id}>
-                                {u.name} ({u.username})
+                                {u.name}
                               </option>
                             ))}
                           </select>
                           {savedHintById[m.id] ? <span className="text-xs text-emerald-700">Gemt</span> : null}
                         </div>
                       ) : (
-                        <span className="text-xs text-stone-500">Ingen brugere med telefonnummer</span>
+                        <span className="text-xs text-stone-500">Ingen kørende sælgere</span>
                       )
                     ) : m.assignedUser ? (
-                      `${m.assignedUser.name} (${m.assignedUser.username})`
+                      m.assignedUser.name
                     ) : (
                       "—"
                     )}
                   </td>
-                  <td className="px-4 py-3 text-stone-800">
+                  <td className="whitespace-nowrap px-4 py-3 text-stone-800">
                     {m.meetingScheduledFor ? new Date(m.meetingScheduledFor).toLocaleString("da-DK") : "—"}
                   </td>
-                  <td className="px-4 py-3 text-stone-600">
-                    {m.meetingBookedAt ? new Date(m.meetingBookedAt).toLocaleString("da-DK") : "—"}
-                  </td>
                   <td className="px-4 py-3 text-stone-700">
-                    {isAdmin && type === "past" && sellers.length > 0 ? (
-                      <div className="flex items-center gap-2">
-                        <select
-                          value={m.bookedByUser?.id ?? ""}
-                          onChange={(e) => void patchSeller(m.id, e.target.value)}
-                          disabled={savingSellerById[m.id] || !m.bookedByUser?.id}
-                          className="rounded-md border border-stone-300 bg-white px-2.5 py-1.5 text-xs font-medium text-stone-800 shadow-sm outline-none ring-stone-400 focus:ring-2 disabled:opacity-60"
-                        >
-                          {!m.bookedByUser?.id ? (
-                            <option value="" disabled>
-                              —
-                            </option>
-                          ) : null}
-                          {sellers.map((u) => (
-                            <option key={u.id} value={u.id}>
-                              {u.name}
-                            </option>
-                          ))}
-                        </select>
-                        {savedSellerHintById[m.id] ? (
-                          <span className="text-xs text-emerald-700">Gemt</span>
-                        ) : null}
-                      </div>
-                    ) : m.bookedByUser ? (
-                      `${m.bookedByUser.name}`
-                    ) : (
-                      "—"
-                    )}
+                    {/* Altid den bruger, der bookede mødet — kan ikke ændres. */}
+                    {m.bookedByUser?.name ?? "—"}
                   </td>
                   <td className="px-4 py-3">
                     <div className="flex flex-wrap items-center gap-1.5">

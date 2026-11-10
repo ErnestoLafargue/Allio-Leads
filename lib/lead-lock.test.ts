@@ -1,5 +1,13 @@
-import { describe, expect, it, afterEach } from "vitest";
-import { getLeadLockMaxIdleMs, getLeadLockTtlMs, isLockActive } from "./lead-lock";
+import { describe, expect, it, afterEach, beforeEach } from "vitest";
+import type { PrismaClient } from "@prisma/client";
+import {
+  getLeadLockMaxIdleMs,
+  getLeadLockTtlMs,
+  isLockActive,
+  refreshLeadLock,
+  tryAcquireLeadLock,
+} from "./lead-lock";
+import { createInMemoryLeadDb, makeLead } from "./test-helpers/in-memory-lead-db";
 
 describe("getLeadLockMaxIdleMs", () => {
   const prevIdle = process.env.LEAD_LOCK_MAX_IDLE_SECONDS;
@@ -66,5 +74,70 @@ describe("isLockActive", () => {
     expect(isLockActive({ lockedByUserId: null, lockedAt: new Date(), lockExpiresAt: null }, now)).toBe(
       false,
     );
+  });
+});
+
+describe("tryAcquireLeadLock — tilbagekaldslås", () => {
+  const mem = createInMemoryLeadDb();
+  const db = mem.db as unknown as PrismaClient;
+  const now = new Date("2026-11-10T13:00:00.000Z");
+  const dueCallbackForA = () =>
+    makeLead({
+      id: "cb",
+      status: "CALLBACK_SCHEDULED",
+      callbackReservedByUserId: "user-a",
+      callbackScheduledFor: new Date(now.getTime() - 60 * 60_000),
+      callbackSeenByAssigneeAt: new Date(now.getTime() - 2 * 60 * 60_000),
+      notes: "A's noter",
+    });
+
+  beforeEach(() => {
+    mem.reset([dueCallbackForA(), makeLead({ id: "new" })]);
+  });
+
+  it("en anden sælger kan ikke låse et forfaldent tilbagekald, selv om ingen har låst det", async () => {
+    expect(await tryAcquireLeadLock(db, "cb", "user-b", now)).toBe(false);
+    expect(mem.lead("cb").lockedByUserId).toBeNull();
+  });
+
+  it("ejeren kan låse sit eget tilbagekald", async () => {
+    expect(await tryAcquireLeadLock(db, "cb", "user-a", now)).toBe(true);
+    expect(mem.lead("cb").lockedByUserId).toBe("user-a");
+  });
+
+  it("tilbagekald uden tildelt kan ikke låses fra dialeren", async () => {
+    mem.lead("cb").callbackReservedByUserId = null;
+    expect(await tryAcquireLeadLock(db, "cb", "user-a", now)).toBe(false);
+  });
+
+  it("bevidst åbning (allowOtherUsersCallback) må låse en andens tilbagekald", async () => {
+    expect(await tryAcquireLeadLock(db, "cb", "user-b", now)).toBe(false);
+    expect(
+      await tryAcquireLeadLock(db, "cb", "user-b", now, { allowOtherUsersCallback: true }),
+    ).toBe(true);
+  });
+
+  it("almindelige «Ny»-leads låses som før — og kun af én ad gangen", async () => {
+    expect(await tryAcquireLeadLock(db, "new", "user-a", now)).toBe(true);
+    expect(await tryAcquireLeadLock(db, "new", "user-b", now)).toBe(false);
+    expect(mem.lead("new").lockedByUserId).toBe("user-a");
+  });
+
+  it("heartbeat kan ikke forlænge en lås, når leadet er blevet en andens tilbagekald", async () => {
+    mem.reset([
+      makeLead({
+        id: "cb",
+        status: "CALLBACK_SCHEDULED",
+        callbackReservedByUserId: "user-a",
+        lockedByUserId: "user-b",
+        lockedAt: now,
+        lockExpiresAt: new Date(now.getTime() + 60_000),
+      }),
+    ]);
+    expect(await refreshLeadLock(db, "cb", "user-b", now)).toBe(false);
+    // Når B's gamle lås er udløbet, kan ejeren overtage.
+    const later = new Date(now.getTime() + getLeadLockMaxIdleMs() + 60_000);
+    expect(await refreshLeadLock(db, "cb", "user-a", later)).toBe(true);
+    expect(mem.lead("cb").lockedByUserId).toBe("user-a");
   });
 });

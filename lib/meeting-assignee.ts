@@ -1,43 +1,68 @@
 import { prisma } from "@/lib/prisma";
 
-type AssigneeUser = {
+export type DrivingSeller = {
   id: string;
   name: string;
   username: string;
   phone: string | null;
+  sellerPriority: number | null;
+  podioSellerItemId: number | null;
+  allioNativeEmployeeId: string | null;
 };
 
-function hasPhone(u: AssigneeUser): boolean {
-  return typeof u.phone === "string" && u.phone.trim().length > 0;
-}
+const SELLER_SELECT = {
+  id: true,
+  name: true,
+  username: true,
+  phone: true,
+  sellerPriority: true,
+  podioSellerItemId: true,
+  allioNativeEmployeeId: true,
+} as const;
 
-function isVictor(u: AssigneeUser): boolean {
+function isVictor(u: { name: string; username: string }): boolean {
   const uname = u.username.trim().toLowerCase();
   const name = u.name.trim().toLowerCase();
   return uname === "victor@allio.dk" || name === "victor lafargue";
 }
 
-export async function listMeetingAssignableUsers(): Promise<AssigneeUser[]> {
-  const rows = await prisma.user.findMany({
-    orderBy: [{ name: "asc" }],
-    select: { id: true, name: true, username: true, phone: true },
-  });
-  return rows.filter(hasPhone);
+/** Sortér efter prioritet (1 først, uden prioritet sidst), derefter navn. */
+export function sortByPriority<T extends { sellerPriority: number | null; name: string }>(rows: T[]): T[] {
+  return [...rows].sort(
+    (a, b) =>
+      (a.sellerPriority ?? Number.MAX_SAFE_INTEGER) - (b.sellerPriority ?? Number.MAX_SAFE_INTEGER) ||
+      a.name.localeCompare(b.name, "da"),
+  );
 }
 
+/**
+ * Kørende sælgere i prioriteret rækkefølge — de har kalender og kan få tildelt møder.
+ * Er ingen sat op endnu, bruges Victor (tidligere fast mødeansvarlig) som nødløsning.
+ */
+export async function listDrivingSellers(): Promise<DrivingSeller[]> {
+  const rows = await prisma.user.findMany({
+    where: { isDrivingSeller: true },
+    select: SELLER_SELECT,
+  });
+  if (rows.length > 0) return sortByPriority(rows);
+  const fallback = await prisma.user.findMany({ select: SELLER_SELECT });
+  return fallback.filter(isVictor);
+}
+
+/** Brugere der kan tildeles møder (Kommende møder, blokeringer) = kørende sælgere. */
+export async function listMeetingAssignableUsers(): Promise<DrivingSeller[]> {
+  return listDrivingSellers();
+}
+
+/** Sælger nr. 1 — bruges når der ikke kan vælges ud fra kalenderen. */
 export async function getDefaultMeetingAssigneeId(): Promise<string | null> {
-  const rows = await listMeetingAssignableUsers();
-  const victor = rows.find(isVictor);
-  return victor?.id ?? null;
+  return (await listDrivingSellers())[0]?.id ?? null;
 }
 
 export async function requireDefaultMeetingAssigneeId(): Promise<string> {
   const id = await getDefaultMeetingAssigneeId();
   if (!id) {
-    throw new Error(
-      "Standard mødeansvarlig (Victor Lafargue / victor@allio.dk) mangler eller har intet telefonnummer.",
-    );
+    throw new Error("Ingen kørende sælger er sat op — markér mindst én bruger som kørende sælger.");
   }
   return id;
 }
-

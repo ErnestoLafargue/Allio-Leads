@@ -48,6 +48,27 @@ function DialerIcon({ className }: { className?: string }) {
   );
 }
 
+function FlowZoneIcon({ className }: { className?: string }) {
+  return (
+    <svg
+      className={className}
+      width="22"
+      height="22"
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="1.8"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      aria-hidden
+    >
+      <rect x="3" y="3" width="18" height="5" rx="1" />
+      <rect x="3" y="10" width="12" height="5" rx="1" />
+      <rect x="3" y="17" width="15" height="4" rx="1" />
+    </svg>
+  );
+}
+
 function LeadsGroupIcon({ className }: { className?: string }) {
   return (
     <svg
@@ -263,6 +284,14 @@ const SIDEBAR_SECTIONS: SidebarSection[] = [
   },
   {
     kind: "link",
+    id: "flowzone",
+    href: "/flowzone",
+    label: "FlowZone",
+    icon: FlowZoneIcon,
+    adminOnly: true,
+  },
+  {
+    kind: "link",
     id: "scoreboard",
     href: "/scoreboard",
     label: "Scoreboard",
@@ -341,6 +370,7 @@ const SIDEBAR_SECTIONS: SidebarSection[] = [
       { href: "/users", label: "Brugere" },
       { href: "/indstillinger", label: "Indstillinger" },
       { href: "/administration/telnyx", label: "Telnyx" },
+      { href: "/administration/booking", label: "Booking" },
       { href: "/administration/dialer", label: "Dialer" },
       { href: "/administration/cost", label: "Cost" },
     ],

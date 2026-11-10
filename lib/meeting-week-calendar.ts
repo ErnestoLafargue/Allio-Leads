@@ -13,6 +13,25 @@ export const MEETING_CALENDAR_HEADER_HEIGHT_PX = 56;
 
 const TZ = "Europe/Copenhagen";
 
+/** Delte formattere — at oprette en `Intl.DateTimeFormat` pr. kald er dyrt (CPU + ICU-hukommelse). */
+const UTC_YMD_FMT = new Intl.DateTimeFormat("en-CA", {
+  timeZone: "UTC",
+  year: "numeric",
+  month: "2-digit",
+  day: "2-digit",
+});
+
+const COPENHAGEN_PARTS_FMT = new Intl.DateTimeFormat("en-CA", {
+  timeZone: TZ,
+  year: "numeric",
+  month: "2-digit",
+  day: "2-digit",
+  hour: "2-digit",
+  minute: "2-digit",
+  weekday: "short",
+  hour12: false,
+});
+
 export type CopenhagenDateTimeParts = {
   dayKey: string;
   year: number;
@@ -45,13 +64,7 @@ function parseDayKey(dayKey: string): { y: number; m: number; d: number } {
 function addDaysToDayKey(dayKey: string, delta: number): string {
   const { y, m, d } = parseDayKey(dayKey);
   const ms = Date.UTC(y, m - 1, d) + delta * 86_400_000;
-  const dt = new Date(ms);
-  return new Intl.DateTimeFormat("en-CA", {
-    timeZone: "UTC",
-    year: "numeric",
-    month: "2-digit",
-    day: "2-digit",
-  }).format(dt);
+  return UTC_YMD_FMT.format(new Date(ms));
 }
 
 export function copenhagenParts(iso: string | Date | null | undefined): CopenhagenDateTimeParts | null {
@@ -59,16 +72,7 @@ export function copenhagenParts(iso: string | Date | null | undefined): Copenhag
   const d = iso instanceof Date ? iso : new Date(iso);
   if (Number.isNaN(d.getTime())) return null;
 
-  const fmt = new Intl.DateTimeFormat("en-CA", {
-    timeZone: TZ,
-    year: "numeric",
-    month: "2-digit",
-    day: "2-digit",
-    hour: "2-digit",
-    minute: "2-digit",
-    weekday: "short",
-    hour12: false,
-  }).formatToParts(d);
+  const fmt = COPENHAGEN_PARTS_FMT.formatToParts(d);
 
   const year = parseInt(fmt.find((p) => p.type === "year")!.value, 10);
   const month = parseInt(fmt.find((p) => p.type === "month")!.value, 10);

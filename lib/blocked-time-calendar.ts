@@ -26,6 +26,17 @@ export type BlockedTimeSegment = {
   clamped: boolean;
 };
 
+/** Delt formatter — oprettes én gang i stedet for pr. kald. */
+const COPENHAGEN_YMD_HM_FMT = new Intl.DateTimeFormat("en-CA", {
+  timeZone: "Europe/Copenhagen",
+  year: "numeric",
+  month: "2-digit",
+  day: "2-digit",
+  hour: "2-digit",
+  minute: "2-digit",
+  hour12: false,
+});
+
 function copenhagenPartsFromMs(ms: number): {
   dayKey: string;
   hour: number;
@@ -33,15 +44,7 @@ function copenhagenPartsFromMs(ms: number): {
 } | null {
   const d = new Date(ms);
   if (Number.isNaN(d.getTime())) return null;
-  const fmt = new Intl.DateTimeFormat("en-CA", {
-    timeZone: "Europe/Copenhagen",
-    year: "numeric",
-    month: "2-digit",
-    day: "2-digit",
-    hour: "2-digit",
-    minute: "2-digit",
-    hour12: false,
-  }).formatToParts(d);
+  const fmt = COPENHAGEN_YMD_HM_FMT.formatToParts(d);
   let hour = parseInt(fmt.find((p) => p.type === "hour")!.value, 10);
   const minute = parseInt(fmt.find((p) => p.type === "minute")!.value, 10);
   if (hour === 24) hour = 0;

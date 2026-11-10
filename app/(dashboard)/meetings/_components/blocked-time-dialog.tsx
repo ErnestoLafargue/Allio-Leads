@@ -279,7 +279,7 @@ export function BlockedTimeDialog({
               {!userId ? <option value="">Vælg mødeansvarlig…</option> : null}
               {selectOptions.map((u) => (
                 <option key={u.id} value={u.id}>
-                  {u.name} ({u.username})
+                  {u.name}
                 </option>
               ))}
             </select>

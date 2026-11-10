@@ -161,15 +161,51 @@ function findFieldByLabel(config: PodioAppConfig, label: string): PodioField | n
   return matches.find((f) => f.status !== "deleted") ?? matches[0] ?? null;
 }
 
-/** Hent felt-metadata (external_id + type) via etiket. */
+/** Hent felt-metadata (field_id + external_id + type) via etiket. */
 export async function resolveFieldMeta(
   app: PodioAppKey,
   label: string,
-): Promise<{ externalId: string; type: string }> {
+): Promise<{ fieldId: number; externalId: string; type: string }> {
   const config = await getAppConfig(app);
   const field = findFieldByLabel(config, label);
   if (!field) throw new Error(`Podio-felt "${label}" findes ikke i app "${app}".`);
-  return { externalId: field.external_id, type: field.type };
+  return { fieldId: field.field_id, externalId: field.external_id, type: field.type };
+}
+
+export type PodioReferenceableItem = { itemId: number; title: string };
+
+/**
+ * Elementer der kan vælges i et relationsfelt (som Podios «Tast for at søge efter indlæg»).
+ * Virker med appens egen nøgle — også selvom den refererede app er en anden.
+ */
+export async function findReferenceableItems(
+  app: PodioAppKey,
+  label: string,
+  text = "",
+  limit = 50,
+): Promise<PodioReferenceableItem[]> {
+  const { fieldId, type } = await resolveFieldMeta(app, label);
+  if (type !== "app") throw new Error(`Podio-felt "${label}" er ikke et relationsfelt (type ${type}).`);
+  const qs = new URLSearchParams({ limit: String(limit), text });
+  const { status, json } = await podioRequest(app, "GET", `/item/field/${fieldId}/find?${qs}`);
+  if (status !== 200 || !Array.isArray(json)) {
+    throw new Error(`Podio find-fejl (${status}) for felt "${label}".`);
+  }
+  return (json as { item_id?: number; title?: string }[])
+    .filter((r) => typeof r.item_id === "number" && r.item_id > 0)
+    .map((r) => ({ itemId: r.item_id!, title: (r.title ?? "").trim() }));
+}
+
+/** Sæt relationsfelt til de givne item-id'er ([] tømmer feltet). */
+export async function setPodioAppReference(
+  app: PodioAppKey,
+  fields: PodioFieldValues,
+  label: string,
+  itemIds: number[],
+): Promise<void> {
+  const { externalId, type } = await resolveFieldMeta(app, label);
+  if (type !== "app") throw new Error(`Podio-felt "${label}" er ikke et relationsfelt (type ${type}).`);
+  fields[externalId] = itemIds;
 }
 
 /** Oversæt felt-etiket til Podios external_id. Kaster hvis feltet ikke findes. */

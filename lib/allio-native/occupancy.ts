@@ -25,6 +25,7 @@ export async function upsertNativeOccupancyFromBooking(
       status: resolvedStatus,
       source: "booking",
       title: booking.customer_name ?? booking.notes ?? "",
+      employeeId: booking.employee_id ?? null,
     },
     update: {
       startDateTime: start,
@@ -32,6 +33,7 @@ export async function upsertNativeOccupancyFromBooking(
       serviceIds,
       status: resolvedStatus,
       title: booking.customer_name ?? booking.notes ?? "",
+      employeeId: booking.employee_id ?? null,
     },
   });
 }

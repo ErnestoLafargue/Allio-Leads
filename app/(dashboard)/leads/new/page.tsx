@@ -12,7 +12,7 @@ import {
 import type { LeadStatus } from "@/lib/lead-status";
 import { defaultBookingSystemForCampaign } from "@/lib/booking-system";
 import {
-  MEETING_TYPE_ONLINE,
+  MEETING_TYPE_PHYSICAL,
   type MeetingType,
 } from "@/lib/meeting-type";
 
@@ -66,7 +66,7 @@ function NewLeadPageInner() {
   const [meetingContactEmail, setMeetingContactEmail] = useState("");
   const [meetingContactPhonePrivate, setMeetingContactPhonePrivate] = useState("");
   const [meetingCompanyName, setMeetingCompanyName] = useState("");
-  const [meetingType, setMeetingType] = useState<MeetingType>(MEETING_TYPE_ONLINE);
+  const [meetingType, setMeetingType] = useState<MeetingType>(MEETING_TYPE_PHYSICAL);
   const [meetingAddress, setMeetingAddress] = useState("");
   const [meetingContactErrors, setMeetingContactErrors] = useState<MeetingContactFieldErrors>({});
   const [custom, setCustom] = useState<Record<string, string>>({});

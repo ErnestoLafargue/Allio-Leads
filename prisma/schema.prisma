@@ -33,6 +33,15 @@ model User {
   /// Sat når SIP URI-opkald (`internal`) er slået til på brugerens credential connection (krav for at Power Dialer kan ringe WebRTC op).
   telnyxSipUriCallingEnabledAt DateTime?
 
+  /// Kørende sælger: har kalender og kan få tildelt fysiske/online kundemøder.
+  isDrivingSeller       Boolean @default(false)
+  /// Rækkefølge ved automatisk tildeling (1 fyldes først). Kun relevant for kørende sælgere.
+  sellerPriority        Int?
+  /// Podio «Sælger»-element (item_id) — null = find automatisk på fornavn.
+  podioSellerItemId     Int?
+  /// Allio-Native medarbejder-id (employee_id) — bookinger/occupancy knyttes til sælgeren.
+  allioNativeEmployeeId String?
+
   bookedMeetings            Lead[]                    @relation("LeadBookedBy")
   archivedMeetingRecords    LeadMeetingRecord[]       @relation("LeadMeetingRecordBookedBy")
   assignedMeetings          Lead[]                    @relation("LeadMeetingAssignedTo")
@@ -50,6 +59,7 @@ model User {
 
   agentSessions  AgentSession[]
   dialerCallLogs DialerCallLog[]
+  flowZoneTasks  FlowZoneTask[]
   callRecordings CallRecording[]
 
   /// Interne opgaver (ticketsystem)
@@ -317,7 +327,7 @@ model Lead {
   lockExpiresAt  DateTime?
   lockedByUser   User?     @relation("LeadLockedBy", fields: [lockedByUserId], references: [id], onDelete: SetNull)
 
-  /// Planlagt genopkald — lead reserveret til én sælger indtil tidspunktet (eller ændret status)
+  /// Planlagt genopkald — lead låst til den tildelte sælger, indtil udfaldet ændres (også efter tidspunktet)
   callbackScheduledFor     DateTime?
   callbackReservedByUserId String?
   callbackReservedByUser   User?     @relation("LeadCallbackReservedBy", fields: [callbackReservedByUserId], references: [id], onDelete: SetNull)
@@ -326,7 +336,7 @@ model Lead {
   callbackNote             String    @default("")
   callbackCreatedByUserId  String?
   callbackCreatedByUser    User?     @relation("LeadCallbackCreatedBy", fields: [callbackCreatedByUserId], references: [id], onDelete: SetNull)
-  /// Første gang den tildelte åbner/reserverer leadet efter planlagt tilbagekald (bruges til genudlevering i kø).
+  /// Første gang den tildelte åbner/reserverer leadet efter planlagt tilbagekald (kun registrering — frigiver ikke leadet).
   callbackSeenByAssigneeAt DateTime?
 
   /// Cal.eu booking uid + ekstern mødelink (Google Meet/Cal Video) — sættes når booking oprettes eksternt.
@@ -980,6 +990,8 @@ model AllioNativeOccupancy {
   endDateTime    DateTime
   /// JSON-array af Native service UUIDs
   serviceIds     String   @default("[]")
+  /// Allio-Native employee_id — knytter optaget tid til en kørende sælger (null = standard-sælger).
+  employeeId     String?
   status         String   @default("confirmed")
   source         String   @default("booking")
   title          String   @default("")
@@ -997,4 +1009,18 @@ model AllioNativeWebhookEvent {
   processedAt DateTime @default(now())
 
   @@index([processedAt])
+}
+
+/// En opgave i brugerens FlowZone (dagsplanlægning i tidszoner). Opgaven gemmes som FlowZones eget
+/// opgaveobjekt i `data`, så planlæggeren kan udvikle sig uden en migration for hvert felt.
+model FlowZoneTask {
+  /// FlowZones eget opgave-id (oprettes i browseren, unikt pr. bruger)
+  id        String
+  userId    String
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  data      Json
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@id([userId, id])
 }

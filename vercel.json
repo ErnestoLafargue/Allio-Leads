@@ -34,7 +34,8 @@
   ],
   "git": {
     "deploymentEnabled": {
-      "scripts-og-traening": false
+      "scripts-og-traening": false,
+      "feat/flowzone": false
     }
   }
 }

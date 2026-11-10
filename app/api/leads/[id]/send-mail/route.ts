@@ -5,7 +5,6 @@ import MailComposer from "nodemailer/lib/mail-composer";
 import { prisma } from "@/lib/prisma";
 import { requireSession } from "@/lib/api-auth";
 import { canAccessBookedMeetingNotes } from "@/lib/lead-meeting-access";
-import { canAccessCallbackLead } from "@/lib/lead-callback-access";
 import { LEAD_ACTIVITY_KIND } from "@/lib/lead-activity-kinds";
 import { embedInlineImages, htmlToPlainText } from "@/lib/mail-send/prepare-outgoing-mail";
 
@@ -119,10 +118,6 @@ export async function POST(req: Request, { params }: Params) {
   if (!canAccessBookedMeetingNotes(session.user.role, session.user.id, lead)) {
     return NextResponse.json({ error: "Ingen adgang til at sende mail for dette lead." }, { status: 403 });
   }
-  if (!canAccessCallbackLead(session.user.role, session.user.id, lead)) {
-    return NextResponse.json({ error: "Lead er reserveret til en anden sælger." }, { status: 403 });
-  }
-
   const host = envOrEmpty("SMTP_HOST");
   const portRaw = envOrEmpty("SMTP_PORT");
   const secureRaw = envOrEmpty("SMTP_SECURE");

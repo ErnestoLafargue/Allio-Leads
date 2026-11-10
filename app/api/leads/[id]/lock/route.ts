@@ -5,6 +5,12 @@ import { releaseExpiredLocksEverywhere, refreshLeadLock, releaseLeadLock, tryAcq
 
 type Params = { params: Promise<{ id: string }> };
 
+/**
+ * Lead-siden er bevidst åbning: alle må låse et lead med en andens aktive tilbagekald her
+ * (fx fundet via søgning). Kun dialerens automatiske udlevering er spærret.
+ */
+const LEAD_PAGE_LOCK_OPTS = { allowOtherUsersCallback: true };
+
 /** POST: prøv at overtage lås (fx fra lead-detalje). */
 export async function POST(_req: Request, { params }: Params) {
   const { session, response } = await requireSession();
@@ -26,7 +32,7 @@ export async function POST(_req: Request, { params }: Params) {
     });
     if (!existing) return NextResponse.json({ error: "Ikke fundet" }, { status: 404 });
 
-    const ok = await tryAcquireLeadLock(prisma, id, userId);
+    const ok = await tryAcquireLeadLock(prisma, id, userId, new Date(), LEAD_PAGE_LOCK_OPTS);
     if (!ok) {
       const fresh = await prisma.lead.findUnique({
         where: { id },
@@ -72,7 +78,7 @@ export async function PATCH(_req: Request, { params }: Params) {
 
   try {
     await releaseExpiredLocksEverywhere(prisma);
-    const ok = await refreshLeadLock(prisma, id, userId);
+    const ok = await refreshLeadLock(prisma, id, userId, new Date(), LEAD_PAGE_LOCK_OPTS);
     if (!ok) {
       return NextResponse.json({ error: "Kunne ikke forlænge lås (måske overtaget af anden?)" }, { status: 409 });
     }

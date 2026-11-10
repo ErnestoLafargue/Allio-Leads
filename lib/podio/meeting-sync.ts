@@ -1,5 +1,6 @@
 import { prisma } from "@/lib/prisma";
 import { formatPodioDateTimeUtc } from "@/lib/podio/datetime";
+import { resolvePodioSellerItemId } from "@/lib/podio/sellers";
 import {
   createItem,
   deleteItem,
@@ -9,6 +10,7 @@ import {
   readTextValue,
   resolveCategoryOptionId,
   resolveFieldExternalId,
+  setPodioAppReference,
   setPodioFieldValue,
   updateItemValues,
   type PodioFieldValues,
@@ -61,6 +63,7 @@ type LeadMeetingSnapshot = {
   calComMeetingUrl: string | null;
   notes: string | null;
   bookedByUser: { name: string | null } | null;
+  assignedUser: { name: string; podioSellerItemId: number | null } | null;
 };
 
 function logPodioError(context: string, err: unknown): void {
@@ -118,6 +121,7 @@ async function buildMoedeFields(
   if (lead.meetingScheduledFor) {
     await setDate(fields, MOEDE_FIELDS.dato, lead.meetingScheduledFor);
   }
+  await setSaelger(fields, lead);
 
   // Interne lead-noter må kun ligge i Podio ("Møde noter") — aldrig i Cal.eu,
   // hvor kunden kan se dem. Feltet er valgfrit i appen, så fejl er ikke-fatale.
@@ -162,7 +166,7 @@ async function buildMoedeFields(
   return fields;
 }
 
-async function resolveMoedeItemId(leadId: string, cachedPodioItemId: string | null): Promise<number | null> {
+export async function resolveMoedeItemId(leadId: string, cachedPodioItemId: string | null): Promise<number | null> {
   if (cachedPodioItemId) {
     const n = Number(cachedPodioItemId);
     if (Number.isFinite(n) && n > 0) return n;
@@ -190,8 +194,47 @@ async function loadLeadMeetingSnapshot(leadId: string): Promise<LeadMeetingSnaps
       calComMeetingUrl: true,
       notes: true,
       bookedByUser: { select: { name: true } },
+      assignedUser: { select: { name: true, podioSellerItemId: true } },
     },
   });
+}
+
+/**
+ * Sæt «Sælger» til den tildelte sælgers Podio-element. Uden sælger røres feltet kun, når
+ * `clearWhenUnassigned` (aktivt valg af «Ingen tildelt») — ellers kunne en sælger sat direkte i
+ * Podio blive slettet af en almindelig synk. Ikke-fatal.
+ */
+async function setSaelger(
+  fields: PodioFieldValues,
+  lead: LeadMeetingSnapshot,
+  opts: { clearWhenUnassigned?: boolean } = {},
+): Promise<void> {
+  if (!lead.assignedUser && !opts.clearWhenUnassigned) return;
+  try {
+    const itemId = lead.assignedUser ? await resolvePodioSellerItemId(lead.assignedUser) : null;
+    // Sælger uden Podio-element: lad feltet være (bedre end at tømme en korrekt værdi).
+    if (lead.assignedUser && !itemId) return;
+    await setPodioAppReference("moeder", fields, MOEDE_FIELDS.saelger, itemId ? [itemId] : []);
+  } catch (err) {
+    logPodioError("Sælger-felt", err);
+  }
+}
+
+/** Opdater kun «Sælger» på Møder-item (efter tildeling under Kommende møder). Ikke-fatal. */
+export async function updateMoedeSellerInPodio(leadId: string): Promise<void> {
+  if (!isPodioAppConfigured("moeder")) return;
+  try {
+    const lead = await loadLeadMeetingSnapshot(leadId);
+    if (!lead) return;
+    const itemId = await resolveMoedeItemId(lead.id, lead.podioItemId);
+    if (!itemId) return;
+    const fields: PodioFieldValues = {};
+    await setSaelger(fields, lead, { clearWhenUnassigned: true });
+    if (Object.keys(fields).length === 0) return;
+    await updateItemValues("moeder", itemId, fields);
+  } catch (err) {
+    logPodioError("updateMoedeSellerInPodio", err);
+  }
 }
 
 /**

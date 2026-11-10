@@ -18,6 +18,7 @@ export function UsersAdminPanel() {
   const [password, setPassword] = useState("");
   const [phone, setPhone] = useState("");
   const [role, setRole] = useState<"SELLER" | "ADMIN">("SELLER");
+  const [isDrivingSeller, setIsDrivingSeller] = useState(false);
   const [creating, setCreating] = useState(false);
 
   useEffect(() => {
@@ -52,7 +53,7 @@ export function UsersAdminPanel() {
     const res = await fetch("/api/users", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ username, name, password, role, phone }),
+      body: JSON.stringify({ username, name, password, role, phone, isDrivingSeller }),
     });
     setCreating(false);
     if (!res.ok) {
@@ -67,6 +68,7 @@ export function UsersAdminPanel() {
     setPassword("");
     setPhone("");
     setRole("SELLER");
+    setIsDrivingSeller(false);
   }
 
   if (status === "loading" || loading) {
@@ -138,6 +140,18 @@ export function UsersAdminPanel() {
             <option value="ADMIN">Administrator</option>
           </select>
         </div>
+        <label className="flex cursor-pointer items-start gap-2.5">
+          <input
+            type="checkbox"
+            checked={isDrivingSeller}
+            onChange={(e) => setIsDrivingSeller(e.target.checked)}
+            className="mt-0.5 h-4 w-4 rounded border-stone-300"
+          />
+          <span className="text-sm text-stone-700">
+            <span className="font-medium">Kørende sælger</span>
+            <span className="block text-xs text-stone-500">Får kalender og kan få tildelt møder.</span>
+          </span>
+        </label>
         {error && <p className="text-sm text-red-600">{error}</p>}
         <button
           type="submit"
