@@ -327,7 +327,7 @@ model Lead {
   lockExpiresAt  DateTime?
   lockedByUser   User?     @relation("LeadLockedBy", fields: [lockedByUserId], references: [id], onDelete: SetNull)
 
-  /// Planlagt genopkald — lead reserveret til én sælger indtil tidspunktet (eller ændret status)
+  /// Planlagt genopkald — lead låst til den tildelte sælger, indtil udfaldet ændres (også efter tidspunktet)
   callbackScheduledFor     DateTime?
   callbackReservedByUserId String?
   callbackReservedByUser   User?     @relation("LeadCallbackReservedBy", fields: [callbackReservedByUserId], references: [id], onDelete: SetNull)
@@ -336,7 +336,7 @@ model Lead {
   callbackNote             String    @default("")
   callbackCreatedByUserId  String?
   callbackCreatedByUser    User?     @relation("LeadCallbackCreatedBy", fields: [callbackCreatedByUserId], references: [id], onDelete: SetNull)
-  /// Første gang den tildelte åbner/reserverer leadet efter planlagt tilbagekald (bruges til genudlevering i kø).
+  /// Første gang den tildelte åbner/reserverer leadet efter planlagt tilbagekald (kun registrering — frigiver ikke leadet).
   callbackSeenByAssigneeAt DateTime?
 
   /// Cal.eu booking uid + ekstern mødelink (Google Meet/Cal Video) — sættes når booking oprettes eksternt.

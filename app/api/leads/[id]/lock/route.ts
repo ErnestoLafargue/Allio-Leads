@@ -2,8 +2,20 @@ import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { requireSession, requireAdmin } from "@/lib/api-auth";
 import { releaseExpiredLocksEverywhere, refreshLeadLock, releaseLeadLock, tryAcquireLeadLock } from "@/lib/lead-lock";
+import {
+  callbackReservedForOtherUserMessage,
+  isCallbackReservedForOtherUser,
+} from "@/lib/lead-callback-access";
 
 type Params = { params: Promise<{ id: string }> };
+
+/**
+ * Admin-undtagelse: admin må bevidst låse et lead med en andens aktive tilbagekald her (lead-siden),
+ * fx for at rydde op eller flytte tilbagekaldet. Dialerens kø/«næste lead» har ingen undtagelse.
+ */
+function lockOptsFor(role: string) {
+  return { allowOtherUsersCallback: role === "ADMIN" };
+}
 
 /** POST: prøv at overtage lås (fx fra lead-detalje). */
 export async function POST(_req: Request, { params }: Params) {
@@ -22,11 +34,21 @@ export async function POST(_req: Request, { params }: Params) {
         lockExpiresAt: true,
         lockedAt: true,
         lockedByUser: { select: { name: true, username: true } },
+        status: true,
+        callbackReservedByUserId: true,
+        callbackReservedByUser: { select: { name: true } },
       },
     });
     if (!existing) return NextResponse.json({ error: "Ikke fundet" }, { status: 404 });
+    const lockOpts = lockOptsFor(session!.user.role);
+    if (!lockOpts.allowOtherUsersCallback && isCallbackReservedForOtherUser(userId, existing)) {
+      return NextResponse.json(
+        { error: callbackReservedForOtherUserMessage(existing.callbackReservedByUser?.name) },
+        { status: 403 },
+      );
+    }
 
-    const ok = await tryAcquireLeadLock(prisma, id, userId);
+    const ok = await tryAcquireLeadLock(prisma, id, userId, new Date(), lockOpts);
     if (!ok) {
       const fresh = await prisma.lead.findUnique({
         where: { id },
@@ -72,7 +94,7 @@ export async function PATCH(_req: Request, { params }: Params) {
 
   try {
     await releaseExpiredLocksEverywhere(prisma);
-    const ok = await refreshLeadLock(prisma, id, userId);
+    const ok = await refreshLeadLock(prisma, id, userId, new Date(), lockOptsFor(session!.user.role));
     if (!ok) {
       return NextResponse.json({ error: "Kunne ikke forlænge lås (måske overtaget af anden?)" }, { status: 409 });
     }

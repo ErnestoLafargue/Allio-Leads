@@ -26,7 +26,9 @@ function cooldownHoursForLead(lead: LeadCooldownCandidate): number {
  *
  * Opretter LeadOutcomeLog (userId null, status NEW) så scoreboard får episode-grænse ved genåbning i køen.
  *
- * Tilbagekald: rækker med planlagt genopkald må ikke auto-nulstilles af cooldown-reglen.
+ * Tilbagekald: rækker med planlagt genopkald må ikke auto-nulstilles af cooldown-reglen. Et aktivt
+ * tilbagekald frigives heller aldrig automatisk, når tidspunktet er passeret — det forbliver låst
+ * til den tildelte sælger, indtil udfaldet ændres (se lib/lead-callback-access.ts).
  */
 export async function applyLeadCooldownResets(): Promise<void> {
   const nowMs = Date.now();
@@ -112,50 +114,9 @@ export async function applyLeadCooldownResets(): Promise<void> {
       data: ids.map((leadId) => ({ leadId, userId: null, status: "NEW" })),
     });
   }
-
-  await releaseStaleCallbacksToCampaignPool(touchedAt);
 }
 
-/**
- * Planlagt tilbagekald er overskredet, tildelte har været inde på leadet, men udfald er ikke ændret
- * (stadig CALLBACK_SCHEDULED + PENDING) → lead tilbage som «Ny» i kampagnekøen for alle.
- */
-export async function releaseStaleCallbacksToCampaignPool(now: Date = new Date()): Promise<void> {
-  const touchedAt = new Date();
-  const toRelease = await prisma.lead.findMany({
-    where: {
-      status: "CALLBACK_SCHEDULED",
-      callbackStatus: "PENDING",
-      callbackScheduledFor: { not: null, lte: now },
-      callbackSeenByAssigneeAt: { not: null },
-    },
-    select: { id: true },
-  });
-  if (toRelease.length === 0) return;
-
-  const ids = toRelease.map((l) => l.id);
-  await prisma.lead.updateMany({
-    where: { id: { in: ids } },
-    data: {
-      status: "NEW",
-      callbackScheduledFor: null,
-      callbackReservedByUserId: null,
-      callbackStatus: "PENDING",
-      callbackNote: "",
-      callbackCreatedByUserId: null,
-      callbackSeenByAssigneeAt: null,
-      lockedByUserId: null,
-      lockedAt: null,
-      lockExpiresAt: null,
-      updatedAt: touchedAt,
-    },
-  });
-  await prisma.leadOutcomeLog.createMany({
-    data: ids.map((leadId) => ({ leadId, userId: null, status: "NEW" })),
-  });
-}
-
-/** Første gang tildelte åbner/reserverer lead med aktivt tilbagekald (bevares til genudlevering ved udløb). */
+/** Første gang tildelte åbner/reserverer lead med aktivt tilbagekald (kun registrering — frigiver ikke leadet). */
 export async function markCallbackSeenByAssignee(leadId: string, assigneeUserId: string): Promise<void> {
   const seenAt = new Date();
   await prisma.$executeRaw`

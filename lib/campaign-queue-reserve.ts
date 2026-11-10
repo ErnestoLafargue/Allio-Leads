@@ -7,6 +7,10 @@ import { isLeadInRebookingDialerPool, type QueueOrderFields } from "@/lib/lead-q
 import { MEETING_OUTCOME_REBOOK, normalizeMeetingOutcomeStatus } from "@/lib/meeting-outcome";
 import { releaseLeadLock, tryAcquireLeadLock } from "@/lib/lead-lock";
 import {
+  callbackReservedForOtherUserMessage,
+  isCallbackReservedForOtherUser,
+} from "@/lib/lead-callback-access";
+import {
   filterLeadsByWorkspaceStartDate,
   type WorkspaceStartDateFilterState,
 } from "@/lib/workspace-start-date-filter";
@@ -60,11 +64,16 @@ export type TryReserveLeadOpts = {
   /**
    * Bruger har valgt dette lead eksplicit (klik i listen / leadId i URL).
    * Spring kø-krav over, så voicemail m.m. ikke erstattes af næste «Ny».
+   * Tilbagekaldslåsen gælder stadig: en andens aktive tilbagekald åbnes aldrig i dialeren.
    */
   explicitOpen?: boolean;
 };
 
-/** Lock + validate + visit history. Returns lead or null. */
+/**
+ * Lock + validate + visit history. Returns lead or null.
+ * Et lead med aktivt tilbagekald hos en anden bruger afvises allerede i låsens UPDATE (atomisk) —
+ * uden admin-undtagelse, da dette er dialeren.
+ */
 export async function tryReserveLead(opts: TryReserveLeadOpts): Promise<ReservedLead | null> {
   const db = opts.db ?? defaultPrisma;
   const { leadId, userId, now, systemCampaignType, explicitOpen } = opts;
@@ -72,6 +81,11 @@ export async function tryReserveLead(opts: TryReserveLeadOpts): Promise<Reserved
   if (!ok) return null;
   const lead = await findReservedLead(db, leadId);
   if (!lead) return null;
+  // Lead kan være sat til en andens tilbagekald mellem lås og læsning (fx af admin).
+  if (isCallbackReservedForOtherUser(userId, lead)) {
+    await releaseLeadLock(db, leadId, userId);
+    return null;
+  }
 
   const isCallbackCandidate =
     lead.status === "CALLBACK_SCHEDULED" &&
@@ -122,6 +136,28 @@ export async function tryReserveLead(opts: TryReserveLeadOpts): Promise<Reserved
     });
   }
   return lead;
+}
+
+/**
+ * Fejltekst når et eksplicit valgt lead ikke kunne åbnes, fordi det har et aktivt tilbagekald hos en
+ * anden bruger — ellers `null` (almindelig «optaget»/kø-fejl).
+ */
+export async function explainCallbackReservedForOtherUser(opts: {
+  db?: PrismaClient;
+  leadId: string;
+  userId: string;
+}): Promise<string | null> {
+  const db = opts.db ?? defaultPrisma;
+  const lead = await db.lead.findUnique({
+    where: { id: opts.leadId },
+    select: {
+      status: true,
+      callbackReservedByUserId: true,
+      callbackReservedByUser: { select: { name: true } },
+    },
+  });
+  if (!lead || !isCallbackReservedForOtherUser(opts.userId, lead)) return null;
+  return callbackReservedForOtherUserMessage(lead.callbackReservedByUser?.name);
 }
 
 export type ReservePendingCallbacksOpts = {

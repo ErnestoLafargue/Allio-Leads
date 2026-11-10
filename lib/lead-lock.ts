@@ -1,4 +1,5 @@
 import type { Prisma, PrismaClient } from "@prisma/client";
+import { notCallbackReservedForOtherUserWhere } from "@/lib/lead-callback-access";
 
 /**
  * Maks. tid uden heartbeat (seneste aktivitet på `lockedAt`) før lås frigives.
@@ -59,8 +60,21 @@ export function isLockedByOtherUser(
   return lead.lockedByUserId !== userId;
 }
 
+export type LeadLockOpts = {
+  /**
+   * Admin på lead-siden må bevidst låse et lead med en andens aktive tilbagekald (oprydning/flyt).
+   * Dialeren sætter den aldrig.
+   */
+  allowOtherUsersCallback?: boolean;
+};
+
+function callbackGuardWhere(userId: string, opts?: LeadLockOpts): Prisma.LeadWhereInput {
+  return opts?.allowOtherUsersCallback ? {} : notCallbackReservedForOtherUserWhere(userId);
+}
+
 /**
- * Atomisk: sæt lås hvis lead er ledigt, udløbet, eller allerede ejet af samme bruger.
+ * Atomisk: sæt lås hvis lead er ledigt, udløbet, eller allerede ejet af samme bruger — og ikke har
+ * et aktivt tilbagekald hos en anden bruger (medmindre `opts.allowOtherUsersCallback`).
  * Returnerer true hvis præcis én række blev opdateret.
  */
 export async function tryAcquireLeadLock(
@@ -68,6 +82,7 @@ export async function tryAcquireLeadLock(
   leadId: string,
   userId: string,
   now: Date = new Date(),
+  opts?: LeadLockOpts,
 ): Promise<boolean> {
   const idleMs = getLeadLockMaxIdleMs();
   const staleCutoff = new Date(now.getTime() - idleMs);
@@ -89,6 +104,7 @@ export async function tryAcquireLeadLock(
         { lockedAt: null, lockExpiresAt: { lt: now } },
         { lockedByUserId: { not: null }, lockedAt: null, lockExpiresAt: null },
       ],
+      AND: [callbackGuardWhere(userId, opts)],
     },
     data: {
       lockedByUserId: userId,
@@ -105,6 +121,7 @@ export async function refreshLeadLock(
   leadId: string,
   userId: string,
   now: Date = new Date(),
+  opts?: LeadLockOpts,
 ): Promise<boolean> {
   const idleMs = getLeadLockMaxIdleMs();
   const staleCutoff = new Date(now.getTime() - idleMs);
@@ -118,6 +135,7 @@ export async function refreshLeadLock(
         { lockedAt: { gte: staleCutoff } },
         { lockedAt: null, lockExpiresAt: { gt: now } },
       ],
+      AND: [callbackGuardWhere(userId, opts)],
     },
     data: {
       lockedAt: now,
@@ -125,7 +143,7 @@ export async function refreshLeadLock(
     },
   });
   if (extended.count === 1) return true;
-  return tryAcquireLeadLock(db, leadId, userId, now);
+  return tryAcquireLeadLock(db, leadId, userId, now, opts);
 }
 
 /** Frigiv lås. Admin kan sætte opts.admin for at fjerne uanset ejer. */
