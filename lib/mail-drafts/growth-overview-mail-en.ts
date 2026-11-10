@@ -504,7 +504,7 @@ flows are in place – without more new clients.
   line-height:17px;
   letter-spacing:0.2px;
   color:#BFA9B1;">
-For example, around <span style="color:#E8BCC4;">DKK 340,000</span> a year
+Equivalent to around <span style="color:#E8BCC4;">DKK 340,000</span> extra a year
 for a clinic with DKK 2,000,000 in annual revenue.
 </p>
 </td>

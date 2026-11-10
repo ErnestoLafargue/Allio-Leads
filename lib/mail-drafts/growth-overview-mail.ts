@@ -504,7 +504,7 @@ rette flows er sat op – uden flere nye kunder.
   line-height:17px;
   letter-spacing:0.2px;
   color:#BFA9B1;">
-Svarer fx til ca. <span style="color:#E8BCC4;">340.000 kr.</span> om året
+Svarer til ca. <span style="color:#E8BCC4;">340.000 kr.</span> ekstra om året
 for en klinik med 2.000.000 kr. i årlig omsætning.
 </p>
 </td>
