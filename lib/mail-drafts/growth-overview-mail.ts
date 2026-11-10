@@ -302,7 +302,7 @@ Typisk er omkring 60 % af kartoteket kunder, der stadig
 kommer jævnligt. De sidste 40 % har ofte været trofaste
 og lagt mange penge i klinikken – men kommer ikke længere.
 Det er det potentiale, vi henter hjem: typisk
-<strong style="color:#39252D;">10–30 ekstra bookinger om måneden</strong>,
+<strong style="color:#39252D;">5–25 ekstra bookinger om måneden</strong>,
 afhængigt af hvor meget kundedata der ligger i ${P.bookingSystem}.
 </p>
 </td>
@@ -336,12 +336,12 @@ Fastholdelse og loyalitet
   line-height:22px;
   color:#61575A;">
 Nogle kunder kommer hver 4. uge, andre hver 12. Allio
-kender den enkelte kundes rytme, og glider en kunde ud
+kender kundernes besøgsfrekvens, og glider en kunde ud
 af den, får kunden en personlig henvendelse – ikke en
 reklame. Sammen med loyalitetsprogrammer til de aktive
 kunder er det forskellen på en kunde, der lægger
 <strong style="color:#39252D;">2.500 kr.</strong> om året,
-og en, der lægger <strong style="color:#39252D;">8.500 kr.</strong>
+og en, der lægger <strong style="color:#39252D;">5.000 kr.</strong>
 </p>
 </td>
 </tr>
@@ -413,7 +413,7 @@ Flere gode Google-anmeldelser
 Anmeldelseslinket sendes kun til de rette kunder – fx
 efter tredje besøg eller et afsluttet forløb – så det er
 de loyale kunder, der deler deres oplevelse. Vi ser
-typisk <strong style="color:#39252D;">15–20 nye gode anmeldelser om måneden</strong>.
+typisk <strong style="color:#39252D;">10–20 nye gode anmeldelser om måneden</strong>.
 </p>
 </td>
 </tr>
@@ -495,6 +495,17 @@ Når relationer bliver<br>
   color:#E5DADC;">
 Typisk stigning i den årlige omsætning, når de
 rette flows er sat op – uden flere nye kunder.
+</p>
+<p style="
+  margin:12px 0 0;
+  padding-top:12px;
+  border-top:1px solid #5A4550;
+  font-size:11px;
+  line-height:17px;
+  letter-spacing:0.2px;
+  color:#BFA9B1;">
+Svarer fx til ca. <span style="color:#E8BCC4;">340.000 kr.</span> om året
+for en klinik med 2.000.000 kr. i årlig omsætning.
 </p>
 </td>
 </tr>
@@ -624,8 +635,9 @@ bedst kan lide, og løbende tilpasser menuen efter sæsonen.
 I.
 </td>
 <td style="padding-bottom:17px;font-size:13px;line-height:21px;color:#5C5355;">
-<strong>Vi skaber overblik</strong> over kunder,
-besøgsmønstre og muligheder i ${P.bookingSystem}.
+<strong>Vi skaber overblik</strong> over jeres kunder i
+${P.bookingSystem}: hvem der kommer fast, hvem der er gledet
+væk, og hvor der ligger bookinger, I ikke får i dag.
 </td>
 </tr>
 
@@ -635,9 +647,9 @@ besøgsmønstre og muligheder i ${P.bookingSystem}.
 II.
 </td>
 <td style="padding-bottom:17px;font-size:13px;line-height:21px;color:#5C5355;">
-<strong>Vi bygger en plan</strong>
-for genaktivering, fastholdelse,
-mersalg og anmeldelser.
+<strong>Vi bygger en plan</strong> for genaktivering,
+fastholdelse, mersalg og anmeldelser – tilpasset jeres
+behandlinger, sæsonen og jeres kundegrundlag.
 </td>
 </tr>
 
@@ -647,9 +659,9 @@ mersalg og anmeldelser.
 III.
 </td>
 <td style="font-size:13px;line-height:21px;color:#5C5355;">
-<strong>Vi udfører og optimerer løbende</strong>,
-så det ikke bliver endnu en stor opgave
-for jeres team.
+<strong>Vi udfører og optimerer løbende</strong>: vi sætter
+kampagner og flows op, følger resultaterne og justerer,
+så det ikke bliver endnu en stor opgave for jeres team.
 </td>
 </tr>
 

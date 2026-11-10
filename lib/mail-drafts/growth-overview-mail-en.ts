@@ -302,7 +302,7 @@ Typically, around 60% of a client base still visits
 regularly. The other 40% have often been loyal and spent
 a lot at the clinic – but no longer come in. That is the
 potential we bring back: typically
-<strong style="color:#39252D;">10–30 extra bookings a month</strong>,
+<strong style="color:#39252D;">5–25 extra bookings a month</strong>,
 depending on how much client data sits in ${P.bookingSystem}.
 </p>
 </td>
@@ -336,12 +336,12 @@ Retention and loyalty
   line-height:22px;
   color:#61575A;">
 Some clients come every 4 weeks, others every 12. Allio
-knows each client's rhythm, and when a client drifts out
+knows each client's visit frequency, and when a client drifts out
 of it, they get a personal message – not an ad. Combined
 with loyalty programmes for active clients, it is the
 difference between a client who spends
 <strong style="color:#39252D;">DKK 2,500</strong> a year
-and one who spends <strong style="color:#39252D;">DKK 8,500</strong>.
+and one who spends <strong style="color:#39252D;">DKK 5,000</strong>.
 </p>
 </td>
 </tr>
@@ -413,7 +413,7 @@ More great Google reviews
 The review link only goes to the right clients – e.g.
 after their third visit or a completed course of treatment
 – so it is your loyal clients who share their experience.
-We typically see <strong style="color:#39252D;">15–20 new great reviews a month</strong>.
+We typically see <strong style="color:#39252D;">10–20 new great reviews a month</strong>.
 </p>
 </td>
 </tr>
@@ -495,6 +495,17 @@ When relationships turn<br>
   color:#E5DADC;">
 Typical increase in annual revenue once the right
 flows are in place – without more new clients.
+</p>
+<p style="
+  margin:12px 0 0;
+  padding-top:12px;
+  border-top:1px solid #5A4550;
+  font-size:11px;
+  line-height:17px;
+  letter-spacing:0.2px;
+  color:#BFA9B1;">
+For example, around <span style="color:#E8BCC4;">DKK 340,000</span> a year
+for a clinic with DKK 2,000,000 in annual revenue.
 </p>
 </td>
 </tr>
@@ -624,8 +635,9 @@ best, and adjusts the menu with the seasons.
 I.
 </td>
 <td style="padding-bottom:17px;font-size:13px;line-height:21px;color:#5C5355;">
-<strong>We map out</strong> your clients, visit
-patterns and opportunities in ${P.bookingSystem}.
+<strong>We map out</strong> your clients in
+${P.bookingSystem}: who comes regularly, who has drifted
+away, and where there are bookings you are missing today.
 </td>
 </tr>
 
@@ -635,9 +647,9 @@ patterns and opportunities in ${P.bookingSystem}.
 II.
 </td>
 <td style="padding-bottom:17px;font-size:13px;line-height:21px;color:#5C5355;">
-<strong>We build a plan</strong>
-for reactivation, retention,
-upselling and reviews.
+<strong>We build a plan</strong> for reactivation,
+retention, upselling and reviews – tailored to your
+treatments, the season and your client base.
 </td>
 </tr>
 
@@ -647,9 +659,9 @@ upselling and reviews.
 III.
 </td>
 <td style="font-size:13px;line-height:21px;color:#5C5355;">
-<strong>We run and optimise it continuously</strong>,
-so it never becomes another big task
-for your team.
+<strong>We run and optimise it continuously</strong>: we set
+up campaigns and flows, follow the results and adjust,
+so it never becomes another big task for your team.
 </td>
 </tr>
 
