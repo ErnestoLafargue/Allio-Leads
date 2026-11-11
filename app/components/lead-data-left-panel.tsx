@@ -10,6 +10,7 @@ import {
 import { ExternalSearchButton } from "@/app/components/external-search-button";
 import { buildHintlyLeadUrl, isKrakPersonFieldLabel, isWebsiteFieldLabel } from "@/lib/external-search-urls";
 import { formatAnnoncerKanaler, formatAnnoncerStatus } from "@/lib/annoncer-display";
+import { COMPANY_TYPE_CUSTOM_KEY } from "@/lib/active-campaign-queue";
 import {
   isVisiblePersonFieldKey,
   visibleLeadPhoneFields,
@@ -278,7 +279,8 @@ export function LeadDataLeftPanel({
     ...(cfg.extensions.city ?? []),
   ];
 
-  const usedCustomKeys = new Set<string>();
+  // Virksomhedstype vises som fast felt under Domæne — ikke igen i kampagnens egne felter.
+  const usedCustomKeys = new Set<string>([COMPANY_TYPE_CUSTOM_KEY]);
 
   return (
     <div className="flex h-full flex-col space-y-6 lg:pr-6">
@@ -480,6 +482,18 @@ export function LeadDataLeftPanel({
                 </div>
               );
             })}
+            {g === "companyName" ? (
+              <div>
+                <label className="mb-1 block text-xs font-medium text-stone-600">Virksomhedstype</label>
+                <input
+                  type="text"
+                  className={inputCls}
+                  value={custom[COMPANY_TYPE_CUSTOM_KEY] ?? ""}
+                  onChange={(e) => onCustom(COMPANY_TYPE_CUSTOM_KEY, e.target.value)}
+                  placeholder="Virksomhedstype"
+                />
+              </div>
+            ) : null}
           </div>
         </section>
       ))}
