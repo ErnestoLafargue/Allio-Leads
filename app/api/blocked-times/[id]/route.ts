@@ -2,7 +2,7 @@ import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { requireSession } from "@/lib/api-auth";
 import { canDeleteBlockedTime, canEditBlockedTime } from "@/lib/blocked-time-auth";
-import { listMeetingAssignableUsers } from "@/lib/meeting-assignee";
+import { listBlockedTimeOwners } from "@/lib/meeting-assignee";
 
 type Params = { params: Promise<{ id: string }> };
 
@@ -52,8 +52,8 @@ export async function PATCH(req: Request, { params }: Params) {
     return NextResponse.json({ error: "Ingen adgang til at redigere denne blokering." }, { status: 403 });
   }
 
-  const assignees = await listMeetingAssignableUsers();
-  if (!assignees.some((u) => u.id === targetUserId)) {
+  const owners = await listBlockedTimeOwners();
+  if (!owners.some((u) => u.id === targetUserId)) {
     return NextResponse.json({ error: "Ugyldig mødeansvarlig." }, { status: 400 });
   }
 

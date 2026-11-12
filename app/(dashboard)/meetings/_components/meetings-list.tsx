@@ -128,6 +128,8 @@ export function MeetingsList({ type }: { type: "upcoming" | "past" }) {
 
   const [rows, setRows] = useState<MeetingRow[]>([]);
   const [assignees, setAssignees] = useState<Assignee[]>([]);
+  /** Alle brugere en blokering kan tilhøre (kørende sælgere først). */
+  const [blockOwners, setBlockOwners] = useState<Assignee[]>([]);
   const [defaultAssigneeId, setDefaultAssigneeId] = useState<string | null>(null);
   const [savingAssigneeById, setSavingAssigneeById] = useState<Record<string, boolean>>({});
   const [savedHintById, setSavedHintById] = useState<Record<string, boolean>>({});
@@ -250,9 +252,14 @@ export function MeetingsList({ type }: { type: "upcoming" | "past" }) {
     async function loadAssignees() {
       const res = await fetch("/api/users/meeting-assignees");
       if (!res.ok) return;
-      const data = (await res.json()) as { users: Assignee[]; defaultUserId: string | null };
+      const data = (await res.json()) as {
+        users: Assignee[];
+        defaultUserId: string | null;
+        blockOwners?: Assignee[];
+      };
       if (!cancelled) {
         setAssignees(data.users ?? []);
+        setBlockOwners(data.blockOwners ?? data.users ?? []);
         setDefaultAssigneeId(data.defaultUserId ?? null);
       }
     }
@@ -442,7 +449,8 @@ export function MeetingsList({ type }: { type: "upcoming" | "past" }) {
               createPrefill={blockedDialogPrefill}
               preferredUserId={blockedDialogSellerId}
               currentUserId={userId}
-              assignees={assignees}
+              assignees={blockOwners}
+              sellerIds={assignees.map((u) => u.id)}
               defaultUserId={defaultAssigneeId}
               onClose={() => setBlockedDialogOpen(false)}
               onSaved={(saved) => void onBlockedTimesSaved(saved)}

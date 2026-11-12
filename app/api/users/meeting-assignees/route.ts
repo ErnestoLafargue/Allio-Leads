@@ -1,6 +1,10 @@
 import { NextResponse } from "next/server";
 import { requireSession } from "@/lib/api-auth";
-import { getDefaultMeetingAssigneeId, listMeetingAssignableUsers } from "@/lib/meeting-assignee";
+import {
+  getDefaultMeetingAssigneeId,
+  listBlockedTimeOwners,
+  listMeetingAssignableUsers,
+} from "@/lib/meeting-assignee";
 
 export async function GET() {
   const { response } = await requireSession();
@@ -8,7 +12,8 @@ export async function GET() {
 
   const users = await listMeetingAssignableUsers();
   const defaultUserId = await getDefaultMeetingAssigneeId();
+  const blockOwners = await listBlockedTimeOwners();
 
-  return NextResponse.json({ users, defaultUserId });
+  return NextResponse.json({ users, defaultUserId, blockOwners });
 }
 

@@ -54,6 +54,21 @@ export async function listMeetingAssignableUsers(): Promise<DrivingSeller[]> {
   return listDrivingSellers();
 }
 
+/**
+ * Alle brugere, en blokering kan tilhøre: kørende sælgere først (efter prioritet), derefter resten
+ * efter navn. Blokeringer hos andre end kørende sælgere påvirker ikke ledige booking-tider.
+ */
+export async function listBlockedTimeOwners(): Promise<{ id: string; name: string; username: string }[]> {
+  const rows = await prisma.user.findMany({
+    select: { id: true, name: true, username: true, isDrivingSeller: true, sellerPriority: true },
+  });
+  const drivers = sortByPriority(rows.filter((u) => u.isDrivingSeller));
+  const others = rows
+    .filter((u) => !u.isDrivingSeller)
+    .sort((a, b) => a.name.localeCompare(b.name, "da"));
+  return [...drivers, ...others].map(({ id, name, username }) => ({ id, name, username }));
+}
+
 /** Sælger nr. 1 — bruges når der ikke kan vælges ud fra kalenderen. */
 export async function getDefaultMeetingAssigneeId(): Promise<string | null> {
   return (await listDrivingSellers())[0]?.id ?? null;

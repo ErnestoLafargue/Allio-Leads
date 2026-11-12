@@ -327,7 +327,9 @@ export function MeetingsWeekCalendar({
       ? lanes.filter(
           (l) =>
             !hiddenLanes.has(l.key) &&
-            (l.key !== UNASSIGNED || visibleMeetings.some((m) => laneKeyOf(m) === UNASSIGNED)),
+            (l.key !== UNASSIGNED ||
+              visibleMeetings.some((m) => laneKeyOf(m) === UNASSIGNED) ||
+              visibleBlocked.some((b) => !lanes.some((x) => x.key === b.userId))),
         )
       : null;
 
@@ -647,7 +649,9 @@ export function MeetingsWeekCalendar({
                           dayKey,
                           dayIndex,
                           dayMeetings.filter((m) => laneKeyOf(m) === l.key),
-                          visibleBlocked.filter((b) => b.userId === l.key),
+                          visibleBlocked.filter((b) =>
+                            l.key === UNASSIGNED ? !lanes.some((x) => x.key === b.userId) : b.userId === l.key,
+                          ),
                           {
                             key: `${dayKey}-${l.key}`,
                             withRightBorder: li === columnLanes.length - 1,

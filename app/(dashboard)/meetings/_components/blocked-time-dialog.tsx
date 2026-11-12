@@ -32,9 +32,11 @@ type Props = {
   /** Ved create: sælgeren man klikkede hos («Pr. sælger»-kolonne eller eneste synlige sælger). */
   preferredUserId?: string | null;
   currentUserId: string;
-  /** Kørende sælgere (hentet af kalenderen). */
+  /** Brugere blokeringen kan tilhøre — kørende sælgere først (hentet af kalenderen). */
   assignees: Assignee[];
   defaultUserId?: string | null;
+  /** Kørende sælgeres id'er — vises øverst i listen. */
+  sellerIds?: string[];
   onClose: () => void;
   /** Kaldes efter gem (med den gemte blokering) eller slet (null). */
   onSaved: (saved: BlockedTimeDto | null) => void;
@@ -113,6 +115,7 @@ export function BlockedTimeDialog({
   currentUserId,
   assignees,
   defaultUserId,
+  sellerIds,
   onClose,
   onSaved,
 }: Props) {
@@ -145,7 +148,7 @@ export function BlockedTimeDialog({
     const startIso = toIso(startDate, startTime);
     const endIso = toIso(endDate, endTime);
     if (!userId) {
-      setSubmitErr("Vælg mødeansvarlig.");
+      setSubmitErr("Vælg hvem blokeringen tilhører.");
       return;
     }
     if (!title.trim()) {
@@ -228,30 +231,53 @@ export function BlockedTimeDialog({
           {mode === "edit" ? "Rediger blokering" : "Bloker tider"}
         </h2>
         <p className="mt-1 text-sm text-stone-600">
-          Blokerede perioder vises i kalenderen og fjernes fra ledige booking-tider for den valgte
-          mødeansvarlige.
+          Blokerede perioder vises i kalenderen. Hos kørende sælgere fjernes de også fra ledige
+          booking-tider.
         </p>
 
         {submitErr && <p className="mt-3 text-sm text-red-600">{submitErr}</p>}
 
         {showUserSelect ? (
           <label className="mt-4 block text-xs font-medium text-stone-600">
-            Mødeansvarlig
+            Blokeringen tilhører
             <select
               value={userId}
               onChange={(e) => setChosenUserId(e.target.value)}
               className="mt-1 w-full rounded-lg border border-stone-200 bg-white px-3 py-2 text-sm text-stone-900 shadow-sm outline-none ring-stone-400 focus:ring-2"
             >
-              {!userId ? <option value="">Vælg mødeansvarlig…</option> : null}
-              {selectOptions.map((u) => (
-                <option key={u.id} value={u.id}>
-                  {u.name}
-                </option>
-              ))}
+              {!userId ? <option value="">Vælg bruger…</option> : null}
+              {sellerIds ? (
+                <>
+                  <optgroup label="Kørende sælgere">
+                    {selectOptions
+                      .filter((u) => sellerIds.includes(u.id))
+                      .map((u) => (
+                        <option key={u.id} value={u.id}>
+                          {u.name}
+                        </option>
+                      ))}
+                  </optgroup>
+                  <optgroup label="Øvrige brugere">
+                    {selectOptions
+                      .filter((u) => !sellerIds.includes(u.id))
+                      .map((u) => (
+                        <option key={u.id} value={u.id}>
+                          {u.name}
+                        </option>
+                      ))}
+                  </optgroup>
+                </>
+              ) : (
+                selectOptions.map((u) => (
+                  <option key={u.id} value={u.id}>
+                    {u.name}
+                  </option>
+                ))
+              )}
             </select>
           </label>
         ) : (
-          <p className="mt-4 text-xs text-stone-500">Henter mødeansvarlige…</p>
+          <p className="mt-4 text-xs text-stone-500">Henter brugere…</p>
         )}
 
         <label className="mt-4 block text-xs font-medium text-stone-600">

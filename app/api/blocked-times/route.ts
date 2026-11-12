@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { requireSession } from "@/lib/api-auth";
-import { listMeetingAssignableUsers } from "@/lib/meeting-assignee";
+import { listBlockedTimeOwners } from "@/lib/meeting-assignee";
 
 function parseIsoDate(raw: string | null, label: string): Date | null {
   if (!raw?.trim()) return null;
@@ -95,8 +95,8 @@ export async function POST(req: Request) {
     return NextResponse.json({ error: "Sluttid skal være efter starttid." }, { status: 400 });
   }
 
-  const assignees = await listMeetingAssignableUsers();
-  if (!assignees.some((u) => u.id === targetUserId)) {
+  const owners = await listBlockedTimeOwners();
+  if (!owners.some((u) => u.id === targetUserId)) {
     return NextResponse.json({ error: "Ugyldig mødeansvarlig." }, { status: 400 });
   }
 
