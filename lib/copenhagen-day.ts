@@ -73,6 +73,29 @@ export function copenhagenDayBoundsUtcFromDayKey(dayKey: string): { start: Date;
   return { start, end };
 }
 
+/**
+ * UTC-tidspunkt for dansk vægur-tid `hhmm` (HH:mm) på `dayKey` — uafhængigt af browserens tidszone.
+ * Rammer også rigtigt på dage med sommertidsskift. null ved ugyldigt input.
+ */
+export function copenhagenWallTimeToUtc(dayKey: string, hhmm: string): Date | null {
+  const match = /^(\d{2}):(\d{2})$/u.exec(hhmm);
+  if (!match) return null;
+  const wanted = parseInt(match[1]!, 10) * 60 + parseInt(match[2]!, 10);
+  if (wanted >= 24 * 60) return null;
+  let start: Date;
+  try {
+    ({ start } = copenhagenDayBoundsUtcFromDayKey(dayKey));
+  } catch {
+    return null;
+  }
+  // Fra midnat + minutter, rettet for den time et sommertidsskift tidligere på dagen flytter uret.
+  const guess = start.getTime() + wanted * 60_000;
+  const parts = COPENHAGEN_YMD_HM_FMT.formatToParts(new Date(guess));
+  const part = (type: string) => parseInt(parts.find((p) => p.type === type)!.value, 10);
+  const shown = (part("hour") % 24) * 60 + part("minute");
+  return new Date(guess + (wanted - shown) * 60_000);
+}
+
 /** YYYY-MM-DD for kalenderdagen i Europe/Copenhagen (til login-scoreboard). */
 export function copenhagenDayKey(reference = new Date()): string {
   return COPENHAGEN_YMD_FMT.format(reference);

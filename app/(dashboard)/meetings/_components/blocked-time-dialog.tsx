@@ -1,6 +1,9 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useState } from "react";
+import { copenhagenWallTimeToUtc } from "@/lib/copenhagen-day";
+import { defaultBlockedTimeAssignee } from "@/lib/blocked-time-calendar";
+import { copenhagenParts } from "@/lib/meeting-week-calendar";
 
 export type BlockedTimeDto = {
   id: string;
@@ -15,25 +18,26 @@ export type BlockedTimeDto = {
 type Assignee = { id: string; name: string; username: string };
 
 export type BlockedTimeCreatePrefill = {
-  /** YYYY-MM-DD (Europe/Copenhagen wall clock / lokal dato). */
+  /** YYYY-MM-DD (Europe/Copenhagen). */
   startDate: string;
   /** HH:mm — 15-min gitter. */
   startTime: string;
 };
 
 type Props = {
-  open: boolean;
   mode: "create" | "edit";
   initial?: BlockedTimeDto | null;
   /** Ved create: forudfyld start (fx fra klik i kalenderen). Slut = start + 60 min. */
   createPrefill?: BlockedTimeCreatePrefill | null;
+  /** Ved create: sælgeren man klikkede hos («Pr. sælger»-kolonne eller eneste synlige sælger). */
+  preferredUserId?: string | null;
   currentUserId: string;
-  isAdmin: boolean;
+  /** Kørende sælgere (hentet af kalenderen). */
+  assignees: Assignee[];
   defaultUserId?: string | null;
-  saving: boolean;
-  errorText: string | null;
   onClose: () => void;
-  onSaved: () => void;
+  /** Kaldes efter gem (med den gemte blokering) eller slet (null). */
+  onSaved: (saved: BlockedTimeDto | null) => void;
 };
 
 const TITLE_PRESETS = ["Frokost", "Ferie", "Internt møde", "Optaget", "Ikke tilgængelig"] as const;
@@ -49,35 +53,29 @@ const TIME_OPTIONS: string[] = (() => {
   return out;
 })();
 
+const pad = (n: number) => String(n).padStart(2, "0");
+
+/** Dato og tid i dansk tid (kalenderen viser Europe/Copenhagen uanset computerens tidszone). */
 function partsFromIso(iso: string): { date: string; time: string } {
-  const d = new Date(iso);
-  if (Number.isNaN(d.getTime())) {
-    return { date: "", time: "09:00" };
-  }
-  const pad = (n: number) => String(n).padStart(2, "0");
-  const date = `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
-  const h = d.getHours();
-  const m = Math.round(d.getMinutes() / 15) * 15;
-  const time = `${pad(h)}:${pad(m === 60 ? 0 : m)}`;
-  return { date, time: TIME_OPTIONS.includes(time) ? time : "09:00" };
+  const p = copenhagenParts(iso);
+  if (!p) return { date: "", time: "09:00" };
+  const m = Math.round(p.minute / 15) * 15;
+  const time = `${pad(p.hour)}:${pad(m === 60 ? 0 : m)}`;
+  return { date: p.dayKey, time: TIME_OPTIONS.includes(time) ? time : "09:00" };
 }
 
 function addOneHour(time: string): string {
   const [hs, ms] = time.split(":").map(Number);
-  let h = (hs ?? 9) + 1;
+  const h = (hs ?? 9) + 1;
   const m = ms ?? 0;
   if (h > 22 || (h === 22 && m > 0)) return "22:00";
-  const pad = (n: number) => String(n).padStart(2, "0");
   const end = `${pad(h)}:${pad(m)}`;
   return TIME_OPTIONS.includes(end) ? end : "22:00";
 }
 
-function rangeFromPrefill(prefill: BlockedTimeCreatePrefill): {
-  startDate: string;
-  startTime: string;
-  endDate: string;
-  endTime: string;
-} {
+type FormRange = { startDate: string; startTime: string; endDate: string; endTime: string };
+
+function rangeFromPrefill(prefill: { startDate: string; startTime: string }): FormRange {
   const startTime = TIME_OPTIONS.includes(prefill.startTime) ? prefill.startTime : "09:00";
   return {
     startDate: prefill.startDate,
@@ -87,97 +85,62 @@ function rangeFromPrefill(prefill: BlockedTimeCreatePrefill): {
   };
 }
 
-function defaultRange(): {
-  startDate: string;
-  startTime: string;
-  endDate: string;
-  endTime: string;
-} {
-  const d = new Date();
-  d.setMinutes(d.getMinutes() + 60, 0, 0);
-  const pad = (n: number) => String(n).padStart(2, "0");
-  const date = `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
-  let h = d.getHours();
-  let m = Math.ceil(d.getMinutes() / 15) * 15;
+/** Næste hele kvarter om ca. en time (dansk tid). */
+function defaultRange(): FormRange {
+  const p = copenhagenParts(new Date(Date.now() + 60 * 60 * 1000));
+  if (!p) return rangeFromPrefill({ startDate: "", startTime: "09:00" });
+  let h = p.hour;
+  let m = Math.ceil(p.minute / 15) * 15;
   if (m >= 60) {
     h += 1;
     m = 0;
   }
   const startTime = `${pad(Math.min(h, 21))}:${pad(m)}`;
-  return rangeFromPrefill({ startDate: date, startTime: TIME_OPTIONS.includes(startTime) ? startTime : "09:00" });
+  return rangeFromPrefill({ startDate: p.dayKey, startTime: TIME_OPTIONS.includes(startTime) ? startTime : "09:00" });
 }
 
 function toIso(date: string, time: string): string | null {
   if (!date || !time) return null;
-  const d = new Date(`${date}T${time}:00`);
-  if (Number.isNaN(d.getTime())) return null;
-  return d.toISOString();
+  return copenhagenWallTimeToUtc(date, time)?.toISOString() ?? null;
 }
 
+/** Monteres kun mens den er åben, så formularen altid starter forfra. */
 export function BlockedTimeDialog({
-  open,
   mode,
   initial,
   createPrefill = null,
+  preferredUserId,
   currentUserId,
-  isAdmin,
+  assignees,
   defaultUserId,
-  saving,
-  errorText,
   onClose,
   onSaved,
 }: Props) {
-  const [assignees, setAssignees] = useState<Assignee[]>([]);
-  const [userId, setUserId] = useState(currentUserId);
-  const [title, setTitle] = useState("");
-  const [startDate, setStartDate] = useState("");
-  const [startTime, setStartTime] = useState("09:00");
-  const [endDate, setEndDate] = useState("");
-  const [endTime, setEndTime] = useState("10:00");
-  const [loadErr, setLoadErr] = useState<string | null>(null);
+  const editing = mode === "edit" && initial ? initial : null;
+  const [initialRange] = useState<FormRange>(() => {
+    if (editing) {
+      const s = partsFromIso(editing.startDateTime);
+      const e = partsFromIso(editing.endDateTime);
+      return { startDate: s.date, startTime: s.time, endDate: e.date, endTime: e.time };
+    }
+    return createPrefill ? rangeFromPrefill(createPrefill) : defaultRange();
+  });
+  const [chosenUserId, setChosenUserId] = useState(editing?.userId ?? "");
+  const [title, setTitle] = useState(editing?.title ?? "");
+  const [startDate, setStartDate] = useState(initialRange.startDate);
+  const [startTime, setStartTime] = useState(initialRange.startTime);
+  const [endDate, setEndDate] = useState(initialRange.endDate);
+  const [endTime, setEndTime] = useState(initialRange.endTime);
   const [submitErr, setSubmitErr] = useState<string | null>(null);
+  const [saving, setSaving] = useState(false);
   const [deleting, setDeleting] = useState(false);
 
-  useEffect(() => {
-    if (!open) return;
-    setLoadErr(null);
-    setSubmitErr(null);
-    void (async () => {
-      const res = await fetch("/api/users/meeting-assignees");
-      if (!res.ok) {
-        setLoadErr("Kunne ikke hente mødeansvarlige.");
-        return;
-      }
-      const data = (await res.json()) as { users: Assignee[]; defaultUserId: string | null };
-      const users = data.users ?? [];
-      setAssignees(users);
-      if (mode === "edit" && initial) {
-        setUserId(initial.userId);
-        setTitle(initial.title);
-        const s = partsFromIso(initial.startDateTime);
-        const e = partsFromIso(initial.endDateTime);
-        setStartDate(s.date);
-        setStartTime(s.time);
-        setEndDate(e.date);
-        setEndTime(e.time);
-      } else {
-        const range = createPrefill ? rangeFromPrefill(createPrefill) : defaultRange();
-        setStartDate(range.startDate);
-        setStartTime(range.startTime);
-        setEndDate(range.endDate);
-        setEndTime(range.endTime);
-        setTitle("");
-        // Admin: standard-mødeansvarlig. Andre: sig selv, hvis de er mødeansvarlig — ellers standarden.
-        const selfIsAssignee = users.some((u) => u.id === currentUserId);
-        const fallback = defaultUserId ?? data.defaultUserId ?? users[0]?.id ?? "";
-        setUserId(!isAdmin && selfIsAssignee ? currentUserId : fallback || currentUserId);
-      }
-    })();
-  }, [open, mode, initial, createPrefill, currentUserId, isAdmin, defaultUserId]);
-
-  if (!open) return null;
+  // Sælgerlisten kan komme lidt efter, at dialogen åbnes — standarden udledes ved render.
+  const userId =
+    chosenUserId || defaultBlockedTimeAssignee(assignees, preferredUserId, currentUserId, defaultUserId);
 
   async function handleSave() {
+    if (saving) return;
     setSubmitErr(null);
     const startIso = toIso(startDate, startTime);
     const endIso = toIso(endDate, endTime);
@@ -205,9 +168,10 @@ export function BlockedTimeDialog({
       endDateTime: endIso,
     };
 
-    const res =
-      mode === "edit" && initial
-        ? await fetch(`/api/blocked-times/${initial.id}`, {
+    setSaving(true);
+    try {
+      const res = editing
+        ? await fetch(`/api/blocked-times/${editing.id}`, {
             method: "PATCH",
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify(body),
@@ -217,35 +181,39 @@ export function BlockedTimeDialog({
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify(body),
           });
-
-    if (!res.ok) {
-      const j = await res.json().catch(() => ({}));
-      setSubmitErr(typeof j.error === "string" ? j.error : "Kunne ikke gemme blokering.");
-      return;
+      const j = (await res.json().catch(() => ({}))) as { error?: unknown; blockedTime?: BlockedTimeDto };
+      if (!res.ok) {
+        setSubmitErr(typeof j.error === "string" ? j.error : "Kunne ikke gemme blokering.");
+        setSaving(false);
+        return;
+      }
+      onSaved(j.blockedTime ?? null);
+    } catch {
+      setSubmitErr("Kunne ikke gemme blokering — tjek forbindelsen og prøv igen.");
+      setSaving(false);
     }
-    onSaved();
   }
 
   async function handleDelete() {
-    if (!initial || mode !== "edit") return;
+    if (!editing) return;
     if (!window.confirm("Slet denne blokering?")) return;
     setDeleting(true);
     setSubmitErr(null);
-    const res = await fetch(`/api/blocked-times/${initial.id}`, { method: "DELETE" });
+    const res = await fetch(`/api/blocked-times/${editing.id}`, { method: "DELETE" });
     setDeleting(false);
     if (!res.ok) {
       const j = await res.json().catch(() => ({}));
       setSubmitErr(typeof j.error === "string" ? j.error : "Kunne ikke slette.");
       return;
     }
-    onSaved();
+    onSaved(null);
   }
 
   const showUserSelect = assignees.length > 0;
-  // Ved redigering kan blokeringens ejer mangle i listen (fx uden telefonnummer) — vis den alligevel.
+  // Ved redigering kan blokeringens ejer mangle i listen (fx ikke længere kørende sælger) — vis den alligevel.
   const selectOptions =
-    initial?.user && !assignees.some((u) => u.id === initial.user!.id)
-      ? [...assignees, initial.user]
+    editing?.user && !assignees.some((u) => u.id === editing.user!.id)
+      ? [...assignees, editing.user]
       : assignees;
 
   return (
@@ -264,16 +232,14 @@ export function BlockedTimeDialog({
           mødeansvarlige.
         </p>
 
-        {(loadErr || errorText || submitErr) && (
-          <p className="mt-3 text-sm text-red-600">{submitErr ?? errorText ?? loadErr}</p>
-        )}
+        {submitErr && <p className="mt-3 text-sm text-red-600">{submitErr}</p>}
 
         {showUserSelect ? (
           <label className="mt-4 block text-xs font-medium text-stone-600">
             Mødeansvarlig
             <select
               value={userId}
-              onChange={(e) => setUserId(e.target.value)}
+              onChange={(e) => setChosenUserId(e.target.value)}
               className="mt-1 w-full rounded-lg border border-stone-200 bg-white px-3 py-2 text-sm text-stone-900 shadow-sm outline-none ring-stone-400 focus:ring-2"
             >
               {!userId ? <option value="">Vælg mødeansvarlig…</option> : null}
@@ -284,7 +250,7 @@ export function BlockedTimeDialog({
               ))}
             </select>
           </label>
-        ) : loadErr ? null : (
+        ) : (
           <p className="mt-4 text-xs text-stone-500">Henter mødeansvarlige…</p>
         )}
 

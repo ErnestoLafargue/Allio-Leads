@@ -51,6 +51,31 @@ type Assignee = {
   phone: string | null;
 };
 
+const BLOCK_DAY_FMT = new Intl.DateTimeFormat("da-DK", {
+  timeZone: "Europe/Copenhagen",
+  weekday: "short",
+  day: "numeric",
+  month: "short",
+});
+const BLOCK_TIME_FMT = new Intl.DateTimeFormat("da-DK", {
+  timeZone: "Europe/Copenhagen",
+  hour: "2-digit",
+  minute: "2-digit",
+});
+
+/** «Victor Lafargue, fre. 13. nov. 10.00–11.00» — så man kan se, hvor blokeringen landede. */
+function describeBlockedTime(b: BlockedTimeDto): string {
+  const start = new Date(b.startDateTime);
+  const end = new Date(b.endDateTime);
+  const startDay = BLOCK_DAY_FMT.format(start);
+  const endDay = BLOCK_DAY_FMT.format(end);
+  const when =
+    startDay === endDay
+      ? `${startDay} ${BLOCK_TIME_FMT.format(start)}–${BLOCK_TIME_FMT.format(end)}`
+      : `${startDay} ${BLOCK_TIME_FMT.format(start)} – ${endDay} ${BLOCK_TIME_FMT.format(end)}`;
+  return b.user?.name ? `${b.user.name}, ${when}` : when;
+}
+
 function outcomeLabel(raw?: string | null) {
   const k = String(raw ?? "").trim().toUpperCase() || MEETING_OUTCOME_PENDING;
   return MEETING_OUTCOME_LABELS[k] ?? MEETING_OUTCOME_LABELS[MEETING_OUTCOME_PENDING];
@@ -119,7 +144,11 @@ export function MeetingsList({ type }: { type: "upcoming" | "past" }) {
   const [blockedDialogPrefill, setBlockedDialogPrefill] = useState<BlockedTimeCreatePrefill | null>(
     null,
   );
-  const [blockedSaving, setBlockedSaving] = useState(false);
+  const [blockedDialogSellerId, setBlockedDialogSellerId] = useState<string | null>(null);
+  /** Ny nøgle pr. åbning, så dialogen altid starter med en frisk formular. */
+  const [blockedDialogKey, setBlockedDialogKey] = useState(0);
+  const [blockedNotice, setBlockedNotice] = useState<string | null>(null);
+  const blockedNoticeTimerRef = useRef<number | null>(null);
   const [settingsDialogOpen, setSettingsDialogOpen] = useState(false);
 
   const title = useMemo(() => (type === "upcoming" ? "Kommende møder" : "Tidligere møder"), [type]);
@@ -185,10 +214,12 @@ export function MeetingsList({ type }: { type: "upcoming" | "past" }) {
     void loadBlockedTimes();
   }, [loadBlockedTimes]);
 
-  function openCreateBlockedDialog(prefill?: BlockedTimeCreatePrefill | null) {
+  function openCreateBlockedDialog(prefill: BlockedTimeCreatePrefill | null, sellerId?: string) {
     setBlockedDialogMode("create");
     setBlockedDialogInitial(null);
-    setBlockedDialogPrefill(prefill ?? null);
+    setBlockedDialogPrefill(prefill);
+    setBlockedDialogSellerId(sellerId ?? null);
+    setBlockedDialogKey((k) => k + 1);
     setBlockedDialogOpen(true);
   }
 
@@ -196,12 +227,20 @@ export function MeetingsList({ type }: { type: "upcoming" | "past" }) {
     setBlockedDialogMode("edit");
     setBlockedDialogInitial(row);
     setBlockedDialogPrefill(null);
+    setBlockedDialogSellerId(null);
+    setBlockedDialogKey((k) => k + 1);
     setBlockedDialogOpen(true);
   }
 
-  async function onBlockedTimesSaved() {
-    setBlockedSaving(false);
+  function showBlockedNotice(text: string) {
+    setBlockedNotice(text);
+    if (blockedNoticeTimerRef.current) window.clearTimeout(blockedNoticeTimerRef.current);
+    blockedNoticeTimerRef.current = window.setTimeout(() => setBlockedNotice(null), 6000);
+  }
+
+  async function onBlockedTimesSaved(saved: BlockedTimeDto | null) {
     setBlockedDialogOpen(false);
+    showBlockedNotice(saved ? `Blokering gemt: ${describeBlockedTime(saved)}` : "Blokering slettet.");
     await loadBlockedTimes();
   }
 
@@ -361,6 +400,14 @@ export function MeetingsList({ type }: { type: "upcoming" | "past" }) {
 
       {sessionStatus === "loading" && <p className="text-sm text-stone-500">Henter session…</p>}
       {error && <p className="text-sm text-red-600">{error}</p>}
+      {blockedNotice && type === "upcoming" && viewMode === "calendar" ? (
+        <p
+          role="status"
+          className="rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-2 text-sm text-emerald-900"
+        >
+          {blockedNotice}
+        </p>
+      ) : null}
 
       {type === "upcoming" && viewMode === "calendar" ? (
         <>
@@ -373,7 +420,7 @@ export function MeetingsList({ type }: { type: "upcoming" | "past" }) {
             openedFrom={upcomingOpenedFrom}
             canOpen={(m) => canOpen(m as MeetingRow)}
             onWeekStartChange={setWeekStartDayKey}
-            onBlockTimesClick={() => openCreateBlockedDialog()}
+            onBlockTimesClick={(sellerId) => openCreateBlockedDialog(null, sellerId)}
             onSettingsClick={isAdmin ? () => setSettingsDialogOpen(true) : undefined}
             onBlockedSegmentClick={(seg) => {
               const full = blockedTimesFull.find((b) => b.id === seg.id);
@@ -381,25 +428,26 @@ export function MeetingsList({ type }: { type: "upcoming" | "past" }) {
               openEditBlockedDialog(full);
             }}
             onEmptySlotClick={(slot) =>
-              openCreateBlockedDialog({
-                startDate: slot.dayKey,
-                startTime: slot.startTime,
-              })
+              openCreateBlockedDialog(
+                { startDate: slot.dayKey, startTime: slot.startTime },
+                slot.sellerId,
+              )
             }
           />
-          <BlockedTimeDialog
-            open={blockedDialogOpen}
-            mode={blockedDialogMode}
-            initial={blockedDialogInitial}
-            createPrefill={blockedDialogPrefill}
-            currentUserId={userId}
-            isAdmin={isAdmin}
-            defaultUserId={defaultAssigneeId}
-            saving={blockedSaving}
-            errorText={null}
-            onClose={() => setBlockedDialogOpen(false)}
-            onSaved={() => void onBlockedTimesSaved()}
-          />
+          {blockedDialogOpen ? (
+            <BlockedTimeDialog
+              key={blockedDialogKey}
+              mode={blockedDialogMode}
+              initial={blockedDialogInitial}
+              createPrefill={blockedDialogPrefill}
+              preferredUserId={blockedDialogSellerId}
+              currentUserId={userId}
+              assignees={assignees}
+              defaultUserId={defaultAssigneeId}
+              onClose={() => setBlockedDialogOpen(false)}
+              onSaved={(saved) => void onBlockedTimesSaved(saved)}
+            />
+          ) : null}
           <MeetingBlockSettingDialog
             open={settingsDialogOpen}
             onClose={() => setSettingsDialogOpen(false)}

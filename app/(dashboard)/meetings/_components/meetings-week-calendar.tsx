@@ -35,6 +35,7 @@ import {
   weekDayKeys,
 } from "@/lib/meeting-week-calendar";
 import { normalizeMeetingType } from "@/lib/meeting-type";
+import { copenhagenDayBoundsUtcFromDayKey } from "@/lib/copenhagen-day";
 
 export type MeetingCalendarRow = {
   id: string;
@@ -50,6 +51,8 @@ export type MeetingCalendarRow = {
 export type CalendarEmptySlotClick = {
   dayKey: string;
   startTime: string;
+  /** Sælgeren man klikkede hos («Pr. sælger»-kolonne eller eneste synlige sælger i filteret). */
+  sellerId?: string;
 };
 
 type Props = {
@@ -60,7 +63,8 @@ type Props = {
   openedFrom: LeadOpenedFrom;
   canOpen: (m: MeetingCalendarRow) => boolean;
   onWeekStartChange: (dayKey: string) => void;
-  onBlockTimesClick?: () => void;
+  /** «Bloker tider» — med sælgeren, hvis filteret kun viser én. */
+  onBlockTimesClick?: (sellerId?: string) => void;
   /** Admin: åbn kalender-indstillinger. */
   onSettingsClick?: () => void;
   onBlockedSegmentClick?: (segment: BlockedTimeSegment) => void;
@@ -85,6 +89,8 @@ const SELLER_COLORS = [
 const UNASSIGNED_COLOR = { bar: "bg-stone-400", chip: "border-stone-300 bg-stone-50 text-stone-700" };
 /** Nøgle for møder uden sælger i filter/kolonner. */
 const UNASSIGNED = "__unassigned__";
+/** Blokeringer i den fælles kolonne-fordeling med møder (adskilt fra mødernes id'er). */
+const BLOCK_LAYOUT_PREFIX = "block:";
 
 type SellerLane = { key: string; label: string; color: { bar: string; chip: string } };
 
@@ -208,10 +214,13 @@ function MeetingCard({
 function BlockedSegmentCard({
   segment,
   row,
+  layout,
   onClick,
 }: {
   segment: BlockedTimeSegment;
   row: BlockedTimeRow;
+  /** Deler bredden med overlappende møder, så blokeringen ikke gemmer sig under dem. */
+  layout: { leftPct: number; widthPct: number };
   onClick?: () => void;
 }) {
   const label = segment.userName
@@ -220,8 +229,8 @@ function BlockedSegmentCard({
   const style: React.CSSProperties = {
     top: `${segment.topPct}%`,
     height: `${segment.heightPct}%`,
-    left: "3px",
-    right: "3px",
+    left: `calc(${layout.leftPct}% + 3px)`,
+    width: `calc(${layout.widthPct}% - 6px)`,
     minHeight: "1.5rem",
   };
 
@@ -309,6 +318,9 @@ export function MeetingsWeekCalendar({
   const visibleBlocked = hasSellers
     ? blockedTimes.filter((b) => !hiddenLanes.has(lanes.some((l) => l.key === b.userId) ? b.userId : UNASSIGNED))
     : blockedTimes;
+  // Viser filteret kun én sælger, er det hans kalender man blokerer i.
+  const visibleSellerLanes = lanes.filter((l) => l.key !== UNASSIGNED && !hiddenLanes.has(l.key));
+  const soleVisibleSellerId = hasSellers && visibleSellerLanes.length === 1 ? visibleSellerLanes[0]!.key : undefined;
   // «Pr. sælger»: én kolonne pr. synlig sælger; «Ingen tildelt» kun når der er sådanne møder i ugen.
   const columnLanes =
     hasSellers && perSeller
@@ -337,13 +349,33 @@ export function MeetingsWeekCalendar({
     dayIndex: number,
     laneMeetings: MeetingCalendarRow[],
     laneBlocked: BlockedTimeRow[],
-    opts: { key: string; withRightBorder: boolean },
+    opts: { key: string; withRightBorder: boolean; sellerId?: string },
   ) {
+    // Møder og blokeringer fordeles i kolonner sammen, så overlappende ikke dækker hinanden.
+    const { start: dayStart, end: dayEnd } = copenhagenDayBoundsUtcFromDayKey(dayKey);
+    const blockedSegments = blockedSegmentsForDay(dayKey, laneBlocked);
+    const items = new Map<string, { startIso: string; durationMin: number }>();
+    for (const m of laneMeetings) {
+      if (!m.meetingScheduledFor) continue;
+      items.set(m.id, {
+        startIso: m.meetingScheduledFor,
+        durationMin: meetingDurationMinutes(normalizeMeetingType(m.meetingType)),
+      });
+    }
+    for (const seg of blockedSegments) {
+      const row = laneBlocked.find((b) => b.id === seg.id);
+      if (!row) continue;
+      const startMs = Math.max(new Date(row.startDateTime).getTime(), dayStart.getTime());
+      const endMs = Math.min(new Date(row.endDateTime).getTime(), dayEnd.getTime());
+      items.set(`${BLOCK_LAYOUT_PREFIX}${seg.id}`, {
+        startIso: new Date(startMs).toISOString(),
+        durationMin: Math.max(15, (endMs - startMs) / 60_000),
+      });
+    }
     const layoutMap = layoutMeetingColumns(
-      laneMeetings.map((m) => m.id),
-      (id) => laneMeetings.find((m) => m.id === id)!.meetingScheduledFor!,
-      (id) =>
-        meetingDurationMinutes(normalizeMeetingType(laneMeetings.find((m) => m.id === id)?.meetingType)),
+      [...items.keys()],
+      (id) => items.get(id)!.startIso,
+      (id) => items.get(id)!.durationMin,
     );
     const isToday = dayKey === today;
     const transports = transportSegmentsForDay(dayKey, laneMeetings);
@@ -366,7 +398,7 @@ export function MeetingsWeekCalendar({
                 const rect = e.currentTarget.getBoundingClientRect();
                 const offsetY = e.clientY - rect.top;
                 const startTime = snapTimeFromColumnClick(offsetY, rect.height);
-                onEmptySlotClick({ dayKey, startTime });
+                onEmptySlotClick({ dayKey, startTime, sellerId: opts.sellerId });
               }
             : undefined
         }
@@ -390,7 +422,7 @@ export function MeetingsWeekCalendar({
           <TransportSegmentCard key={seg.id} segment={seg} />
         ))}
 
-        {blockedSegmentsForDay(dayKey, laneBlocked).map((seg) => {
+        {blockedSegments.map((seg) => {
           const row = laneBlocked.find((b) => b.id === seg.id);
           if (!row) return null;
           return (
@@ -398,6 +430,7 @@ export function MeetingsWeekCalendar({
               key={`${seg.id}-${dayKey}`}
               segment={seg}
               row={row}
+              layout={layoutMap.get(`${BLOCK_LAYOUT_PREFIX}${seg.id}`) ?? { leftPct: 0, widthPct: 100 }}
               onClick={onBlockedSegmentClick ? () => onBlockedSegmentClick(seg) : undefined}
             />
           );
@@ -451,7 +484,7 @@ export function MeetingsWeekCalendar({
           {onBlockTimesClick ? (
             <button
               type="button"
-              onClick={onBlockTimesClick}
+              onClick={() => onBlockTimesClick(soleVisibleSellerId)}
               className="rounded-lg border border-stone-300 bg-white px-3 py-1.5 text-sm font-medium text-stone-800 shadow-sm hover:bg-stone-50"
             >
               Bloker tider
@@ -604,6 +637,7 @@ export function MeetingsWeekCalendar({
                     return renderLane(dayKey, dayIndex, dayMeetings, visibleBlocked, {
                       key: dayKey,
                       withRightBorder: true,
+                      sellerId: soleVisibleSellerId,
                     });
                   }
                   return (
@@ -614,7 +648,11 @@ export function MeetingsWeekCalendar({
                           dayIndex,
                           dayMeetings.filter((m) => laneKeyOf(m) === l.key),
                           visibleBlocked.filter((b) => b.userId === l.key),
-                          { key: `${dayKey}-${l.key}`, withRightBorder: li === columnLanes.length - 1 },
+                          {
+                            key: `${dayKey}-${l.key}`,
+                            withRightBorder: li === columnLanes.length - 1,
+                            sellerId: l.key === UNASSIGNED ? undefined : l.key,
+                          },
                         ),
                       )}
                     </div>

@@ -110,6 +110,23 @@ export function blockedSegmentsForDay(dayKey: string, rows: BlockedTimeRow[]): B
   return out;
 }
 
+/**
+ * Mødeansvarlig for en ny blokering: sælgeren man klikkede hos, ellers en selv (hvis man er
+ * kørende sælger), ellers sælger nr. 1. "" hvis listen er tom.
+ */
+export function defaultBlockedTimeAssignee(
+  assignees: { id: string }[],
+  preferredUserId: string | null | undefined,
+  currentUserId: string,
+  defaultUserId: string | null | undefined,
+): string {
+  const ids = new Set(assignees.map((u) => u.id));
+  if (preferredUserId && ids.has(preferredUserId)) return preferredUserId;
+  if (ids.has(currentUserId)) return currentUserId;
+  if (defaultUserId && ids.has(defaultUserId)) return defaultUserId;
+  return assignees[0]?.id ?? "";
+}
+
 export type TransportSegment = {
   id: string;
   meetingId: string;
