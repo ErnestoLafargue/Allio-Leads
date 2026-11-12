@@ -19,7 +19,6 @@ import {
   acquireAllioNativeSyncLock,
   releaseAllioNativeSyncLock,
 } from "@/lib/allio-native/sync-lock";
-import { meetingDurationMinutes } from "@/lib/booking/meeting-type-buffers";
 import {
   MEETING_TYPE_PHYSICAL,
   normalizeMeetingType,
@@ -48,7 +47,8 @@ function resolveCustomerAddress(lead: {
  * Opretter eller opdaterer booking i Allio-Native for et Allio-Leads-møde.
  *
  * 1) Kunde fra mødefelterne (navn/email/privat tlf + adresse + CVR), SMS=nej / E-mail=nej.
- * 2) Booking med Online- eller Fysisk-ydelse — uden kunde-notifikation.
+ * 2) Booking med Online- eller Fysisk-ydelse. Længden følger ydelsen i Allio (60 / 90 min); kunden er oprettet
+ *    uden SMS og e-mail, så der går ingen bekræftelse ud.
  *
  * Kaster ved fejl — kaldere behandler ikke-fatalt.
  */
@@ -117,7 +117,6 @@ export async function ensureAllioNativeBookingForLead(
     }
 
     const startTime = formatAllioStartTime(lead.meetingScheduledFor);
-    const durationMinutes = meetingDurationMinutes(meetingType);
     const customerAddress = resolveCustomerAddress(lead);
     const notes = buildAllioNativeNotes(
       leadId,
@@ -135,7 +134,6 @@ export async function ensureAllioNativeBookingForLead(
     if (lead.allioBookingId) {
       const updated = await updateBooking(lead.allioBookingId, {
         start_time: startTime,
-        duration_minutes: durationMinutes,
         notes,
         notify_customer: false,
         ...(employeeId ? { employee_id: employeeId } : {}),
@@ -148,12 +146,9 @@ export async function ensureAllioNativeBookingForLead(
       customer_id: customerId,
       service_ids: [serviceId],
       start_time: startTime,
-      duration_minutes: durationMinutes,
       notes,
       employee_id: employeeId,
       allow_outside_opening_hours: true,
-      // Undgå bekræftelses-SMS/mail ved oprettelse; follow-ups/påmindelser følger stadig Native.
-      notify_customer: false,
     });
 
     await prisma.lead.update({

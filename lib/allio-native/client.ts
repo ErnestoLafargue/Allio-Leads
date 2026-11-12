@@ -240,27 +240,21 @@ export async function createBooking(input: {
   customer_id: string;
   service_ids: string[];
   start_time: string;
-  /** Mødelængde i minutter (60 online / 90 fysisk). */
-  duration_minutes?: number;
   employee_id?: string;
   notes?: string;
   allow_outside_opening_hours?: boolean;
-  /** Undgå SMS/e-mail til kunden ved oprettelse (default false i vores sync). */
-  notify_customer?: boolean;
 }): Promise<AllioBooking> {
+  // Allio afviser ukendte felter med 400. Længden kommer fra ydelsen i Allio (Online 60 / Fysisk 90 min), og
+  // create sender ingen bekræftelse til kunden, så duration_minutes og notify_customer må ikke sendes med.
   const res = await allioFetch<AllioBooking>("/v1/bookings", {
     method: "POST",
     body: JSON.stringify({
       customer_id: input.customer_id,
       service_ids: input.service_ids,
       start_time: input.start_time,
-      ...(typeof input.duration_minutes === "number"
-        ? { duration_minutes: input.duration_minutes }
-        : {}),
       ...(input.employee_id ? { employee_id: input.employee_id } : {}),
       ...(input.notes != null ? { notes: input.notes } : {}),
       ...(input.allow_outside_opening_hours ? { allow_outside_opening_hours: true } : {}),
-      notify_customer: input.notify_customer ?? false,
     }),
   });
   if (!res.ok) {
@@ -276,9 +270,9 @@ export async function createBooking(input: {
 
 export async function updateBooking(
   bookingId: string,
+  /** Længden følger ydelsen i Allio; duration_minutes er skrivebeskyttet i Allio's API. */
   patch: {
     start_time?: string;
-    duration_minutes?: number;
     employee_id?: string;
     status?: string;
     notes?: string | null;
