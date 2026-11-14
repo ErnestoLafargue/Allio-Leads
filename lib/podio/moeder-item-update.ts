@@ -15,6 +15,7 @@ import {
   type PodioItem,
 } from "@/lib/podio/client";
 import { findDrivingSellerByPodioItemId } from "@/lib/podio/sellers";
+import { sendOutcomeToAllioOs } from "@/lib/allio-os/send-outcome";
 import {
   MOEDE_FIELDS,
   normalizeMoedeStatus,
@@ -40,6 +41,11 @@ async function currentOutcome(leadId: string): Promise<string | null> {
   return normalizeMeetingOutcomeStatus(lead.meetingOutcomeStatus);
 }
 
+/** Udfald fra fx Podio skal også ind i Allio OS; udfald, der kom fra Allio OS, sendes ikke tilbage. */
+async function shareWithAllioOs(leadId: string, source: string): Promise<void> {
+  if (source !== "Allio OS") await sendOutcomeToAllioOs(leadId);
+}
+
 export async function applyPendingOutcome(leadId: string, source = "Podio"): Promise<boolean> {
   if ((await currentOutcome(leadId)) === MEETING_OUTCOME_PENDING) return false;
   await prisma.lead.update({
@@ -54,6 +60,7 @@ export async function applyPendingOutcome(leadId: string, source = "Podio"): Pro
       summary: `Møde sat til Afventer afholdelse i ${source}.`,
     },
   });
+  await shareWithAllioOs(leadId, source);
   return true;
 }
 
@@ -71,6 +78,7 @@ export async function applyInProgressOutcome(leadId: string, source = "Podio"): 
       summary: `Møde sat til Under Behandling i ${source}.`,
     },
   });
+  await shareWithAllioOs(leadId, source);
   return true;
 }
 
@@ -88,6 +96,7 @@ export async function applyLostOutcome(leadId: string, source = "Podio"): Promis
       summary: `Møde sat til Tabt i ${source}.`,
     },
   });
+  await shareWithAllioOs(leadId, source);
   return true;
 }
 
@@ -111,6 +120,7 @@ export async function applySaleOutcome(leadId: string, source = "Podio"): Promis
       summary: `Møde sat til Vundet i ${source} — flyttet til Aktive kunder.`,
     },
   });
+  await shareWithAllioOs(leadId, source);
   return true;
 }
 
