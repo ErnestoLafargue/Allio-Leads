@@ -248,10 +248,12 @@ export async function createCustomer(input: CreateAllioCustomerInput): Promise<A
   return res.data;
 }
 
-/** Kunden i Allio med samme e-mail (eller de sidste 8 cifre af telefonnummeret). */
+/**
+ * Kunden i Allio med samme e-mail (eller de sidste 8 cifre af telefonnummeret).
+ * Allios kundesøgning matcher kun navn og e-mail (og afviser "+"), så der søges altid på e-mailen.
+ */
 async function findExistingCustomer(input: CreateAllioCustomerInput): Promise<AllioCustomer | null> {
-  const needle = (input.phone || input.email).trim().toLowerCase();
-  const existing = await listCustomers(needle, 10);
+  const existing = await listCustomers(input.email.trim().toLowerCase(), 10);
   return (
     existing.find((c) => {
       const email = (c.email ?? "").trim().toLowerCase();
