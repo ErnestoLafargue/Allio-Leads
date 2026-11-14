@@ -3,7 +3,7 @@ import bcrypt from "bcryptjs";
 import { prisma } from "@/lib/prisma";
 import { requireAdmin } from "@/lib/api-auth";
 import { normalizePhoneToE164ForDial } from "@/lib/phone-e164";
-import { drivingSellerUpdate } from "@/lib/driving-seller";
+import { drivingSellerUpdate, ensureAllioCalendarAfterResponse } from "@/lib/driving-seller";
 
 export async function GET() {
   const { session, response } = await requireAdmin();
@@ -73,5 +73,6 @@ export async function POST(req: Request) {
     },
   });
 
+  if (user.isDrivingSeller) ensureAllioCalendarAfterResponse(user.id);
   return NextResponse.json(user);
 }
