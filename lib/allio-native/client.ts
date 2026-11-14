@@ -91,6 +91,20 @@ async function allioFetch<T>(
   return { ok: true, status: res.status, data: (json.data as T) ?? (json as unknown as T) };
 }
 
+/**
+ * api.allio.dk (Allios gateway) giver op efter ca. 7 s og svarer 503 "Upstream unavailable", også når Allio
+ * stadig er ved at gennemføre kaldet. En oprettelse kan derfor være lykkedes, selvom svaret er en fejl,
+ * så den må ikke bare gentages blindt: slå op, om den findes, før der oprettes igen.
+ */
+export function isAllioTransientFailure(status: number, raw: string): boolean {
+  return status === 0 || status === 502 || status === 503 || status === 504 || /upstream unavailable/i.test(raw);
+}
+
+/** Vent mellem opslag, mens Allio gør en oprettelse færdig efter en timeout i gatewayen. */
+export function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
 export type AllioCustomer = {
   id: string;
   first_name?: string;
@@ -216,24 +230,39 @@ export async function createCustomer(input: CreateAllioCustomerInput): Promise<A
         const byId = await getCustomer(existingId);
         if (byId) return byId;
       }
-      const needle = (input.phone || input.email).trim().toLowerCase();
-      const existing = await listCustomers(needle, 10);
-      const match = existing.find((c) => {
-        const email = (c.email ?? "").trim().toLowerCase();
-        const phone = (c.phone ?? "").replace(/\D/g, "");
-        const wantPhone = (input.phone ?? "").replace(/\D/g, "");
-        return (
-          email === input.email.trim().toLowerCase() ||
-          (wantPhone.length >= 8 && phone.endsWith(wantPhone.slice(-8)))
-        );
-      });
+      const match = await findExistingCustomer(input);
       if (match) return match;
+    }
+    // Gatewayen gav op, men kunden kan være oprettet i Allio: find den i stedet for at fejle.
+    if (isAllioTransientFailure(res.status, res.raw)) {
+      for (const wait of [2000, 4000, 6000]) {
+        await sleep(wait);
+        const match = await findExistingCustomer(input);
+        if (match) return match;
+      }
     }
     throw new Error(
       `Allio-Native createCustomer: ${res.error.code ?? ""} ${res.error.message ?? res.raw}`,
     );
   }
   return res.data;
+}
+
+/** Kunden i Allio med samme e-mail (eller de sidste 8 cifre af telefonnummeret). */
+async function findExistingCustomer(input: CreateAllioCustomerInput): Promise<AllioCustomer | null> {
+  const needle = (input.phone || input.email).trim().toLowerCase();
+  const existing = await listCustomers(needle, 10);
+  return (
+    existing.find((c) => {
+      const email = (c.email ?? "").trim().toLowerCase();
+      const phone = (c.phone ?? "").replace(/\D/g, "");
+      const wantPhone = (input.phone ?? "").replace(/\D/g, "");
+      return (
+        email === input.email.trim().toLowerCase() ||
+        (wantPhone.length >= 8 && phone.endsWith(wantPhone.slice(-8)))
+      );
+    }) ?? null
+  );
 }
 
 export async function createBooking(input: {
@@ -260,9 +289,10 @@ export async function createBooking(input: {
   if (!res.ok) {
     const err = new Error(
       `Allio-Native createBooking: ${res.error.code ?? ""} ${res.error.message ?? res.raw}`,
-    ) as Error & { code?: string; status?: number };
+    ) as Error & { code?: string; status?: number; transient?: boolean };
     err.code = res.error.code;
     err.status = res.status;
+    err.transient = isAllioTransientFailure(res.status, res.raw);
     throw err;
   }
   return res.data;

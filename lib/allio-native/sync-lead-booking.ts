@@ -5,12 +5,15 @@ import {
   createCustomer,
   formatAllioStartTime,
   isAllioNativeConfigured,
+  listBookings,
   serviceIdForMeetingType,
+  sleep,
   splitName,
   updateBooking,
   cancelBooking,
+  type AllioBooking,
 } from "@/lib/allio-native/client";
-import { buildAllioNativeNotes } from "@/lib/allio-native/notes";
+import { buildAllioNativeNotes, parseLeadIdFromAllioNotes } from "@/lib/allio-native/notes";
 import {
   removeNativeOccupancy,
   upsertNativeOccupancyFromBooking,
@@ -41,6 +44,22 @@ function resolveCustomerAddress(lead: {
     return meetingAddr || companyAddr || undefined;
   }
   return companyAddr || meetingAddr || undefined;
+}
+
+/** Leadets aktive booking i Allio, fundet på "allio-leads:<id>" i noterne omkring mødetidspunktet. */
+async function findAllioBookingForLead(leadId: string, start: Date): Promise<AllioBooking | null> {
+  const bookings = await listBookings({
+    from: new Date(start.getTime() - 12 * 60 * 60 * 1000).toISOString(),
+    to: new Date(start.getTime() + 12 * 60 * 60 * 1000).toISOString(),
+    limit: 100,
+  });
+  return (
+    bookings.find(
+      (b) =>
+        parseLeadIdFromAllioNotes(b.notes) === leadId &&
+        String(b.status ?? "").toLowerCase() !== "cancelled",
+    ) ?? null
+  );
 }
 
 /**
@@ -142,14 +161,28 @@ export async function ensureAllioNativeBookingForLead(
       return { customerId, bookingId: updated.id };
     }
 
-    const booking = await createBooking({
-      customer_id: customerId,
-      service_ids: [serviceId],
-      start_time: startTime,
-      notes,
-      employee_id: employeeId,
-      allow_outside_opening_hours: true,
-    });
+    // Et tidligere forsøg kan have oprettet bookingen, selvom Allios gateway svarede med en fejl.
+    let booking = await findAllioBookingForLead(leadId, lead.meetingScheduledFor);
+    if (!booking) {
+      try {
+        booking = await createBooking({
+          customer_id: customerId,
+          service_ids: [serviceId],
+          start_time: startTime,
+          notes,
+          employee_id: employeeId,
+          allow_outside_opening_hours: true,
+        });
+      } catch (err) {
+        if (!(err as { transient?: boolean }).transient) throw err;
+        for (const wait of [2000, 4000, 6000]) {
+          await sleep(wait);
+          booking = await findAllioBookingForLead(leadId, lead.meetingScheduledFor);
+          if (booking) break;
+        }
+        if (!booking) throw err;
+      }
+    }
 
     await prisma.lead.update({
       where: { id: leadId },

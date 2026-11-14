@@ -30,6 +30,10 @@
     {
       "path": "/api/cron/sync-allio-native-occupancy",
       "schedule": "0 * * * *"
+    },
+    {
+      "path": "/api/cron/sync-allio-native-bookings",
+      "schedule": "*/15 * * * *"
     }
   ],
   "git": {
