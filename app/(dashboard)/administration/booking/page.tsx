@@ -22,6 +22,8 @@ type BookingAdminData = {
   sellers: SellerRow[];
   podioOptions: PodioOption[];
   podioError: string | null;
+  allioEmployees: { id: string; name: string }[];
+  allioError: string | null;
 };
 
 /** Hele og halve timer 09:00–17:00 til «Onsdag fra kl.». */
@@ -201,23 +203,35 @@ export default function BookingAdminPage() {
                     </span>
                   </label>
 
-                  <label className="flex shrink-0 flex-col gap-1 text-xs text-stone-600 sm:w-44">
-                    Allio-Native medarbejder-id
-                    <input
-                      defaultValue={s.allioNativeEmployeeId ?? ""}
-                      placeholder="Standard"
+                  <label className="flex shrink-0 flex-col gap-1 text-xs text-stone-600 sm:w-52">
+                    Kalender i Allio
+                    <select
+                      value={s.allioNativeEmployeeId ?? ""}
                       disabled={busy}
-                      onBlur={(e) => {
-                        const v = e.target.value.trim();
-                        if (v === (s.allioNativeEmployeeId ?? "")) return;
+                      onChange={(e) =>
                         void send(
                           "PATCH",
-                          { sellerId: s.id, allioNativeEmployeeId: v || null },
-                          "Native-id gemt",
-                        );
-                      }}
-                      className={`${input} w-full`}
-                    />
+                          { sellerId: s.id, allioNativeEmployeeId: e.target.value || null },
+                          e.target.value === "__create__" ? "Kalender oprettet i Allio" : "Kalender gemt",
+                        )
+                      }
+                      className={`${input} w-full min-w-0`}
+                    >
+                      <option value="">Standard-kalenderen</option>
+                      {data.allioEmployees.map((emp) => (
+                        <option key={emp.id} value={emp.id}>
+                          {emp.name}
+                        </option>
+                      ))}
+                      {s.allioNativeEmployeeId &&
+                        !data.allioEmployees.some((emp) => emp.id === s.allioNativeEmployeeId) && (
+                          <option value={s.allioNativeEmployeeId}>Ukendt kalender ({s.allioNativeEmployeeId.slice(0, 8)})</option>
+                        )}
+                      <option value="__create__">+ Opret ny kalender i Allio</option>
+                    </select>
+                    {data.allioError && (
+                      <span className="text-amber-700">Allio-kalenderne kunne ikke hentes</span>
+                    )}
                   </label>
                 </li>
               );

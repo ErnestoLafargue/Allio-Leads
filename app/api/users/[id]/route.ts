@@ -3,7 +3,7 @@ import bcrypt from "bcryptjs";
 import { prisma } from "@/lib/prisma";
 import { requireAdmin } from "@/lib/api-auth";
 import { normalizePhoneToE164ForDial } from "@/lib/phone-e164";
-import { drivingSellerUpdate } from "@/lib/driving-seller";
+import { drivingSellerUpdate, ensureAllioCalendarAfterResponse } from "@/lib/driving-seller";
 
 type Params = { params: Promise<{ id: string }> };
 
@@ -101,6 +101,7 @@ export async function PATCH(req: Request, { params }: Params) {
     select: selectPublic,
   });
 
+  if (drivingChanged && updated.isDrivingSeller) ensureAllioCalendarAfterResponse(updated.id);
   return NextResponse.json(updated);
 }
 

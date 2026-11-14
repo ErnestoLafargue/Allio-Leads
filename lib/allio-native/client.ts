@@ -363,6 +363,51 @@ export async function listBookings(opts: {
   return Array.isArray(res.data) ? res.data : [];
 }
 
+export type AllioEmployee = {
+  id: string;
+  name: string;
+  email?: string | null;
+  phone?: string | null;
+  is_active?: boolean;
+  service_ids?: string[];
+};
+
+/** Kalenderne (medarbejderne) i Allio Booking. */
+export async function listEmployees(opts: { includeInactive?: boolean } = {}): Promise<AllioEmployee[]> {
+  const qs = opts.includeInactive ? "?include_inactive=true" : "";
+  const res = await allioFetch<AllioEmployee[]>(`/v1/employees${qs}`);
+  if (!res.ok) {
+    throw new Error(
+      `Allio-Native listEmployees: ${res.error.code ?? ""} ${res.error.message ?? res.raw}`,
+    );
+  }
+  return Array.isArray(res.data) ? res.data : [];
+}
+
+/** Opret en kalender i Allio (uden login). */
+export async function createEmployee(input: {
+  name: string;
+  phone?: string | null;
+  service_ids?: string[];
+}): Promise<AllioEmployee> {
+  const res = await allioFetch<AllioEmployee>("/v1/employees", {
+    method: "POST",
+    body: JSON.stringify({
+      name: input.name,
+      ...(input.phone ? { phone: input.phone } : {}),
+      ...(input.service_ids?.length ? { service_ids: input.service_ids } : {}),
+    }),
+  });
+  if (!res.ok) {
+    const err = new Error(
+      `Allio-Native createEmployee: ${res.error.code ?? ""} ${res.error.message ?? res.raw}`,
+    ) as Error & { transient?: boolean };
+    err.transient = isAllioTransientFailure(res.status, res.raw);
+    throw err;
+  }
+  return res.data;
+}
+
 export async function getBooking(bookingId: string): Promise<AllioBooking | null> {
   const res = await allioFetch<AllioBooking>(`/v1/bookings/${encodeURIComponent(bookingId)}`);
   if (!res.ok) {

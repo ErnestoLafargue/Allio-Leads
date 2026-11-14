@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
-import type { AllioBooking } from "@/lib/allio-native/client";
+import type { AllioBooking, AllioEmployee } from "@/lib/allio-native/client";
+import { linkAllioEmployee, unlinkAllioEmployee } from "@/lib/allio-native/employees";
 import { applyAllioNativeBookingEvent } from "@/lib/allio-native/webhook-apply";
 import { verifyAllioNativeWebhookSignature } from "@/lib/allio-native/webhook-verify";
 
@@ -10,13 +11,16 @@ type AllioWebhookEnvelope = {
   id?: string;
   type?: string;
   created_at?: string;
-  data?: AllioBooking;
+  data?: AllioBooking | AllioEmployee;
   previous_attributes?: Partial<AllioBooking>;
 };
 
+const BOOKING_EVENTS = new Set(["booking.created", "booking.updated", "booking.deleted"]);
+const EMPLOYEE_EVENTS = new Set(["employee.created", "employee.updated", "employee.deleted"]);
+
 /**
  * POST /api/webhooks/allio-native
- * Modtager booking.created / booking.updated / booking.deleted fra Allio-Native.
+ * Modtager booking.* fra Allio-Native, og employee.* så nye kalendere kobles til sælgerne.
  */
 export async function POST(req: Request) {
   const secret = (process.env.ALLIO_WEBHOOK_SECRET ?? "").trim();
@@ -50,11 +54,7 @@ export async function POST(req: Request) {
   const eventId = (envelope.id ?? req.headers.get("x-allio-event-id") ?? "").trim();
   const type = String(envelope.type ?? req.headers.get("x-allio-event") ?? "").trim();
 
-  if (
-    type !== "booking.created" &&
-    type !== "booking.updated" &&
-    type !== "booking.deleted"
-  ) {
+  if (!BOOKING_EVENTS.has(type) && !EMPLOYEE_EVENTS.has(type)) {
     return NextResponse.json({ ok: true, ignored: type || "unknown" });
   }
 
@@ -70,9 +70,17 @@ export async function POST(req: Request) {
   }
 
   try {
+    if (EMPLOYEE_EVENTS.has(type)) {
+      const employee = (envelope.data ?? {}) as AllioEmployee;
+      const result =
+        type === "employee.deleted"
+          ? await unlinkAllioEmployee(employee.id)
+          : await linkAllioEmployee(employee);
+      return NextResponse.json({ ok: true, ...result });
+    }
     const result = await applyAllioNativeBookingEvent({
-      type,
-      data: envelope.data ?? ({} as AllioBooking),
+      type: type as "booking.created" | "booking.updated" | "booking.deleted",
+      data: (envelope.data ?? {}) as AllioBooking,
       previous_attributes: envelope.previous_attributes,
     });
     return NextResponse.json({ ok: true, ...result });

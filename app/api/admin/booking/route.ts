@@ -3,6 +3,14 @@ import { prisma } from "@/lib/prisma";
 import { requireAdmin } from "@/lib/api-auth";
 import { getBookingSettings, saveBookingSettings } from "@/lib/booking/booking-settings-db";
 import { listDrivingSellers } from "@/lib/meeting-assignee";
+import { isAllioNativeConfigured, listEmployees } from "@/lib/allio-native/client";
+import { ensureAllioEmployeeForSeller } from "@/lib/allio-native/employees";
+
+// Oprettelse af en kalender går gennem Allios API, der kan være flere sekunder om det.
+export const maxDuration = 60;
+
+/** Værdi i kalendervælgeren: opret en ny kalender i Allio til sælgeren. */
+const CREATE_ALLIO_CALENDAR = "__create__";
 import { listPodioSellerOptions, matchPodioSellerByName } from "@/lib/podio/sellers";
 
 /** Administration → Booking: regler, kørende sælgere (prioritet) og Podio-/Native-kobling. */
@@ -11,6 +19,15 @@ export async function GET() {
   if (response) return response;
 
   const [settings, sellers] = await Promise.all([getBookingSettings(), listDrivingSellers()]);
+  let allioEmployees: { id: string; name: string }[] = [];
+  let allioError: string | null = null;
+  if (isAllioNativeConfigured()) {
+    try {
+      allioEmployees = (await listEmployees()).map((e) => ({ id: e.id, name: e.name }));
+    } catch (e) {
+      allioError = e instanceof Error ? e.message : String(e);
+    }
+  }
   let podioOptions: { itemId: number; title: string }[] = [];
   let podioError: string | null = null;
   try {
@@ -23,6 +40,8 @@ export async function GET() {
     settings,
     podioOptions,
     podioError,
+    allioEmployees,
+    allioError,
     sellers: sellers.map((s) => ({
       id: s.id,
       name: s.name,
@@ -81,6 +100,19 @@ export async function PATCH(req: Request) {
   }
   if (body && "allioNativeEmployeeId" in body) {
     const v = typeof body.allioNativeEmployeeId === "string" ? body.allioNativeEmployeeId.trim() : "";
+    if (v === CREATE_ALLIO_CALENDAR) {
+      // Ryd koblingen og find/opret en kalender i Allio til sælgeren.
+      await prisma.user.update({ where: { id: sellerId }, data: { ...data, allioNativeEmployeeId: null } });
+      try {
+        const employeeId = await ensureAllioEmployeeForSeller(sellerId);
+        return NextResponse.json({ ok: true, allioNativeEmployeeId: employeeId });
+      } catch (e) {
+        return NextResponse.json(
+          { error: `Kalenderen kunne ikke oprettes i Allio: ${e instanceof Error ? e.message : String(e)}` },
+          { status: 502 },
+        );
+      }
+    }
     data.allioNativeEmployeeId = v || null;
   }
   await prisma.user.update({ where: { id: sellerId }, data });
