@@ -40,7 +40,7 @@ async function currentOutcome(leadId: string): Promise<string | null> {
   return normalizeMeetingOutcomeStatus(lead.meetingOutcomeStatus);
 }
 
-async function applyPendingOutcome(leadId: string): Promise<boolean> {
+export async function applyPendingOutcome(leadId: string, source = "Podio"): Promise<boolean> {
   if ((await currentOutcome(leadId)) === MEETING_OUTCOME_PENDING) return false;
   await prisma.lead.update({
     where: { id: leadId },
@@ -51,13 +51,13 @@ async function applyPendingOutcome(leadId: string): Promise<boolean> {
       leadId,
       userId: null,
       kind: LEAD_ACTIVITY_KIND.MEETING_OUTCOME_SET,
-      summary: "Møde sat til Afventer afholdelse i Podio.",
+      summary: `Møde sat til Afventer afholdelse i ${source}.`,
     },
   });
   return true;
 }
 
-async function applyInProgressOutcome(leadId: string): Promise<boolean> {
+export async function applyInProgressOutcome(leadId: string, source = "Podio"): Promise<boolean> {
   if ((await currentOutcome(leadId)) === MEETING_OUTCOME_IN_PROGRESS) return false;
   await prisma.lead.update({
     where: { id: leadId },
@@ -68,13 +68,13 @@ async function applyInProgressOutcome(leadId: string): Promise<boolean> {
       leadId,
       userId: null,
       kind: LEAD_ACTIVITY_KIND.MEETING_OUTCOME_SET,
-      summary: "Møde sat til Under Behandling i Podio.",
+      summary: `Møde sat til Under Behandling i ${source}.`,
     },
   });
   return true;
 }
 
-async function applyLostOutcome(leadId: string): Promise<boolean> {
+export async function applyLostOutcome(leadId: string, source = "Podio"): Promise<boolean> {
   if ((await currentOutcome(leadId)) === MEETING_OUTCOME_LOST) return false;
   await prisma.lead.update({
     where: { id: leadId },
@@ -85,13 +85,13 @@ async function applyLostOutcome(leadId: string): Promise<boolean> {
       leadId,
       userId: null,
       kind: LEAD_ACTIVITY_KIND.MEETING_OUTCOME_SET,
-      summary: "Møde sat til Tabt i Podio.",
+      summary: `Møde sat til Tabt i ${source}.`,
     },
   });
   return true;
 }
 
-async function applySaleOutcome(leadId: string): Promise<boolean> {
+export async function applySaleOutcome(leadId: string, source = "Podio"): Promise<boolean> {
   if ((await currentOutcome(leadId)) === MEETING_OUTCOME_SALE) return false;
   const { ensureSystemCampaignId } = await import("@/lib/ensure-system-campaigns");
   const activeCustomersId = await ensureSystemCampaignId("active_customers");
@@ -108,7 +108,7 @@ async function applySaleOutcome(leadId: string): Promise<boolean> {
       leadId,
       userId: null,
       kind: LEAD_ACTIVITY_KIND.MEETING_OUTCOME_SET,
-      summary: "Møde sat til Vundet i Podio — flyttet til Aktive kunder.",
+      summary: `Møde sat til Vundet i ${source} — flyttet til Aktive kunder.`,
     },
   });
   return true;
