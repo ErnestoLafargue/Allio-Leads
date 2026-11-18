@@ -309,6 +309,8 @@ export async function updateBooking(
     status?: string;
     notes?: string | null;
     notify_customer?: boolean;
+    /** Medarbejderen må have et andet møde på samme tid (fx når et møde skifter sælger). */
+    allow_double_booking?: boolean;
   },
 ): Promise<AllioBooking> {
   const res = await allioFetch<AllioBooking>(`/v1/bookings/${encodeURIComponent(bookingId)}`, {

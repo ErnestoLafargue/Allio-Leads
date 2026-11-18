@@ -1,6 +1,7 @@
 import { createHmac } from "node:crypto";
 import { after } from "next/server";
 import { prisma } from "@/lib/prisma";
+import { cancelAllioNativeBookingForLead } from "@/lib/allio-native/sync-lead-booking";
 import {
   MEETING_OUTCOME_HELD,
   MEETING_OUTCOME_IN_PROGRESS,
@@ -76,7 +77,32 @@ export async function sendOutcomeToAllioOs(leadId: string): Promise<void> {
   }
 }
 
-/** Som sendOutcomeToAllioOs, men efter svaret, så brugeren ikke venter. */
-export function sendOutcomeToAllioOsAfterResponse(leadId: string): void {
-  after(() => sendOutcomeToAllioOs(leadId));
+/** Er mødet sat til Genbook, aflyses bookingen i Allios kalender (kunden får ingen besked). */
+export async function cancelAllioBookingIfRebooked(leadId: string): Promise<void> {
+  const lead = await prisma.lead.findUnique({
+    where: { id: leadId },
+    select: { allioBookingId: true, meetingOutcomeStatus: true },
+  });
+  if (!lead?.allioBookingId) return;
+  if (normalizeMeetingOutcomeStatus(lead.meetingOutcomeStatus) !== MEETING_OUTCOME_REBOOK) return;
+  try {
+    await cancelAllioNativeBookingForLead(leadId);
+  } catch (err) {
+    console.error(`[allio-native] aflysning ved Genbook fejlede lead=${leadId}:`, err instanceof Error ? err.message : err);
+  }
+}
+
+/**
+ * Leads-udfaldet videre til Allio: til Allio OS' Salg-menu (ikke når udfaldet kom derfra), og ved Genbook aflyses
+ * bookingen i Allio bagefter, så mødet forsvinder fra kalenderen og fra Salg. Udfaldet sendes først, mens Allio OS
+ * stadig kan finde mødet på bookingen.
+ */
+export async function shareOutcomeWithAllio(leadId: string, opts: { fromAllioOs?: boolean } = {}): Promise<void> {
+  if (!opts.fromAllioOs) await sendOutcomeToAllioOs(leadId);
+  await cancelAllioBookingIfRebooked(leadId);
+}
+
+/** Som shareOutcomeWithAllio, men efter svaret, så brugeren ikke venter. */
+export function shareOutcomeWithAllioAfterResponse(leadId: string): void {
+  after(() => shareOutcomeWithAllio(leadId));
 }

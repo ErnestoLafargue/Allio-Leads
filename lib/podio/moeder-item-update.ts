@@ -15,7 +15,7 @@ import {
   type PodioItem,
 } from "@/lib/podio/client";
 import { findDrivingSellerByPodioItemId } from "@/lib/podio/sellers";
-import { sendOutcomeToAllioOs } from "@/lib/allio-os/send-outcome";
+import { shareOutcomeWithAllio } from "@/lib/allio-os/send-outcome";
 import {
   MOEDE_FIELDS,
   normalizeMoedeStatus,
@@ -43,7 +43,7 @@ async function currentOutcome(leadId: string): Promise<string | null> {
 
 /** Udfald fra fx Podio skal også ind i Allio OS; udfald, der kom fra Allio OS, sendes ikke tilbage. */
 async function shareWithAllioOs(leadId: string, source: string): Promise<void> {
-  if (source !== "Allio OS") await sendOutcomeToAllioOs(leadId);
+  await shareOutcomeWithAllio(leadId, { fromAllioOs: source === "Allio OS" });
 }
 
 export async function applyPendingOutcome(leadId: string, source = "Podio"): Promise<boolean> {
@@ -180,6 +180,8 @@ export async function applyMoederItemUpdate(itemId: number): Promise<MoederItemU
 
   if (statusKey === "genbook") {
     const moved = await moveLeadToRebooking(leadId);
+    // Genbook i Podio: udfaldet til Allio OS, og bookingen i Allio aflyses.
+    if (moved) await shareOutcomeWithAllio(leadId);
     return {
       ok: true,
       handled: "item.update",
