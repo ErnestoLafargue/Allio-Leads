@@ -1,5 +1,6 @@
 import { createHmac, timingSafeEqual } from "node:crypto";
 import { moveLeadToRebooking } from "@/lib/calcom/webhook-apply";
+import { cancelAllioBookingIfRebooked } from "@/lib/allio-os/send-outcome";
 import {
   applyInProgressOutcome,
   applyLostOutcome,
@@ -51,8 +52,12 @@ export async function applyAllioOsOutcome(leadId: string, outcome: AllioOsOutcom
       return applyInProgressOutcome(leadId, source);
     case "tabt":
       return applyLostOutcome(leadId, source);
-    case "genbook":
-      return moveLeadToRebooking(leadId);
+    case "genbook": {
+      // Genbook i Allio OS: som i Leads aflyses bookingen i Allio.
+      const moved = await moveLeadToRebooking(leadId);
+      await cancelAllioBookingIfRebooked(leadId);
+      return moved;
+    }
     default:
       return applyPendingOutcome(leadId, source);
   }

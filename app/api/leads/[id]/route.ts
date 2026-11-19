@@ -1,4 +1,5 @@
 import { after, NextResponse } from "next/server";
+import { shareOutcomeWithAllioAfterResponse } from "@/lib/allio-os/send-outcome";
 import { prisma } from "@/lib/prisma";
 import { requireSession } from "@/lib/api-auth";
 import { isLeadStatus, LEAD_STATUS_LABELS, type LeadStatus } from "@/lib/lead-status";
@@ -778,6 +779,11 @@ export async function PATCH(req: Request, { params }: Params) {
     after(() => {
       void syncPostBookingIntegrations(id);
     });
+  }
+
+  // Udfaldet ændret i Leads → også i Allio OS (Salg-menuen); Genbook aflyser bookingen i Allio.
+  if (prevMeetingOutcomeNorm !== finalMeetingOutcomeNorm) {
+    shareOutcomeWithAllioAfterResponse(id);
   }
 
   // Hard rule: møde booket → hent ALLE lydfiler ind i Allio.

@@ -63,6 +63,25 @@ async function findAllioBookingForLead(leadId: string, start: Date): Promise<All
 }
 
 /**
+ * Opdatér leadets booking i Allio. Leads bestemmer, hvem der holder mødet: skifter et møde sælger, må den nye sælger
+ * gerne have et andet møde på samme tid i Allio (fx mens to møder byttes om). Kender Allio ikke
+ * allow_double_booking endnu, prøves igen uden.
+ */
+async function updateLeadBooking(
+  bookingId: string,
+  patch: Parameters<typeof updateBooking>[1],
+): Promise<AllioBooking> {
+  try {
+    return await updateBooking(bookingId, { ...patch, allow_double_booking: true });
+  } catch (err) {
+    if (err instanceof Error && err.message.includes("allow_double_booking")) {
+      return updateBooking(bookingId, patch);
+    }
+    throw err;
+  }
+}
+
+/**
  * Opretter eller opdaterer booking i Allio-Native for et Allio-Leads-møde.
  *
  * 1) Kunde fra mødefelterne (navn/email/privat tlf + adresse + CVR), SMS=nej / E-mail=nej.
@@ -151,7 +170,7 @@ export async function ensureAllioNativeBookingForLead(
     const employeeId = lead.assignedUser?.allioNativeEmployeeId?.trim() || allioEmployeeId();
 
     if (lead.allioBookingId) {
-      const updated = await updateBooking(lead.allioBookingId, {
+      const updated = await updateLeadBooking(lead.allioBookingId, {
         start_time: startTime,
         notes,
         notify_customer: false,
@@ -199,7 +218,7 @@ export async function ensureAllioNativeBookingForLead(
   }
 }
 
-/** Aflys Native-booking når Allio-Leads møde aflyses/genbookes. */
+/** Aflys bookingen i Allio, når mødet i Leads sættes til Genbook. */
 export async function cancelAllioNativeBookingForLead(leadId: string): Promise<void> {
   if (!isAllioNativeConfigured()) return;
   const lead = await prisma.lead.findUnique({
